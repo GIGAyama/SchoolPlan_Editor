@@ -545,7 +545,6 @@ const SP_KEY_TIMETABLE = 'fixedTimetableData';
 
 /**
  * [エディタ API] 固定時間割データを取得します。
- * 最初は「初期設定」シートから取得し、以降はスクリプトプロパティから。
  */
 function getTimetableForEditor() {
   try {
@@ -554,21 +553,6 @@ function getTimetableForEditor() {
 
     if (savedJson) {
       return { success: true, data: JSON.parse(savedJson) };
-    }
-
-    // フォールバック: 初期設定シートから読み込み
-    const ss = getSs_();
-    const shSettings = ss.getSheetByName(SHEET_NAME_SETTINGS);
-    if (shSettings) {
-      const raw = shSettings.getRange(SETTINGS_RANGE_TIMETABLE).getValues();
-      // 5行(月〜金) x 8列(時程, 朝学習, 1校時〜6校時)
-      const data = raw.map((row, i) => ({
-        day: i, // 0=月, 1=火, ..., 4=金
-        time: row[0] || '',
-        morning: row[1] || '',
-        periods: [row[2] || '', row[3] || '', row[4] || '', row[5] || '', row[6] || '', row[7] || '']
-      }));
-      return { success: true, data: data };
     }
 
     // デフォルト空データ
@@ -592,22 +576,6 @@ function saveTimetableFromEditor(timetableData) {
       throw new Error('無効な時間割データです。');
     }
     PropertiesService.getScriptProperties().setProperty(SP_KEY_TIMETABLE, JSON.stringify(timetableData));
-
-    // 初期設定シートへのバックシンク（後方互換）
-    try {
-      const ss = getSs_();
-      const shSettings = ss.getSheetByName(SHEET_NAME_SETTINGS);
-      if (shSettings) {
-        const rows = timetableData.map(d => [
-          d.time || '', d.morning || '',
-          d.periods[0] || '', d.periods[1] || '', d.periods[2] || '',
-          d.periods[3] || '', d.periods[4] || '', d.periods[5] || ''
-        ]);
-        shSettings.getRange(SETTINGS_RANGE_TIMETABLE).setValues(rows);
-      }
-    } catch (syncErr) {
-      logInfo('初期設定シートへのバックシンクはスキップされました: ' + syncErr.message);
-    }
 
     return { success: true, message: '固定時間割を保存しました。' };
   } catch (e) {
@@ -637,17 +605,16 @@ function applyTimetableToWeek(mondayStr) {
 // ===================================================
 
 /**
- * Phase 5: 不要になったシートを削除し、残存シートを保護します。
+ * 残存シートを保護します。
  * メニューから実行されることを想定しています。
  */
-function executePhase5Cleanup() {
+function protectSheets() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
-    '⚠️ Phase 5: シート整理の実行',
-    '以下の操作を実行します。\n\n' +
-    '【削除】「初期設定」「週案入力用」シート\n' +
-    '【保護】「データベース」「単元マスタ」「ログ」「週案」「学級通信」シート\n\n' +
-    '削除されたシートは元に戻せません。本当に実行しますか？',
+    'シート保護の実行',
+    '以下のシートを保護します。\n\n' +
+    '「データベース」「単元マスタ」「ログ」「学級通信」\n\n' +
+    '実行しますか？',
     ui.ButtonSet.YES_NO
   );
 
@@ -659,26 +626,6 @@ function executePhase5Cleanup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const results = [];
 
-  // --- シート削除 ---
-  // ※「初期設定」シートは週案シートの数式・条件付き書式が依存しているため、Webアプリでの完全再現後に削除する
-  const sheetsToDelete = ['週案入力用'];
-  sheetsToDelete.forEach(name => {
-    try {
-      const sheet = ss.getSheetByName(name);
-      if (sheet) {
-        ss.deleteSheet(sheet);
-        results.push(`「${name}」シートを削除しました。`);
-        logInfo(`Phase 5: 「${name}」シートを削除しました。`);
-      } else {
-        results.push(`「${name}」シートは既に存在しません。`);
-      }
-    } catch (e) {
-      results.push(`「${name}」シートの削除に失敗: ${e.message}`);
-      logError(`Phase 5: シート削除失敗 (${name})`, e);
-    }
-  });
-
-  // --- シート保護 ---
   const sheetsToProtect = [
     SHEET_NAME_DATABASE, SHEET_NAME_UNIT_MASTER, SHEET_NAME_LOG,
     SHEET_NAME_NEWSLETTER
@@ -689,28 +636,27 @@ function executePhase5Cleanup() {
     try {
       const sheet = ss.getSheetByName(name);
       if (sheet) {
-        // 既存の保護を解除してから再設定
         sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove());
-        
-        const protection = sheet.protect().setDescription(`Phase 5: ${name} (自動保護)`);
+
+        const protection = sheet.protect().setDescription(`${name} (自動保護)`);
         protection.addEditor(owner);
         protection.removeEditors(protection.getEditors().filter(u => u.getEmail() !== owner.getEmail()));
         if (protection.canDomainEdit()) {
           protection.setDomainEdit(false);
         }
-        results.push(`🔒 「${name}」シートを保護しました。`);
-        logInfo(`Phase 5: 「${name}」シートを保護しました。`);
+        results.push(`「${name}」シートを保護しました。`);
+        logInfo(`「${name}」シートを保護しました。`);
       } else {
         results.push(`「${name}」シートが見つかりません（スキップ）。`);
       }
     } catch (e) {
       results.push(`「${name}」シートの保護に失敗: ${e.message}`);
-      logError(`Phase 5: シート保護失敗 (${name})`, e);
+      logError(`シート保護失敗 (${name})`, e);
     }
   });
 
-  ui.alert('Phase 5 完了', results.join('\n'), ui.ButtonSet.OK);
-  logInfo('Phase 5 クリーンアップ完了:\n' + results.join('\n'));
+  ui.alert('完了', results.join('\n'), ui.ButtonSet.OK);
+  logInfo('シート保護完了:\n' + results.join('\n'));
 }
 
 // ===================================================

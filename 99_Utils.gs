@@ -277,11 +277,10 @@ function executeServerFunctionForModal(functionName) {
 
 /**
  * 固定時間割データを2次元配列（5行×8列）で返します。
- * スクリプトプロパティ → 初期設定シート → 空データ の優先度でフォールバックします。
+ * スクリプトプロパティから取得します。未設定の場合は空データを返します。
  * 戻り値: [[時程, 朝学習, 1校時, 2校時, 3校時, 4校時, 5校時, 6校時], ...] (月〜金の5行)
  */
 function getTimetableData_() {
-  // 1. スクリプトプロパティから取得
   const savedJson = PropertiesService.getScriptProperties().getProperty('fixedTimetableData');
   if (savedJson) {
     try {
@@ -293,19 +292,9 @@ function getTimetableData_() {
         (d.periods && d.periods[4]) || '', (d.periods && d.periods[5]) || ''
       ]);
     } catch(e) {
-      logInfo('固定時間割のプロパティ解析に失敗、フォールバック: ' + e.message);
+      logInfo('固定時間割のプロパティ解析に失敗: ' + e.message);
     }
   }
 
-  // 2. 初期設定シートからのフォールバック（シートが残存する場合）
-  try {
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-    const shSettings = ss.getSheetByName(SHEET_NAME_SETTINGS);
-    if (shSettings) {
-      return shSettings.getRange(SETTINGS_RANGE_TIMETABLE).getValues();
-    }
-  } catch(e) { /* 無視 */ }
-
-  // 3. 空データ
   return [['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','','']];
 }

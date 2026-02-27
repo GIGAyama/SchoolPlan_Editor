@@ -3,13 +3,11 @@
  */
 
 // --- シート名 ---
-const SHEET_NAME_SETTINGS = "初期設定";
 const SHEET_NAME_DATABASE = "データベース";
-// const SHEET_NAME_INPUT = "週案入力用"; // Phase 5で廃止
 const SHEET_NAME_NEWSLETTER = "学級通信";
 const SHEET_NAME_UNIT_MASTER = "単元マスタ";
 const SHEET_NAME_LOG = "ログ";
-const SHEET_NAME_TASK = "タスク"; // Phase 6 追加
+const SHEET_NAME_TASK = "タスク";
 
 // === スクリプトプロパティ & トリガー管理用 ===
 // 担当学年
@@ -26,16 +24,6 @@ const SCRIPT_PROP_EVENT_PDF_TOTAL = 'eventPdfTotalCount';
 const SCRIPT_PROP_EVENT_PDF_YEAR = 'eventPdfProcessingYear';
 const TRIGGER_FUNCTION_NAME_EVENT = 'processNextEventPdf';  
 
-// --- 固定時間割転記関連 定数 ---
-const SETTINGS_RANGE_TIMETABLE = "B22:I26";
-
-// --- 「初期設定」シートのセル定義 ---
-const SETTINGS_CELL_COURSE_NAME = "B7";
-const SETTINGS_CELL_EVENT_PDF_FOLDER_ID = "B8";
-const SETTINGS_CELL_PDF_FOLDER_ID = "B9";
-const SETTINGS_CELL_GEMINI_API_KEY = "B10";
-const SETTINGS_CELL_STATUS = "B11"; // ステータス表示用セル
-const SETTINGS_RANGE_COURSE_LIST_OUTPUT = "B29";
 
 /**
  * データベースシートの列インデックスを動的に取得します（ヘッダー行に基づく）。

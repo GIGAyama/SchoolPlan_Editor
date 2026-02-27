@@ -9,7 +9,7 @@ function importEventsFromFolder_UI() {
   const ui = SpreadsheetApp.getUi();
   try {
     // 設定はスクリプトプロパティ経由で取得
-    const folderId = getSetting(SP_KEY_EVENT_PDF_FOLDER_ID, SETTINGS_CELL_EVENT_PDF_FOLDER_ID);
+    const folderId = getSetting(SP_KEY_EVENT_PDF_FOLDER_ID);
     if (!folderId) throw new Error(`行事予定PDFフォルダIDが未設定です。設定ダッシュボードから設定してください。`);
 
     const yearResponse = ui.prompt('年度の入力', '処理対象の年度（4月始まり）を西暦で入力してください。\n例: 2025', ui.ButtonSet.OK_CANCEL);
@@ -250,12 +250,12 @@ function processEventPdf(fileId, year, month) {
  */
 function createUnitMasterFromPdfs_UI() {
   const ui = SpreadsheetApp.getUi();
-  const response = ui.alert( '指導計画PDFの読み込み', '「初期設定」シートで指定されたフォルダ内のPDFをAIが読み取り、「単元マスタ」シートを作成・更新します。\n' + '処理はバックグラウンドで自動的に中断・再開され、完了まで数分～数十分かかる場合があります。\n\n' + '実行しますか？', ui.ButtonSet.YES_NO );
+  const response = ui.alert( '指導計画PDFの読み込み', '設定で指定されたフォルダ内のPDFをAIが読み取り、「単元マスタ」シートを作成・更新します。\n' + '処理はバックグラウンドで自動的に中断・再開され、完了まで数分～数十分かかる場合があります。\n\n' + '実行しますか？', ui.ButtonSet.YES_NO );
   if (response == ui.Button.YES) {
     resetUnitMasterProcessing();
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     // 設定はスクリプトプロパティ経由で取得
-    const folderId = getSetting(SP_KEY_PDF_FOLDER_ID, SETTINGS_CELL_PDF_FOLDER_ID);
+    const folderId = getSetting(SP_KEY_PDF_FOLDER_ID);
     if (!folderId) {
       ui.alert('指導計画PDFフォルダIDが未設定です。設定ダッシュボードから設定してください。');
       return;
@@ -418,16 +418,6 @@ function resetAllPdfProcessing_UI() {
     resetUnitMasterProcessing();
     resetEventPdfProcessing();
 
-    try {
-      // SETTINGS_CELL_STATUS: ステータスシートが残っている間は更新、なければスキップ
-      const ss_ = SpreadsheetApp.getActiveSpreadsheet();
-      const settingsSheet_ = ss_.getSheetByName(SHEET_NAME_SETTINGS);
-      if (settingsSheet_) {
-        settingsSheet_.getRange(SETTINGS_CELL_STATUS).clearContent();
-      }
-    } catch (e) {
-      logError("ステータスセルのクリアに失敗", e);
-    }
     ui.alert('すべてのPDF読み込み処理を停止しました。');
   }
 }
@@ -458,8 +448,7 @@ function resetEventPdfProcessing() {
 function getPdfFileListForWebApp(type) {
   try {
     const spKey = type === 'unit' ? SP_KEY_PDF_FOLDER_ID : SP_KEY_EVENT_PDF_FOLDER_ID;
-    const fbCell = type === 'unit' ? SETTINGS_CELL_PDF_FOLDER_ID : SETTINGS_CELL_EVENT_PDF_FOLDER_ID;
-    const folderId = getSetting(spKey, fbCell);
+    const folderId = getSetting(spKey);
     if (!folderId) {
       throw new Error(`フォルダIDが未設定です。ダッシュボードの「Google Drive フォルダ設定」をご確認ください。`);
     }
