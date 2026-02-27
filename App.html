@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>週案エディタ</title>
+    <!-- GIGA Standard v2: Zen Maru Gothic -->
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Google Material Symbols -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+        rel="stylesheet" />
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <?!= include('App_Css'); ?>
+    <!-- Google Picker API Library -->
+    <script type="text/javascript" src="https://apis.google.com/js/api.js"></script>
+</head>
+
+<body>
+
+    <!-- ===== アプリシェル ===== -->
+    <div id="app">
+
+        <!-- ヘッダー -->
+        <header class="app-header">
+            <div class="header-left">
+                <div class="app-logo"><span class="material-symbols-outlined"
+                        style="font-size: 28px;">calendar_month</span></div>
+                <div>
+                    <div class="app-title">週案エディタ</div>
+                    <div class="app-subtitle" id="headerSubtitle">読み込み中...</div>
+                </div>
+            </div>
+            <nav class="header-nav">
+                <button class="nav-btn active" data-view="plan" onclick="switchView('plan')">
+                    <span class="material-symbols-outlined">calendar_view_week</span> 週案
+                </button>
+                <button class="nav-btn" data-view="hours" onclick="switchView('hours')">
+                    <span class="material-symbols-outlined">bar_chart</span> 時数
+                </button>
+                <button class="nav-btn" data-view="newsletter" onclick="switchView('newsletter')">
+                    <span class="material-symbols-outlined">newspaper</span> 学級通信
+                </button>
+                <button class="nav-btn" data-view="settings" onclick="switchView('settings')">
+                    <span class="material-symbols-outlined">settings</span> 設定
+                </button>
+                <button class="nav-btn" data-view="task" onclick="switchView('task')">
+                    <span class="material-symbols-outlined">task_alt</span> タスク
+                </button>
+                <button class="nav-btn" data-view="integration" onclick="switchView('integration')">
+                    <span class="material-symbols-outlined">cable</span> データ連携
+                </button>
+            </nav>
+        </header>
+
+        <!-- ===== 週案ビュー ===== -->
+        <div id="view-plan" class="view active">
+
+            <!-- 週ナビゲーション -->
+            <div class="week-nav" style="flex-wrap: wrap; gap: 8px;">
+                <button class="btn-icon" id="prevWeekBtn" onclick="navigateWeek(-1)" title="前の週へ">
+                    ‹
+                </button>
+                <div class="week-info">
+                    <div id="weekLabel" class="week-label">読み込み中...</div>
+                    <div id="weekRange" class="week-range"></div>
+                </div>
+                <button class="btn-icon" id="nextWeekBtn" onclick="navigateWeek(1)" title="次の週へ">
+                    ›
+                </button>
+                <button class="btn-today" onclick="goToToday()">今週</button>
+
+                <div
+                    style="display:flex; align-items:center; gap:8px; margin-left: 12px; padding-left:12px; border-left:1px solid var(--border);">
+                    <input type="date" id="jumpDateInput" title="指定した日付を含む週へジャンプ" onchange="jumpToDate(this.value)"
+                        style="border:1px solid var(--border); border-radius:4px; padding:2px 4px; font-size:0.85rem; color:var(--text-main); fill:var(--text-main); background:var(--bg-card); cursor:pointer;">
+
+                    <div style="display:flex; align-items:center; gap:4px;">
+                        <span style="font-size:0.85rem; color:var(--text-sub);">第</span>
+                        <input type="number" id="jumpWeekInput" min="1" max="53" title="指定した週番号へジャンプ"
+                            onchange="jumpToWeek(this.value)"
+                            style="width:50px; border:1px solid var(--border); border-radius:4px; padding:2px 4px; font-size:0.85rem; text-align:center; background:var(--bg-card); color:var(--text-main);">
+                        <span style="font-size:0.85rem; color:var(--text-sub);">週</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 編集ツールバー -->
+            <div class="edit-toolbar">
+                <div class="edit-hint" id="editModeIndicator">
+                    <span class="mode-dot view-dot"></span>
+                    <span id="modeLabel">閲覧モード</span>
+                </div>
+                <div class="toolbar-actions">
+                    <button class="btn btn-outline d-flex align-items-center gap-1" id="editToggleBtn"
+                        onclick="toggleEditMode()"><span class="material-symbols-outlined fs-6">edit</span> 編集</button>
+                    <button class="btn btn-outline d-flex align-items-center gap-1" id="printBtn"
+                        onclick="printWeeklyPlan()"><span class="material-symbols-outlined fs-6">print</span>
+                        印刷</button>
+                    <button class="btn btn-outline d-flex align-items-center gap-1" id="autoFillBtn"
+                        onclick="autoFillPlan()"
+                        style="display:none; color: var(--primary); border-color: var(--primary);"><span
+                            class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力</button>
+                    <button class="btn btn-primary d-flex align-items-center gap-1" id="saveBtn"
+                        onclick="saveWeeklyPlan()" style="display:none"><span
+                            class="material-symbols-outlined fs-6">save</span>
+                        保存する</button>
+                    <button class="btn btn-ghost" id="cancelBtn" onclick="cancelEdit()"
+                        style="display:none">キャンセル</button>
+                </div>
+            </div>
+
+            <!-- 週案レイアウト（メイングリッド + タスクサイドバー） -->
+            <div class="plan-layout">
+                <!-- 週案グリッド -->
+                <div class="week-grid-wrapper">
+                    <div id="weekGrid" class="week-grid">
+                        <!-- JS で動的に生成 -->
+                        <div class="loading-state">
+                            <div class="spinner-lg"></div>
+                            <p>データを読み込んでいます...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 今週のタスクサイドバー -->
+                <div class="weekly-task-sidebar">
+                    <div class="weekly-task-sidebar-header">
+                        <span class="d-flex align-items-center gap-1"><span
+                                class="material-symbols-outlined fs-6">task_alt</span> 今週のタスク</span>
+                        <div style="flex:1"></div>
+                        <button class="btn-icon" onclick="showManualTaskInput()"
+                            style="font-size:1.1rem; padding:0 4px; color:var(--primary);" title="タスクを追加">+</button>
+                    </div>
+                    <div id="sidebarTaskList" class="weekly-task-sidebar-content">
+                        <!-- JSで動的にタスクを描画 -->
+                        <div class="st-empty">タスクを読み込み中...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 時数ビュー ===== -->
+        <div id="view-hours" class="view">
+            <div class="section-header-bar">
+                <h2><span class="material-symbols-outlined fs-6">calendar_month</span> 年間・教科別 実施時数</h2>
+                <div class="month-nav">
+                    <button class="btn-icon" onclick="navigateYear(-1)">‹</button>
+                    <span id="yearLabel" style="min-width: 100px; text-align: center;">－年度</span>
+                    <button class="btn-icon" onclick="navigateYear(1)">›</button>
+                </div>
+            </div>
+
+            <div id="hoursContent" class="hours-content" style="padding: 0;">
+                <div class="loading-state">
+                    <div class="spinner-lg"></div>
+                    <p>時数データを集計しています...</p>
+                </div>
+                <!-- テーブルはJSで動的に注入される -->
+            </div>
+
+            <!-- 年間時数進捗ダッシュボード -->
+            <div style="padding: 20px;">
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon"><span
+                                class="material-symbols-outlined fs-6">bar_chart</span></span>
+                        <span class="integration-title">年間時数進捗（対象週まで）</span>
+                    </div>
+                    <div class="integration-body">
+                        <div id="hoursSummaryContent">
+                            <p style="font-size:0.82rem; color:var(--text-sub); text-align:center; padding:16px;">
+                                週案タブで週を選択すると、ここに年間時数進捗が表示されます。
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 学級通信ジェネレータービュー ===== -->
+        <div id="view-newsletter" class="view">
+            <div class="section-header-bar">
+                <h2><span class="material-symbols-outlined fs-6">newspaper</span> 学級通信ジェネレーター</h2>
+            </div>
+            <div class="newsletter-layout">
+
+                <!-- 左ペイン: 週選択 + アクション -->
+                <div class="newsletter-sidebar">
+                    <div class="nw-card">
+                        <div class="nw-label">対象週を選択</div>
+                        <div class="week-mini-nav">
+                            <button class="btn-icon" onclick="navigateNwWeek(-1)">‹</button>
+                            <span id="nwWeekLabel" style="font-size:0.82rem;font-weight:600;">－</span>
+                            <button class="btn-icon" onclick="navigateNwWeek(1)">›</button>
+                        </div>
+                        <button class="btn btn-primary" style="width:100%;margin-top:12px;"
+                            onclick="loadNewsletterPreview()">
+                            📄 予定を読み込む
+                        </button>
+                    </div>
+                    <div class="nw-card">
+                        <div class="nw-label">追記メッセージ（任意）</div>
+                        <textarea id="nwCustomMessage" rows="4" placeholder="学級通信への追記メモ..."
+                            style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:0.82rem;resize:vertical;"></textarea>
+                    </div>
+                    <div class="nw-card">
+                        <div class="nw-label">アクション</div>
+                        <button class="btn btn-outline d-flex align-items-center gap-1 w-100 justify-content-center"
+                            style="margin-bottom:8px;" onclick="generateNwPdf()">
+                            <span class="material-symbols-outlined fs-6">post_add</span> 自動生成</button>
+                        <button
+                            class="btn btn-primary d-flex align-items-center gap-1 mt-2 w-100 justify-content-center"
+                            onclick="postNewsletterToClassroom()">
+                            <span class="material-symbols-outlined fs-6">rocket_launch</span> Classroomに投稿
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 右ペイン: 週案データプレビュー -->
+                <div class="newsletter-main">
+                    <div id="nwPreviewArea" class="nw-preview">
+                        <div class="nw-empty">← 左から週を選択し、「予定を読み込む」をクリックしてください</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ===== 設定ビュー (06_Settings.gs と連携) ===== -->
+        <div id="view-settings" class="view">
+            <div class="section-header-bar">
+                <h2><span class="material-symbols-outlined fs-6">settings</span> 設定</h2>
+            </div>
+            <div style="padding: 0 20px 20px;">
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">settings</span>
+                        </span>
+                        <span class="integration-title">システム設定</span>
+                    </div>
+                    <div class="integration-body" style="display:flex; flex-direction:column; gap:16px;">
+
+                        <!-- 担当学年設定 -->
+                        <div
+                            style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">school</span> 担当学年設定</h4>
+                            <div>
+                                <label
+                                    style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">時数集計の基準となる学年（標準時数が自動適用されます）</label>
+                                <select id="sysGradeSelect"
+                                    style="width:100%; max-width:200px; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                    <option value="1">1年生</option>
+                                    <option value="2">2年生</option>
+                                    <option value="3">3年生</option>
+                                    <option value="4">4年生</option>
+                                    <option value="5">5年生</option>
+                                    <option value="6">6年生</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Classroom連携 -->
+                        <div
+                            style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);">🏫 Google Classroom
+                                連携</h4>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                                <div>
+                                    <label
+                                        style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">連携クラス名</label>
+                                    <div style="display:flex; gap:8px;">
+                                        <input type="text" id="sysCourseName" placeholder="例：4年1組 令和7年度"
+                                            style="flex:1; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                        <button class="btn btn-outline" style="padding:0 8px;"
+                                            onclick="fetchSettingCourseList()">一覧取得</button>
+                                    </div>
+                                    <select id="sysCourseSelect"
+                                        style="display:none; width:100%; margin-top:4px; padding:6px;"
+                                        onchange="document.getElementById('sysCourseName').value = this.value">
+                                        <option value="">-- 選択してください --</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label
+                                        style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">明日の予定
+                                        自動投稿時刻（時）</label>
+                                    <input type="number" id="sysPostHour" min="0" max="23" placeholder="例：16"
+                                        style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- フォルダ設定 -->
+                        <div
+                            style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                                    class="material-symbols-outlined fs-6">folder</span> PDF格納フォルダID</h4>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                                <div>
+                                    <label
+                                        style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">指導計画PDF
+                                        フォルダID</label>
+                                    <input type="text" id="sysPdfFolderId" placeholder="DriveのフォルダURL末尾のID"
+                                        style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                </div>
+                                <div>
+                                    <label
+                                        style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">行事予定PDF
+                                        フォルダID</label>
+                                    <input type="text" id="sysEventPdfFolderId" placeholder="DriveのフォルダURL末尾のID"
+                                        style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Gemini設定 -->
+                        <div class="settings-card">
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"
+                                class="d-flex align-items-center gap-1"><span
+                                    class="material-symbols-outlined">smart_toy</span> Gemini API 設定</h4>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                                <div>
+                                    <label
+                                        style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">Gemini
+                                        API キー</label>
+                                    <input type="password" id="sysGeminiApiKey" placeholder="••••••••••••••••••••"
+                                        style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                </div>
+                                <div>
+                                    <label
+                                        style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">使用モデル名</label>
+                                    <select id="sysGeminiModelName"
+                                        style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                        <option value="gemini-1.5-flash">gemini-1.5-flash (推奨・高速)</option>
+                                        <option value="gemini-1.5-pro">gemini-1.5-pro (高精度)</option>
+                                        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 保存ボタン -->
+                        <div style="display:flex; justify-content:flex-end;">
+                            <button class="btn btn-primary" onclick="saveSystemSettings()">💾 システム設定を保存</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- カレンダー生成機能（年度更新） -->
+            <div style="padding: 0 20px 20px;">
+                <div class="integration-section" style="border:1px solid #ffcc80;">
+                    <div class="integration-header" style="background:#fff3e0;">
+                        <span class="integration-icon">🗓️</span>
+                        <span class="integration-title" style="color:#e65100;">年間カレンダー生成機能（年度更新）</span>
+                    </div>
+                    <div class="integration-body" style="display:flex; flex-direction:column; gap:16px;">
+                        <p style="font-size:0.85rem; color:var(--text-sub); margin-bottom:8px;">
+                            新学期のセットアップ時や、スプレッドシートの数式が壊れた場合に使用します。<br>
+                            開始日を指定すると約1年分の「日付」「曜日」「週番号」がデータベースに構築（上書き）されます。既存の入力データ（各校時の内容など）は消えません。
+                        </p>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                            <div>
+                                <label
+                                    style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">対象年度</label>
+                                <input type="number" id="sysCalYear" value="2025"
+                                    style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                            </div>
+                            <div>
+                                <label
+                                    style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">第1週目の月曜日</label>
+                                <input type="date" id="sysCalStartMonday"
+                                    style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                            </div>
+                        </div>
+                        <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+                            <button class="btn" style="background-color:#e65100; color:white;"
+                                onclick="confirmGenerateCalendar()">⚠️ カレンダーを再生成する</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 固定時間割エディタ -->
+            <div style="padding: 0 20px 20px;">
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon">⏱️</span>
+                        <span class="integration-title">固定時間割エディタ</span>
+                    </div>
+                    <div class="integration-body">
+                        <p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:12px">
+                            毎週の基本時間割を編集します。保存後、任意の週に一括転記できます。
+                        </p>
+                        <div class="tt-editor-wrap">
+                            <table class="tt-editor-table" id="timetableEditor">
+                                <thead>
+                                    <tr>
+                                        <th></th>
+                                        <th>時程</th>
+                                        <th>朝学習</th>
+                                        <th>1校時</th>
+                                        <th>2校時</th>
+                                        <th>3校時</th>
+                                        <th>4校時</th>
+                                        <th>5校時</th>
+                                        <th>6校時</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="timetableBody">
+                                    <!-- JSで動的に生成 -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div
+                            style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px; flex-wrap:wrap; align-items:center;">
+                            <button class="btn btn-outline" onclick="loadTimetableEditor()">⭯ 再読み込み</button>
+                            <button class="btn btn-primary" onclick="saveTimetable()">💾 保存</button>
+                        </div>
+                        <hr style="margin: 16px 0; border:none; border-top:1px dashed var(--border);">
+                        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                            <span style="font-size:0.8rem;font-weight:600;color:var(--text-sub)">‣ 選択中の週に転記:</span>
+                            <button class="btn btn-outline" onclick="applyTimetableToCurrentWeek()">⏱️ 今の週に展開</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 長期休業期間設定 & 年間一括転記 -->
+            <div style="padding: 0 20px 20px;">
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon">📅</span>
+                        <span class="integration-title">年間一括転記（長期休業期間の設定）</span>
+                    </div>
+                    <div class="integration-body">
+                        <p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:12px">
+                            長期休業期間を設定し、それを除外した全週に固定時間割を一括転記します。
+                        </p>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;">
+                            <div class="vacation-card">
+                                <strong>🌻 夏休み</strong>
+                                <label>開始日<input type="date" id="vacSummerStart"></label>
+                                <label>終了日<input type="date" id="vacSummerEnd"></label>
+                            </div>
+                            <div class="vacation-card">
+                                <strong>⛄ 冬休み</strong>
+                                <label>開始日<input type="date" id="vacWinterStart"></label>
+                                <label>終了日<input type="date" id="vacWinterEnd"></label>
+                            </div>
+                            <div class="vacation-card">
+                                <strong>🌸 春休み</strong>
+                                <label>開始日<input type="date" id="vacSpringStart"></label>
+                                <label>終了日<input type="date" id="vacSpringEnd"></label>
+                            </div>
+                        </div>
+                        <div
+                            style="display:flex; gap:10px; justify-content:flex-end; margin-top:16px; align-items:center;">
+                            <span id="bulkTransferStatus"
+                                style="flex:1; font-size:0.8rem; color:var(--text-sub);"></span>
+                            <button class="btn btn-primary d-flex align-items-center gap-1"
+                                onclick="runBulkTransfer()"><span class="material-symbols-outlined">rocket_launch</span>
+                                年間一括転記を実行</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 教科別標準時数エディタ -->
+            <div style="padding: 0 20px 20px;">
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">bar_chart</span>
+                        </span>
+                        <span class="integration-title">教科別 年間標準時数</span>
+                    </div>
+                    <div class="integration-body">
+                        <p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:12px">
+                            担当学年の年間標準時数を設定します。時数集計の%計算に使用されます。
+                        </p>
+                        <div id="standardHoursEditor" class="std-hours-grid">
+                            <!-- JSで動的に生成 -->
+                        </div>
+                        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
+                            <button class="btn btn-outline" onclick="loadStandardHours()">⭯ 再読み込み</button>
+                            <button class="btn btn-primary" onclick="saveStdHours()">💾 保存</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== タスク（TODO）ダッシュボードビュー ===== -->
+        <div id="view-task" class="view">
+            <div class="section-header-bar" style="margin-bottom: 20px;">
+                <h2>☑️ タスク・準備物管理</h2>
+            </div>
+
+            <div style="padding: 0 20px 20px; display: flex; flex-direction: column; gap: 20px;">
+
+                <!-- 1. AI抽出コンソール -->
+                <div class="integration-section">
+                    <div class="integration-header" style="background: linear-gradient(135deg, #1aa260, #137746);">
+                        <span class="integration-icon">✨</span>
+                        <span class="integration-title">AI タスク抽出コンソール</span>
+                    </div>
+                    <div class="integration-body">
+                        <p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:12px">
+                            授業予定や会議録から、必要な準備物・事前タスクをAIが自動で洗い出し、リスト化します。
+                        </p>
+
+                        <!-- モード切替タブ（簡易） -->
+                        <div
+                            style="display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
+                            <label style="font-weight: bold; font-size: 0.85rem; cursor: pointer;">
+                                <input type="radio" name="aiTaskMode" value="schedule" checked
+                                    onchange="toggleAiTaskMode()"> 📅 予定解析（先読み）
+                            </label>
+                            <label
+                                style="font-weight: bold; font-size: 0.85rem; cursor: pointer; color: var(--text-sub);">
+                                <input type="radio" name="aiTaskMode" value="text" onchange="toggleAiTaskMode()"> 📝
+                                フリーテキスト解析（議事録等）
+                            </label>
+                        </div>
+
+                        <!-- モード1: 予定解析入力部 -->
+                        <div id="aiTaskScheduleMode">
+                            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:0.85rem;">
+                                <span>抽出期間:</span>
+                                <input type="date" id="aiTaskStartDate" class="form-control form-control-sm"
+                                    style="width: auto;">
+                                <span>〜</span>
+                                <input type="date" id="aiTaskEndDate" class="form-control form-control-sm"
+                                    style="width: auto;">
+                                <button class="btn btn-primary btn-sm d-flex align-items-center gap-1"
+                                    onclick="runAiTaskExtraction('schedule')"><span
+                                        class="material-symbols-outlined fs-6">rocket_launch</span>
+                                    AI抽出を実行</button>
+                            </div>
+                            <small class="text-muted d-block mt-1">※指定期間の週案データと行事予定を横断して読み込みます。</small>
+                        </div>
+
+                        <!-- モード2: テキスト解析入力部 -->
+                        <div id="aiTaskTextMode" style="display:none;">
+                            <textarea id="aiTaskTextInput" class="form-control" rows="3"
+                                placeholder="会議の議事録や打ち合わせメモをここにペースト..."></textarea>
+                            <div style="text-align: right; margin-top: 8px;">
+                                <button class="btn btn-primary btn-sm d-flex align-items-center gap-1"
+                                    onclick="runAiTaskExtraction('text')"><span
+                                        class="material-symbols-outlined fs-6">rocket_launch</span>
+                                    AI要約＆抽出を実行</button>
+                            </div>
+                        </div>
+
+                        <!-- 抽出結果プレビュー領域 -->
+                        <div id="aiTaskPreviewArea"
+                            style="display:none; margin-top: 15px; padding: 10px; background: var(--primary-light); border: 1px solid #1a73e8; border-radius: 8px;">
+                            <strong style="color: #1a73e8; font-size: 0.85rem;">✨ 抽出結果プレビュー（まだ保存されていません）</strong>
+                            <div id="aiTaskPreviewList" style="margin-top: 10px; max-height: 200px; overflow-y: auto;">
+                                <!-- JSで動的生成 -->
+                            </div>
+                            <div style="text-align: right; margin-top: 10px;">
+                                <button class="btn btn-outline btn-sm me-2"
+                                    onclick="cancelAiTaskPreview()">キャンセル</button>
+                                <button class="btn btn-primary btn-sm" onclick="confirmAiTaskSave()">💾
+                                    リストに確定・追加する</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. ダッシュボード（タスク一覧） -->
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon">📋</span>
+                        <span class="integration-title">現在のタスク・準備物</span>
+                    </div>
+                    <div class="integration-body" style="padding-top: 0;">
+                        <!-- コントロールバー -->
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px;">
+                            <div>
+                                <label style="font-size: 0.8rem; cursor: pointer;">
+                                    <input type="checkbox" id="chkShowCompletedTasks" onchange="renderTaskList()">
+                                    完了済みのタスクも表示する
+                                </label>
+                            </div>
+                            <div>
+                                <button class="btn btn-outline btn-sm" onclick="loadTasks()"><i
+                                        class="bi bi-arrow-clockwise"></i> 更新</button>
+                                <button class="btn btn-outline btn-sm ms-2" onclick="showManualTaskInput()"><i
+                                        class="bi bi-plus-lg"></i> 手動追加</button>
+                            </div>
+                        </div>
+
+                        <!-- リスト本体 -->
+                        <div id="taskListContainer" class="task-grid">
+                            <!-- JSで動的生成 -->
+                            <div style="text-align: center; padding: 20px; color: var(--text-hint);">読み込み中...</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ===== データ連携ビュー ===== -->
+        <div id="view-integration" class="view">
+            <div class="section-header-bar" style="margin-bottom: 20px;">
+                <h2><span class="material-symbols-outlined fs-6">cable</span> データ連携（PDF読み込み）</h2>
+            </div>
+
+            <div style="padding: 0 20px;">
+                <!-- 指導計画PDF -->
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon">📖</span>
+                        <span class="integration-title">指導計画PDFの読み込み（単元マスタ自動構築）</span>
+                    </div>
+                    <div class="integration-body">
+                        <p style="font-size:0.8rem;color:var(--text-sub)">
+                            単元マスタを再構築する対象のPDFファイルを選択してください。<br>
+                            ※実行すると現在の単元マスタは上書きされます。
+                        </p>
+                        <div class="input-with-btn">
+                            <button class="btn btn-primary" onclick="openGooglePicker('unit')"><span
+                                    class="material-symbols-outlined fs-6">folder</span> Google
+                                Driveから選ぶ</button>
+                            <span style="font-size: 0.8rem; color: var(--text-hint); margin: 0 8px;">または</span>
+                            <button class="btn btn-outline" onclick="fetchPdfList('unit')">指定フォルダを読み込む</button>
+                            <span id="unitStatusText"
+                                style="flex:1; font-size: 0.8rem; font-weight: bold; color: var(--primary);"></span>
+                        </div>
+                        <div class="file-list-container" id="unitFileList">
+                            <div class="empty-message">一覧を取得していません...</div>
+                        </div>
+                        <div class="integration-row" style="justify-content: flex-end;">
+                            <button class="btn btn-primary" id="startUnitBtn" onclick="startProcessing('unit')"
+                                disabled>▶ 単元マスタ再構築を開始</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 行事予定PDF -->
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon">📅</span>
+                        <span class="integration-title">行事予定PDFの読み込み</span>
+                    </div>
+                    <div class="integration-body">
+                        <p style="font-size:0.8rem;color:var(--text-sub)">
+                            行事予定PDFファイルから予定を抽出し、データベースに書き込みます。
+                        </p>
+                        <div class="input-with-btn">
+                            <button class="btn btn-primary" onclick="openGooglePicker('event')"><span
+                                    class="material-symbols-outlined fs-6">folder</span> Google
+                                Driveから選ぶ</button>
+                            <span style="font-size: 0.8rem; color: var(--text-hint); margin: 0 8px;">または</span>
+                            <button class="btn btn-outline" onclick="fetchPdfList('event')">指定フォルダを読み込む</button>
+                            <span id="eventStatusText"
+                                style="flex:1; font-size: 0.8rem; font-weight: bold; color: var(--primary);"></span>
+                        </div>
+                        <div class="file-list-container" id="eventFileList">
+                            <div class="empty-message">一覧を取得していません...</div>
+                        </div>
+                        <div class="integration-row">
+                            <div style="flex: 1; display:flex; flex-direction:column; gap:4px;">
+                                <label style="font-size:0.75rem;font-weight:600;color:var(--text-sub)">対象年度（西暦:
+                                    4月始まり）</label>
+                                <input type="number" id="eventFiscalYear" placeholder="例: 2025"
+                                    style="height:34px;padding:0 12px;border:1px solid var(--border);border-radius:6px;width:120px;" />
+                            </div>
+                            <button class="btn btn-primary" id="startEventBtn" onclick="startProcessing('event')"
+                                disabled>▶ 行事予定読み込みを開始</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- リセット -->
+                <div class="integration-section" style="border-color: var(--danger);">
+                    <div class="integration-body"
+                        style="flex-direction:row; align-items:center; justify-content:space-between;">
+                        <div>
+                            <span class="integration-title d-flex align-items-center gap-1"
+                                style="color: var(--danger);"><span
+                                    class="material-symbols-outlined text-danger">warning</span> 処理の強制リセット</span>
+                            <p style="font-size:0.75rem;color:var(--text-sub);margin-top:4px;">
+                                実行中のすべてのPDF読み込みタスクを強制終了します。</p>
+                        </div>
+                        <button class="btn btn-outline" style="border-color: var(--danger); color: var(--danger);"
+                            onclick="resetPdfProcessing()">強制リセット</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /app -->
+
+    <!-- GIGA Standard v2: 固定フッター -->
+    <footer class="text-center text-muted py-3 mt-4 border-top giga-footer">
+        <small>© 2026 週案エディタ <a href="https://note.com/cute_borage86" target="_blank"
+                class="text-decoration-none text-muted">GIGA山</a></small>
+    </footer>
+
+    <?!= include('App_Js'); ?>
+
+</body>
+
+</html>
