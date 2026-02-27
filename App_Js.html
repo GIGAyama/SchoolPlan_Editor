@@ -1,0 +1,2144 @@
+<script>
+    'use strict';
+
+    // ===== グローバル状態 =====
+    const STATE = {
+        view: 'plan',
+        mondayStr: null,
+        weekData: null,
+        masterData: null,
+        editMode: false,
+        editBuffer: null,
+        hoursYear: (new Date().getMonth() + 1 <= 3) ? new Date().getFullYear() - 1 : new Date().getFullYear(),
+        hoursMonth: new Date().getMonth() + 1,
+        nwMondayStr: null,
+        hoursSummaryData: null,
+        tasks: null
+    };
+
+    const DAY_LABELS_JP = ['月', '火', '水', '木', '金', '土', '日'];
+
+    // ===== 初期化 =====
+    window.onload = function () {
+        loadMasterData();
+        goToToday();
+        loadAnnualHoursView();
+        loadSettingsView();
+    };
+
+    // ===== ビュー切り替え =====
+    function switchView(viewName) {
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('view-' + viewName).classList.add('active');
+        document.querySelector('.nav-btn[data-view="' + viewName + '"]').classList.add('active');
+        STATE.view = viewName;
+        if (viewName === 'newsletter' && !STATE.nwMondayStr) {
+            STATE.nwMondayStr = STATE.mondayStr;
+            if (STATE.nwMondayStr) document.getElementById('nwWeekLabel').textContent = STATE.nwMondayStr + '週';
+        }
+        if (viewName === 'integration') {
+            checkProcessingStatus();
+        }
+        if (viewName === 'settings' && !timetableLoaded) {
+            loadTimetableEditor();
+        }
+        if (viewName === 'settings' && !vacationDatesLoaded) {
+            loadVacationDates();
+        }
+        if (viewName === 'settings' && !stdHoursLoaded) {
+            loadStandardHours();
+        }
+        if (viewName === 'settings' && !isSystemSettingsLoaded) {
+            loadSystemSettings();
+        }
+        if (viewName === 'hours' && STATE.mondayStr) {
+            loadHoursSummary();
+        }
+        if (viewName === 'task' && !taskDataLoaded) {
+            loadTasks();
+        }
+    }
+
+    // ===== 単元マスタ読み込み =====
+    function loadMasterData() {
+        google.script.run
+            .withSuccessHandler(function (data) {
+                if (data.success) STATE.masterData = data;
+            })
+            .getUnitMasterForSuggest();
+    }
+
+    // ===== 週案ビュー =====
+    function goToToday() {
+        console.log('[DEBUG] goToToday called');
+        google.script.run
+            .withSuccessHandler(function (mondayStr) {
+                console.log('[DEBUG] getTodaysMondayStr success:', mondayStr);
+                STATE.mondayStr = mondayStr;
+                loadWeeklyPlan();
+            })
+            .withFailureHandler(function (e) {
+                console.error('[DEBUG] getTodaysMondayStr FAILED:', e.message);
+                showToast('error', '初期化エラー: ' + e.message);
+            })
+            .getTodaysMondayStr();
+    }
+
+    function navigateWeek(delta) {
+        if (!STATE.mondayStr) return;
+        var parts = STATE.mondayStr.split('/');
+        var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+        d.setDate(d.getDate() + delta * 7);
+        STATE.mondayStr = formatDateLocal(d);
+        loadWeeklyPlan();
+    }
+
+    function jumpToDate(dateStr) {
+        if (!dateStr) return;
+        var parts = dateStr.split('-');
+        var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+        var day = d.getDay();
+        var diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        d.setDate(diff);
+        STATE.mondayStr = formatDateLocal(d);
+        loadWeeklyPlan();
+
+        // 日付入力をリセット（不要な場合はそのまま）
+        document.getElementById('jumpDateInput').value = '';
+    }
+
+    function jumpToWeek(weekNum) {
+        if (!weekNum) return;
+
+        var originalLabel = document.getElementById('weekLabel').textContent;
+        document.getElementById('weekLabel').textContent = '検索中...';
+
+        google.script.run
+            .withSuccessHandler(function (mondayStr) {
+                if (mondayStr) {
+                    STATE.mondayStr = mondayStr;
+                    loadWeeklyPlan();
+                } else {
+                    document.getElementById('weekLabel').textContent = originalLabel;
+                    showToast('error', '指定された週が見つかりませんでした');
+                }
+                document.getElementById('jumpWeekInput').value = '';
+            })
+            .withFailureHandler(function (e) {
+                document.getElementById('weekLabel').textContent = originalLabel;
+                showToast('error', '検索エラー: ' + e.message);
+                document.getElementById('jumpWeekInput').value = '';
+            })
+            .getMondayStrByWeekNumber(weekNum);
+    }
+
+
+    function loadWeeklyPlan() {
+        console.log('[DEBUG] loadWeeklyPlan called, mondayStr:', STATE.mondayStr);
+        if (STATE.editMode) cancelEdit();
+        var grid = document.getElementById('weekGrid');
+        grid.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>読み込み中...</p></div>';
+        document.getElementById('weekLabel').textContent = '読み込み中...';
+
+        google.script.run
+            .withSuccessHandler(function (data) {
+                console.log('[DEBUG] getWeeklyPlanData success:', JSON.stringify(data).substring(0, 300));
+                if (!data.success) { showToast('error', 'データ取得エラー: ' + data.error); return; }
+                STATE.weekData = data;
+                renderWeekGrid(data.days);
+                updateWeekHeader(data.days, data.weekNum);
+                loadHoursSummary(); // 週変更時に時数集計も更新
+
+                // 週案表示時にタスクパネルも更新する
+                if (taskDataLoaded) {
+                    renderWeeklyTaskPanel();
+                } else {
+                    loadTasks();
+                }
+            })
+            .withFailureHandler(function (e) {
+                console.error('[DEBUG] getWeeklyPlanData FAILED:', e.message);
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .getWeeklyPlanData(STATE.mondayStr);
+    }
+
+    function updateWeekHeader(days, weekNum) {
+        if (!days || days.length === 0) return;
+        var mon = days[0];
+        var parts = mon.date.split('/');
+        var displayWeek = weekNum !== undefined && weekNum !== null ? weekNum : '?';
+        document.getElementById('weekLabel').textContent = parts[0] + '年 第' + displayWeek + '週';
+        document.getElementById('weekRange').textContent = mon.date + '（月）〜 ' + days[6].date + '（日）';
+        document.getElementById('headerSubtitle').textContent = '第' + displayWeek + '週 表示中';
+    }
+
+    // ===== グリッドレンダリング =====
+    function renderWeekGrid(days) {
+        var today = formatDateLocal(new Date());
+        var grid = document.getElementById('weekGrid');
+        var isEdit = STATE.editMode;
+        grid.innerHTML = '';
+        grid.className = 'week-grid' + (isEdit ? ' edit-mode' : '');
+
+        var corner = document.createElement('div');
+        corner.className = 'grid-header';
+        grid.appendChild(corner);
+
+        days.forEach(function (day, i) {
+            var h = document.createElement('div');
+            var cls = 'grid-header';
+            if (day.date === today) cls += ' today-col';
+            else if (i === 5) cls += ' sat-col';
+            else if (i === 6) cls += ' sun-col';
+            h.className = cls;
+            h.innerHTML = '<div>' + day.dayLabel + '</div><div style="font-size:0.7rem;color:inherit;opacity:0.8;font-weight:400;">' + day.date.slice(5) + '</div>';
+            grid.appendChild(h);
+        });
+
+        var rows = [
+            { key: 'event', label: '行事', multi: false, section: true },
+            { key: 'morning', label: '朝学習', multi: false },
+            { key: 'period0', label: '1校時', multi: true, section: true },
+            { key: 'period1', label: '2校時', multi: true },
+            { key: 'recess1', label: '中休み', multi: false, section: true },
+            { key: 'period2', label: '3校時', multi: true, section: true },
+            { key: 'period3', label: '4校時', multi: true },
+            { key: 'recess2', label: '昼休み', multi: false, section: true },
+            { key: 'period4', label: '5校時', multi: true, section: true },
+            { key: 'period5', label: '6校時', multi: true },
+            { key: 'afterschool', label: '放課後', multi: false, section: true },
+            { key: 'homework', label: '宿題', multi: false, section: true },
+            { key: 'items', label: '持ち物', multi: false },
+        ];
+
+        rows.forEach(function (rowDef) {
+            var label = document.createElement('div');
+            label.className = 'grid-label' + (rowDef.section ? ' section-top' : '');
+            label.textContent = rowDef.label;
+            grid.appendChild(label);
+
+            days.forEach(function (day, i) {
+                var cell = document.createElement('div');
+                var cls = 'grid-cell';
+                if (day.date === today) cls += ' today-col';
+                else if (i === 5) cls += ' sat-col';
+                else if (i === 6) cls += ' sun-col';
+                if (rowDef.section) cls += ' section-top';
+                if (rowDef.key === 'event') cls += ' event-row';
+                cell.className = cls;
+
+                if (rowDef.multi) {
+                    var pIdx = parseInt(rowDef.key.replace('period', ''));
+                    var p = day.periods[pIdx] || { subject: '', unit: '', content: '' };
+                    if (isEdit) {
+                        cell.innerHTML = renderPeriodEdit(pIdx, i, p);
+                        cell.setAttribute('data-day', i);
+                        cell.setAttribute('data-period', pIdx);
+                    } else {
+                        cell.innerHTML = renderPeriodView(p);
+                    }
+                } else {
+                    var val = day[rowDef.key] || '';
+                    if (isEdit) {
+                        var ta = document.createElement('textarea');
+                        ta.rows = (rowDef.key === 'homework' || rowDef.key === 'items') ? 3 : 1;
+                        ta.value = val;
+                        ta.setAttribute('data-field', rowDef.key);
+                        ta.setAttribute('data-day', i);
+                        ta.style.height = (rowDef.key === 'homework' || rowDef.key === 'items') ? '54px' : '28px';
+                        cell.appendChild(ta);
+                    } else {
+                        cell.textContent = val;
+                    }
+                }
+                grid.appendChild(cell);
+            });
+        });
+    }
+
+    function renderPeriodView(p) {
+        if (!p.subject) return '';
+        var html = '<div class="period-subject">' + escHtml(p.subject) + '</div>';
+        if (p.unit) html += '<div class="period-unit">' + escHtml(p.unit) + '</div>';
+        if (p.content) html += '<div class="period-content">' + escHtml(p.content) + '</div>';
+        return html;
+    }
+
+    function renderPeriodEdit(pIdx, dayIdx, p) {
+        return '<input type="text" class="period-subject-input" placeholder="教科" value="' + escAttr(p.subject) + '" '
+            + 'data-field="subject" data-day="' + dayIdx + '" data-period="' + pIdx + '" '
+            + 'oninput="onSubjectInput(this)" onfocus="showSuggest(this)" onblur="hideSuggest(this)">'
+            + '<input type="text" placeholder="単元名" value="' + escAttr(p.unit) + '" '
+            + 'data-field="unit" data-day="' + dayIdx + '" data-period="' + pIdx + '">'
+            + '<textarea rows="2" placeholder="学習内容" style="font-size:0.72rem;" '
+            + 'data-field="content" data-day="' + dayIdx + '" data-period="' + pIdx + '">' + escHtml(p.content) + '</textarea>'
+            + '<div class="suggest-box" id="suggest-' + dayIdx + '-' + pIdx + '" style="display:none;"></div>';
+    }
+
+    // ===== 教科サジェスト =====
+    function onSubjectInput(input) {
+        if (!STATE.masterData) return;
+        var val = input.value;
+        var dayIdx = input.dataset.day;
+        var pIdx = input.dataset.period;
+        var box = document.getElementById('suggest-' + dayIdx + '-' + pIdx);
+        if (!box) return;
+        var subjects = STATE.masterData.subjects || [];
+        var matches = val ? subjects.filter(function (s) { return s.indexOf(val) >= 0; }) : subjects.slice(0, 8);
+        if (matches.length === 0) { box.style.display = 'none'; return; }
+        box.innerHTML = matches.map(function (s) {
+            return '<div class="suggest-item" onmousedown="selectSubject(this,\'' + escAttr(s) + '\',\'' + dayIdx + '\',\'' + pIdx + '\')">' + escHtml(s) + '</div>';
+        }).join('');
+        box.style.display = 'block';
+    }
+
+    function showSuggest(input) { onSubjectInput(input); }
+    function hideSuggest(input) {
+        setTimeout(function () {
+            var dayIdx = input.dataset.day;
+            var pIdx = input.dataset.period;
+            var box = document.getElementById('suggest-' + dayIdx + '-' + pIdx);
+            if (box) box.style.display = 'none';
+        }, 200);
+    }
+    function selectSubject(el, subject, dayIdx, pIdx) {
+        var cell = el.closest('.grid-cell');
+        if (!cell) return;
+        var inp = cell.querySelector('[data-field="subject"]');
+        if (inp) inp.value = subject;
+        var box = document.getElementById('suggest-' + dayIdx + '-' + pIdx);
+        if (box) box.style.display = 'none';
+    }
+
+    // ===== 編集モード制御 =====
+    function toggleEditMode() {
+        STATE.editMode = !STATE.editMode;
+        updateEditUI();
+        renderWeekGrid(STATE.weekData.days);
+    }
+    function cancelEdit() {
+        STATE.editMode = false;
+        updateEditUI();
+        renderWeekGrid(STATE.weekData.days);
+    }
+    function updateEditUI() {
+        var dot = document.querySelector('.mode-dot');
+        var label = document.getElementById('modeLabel');
+        var editBtn = document.getElementById('editToggleBtn');
+        var pdfBtn = document.getElementById('pdfBtn');
+        var autoFillBtn = document.getElementById('autoFillBtn');
+        var saveBtn = document.getElementById('saveBtn');
+        var cancelBtn = document.getElementById('cancelBtn');
+        if (STATE.editMode) {
+            dot.className = 'mode-dot edit-dot';
+            label.textContent = '編集モード';
+            editBtn.style.display = 'none';
+            if (pdfBtn) pdfBtn.style.display = 'none';
+            if (autoFillBtn) autoFillBtn.style.display = '';
+            saveBtn.style.display = '';
+            cancelBtn.style.display = '';
+        } else {
+            dot.className = 'mode-dot view-dot';
+            label.textContent = '閲覧モード';
+            editBtn.style.display = '';
+            if (pdfBtn) pdfBtn.style.display = '';
+            if (autoFillBtn) autoFillBtn.style.display = 'none';
+            saveBtn.style.display = 'none';
+            cancelBtn.style.display = 'none';
+        }
+    }
+
+    // ===== 編集中の入力データを回収 =====
+    function collectCurrentEditData() {
+        if (!STATE.weekData) return null;
+        return STATE.weekData.days.map(function (day, dayIdx) {
+            var newDay = JSON.parse(JSON.stringify(day));
+            ['event', 'morning', 'recess1', 'recess2', 'afterschool', 'homework', 'items'].forEach(function (field) {
+                var el = document.querySelector('[data-field="' + field + '"][data-day="' + dayIdx + '"]');
+                if (el) newDay[field] = el.value;
+            });
+            for (var pIdx = 0; pIdx < 6; pIdx++) {
+                var subject = document.querySelector('[data-field="subject"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+                var unit = document.querySelector('[data-field="unit"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+                var content = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+                if (subject) {
+                    newDay.periods[pIdx] = {
+                        subject: subject.value || '',
+                        unit: unit ? unit.value || '' : '',
+                        content: content ? content.value || '' : '',
+                    };
+                }
+            }
+            return newDay;
+        });
+    }
+
+    // ===== 保存 =====
+    function saveWeeklyPlan() {
+        var days = collectCurrentEditData();
+        if (!days) return;
+
+        document.getElementById('saveBtn').disabled = true;
+        document.getElementById('saveBtn').textContent = '保存中...';
+        showToast('info', '保存中...');
+
+        google.script.run
+            .withSuccessHandler(function (result) {
+                document.getElementById('saveBtn').disabled = false;
+                document.getElementById('saveBtn').textContent = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
+                if (result.success) {
+                    STATE.weekData.days = days;
+                    cancelEdit();
+                    showToast('success', '' + result.message);
+                } else {
+                    showToast('error', '保存失敗: ' + result.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                document.getElementById('saveBtn').disabled = false;
+                document.getElementById('saveBtn').textContent = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .saveWeeklyPlanData(STATE.mondayStr, days);
+    }
+
+    // ===== AI 単元自動入力 =====
+    function autoFillPlan() {
+        if (!STATE.mondayStr) return;
+        var currentDays = collectCurrentEditData();
+        if (!currentDays) return;
+
+        var btn = document.getElementById('autoFillBtn');
+        if (btn) { btn.disabled = true; btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 計算中...'; }
+        showToast('info', '単元マスタから学習内容を自動計算しています...');
+
+        google.script.run
+            .withSuccessHandler(function (result) {
+                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力'; }
+                if (result.success) {
+                    STATE.weekData.days = result.days;
+                    // 編集状態のまま画面を再描画（AIの結果を反映）
+                    renderWeekGrid(STATE.weekData.days);
+                    showToast('success', 'AI自動入力が完了しました。内容を確認し、問題なければ「保存する」を押してください。');
+                } else {
+                    showToast('error', '自動入力エラー: ' + result.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力'; }
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .calculateAutoFillForWebApp(STATE.mondayStr, currentDays);
+    }
+
+
+    // ===== 週案印刷 (HTMLベース) =====
+    function printWeeklyPlan() {
+        if (!STATE.weekData || !STATE.weekData.days) {
+            showToast('error', '週のデータが読み込まれていません');
+            return;
+        }
+
+        var btn = document.getElementById('printBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 準備中...';
+        }
+
+        var printFrame = document.getElementById('printFrame');
+        if (!printFrame) {
+            printFrame = document.createElement('iframe');
+            printFrame.id = 'printFrame';
+            printFrame.style.display = 'none';
+            document.body.appendChild(printFrame);
+        }
+
+        var doc = printFrame.contentWindow.document;
+        doc.open();
+
+        var weekNum = STATE.weekData.weekNum !== undefined && STATE.weekData.weekNum !== null ? STATE.weekData.weekNum : '?';
+        var days = STATE.weekData.days || [];
+
+        var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>週案_第' + weekNum + '週</title>';
+        html += '<style>';
+        html += '@import url("https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap");';
+        html += '@page { size: A4 portrait; margin: 10mm; }';
+        html += 'body { font-family: "Zen Maru Gothic", sans-serif; font-size: 10px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
+        html += '.page { width: 100%; height: 100%; box-sizing: border-box; page-break-after: always; display: flex; flex-direction: column; }';
+        html += '.page:last-child { page-break-after: auto; }';
+        html += 'table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-bottom: 0; }';
+        html += 'th, td { border: 1px solid #333; padding: 3px; vertical-align: top; word-wrap: break-word; overflow: hidden; }';
+        html += 'th { text-align: center; font-weight: normal; }';
+        html += '.subject { font-weight: bold; font-size: 10px; background-color: #dcedc8; padding: 2px; text-align: left; border-bottom: 1px solid #ccc; margin: -3px -3px 2px -3px; }';
+        html += '.unit { font-size: 9px; color: #555; margin-bottom: 2px; }';
+        html += '.content { font-size: 9px; }';
+        html += '.row-header { width: 35px; text-align: center; vertical-align: middle; padding: 2px; }';
+        html += '.recess-row td { height: 16px; background-color: #ffe0b2; }';
+        html += '.recess-row td:first-child { text-align: center; font-weight: bold; padding: 0; vertical-align: middle;}';
+
+        // Header specific
+        html += '.doc-title { text-align: center; font-size: 16px; font-weight: bold; margin-bottom: 8px; position: relative; }';
+        html += '.doc-week { position: absolute; right: 0; top: 0; font-size: 12px; font-weight: normal; }';
+
+        // Page 1 specific
+        html += '.grid1 td { height: 50px; }';
+        html += '.event-cell { height: 70px; }';
+        html += '.afterschool-cell { height: 45px; }';
+
+        // Page 2 specific
+        html += '.page2-layout { display: flex; gap: 8px; height: 100%; align-items: stretch; }';
+        html += '.page2-left { flex: 0 0 45%; }';
+        html += '.page2-right { flex: 0 0 53%; display: flex; flex-direction: column; gap: 8px; position: relative; }';
+        html += '.sat-col { background-color: #bbdefb; width: 40%; }';
+        html += '.sun-col { background-color: #ffcdd2; width: 40%; }';
+
+        html += '.stats-table th, .stats-table td { font-size: 8px; text-align: center; padding: 2px; border: 1px solid #333; }';
+        html += '.stats-table th { background-color: #e0e0e0; }';
+        html += '.stats-table { width: 100%; border: 1.5px solid #333; }';
+
+        // Separate seal table (absolute positioned)
+        html += '.seal-table { position: absolute; bottom: 0; right: 0; width: 35%; border: 1.5px solid #333; background-color: #fff; z-index: 10; }';
+        html += '.seal-table th, .seal-table td { font-size: 8px; text-align: center; padding: 2px; border: 1px solid #333; }';
+        html += '.seal-header { background-color: #dcedc8; }';
+
+        html += '.todo-box { border: 1.5px solid #333; padding: 8px; background-color: #dcedc8; border-radius: 4px; display: flex; flex-direction: column; flex: 0 1 auto; max-height: 50%; }';
+        html += '.todo-title { font-weight: bold; margin-bottom: 6px; font-size: 11px; }';
+        html += '.todo-item { border: 1px solid #333; background-color: #fff; margin-bottom: 4px; padding: 4px; font-size: 10px; }';
+        html += '.todo-list-wrap { display: flex; flex-direction: column; overflow: hidden; }';
+
+        html += '.free-box { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; padding-top: 5px; }';
+        html += '.line-row { border-bottom: 1px dashed #ccc; height: 22px; width: 100%; }';
+        html += '</style></head><body>';
+
+        var renderDateHeader = function (d) {
+            if (!d) return "";
+            var p = d.date.split("/");
+            return p[1] + "/" + p[2] + "<br>" + d.dayLabel;
+        };
+
+        var renderPeriod = function (p) {
+            var content = "";
+            if (p.subject) content += '<div class="subject">' + p.subject + '</div>';
+            if (p.unit) content += '<div class="unit">' + p.unit + '</div>';
+            if (p.content) content += '<div class="content">' + p.content.replace(/\\n/g, '<br>') + '</div>';
+            return content;
+        };
+
+        // ====== 1ページ目 ======
+        html += '<div class="page">';
+        html += '<div class="doc-title">週間指導計画簿<div class="doc-week">第' + weekNum + '週</div></div>';
+        html += '<table class="grid1">';
+
+        // ヘッダー行
+        html += '<tr><th class="row-header">日付<br>曜日</th>';
+        for (var i = 0; i < 5; i++) { html += '<th>' + renderDateHeader(days[i]) + '</th>'; }
+        html += '</tr>';
+
+        // 行事
+        html += '<tr><td class="row-header">時程<br>行事</td>';
+        for (var i = 0; i < 5; i++) { html += '<td class="event-cell">' + ((days[i] && days[i].event) ? days[i].event.replace(/\\n/g, '<br>') : '') + '</td>'; }
+        html += '</tr>';
+
+        // 朝学習
+        html += '<tr><td class="row-header">朝学習</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? days[i].morning.replace(/\\n/g, '<br>') : '') + '</td>'; }
+        html += '</tr>';
+
+        // 1校時
+        html += '<tr><td class="row-header">1校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[0]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 2校時
+        html += '<tr><td class="row-header">2校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[1]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 中休み
+        html += '<tr class="recess-row"><td class="row-header">中休</td>';
+        for (var i = 0; i < 5; i++) { html += '<td></td>'; }
+        html += '</tr>';
+
+        // 3校時
+        html += '<tr><td class="row-header">3校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[2]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 4校時
+        html += '<tr><td class="row-header">4校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[3]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 昼休み
+        html += '<tr class="recess-row"><td class="row-header">昼休</td>';
+        for (var i = 0; i < 5; i++) { html += '<td></td>'; }
+        html += '</tr>';
+
+        // 5校時
+        html += '<tr><td class="row-header">5校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[4]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 6校時
+        html += '<tr><td class="row-header">6校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[5]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 放課後
+        html += '<tr><td class="row-header">放課後</td>';
+        for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? days[i].afterschool.replace(/\\n/g, '<br>') : '') + '</td>'; }
+        html += '</tr>';
+
+        html += '</table>';
+        html += '</div>';
+
+        // ====== 2ページ目 ======
+        html += '<div class="page">';
+        html += '<div class="page2-layout">';
+
+        // 週末（左ペイン）
+        html += '<div class="page2-left">';
+        html += '<table class="grid1">';
+
+        html += '<tr><th class="row-header">日付<br>曜日</th>';
+        html += '<th class="sat-col">' + renderDateHeader(days[5]) + '</th>';
+        html += '<th class="sun-col">' + renderDateHeader(days[6]) + '</th></tr>';
+
+        var renderWeekendContent = function (key, idx, p_idx) {
+            var d = days[idx] || {};
+            if (p_idx !== undefined) {
+                return d.periods ? renderPeriod(d.periods[p_idx]) : '';
+            }
+            return d[key] ? d[key].replace(/\\n/g, '<br>') : '';
+        };
+
+        // 行事
+        html += '<tr><td class="row-header">時程<br>行事</td>';
+        html += '<td class="event-cell">' + renderWeekendContent("event", 5) + '</td>';
+        html += '<td class="event-cell">' + renderWeekendContent("event", 6) + '</td>';
+        html += '</tr>';
+
+        // 朝学習
+        html += '<tr><td class="row-header">朝学習</td>';
+        html += '<td>' + renderWeekendContent("morning", 5) + '</td>';
+        html += '<td>' + renderWeekendContent("morning", 6) + '</td>';
+        html += '</tr>';
+
+        // 1校時
+        html += '<tr><td class="row-header">1校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 0) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 0) + '</td>';
+        html += '</tr>';
+
+        // 2校時
+        html += '<tr><td class="row-header">2校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 1) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 1) + '</td>';
+        html += '</tr>';
+
+        // 中休み
+        html += '<tr class="recess-row"><td class="row-header">中休</td><td></td><td></td></tr>';
+
+        // 3校時
+        html += '<tr><td class="row-header">3校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 2) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 2) + '</td>';
+        html += '</tr>';
+
+        // 4校時
+        html += '<tr><td class="row-header">4校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 3) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 3) + '</td>';
+        html += '</tr>';
+
+        // 昼休み
+        html += '<tr class="recess-row"><td class="row-header">昼休</td><td></td><td></td></tr>';
+
+        // 5校時
+        html += '<tr><td class="row-header">5校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 4) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 4) + '</td>';
+        html += '</tr>';
+
+        // 6校時
+        html += '<tr><td class="row-header">6校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 5) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 5) + '</td>';
+        html += '</tr>';
+
+        // 放課後
+        html += '<tr><td class="row-header">放課後</td>';
+        html += '<td class="afterschool-cell">' + renderWeekendContent("afterschool", 5) + '</td>';
+        html += '<td class="afterschool-cell">' + renderWeekendContent("afterschool", 6) + '</td>';
+        html += '</tr>';
+
+        html += '</table>';
+        html += '</div>';
+
+        // 右ペイン
+        html += '<div class="page2-right">';
+
+        // 時数集計表 (2セットに分割して横並べ)
+        var summary = STATE.hoursSummaryData || [];
+        html += '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">';
+
+        // 1列目 (0-9)
+        html += '<table class="stats-table" style="width:48%;">';
+        html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
+        for (var i = 0; i < 10; i++) {
+            var s = summary[i] || { subject: " ", weekly: " ", cumulative: " ", percent: " " };
+            html += '<tr>';
+            html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
+            html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
+            html += '<td>' + (s.cumulative !== undefined && s.cumulative !== "" ? s.cumulative : "&nbsp;") + '</td>';
+            html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
+            html += '</tr>';
+        }
+        html += '</table>';
+
+        // 2列目 (10-18)
+        html += '<table class="stats-table" style="width:48%;">';
+        html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
+        for (var i = 10; i < 19; i++) {
+            var s = summary[i] || { subject: " ", weekly: " ", cumulative: " ", percent: " " };
+            html += '<tr>';
+            html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
+            html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
+            html += '<td>' + (s.cumulative !== undefined && s.cumulative !== "" ? s.cumulative : "&nbsp;") + '</td>';
+            html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
+            html += '</tr>';
+        }
+        html += '</table>';
+        html += '</div>';
+
+        // Todoリスト
+        html += '<div class="todo-box">';
+        html += '<div class="todo-title">Todoリスト</div>';
+        html += '<div class="todo-list-wrap">';
+        var tasks = STATE.tasks || [];
+        var activeTasks = tasks.filter(function (t) { return t.status !== '完了'; });
+        // 少なくとも3つは空枠を表示するが、タスクが多ければ動的に増える（flexbox設定によりmax-heightまで成長）
+        var displayCount = Math.max(3, activeTasks.length);
+        for (var i = 0; i < displayCount; i++) {
+            var text = (activeTasks[i] && activeTasks[i].content) ? activeTasks[i].content : '&nbsp;';
+            html += '<div class="todo-item">' + text + '</div>';
+        }
+        html += '</div>';
+        html += '</div>';
+
+        // フリー枠 & 検印枠 コンテナ
+        html += '<div style="flex: 1; position: relative;">';
+
+        // フリー枠
+        html += '<div class="free-box">';
+        // flex-growを利用して、余った高さいっぱいに罫線を引く
+        for (var i = 0; i < 20; i++) {
+            html += '<div class="line-row"></div>';
+        }
+        html += '</div>';
+
+        // 検印枠 (右下固定)
+        html += '<table class="seal-table">';
+        html += '<tr><td rowspan="2" class="seal-header" style="width:20px; font-weight:bold; vertical-align:middle; font-size:12px;">検<br><br>印</td><td class="seal-header">校長</td><td class="seal-header">副校長</td><td class="seal-header">担当者</td></tr>';
+        html += '<tr><td style="height:50px;"></td><td></td><td></td></tr>';
+        html += '</table>';
+
+        html += '</div>'; // end free relative container
+
+        html += '</div>'; // end page2-right
+        html += '</div>'; // end page2-layout
+        html += '</div>'; // end page
+
+        html += '</body></html>';
+
+        doc.write(html);
+        doc.close();
+
+        setTimeout(function () {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '<span class="material-symbols-outlined fs-6">print</span> 印刷';
+            }
+            printFrame.contentWindow.focus();
+            printFrame.contentWindow.print();
+        }, 500);
+    }
+
+    // ===== 年間時数ビュー =====
+    function navigateYear(delta) {
+        STATE.hoursYear += delta;
+        loadAnnualHoursView();
+    }
+
+    function loadAnnualHoursView() {
+        document.getElementById('yearLabel').textContent = STATE.hoursYear + '年度';
+        var content = document.getElementById('hoursContent');
+        content.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>時数データを集計しています...</p></div>';
+        google.script.run
+            .withSuccessHandler(function (data) {
+                if (!data.success) { content.innerHTML = '<div class="hours-empty">取得失敗: ' + data.error + '</div>'; return; }
+                renderAnnualHoursTable(data.hoursData);
+            })
+            .getAnnualHoursData(STATE.hoursYear);
+    }
+
+    /** 
+     * 分数表示用ヘルパー 
+     * (小数を 1/2, 1/3, 1/4, 1/6, 1/8 などの近似分数にフォーマット)
+     */
+    function formatFraction(value) {
+        if (!value) return "0";
+
+        var eps = 0.01;
+        var whole = Math.floor(value + eps);
+        var rem = value - whole;
+
+        if (rem < eps || rem > 1 - eps) {
+            return Math.round(value).toString();
+        }
+
+        var denoms = [2, 3, 4, 6, 8];
+        var bestFrac = null;
+        var minErr = Infinity;
+
+        for (var i = 0; i < denoms.length; i++) {
+            var d = denoms[i];
+            for (var n = 1; n < d; n++) {
+                var err = Math.abs(rem - (n / d));
+                if (err < minErr) {
+                    minErr = err;
+                    bestFrac = { n: n, d: d };
+                }
+            }
+        }
+
+        if (minErr > 0.05) {
+            // 近似できないほど半端な数は小数第一位で出す
+            return value.toFixed(1);
+        }
+
+        var fracStr = '<span class="fraction-text">' + bestFrac.n + '/' + bestFrac.d + '</span>';
+        if (whole === 0) return fracStr;
+        return whole + ' ' + fracStr;
+    }
+
+    function renderAnnualHoursTable(hoursData) {
+        var content = document.getElementById('hoursContent');
+
+        var defaultSubjects = ['国語', '図書', '書写', '社会', '算数', '理科', '生活', '音楽', '図画工作', '家庭', '体育', '外国語', '道徳', '外国語活動', '総合', '学活', '行事'];
+        var foundSubjects = Object.keys(hoursData);
+        var customSubjects = foundSubjects.filter(function (s) { return defaultSubjects.indexOf(s) === -1 && s.trim() !== ''; });
+        var allSubjects = defaultSubjects.concat(customSubjects);
+
+        var html = '<table class="annual-hours-table"><thead><tr>';
+        html += '<th></th>';
+
+        var months = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+        months.forEach(function (m) { html += '<th>' + m + '</th>'; });
+        html += '<th class="term-total-col border-right-red">1学期</th>';
+        html += '<th class="term-total-col border-right-red">2学期</th>';
+        html += '<th class="term-total-col border-right-red">3学期</th>';
+        html += '<th class="term-total-col">各教科等計</th>';
+        html += '</tr></thead><tbody>';
+
+        var monthTotals = {};
+        var termTotals = { 1: 0, 2: 0, 3: 0 };
+        var grandTotal = 0;
+
+        var monthTotalsNoEvent = {};
+        var termTotalsNoEvent = { 1: 0, 2: 0, 3: 0 };
+        var grandTotalNoEvent = 0;
+
+        months.forEach(function (m) {
+            monthTotals[m] = 0;
+            monthTotalsNoEvent[m] = 0;
+        });
+
+        var rowCount = 0;
+        allSubjects.forEach(function (sub) {
+            var dataSub = hoursData[sub] || {};
+            var hasData = Object.keys(dataSub).length > 0;
+            if (!hasData && customSubjects.indexOf(sub) !== -1) return; // カスタム科目でデータないものは除外
+
+            var subTotal = 0;
+            var subTerm1 = 0, subTerm2 = 0, subTerm3 = 0;
+
+            var rowHtml = '<tr>';
+            rowHtml += '<td>' + escHtml(sub) + '</td>';
+
+            months.forEach(function (m) {
+                var val = dataSub[m] || 0;
+                subTotal += val;
+                monthTotals[m] += val;
+                if (sub !== '行事') monthTotalsNoEvent[m] += val;
+
+                if (m >= 4 && m <= 7) subTerm1 += val;
+                else if (m >= 8 && m <= 12) subTerm2 += val;
+                else subTerm3 += val;
+
+                var cls = (m === 7 || m === 12 || m === 3) ? ' class="border-right-red"' : '';
+                rowHtml += '<td' + cls + '>' + formatFraction(val) + '</td>';
+            });
+
+            if (sub !== '行事') {
+                termTotalsNoEvent[1] += subTerm1;
+                termTotalsNoEvent[2] += subTerm2;
+                termTotalsNoEvent[3] += subTerm3;
+                grandTotalNoEvent += subTotal;
+            }
+
+            termTotals[1] += subTerm1;
+            termTotals[2] += subTerm2;
+            termTotals[3] += subTerm3;
+            grandTotal += subTotal;
+
+            rowHtml += '<td class="term-total-col border-right-red">' + formatFraction(subTerm1) + '</td>';
+            rowHtml += '<td class="term-total-col border-right-red">' + formatFraction(subTerm2) + '</td>';
+            rowHtml += '<td class="term-total-col border-right-red">' + formatFraction(subTerm3) + '</td>';
+            rowHtml += '<td class="term-total-col">' + formatFraction(subTotal) + '</td>';
+            rowHtml += '</tr>';
+
+            // データが全く無いデフォルト科目を行事として見せないための処理。今回は表示しておく。
+            html += rowHtml;
+            rowCount++;
+        });
+
+        if (rowCount === 0) {
+            content.innerHTML = '<div class="hours-empty">📭 データがありません。</div>';
+            return;
+        }
+
+        // 月別授業時数（行事除外）
+        html += '<tr class="total-row-1 border-top-red"><td>月別授業時数</td>';
+        months.forEach(function (m) {
+            var cls = (m === 7 || m === 12 || m === 3) ? ' class="border-right-red"' : '';
+            html += '<td' + cls + '>' + formatFraction(monthTotalsNoEvent[m]) + '</td>';
+        });
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotalsNoEvent[1]) + '</td>';
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotalsNoEvent[2]) + '</td>';
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotalsNoEvent[3]) + '</td>';
+        html += '<td class="term-total-col">' + formatFraction(grandTotalNoEvent) + '</td></tr>';
+
+        // 月別総時数（行事含む）
+        html += '<tr class="total-row-2 border-top-red"><td>月別総時数</td>';
+        months.forEach(function (m) {
+            var cls = (m === 7 || m === 12 || m === 3) ? ' class="border-right-red"' : '';
+            html += '<td' + cls + '>' + formatFraction(monthTotals[m]) + '</td>';
+        });
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotals[1]) + '</td>';
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotals[2]) + '</td>';
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotals[3]) + '</td>';
+        html += '<td class="term-total-col">' + formatFraction(grandTotal) + '</td></tr>';
+
+        html += '</tbody></table>';
+        content.innerHTML = html;
+    }
+
+    // ===== 設定ビュー =====
+    function loadSettingsView() {
+        google.script.run
+            .withSuccessHandler(function (settings) {
+                if (settings) {
+                    var el = document.getElementById('settingCourseNameDisp');
+                    if (el) el.textContent = settings.courseName || '未設定';
+                }
+            })
+            .getSettingsForDashboard();
+    }
+
+    // ===== PDF出力 =====
+    function downloadWeekPdf() {
+        if (!STATE.mondayStr) { showToast('error', '週のデータを読み込んでください'); return; }
+        var btn = document.getElementById('pdfBtn');
+        btn.disabled = true;
+        btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 生成中...';
+        showToast('info', 'PDFを生成しています...');
+        google.script.run
+            .withSuccessHandler(function (result) {
+                btn.disabled = false;
+                btn.textContent = '<span class="material-symbols-outlined fs-6">description</span> PDF出力';
+                if (result.success) {
+                    showToast('success', 'PDF生成完了！');
+                    window.open(result.viewUrl, '_blank');
+                } else {
+                    showToast('error', 'PDF生成失敗: ' + result.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                btn.disabled = false;
+                btn.textContent = '<span class="material-symbols-outlined fs-6">description</span> PDF出力';
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .generateWeeklyPlanPdf(STATE.mondayStr);
+    }
+
+    // ===== 学級通信: 週ナビ =====
+    function navigateNwWeek(delta) {
+        var base = STATE.nwMondayStr || STATE.mondayStr;
+        if (!base) return;
+        var parts = base.split('/');
+        var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+        d.setDate(d.getDate() + delta * 7);
+        STATE.nwMondayStr = formatDateLocal(d);
+        document.getElementById('nwWeekLabel').textContent = STATE.nwMondayStr + '週';
+    }
+
+    // ===== 学級通信: 予定プレビュー =====
+    function loadNewsletterPreview() {
+        var mondayStr = STATE.nwMondayStr || STATE.mondayStr;
+        if (!mondayStr) { showToast('error', '週を選択してください'); return; }
+        document.getElementById('nwPreviewArea').innerHTML = '<div class="loading-state"><div class="spinner-lg"></div></div>';
+        google.script.run
+            .withSuccessHandler(function (data) {
+                if (!data.success) { document.getElementById('nwPreviewArea').innerHTML = '<div class="nw-empty">データ取得失敗: ' + data.error + '</div>'; return; }
+                renderNewsletterPreview(data);
+            })
+            .withFailureHandler(function (e) {
+                document.getElementById('nwPreviewArea').innerHTML = '<div class="nw-empty">通信エラー: ' + e.message + '</div>';
+            })
+            .getNewsletterData(mondayStr);
+    }
+
+    function renderNewsletterPreview(data) {
+        var rows = '';
+        data.days.slice(0, 5).forEach(function (day) {
+            var subjects = day.periods.filter(function (p) { return p.subject; }).map(function (p) { return p.subject; }).join('・') || '（記録なし）';
+            var ev = day.event ? '<span style="color:#d32f2f;font-weight:700;">【' + escHtml(day.event) + '】</span> ' : '';
+            rows += '<tr><td style="font-weight:700;width:80px;">' + day.dayLabel + '（' + escHtml(day.date.slice(5)) + '）</td><td>' + ev + escHtml(subjects) + '</td></tr>';
+            if (day.homework) rows += '<tr><td style="color:var(--text-sub);font-size:0.75rem;">宿題</td><td style="font-size:0.75rem;color:var(--text-sub);">' + escHtml(day.homework) + '</td></tr>';
+        });
+        document.getElementById('nwPreviewArea').innerHTML =
+            '<div class="nw-title"><span class="material-symbols-outlined fs-6">newspaper</span> ' + escHtml(data.title) + '</div>'
+            + '<div class="nw-date">対象週: ' + escHtml(data.date) + '〜</div>'
+            + '<table class="nw-schedule-table"><thead><tr><th>曜日</th><th>授業・内容</th></tr></thead><tbody>' + rows + '</tbody></table>'
+            + '<p style="color:var(--text-sub);font-size:0.75rem;margin-top:16px;">※ 「学級通信」シートにデータが入力済みの場合は、そのPDFが出力されます。</p>';
+    }
+
+    // ===== 学級通信: PDF生成 =====
+    function generateNwPdf() {
+        var mondayStr = STATE.nwMondayStr || STATE.mondayStr;
+        if (!mondayStr) { showToast('error', '週を選択してください'); return; }
+
+        var btn = document.querySelector('#view-newsletter .btn-outline');
+        if (btn) { btn.disabled = true; btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 生成中...'; }
+        showToast('info', '学級通信PDFを生成中...');
+        google.script.run
+            .withSuccessHandler(function (result) {
+                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">move_to_inbox</span> 学級通信シートをPDF化'; }
+                if (result.success) {
+                    var preview = document.getElementById('nwPreviewArea');
+                    preview.insertAdjacentHTML('beforeend',
+                        '<div style="margin-top:16px"><a href="' + result.viewUrl + '" target="_blank" class="pdf-result-link"><span class="material-symbols-outlined fs-6">description</span> PDFを開く: ' + escHtml(result.fileName) + '</a></div>');
+                    showToast('success', 'PDF生成完了！');
+                } else {
+                    showToast('error', 'PDF生成失敗: ' + result.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">move_to_inbox</span> 学級通信シートをPDF化'; }
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .generateNewsletterPdf(mondayStr);
+    }
+
+    // ===== 学級通信: Classroom投稿 =====
+    function postNwToClassroom() {
+        var mondayStr = STATE.nwMondayStr || STATE.mondayStr;
+        if (!mondayStr) { showToast('error', '週を選択してください'); return; }
+
+        var customMsg = document.getElementById('nwCustomMessage').value.trim();
+        var btn = document.querySelector('#view-newsletter [style*="background:#34a853"]');
+        if (btn) { btn.disabled = true; btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 投稿中...'; }
+        showToast('info', 'Classroomに投稿しています...');
+        google.script.run
+            .withSuccessHandler(function (result) {
+                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">rocket_launch</span> Classroomに投稿'; }
+                if (result.success) showToast('success', '' + result.message);
+                else showToast('error', '投稿失敗: ' + result.error);
+            })
+            .withFailureHandler(function (e) {
+                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">rocket_launch</span> Classroomに投稿'; }
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .postNewsletterToClassroomFromWeb(mondayStr, customMsg || null);
+    }
+
+    // ===== データ連携 (PDF処理) =====
+    function fetchPdfList(type) {
+        var listEl = document.getElementById(type + 'FileList');
+        var statusEl = document.getElementById(type + 'StatusText');
+        listEl.innerHTML = '<div class="empty-message">読み込み中...</div>';
+        statusEl.textContent = '一覧を取得中...';
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    renderFileList(type, res.files);
+                    statusEl.textContent = res.files.length + '件のPDFを取得しました。';
+                } else {
+                    listEl.innerHTML = '<div class="empty-message" style="color:var(--danger)">エラー: ' + escHtml(res.error) + '</div>';
+                    statusEl.textContent = '';
+                }
+            })
+            .withFailureHandler(function (e) {
+                listEl.innerHTML = '<div class="empty-message" style="color:var(--danger)">通信エラー: ' + escHtml(e.message) + '</div>';
+                statusEl.textContent = '';
+            })
+            .getPdfFileListForWebApp(type);
+    }
+
+    function renderFileList(type, files) {
+        var listEl = document.getElementById(type + 'FileList');
+        if (files.length === 0) {
+            listEl.innerHTML = '<div class="empty-message">PDFファイルが見つかりません。</div>';
+            document.getElementById('start' + type.charAt(0).toUpperCase() + type.slice(1) + 'Btn').disabled = true;
+            return;
+        }
+
+        listEl.innerHTML = '';
+        files.forEach(function (file) {
+            var item = document.createElement('div');
+            item.className = 'file-item';
+
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = file.id;
+            cb.className = type + '-file-cb';
+            cb.id = 'cb_' + file.id;
+            cb.onchange = function () { updateSelection(type); };
+
+            var label = document.createElement('label');
+            label.htmlFor = 'cb_' + file.id;
+            label.textContent = file.name;
+
+            var dateSpan = document.createElement('span');
+            dateSpan.className = 'file-date';
+            dateSpan.textContent = new Date(file.dateCreated).toLocaleDateString('ja-JP');
+
+            item.appendChild(cb);
+            item.appendChild(label);
+            item.appendChild(dateSpan);
+            listEl.appendChild(item);
+        });
+        updateSelection(type);
+    }
+
+    function updateSelection(type) {
+        var count = document.querySelectorAll('.' + type + '-file-cb:checked').length;
+        var btn = document.getElementById('start' + type.charAt(0).toUpperCase() + type.slice(1) + 'Btn');
+        btn.disabled = count === 0;
+        var statusEl = document.getElementById(type + 'StatusText');
+        statusEl.textContent = count + '件のファイルが選択されています。';
+    }
+
+    async function startProcessing(type) {
+        var checkboxes = document.querySelectorAll('.' + type + '-file-cb:checked');
+        var fileIds = Array.from(checkboxes).map(function (cb) { return cb.value; });
+
+        if (fileIds.length === 0) return;
+
+        var result = await Swal.fire({
+            title: '処理の開始',
+            text: '選択した ' + fileIds.length + ' 個のPDFからデータの読み込みを開始します。よろしいですか？',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '開始する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8'
+        });
+        if (!result.isConfirmed) return;
+
+        showToast('info', 'バッチ処理をリクエスト中...');
+
+        if (type === 'event') {
+            var year = document.getElementById('eventFiscalYear').value;
+            if (!year) {
+                showToast('error', '対象年度を入力してください。');
+                return;
+            }
+            google.script.run
+                .withSuccessHandler(onProcessStartSuccess)
+                .withFailureHandler(onProcessStartFail)
+                .startEventPdfProcessingFromWebApp(fileIds, parseInt(year));
+        } else {
+            google.script.run
+                .withSuccessHandler(onProcessStartSuccess)
+                .withFailureHandler(onProcessStartFail)
+                .startUnitMasterProcessingFromWebApp(fileIds);
+        }
+    }
+
+    // ===== データ連携 (Google Picker 追加機能) =====
+    var pickerApiLoaded = false;
+    var currentPickerType = null;
+
+    function openGooglePicker(type) {
+        currentPickerType = type;
+        showToast('info', 'Google Driveに接続中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success && res.token) {
+                    if (!pickerApiLoaded) {
+                        gapi.load('picker', {
+                            callback: function () {
+                                pickerApiLoaded = true;
+                                createPicker(res.token);
+                            }
+                        });
+                    } else {
+                        createPicker(res.token);
+                    }
+                } else {
+                    showToast('error', '認証情報の取得に失敗しました: ' + (res.error || ''));
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .getPickerAuthInfo();
+    }
+
+    function createPicker(oauthToken) {
+        var view = new google.picker.DocsView(google.picker.ViewId.DOCS);
+        view.setMimeTypes('application/pdf');
+
+        var picker = new google.picker.PickerBuilder()
+            .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+            .addView(view)
+            .setOAuthToken(oauthToken)
+            .setCallback(pickerCallback)
+            .setOrigin('https://script.google.com')
+            .setTitle(currentPickerType === 'unit' ? '指導計画PDFを選択' : '行事予定PDFを選択')
+            .build();
+
+        picker.setVisible(true);
+    }
+
+    async function pickerCallback(data) {
+        if (data.action === google.picker.Action.PICKED) {
+            var fileIds = data.docs.map(function (doc) { return doc.id; });
+            var type = currentPickerType;
+
+            if (fileIds.length === 0) return;
+            var swalResult = await Swal.fire({
+                title: '処理の開始',
+                text: '選択した ' + fileIds.length + ' 個のPDFからデータの読み込みを開始します。よろしいですか？',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '開始する',
+                cancelButtonText: 'キャンセル',
+                confirmButtonColor: '#1a73e8'
+            });
+            if (!swalResult.isConfirmed) return;
+
+            showToast('info', 'バッチ処理をリクエスト中...');
+
+            if (type === 'event') {
+                var year = document.getElementById('eventFiscalYear').value;
+                if (!year) {
+                    showToast('error', '対象年度を入力してください。');
+                    return;
+                }
+                google.script.run
+                    .withSuccessHandler(onProcessStartSuccess)
+                    .withFailureHandler(onProcessStartFail)
+                    .startEventPdfProcessingFromWebApp(fileIds, parseInt(year));
+            } else {
+                google.script.run
+                    .withSuccessHandler(onProcessStartSuccess)
+                    .withFailureHandler(onProcessStartFail)
+                    .startUnitMasterProcessingFromWebApp(fileIds);
+            }
+        }
+    }
+
+    // ===== データ連携 処理結果コールバックなど =====
+    function onProcessStartSuccess(res) {
+        if (res.success) {
+            showToast('success', '' + res.message);
+            setTimeout(checkProcessingStatus, 2000);
+        } else {
+            showToast('error', 'エラー: ' + res.error);
+        }
+    }
+
+    function onProcessStartFail(e) {
+        showToast('error', '通信エラー: ' + e.message);
+    }
+
+    function checkProcessingStatus() {
+        // 現在データ連携タブを開いていない場合はポーリングしない
+        var viewIntegration = document.getElementById('view-integration');
+        if (!viewIntegration || !viewIntegration.classList.contains('active')) return;
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) return;
+
+                var unitBtn = document.getElementById('startUnitBtn');
+                var eventBtn = document.getElementById('startEventBtn');
+                var unitStatusMsg = document.getElementById('unitStatusText');
+                var eventStatusMsg = document.getElementById('eventStatusText');
+
+                if (res.unitStatus.isRunning) {
+                    unitBtn.disabled = true;
+                    unitBtn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...';
+                    unitStatusMsg.innerHTML = '<span style="color:var(--danger)">実行中 (残件: ' + res.unitStatus.remaining + ' / 全 ' + res.unitStatus.total + ')</span>';
+                } else {
+                    unitBtn.textContent = '▶ 単元マスタ再構築を開始';
+                    updateSelection('unit');
+                }
+
+                if (res.eventStatus.isRunning) {
+                    eventBtn.disabled = true;
+                    eventBtn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...';
+                    eventStatusMsg.innerHTML = '<span style="color:var(--danger)">実行中 (残件: ' + res.eventStatus.remaining + ' / 全 ' + res.eventStatus.total + ')</span>';
+                } else {
+                    eventBtn.textContent = '▶ 行事予定読み込みを開始';
+                    updateSelection('event');
+                }
+
+                if (res.unitStatus.isRunning || res.eventStatus.isRunning) {
+                    setTimeout(checkProcessingStatus, 3000);
+                }
+            })
+            .getPdfProcessingStatusForWebApp();
+    }
+
+    async function resetPdfProcessing() {
+        var result = await Swal.fire({
+            title: '⚠️ 強制リセット',
+            text: 'バックグラウンドで実行中のすべての処理キューを強制的に破棄します。よろしいですか？',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'リセットする',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#ea4335'
+        });
+        if (!result.isConfirmed) return;
+
+        showToast('info', '処理を停止中...');
+        google.script.run
+            .withSuccessHandler(function () {
+                showToast('success', 'すべての処理キューを強制リセットしました。');
+                checkProcessingStatus();
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', 'エラー: ' + e.message);
+            })
+            .resetAllPdfProcessing_UI();
+    }
+
+    // ===== ユーティリティ =====
+    function formatDateLocal(date) {
+        var y = date.getFullYear();
+        var m = String(date.getMonth() + 1).padStart(2, '0');
+        var d = String(date.getDate()).padStart(2, '0');
+        return y + '/' + m + '/' + d;
+    }
+    function escHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function escAttr(str) {
+        if (!str) return '';
+        return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // ===== トースト (SweetAlert2 Toast) =====
+    var SwalToast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 3500,
+        timerProgressBar: true,
+        didOpen: function (toast) {
+            toast.addEventListener('mouseenter', Swal.stopTimer);
+            toast.addEventListener('mouseleave', Swal.resumeTimer);
+        }
+    });
+
+    function showToast(type, message) {
+        var iconMap = { success: 'success', error: 'error', info: 'info' };
+        SwalToast.fire({
+            icon: iconMap[type] || 'info',
+            title: message
+        });
+    }
+
+    // ===== 固定時間割エディタ =====
+    var DAY_NAMES = ['月', '火', '水', '木', '金'];
+    var timetableLoaded = false;
+
+    function loadTimetableEditor() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    renderTimetableEditor(res.data);
+                    timetableLoaded = true;
+                } else {
+                    showToast('error', 'エラー: ' + (res.error || ''));
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .getTimetableForEditor();
+    }
+
+    function renderTimetableEditor(data) {
+        var tbody = document.getElementById('timetableBody');
+        tbody.innerHTML = '';
+        data.forEach(function (dayData, dayIndex) {
+            var tr = document.createElement('tr');
+            // 曜日ラベル
+            var tdLabel = document.createElement('td');
+            tdLabel.textContent = DAY_NAMES[dayIndex];
+            tr.appendChild(tdLabel);
+            // 時程
+            tr.appendChild(makeEditorCell('tt_' + dayIndex + '_time', dayData.time || ''));
+            // 朝学習
+            tr.appendChild(makeEditorCell('tt_' + dayIndex + '_morning', dayData.morning || ''));
+            // 1〜6校時
+            for (var p = 0; p < 6; p++) {
+                tr.appendChild(makeEditorCell('tt_' + dayIndex + '_p' + p, (dayData.periods && dayData.periods[p]) || ''));
+            }
+            tbody.appendChild(tr);
+        });
+    }
+
+    function makeEditorCell(id, value) {
+        var td = document.createElement('td');
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.id = id;
+        input.value = value;
+        td.appendChild(input);
+        return td;
+    }
+
+    function gatherTimetableData() {
+        var data = [];
+        for (var d = 0; d < 5; d++) {
+            var periods = [];
+            for (var p = 0; p < 6; p++) {
+                var el = document.getElementById('tt_' + d + '_p' + p);
+                periods.push(el ? el.value : '');
+            }
+            data.push({
+                day: d,
+                time: (document.getElementById('tt_' + d + '_time') || {}).value || '',
+                morning: (document.getElementById('tt_' + d + '_morning') || {}).value || '',
+                periods: periods
+            });
+        }
+        return data;
+    }
+
+    function saveTimetable() {
+        var data = gatherTimetableData();
+        showToast('info', '保存中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '' + res.message);
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .saveTimetableFromEditor(data);
+    }
+
+    async function applyTimetableToCurrentWeek() {
+        if (!STATE.mondayStr) {
+            showToast('error', '表示中の週が設定されていません。');
+            return;
+        }
+        var result = await Swal.fire({
+            title: '時間割の転記',
+            text: STATE.mondayStr + ' 週に固定時間割を転記します。既存データは上書きされます。よろしいですか？',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '転記する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8'
+        });
+        if (!result.isConfirmed) return;
+        showToast('info', '転記中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '' + res.message);
+                    loadWeeklyPlan(); // 転記後、週案を再読み込み
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .applyTimetableToWeek(STATE.mondayStr);
+    }
+
+    // ===== 長期休業期間設定 & 年間一括転記 =====
+    var vacationDatesLoaded = false;
+
+    function loadVacationDates() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res) {
+                    document.getElementById('vacSummerStart').value = res.summerStart || '';
+                    document.getElementById('vacSummerEnd').value = res.summerEnd || '';
+                    document.getElementById('vacWinterStart').value = res.winterStart || '';
+                    document.getElementById('vacWinterEnd').value = res.winterEnd || '';
+                    document.getElementById('vacSpringStart').value = res.springStart || '';
+                    document.getElementById('vacSpringEnd').value = res.springEnd || '';
+                    vacationDatesLoaded = true;
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '休業日データの取得に失敗: ' + e.message);
+            })
+            .getDefaultExclusionDates();
+    }
+
+    async function runBulkTransfer() {
+        var dates = {
+            summerStart: document.getElementById('vacSummerStart').value,
+            summerEnd: document.getElementById('vacSummerEnd').value,
+            winterStart: document.getElementById('vacWinterStart').value,
+            winterEnd: document.getElementById('vacWinterEnd').value,
+            springStart: document.getElementById('vacSpringStart').value,
+            springEnd: document.getElementById('vacSpringEnd').value
+        };
+
+        var swalResult = await Swal.fire({
+            title: '⚠️ 年間一括転記',
+            text: '長期休業期間を除外し、今後のすべての週に固定時間割を一括転記します。既存のデータは上書きされます。',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '実行する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#e65100'
+        });
+        if (!swalResult.isConfirmed) return;
+
+        var statusEl = document.getElementById('bulkTransferStatus');
+        statusEl.textContent = '一括転記を実行中...（数分かかることがあります）';
+        showToast('info', '年間一括転記を実行中...');
+
+        google.script.run
+            .withSuccessHandler(function (msg) {
+                statusEl.textContent = '';
+                showToast('success', '' + (msg || '一括転記が完了しました。'));
+            })
+            .withFailureHandler(function (e) {
+                statusEl.textContent = '';
+                showToast('error', 'エラー: ' + e.message);
+            })
+            .processBulkTransferWithExclusion(dates);
+    }
+
+    // ===== 教科別標準時数エディタ =====
+    var stdHoursLoaded = false;
+    var stdHoursData = [];
+
+    function loadStandardHours() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    stdHoursData = res.data;
+                    renderStdHoursEditor(res.data);
+                    stdHoursLoaded = true;
+                } else {
+                    showToast('error', 'エラー: ' + (res.error || ''));
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .getStandardHours();
+    }
+
+    function renderStdHoursEditor(data) {
+        var container = document.getElementById('standardHoursEditor');
+        container.innerHTML = '';
+        data.forEach(function (item, i) {
+            var div = document.createElement('div');
+            div.className = 'std-hours-item';
+            div.innerHTML =
+                '<label>' + escHtml(item.subject) + '</label>' +
+                '<input type="number" id="stdH_' + i + '" value="' + (item.hours || 0) + '" min="0">';
+            container.appendChild(div);
+        });
+    }
+
+    function saveStdHours() {
+        var data = [];
+        var container = document.getElementById('standardHoursEditor');
+        var items = container.querySelectorAll('.std-hours-item');
+        items.forEach(function (item, i) {
+            var label = item.querySelector('label').textContent;
+            var input = item.querySelector('input');
+            data.push({ subject: label, hours: parseInt(input.value) || 0 });
+        });
+        showToast('info', '保存中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '' + res.message);
+                    stdHoursData = data;
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .saveStandardHours(data);
+    }
+
+    // ===== 時数集計ダッシュボード =====
+    function loadHoursSummary() {
+        if (!STATE.mondayStr) return;
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    STATE.hoursSummaryData = res.data;
+                    renderHoursSummary(res.data);
+                } else {
+                    showToast('error', '時数集計エラー: ' + (res.error || ''));
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .getHoursSummary(STATE.mondayStr);
+    }
+
+    function renderHoursSummary(data) {
+        var container = document.getElementById('hoursSummaryContent');
+        if (!data || data.length === 0) {
+            container.innerHTML = '<p style="text-align:center;color:var(--text-sub);padding:16px;font-size:0.82rem;">データがありません</p>';
+            return;
+        }
+        var html = '<table class="hours-summary-table"><thead><tr>' +
+            '<th>教科</th><th>当週</th><th>累計</th><th>標準</th><th style="width:40%">進捗</th><th>%</th>' +
+            '</tr></thead><tbody>';
+        data.forEach(function (row) {
+            var pct = Math.min(row.percent, 150);
+            var overClass = row.percent > 100 ? ' over' : '';
+            html += '<tr>' +
+                '<td style="font-weight:600;">' + escHtml(row.subject) + '</td>' +
+                '<td>' + formatFraction(row.weekly) + '</td>' +
+                '<td>' + formatFraction(row.cumulative) + '</td>' +
+                '<td>' + row.standard + '</td>' +
+                '<td><div class="progress-bar-wrap"><div class="progress-bar-fill' + overClass + '" style="width:' + Math.min(pct, 100) + '%"></div></div></td>' +
+                '<td class="pct-label">' + row.percent + '%</td>' +
+                '</tr>';
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    // ===== システム設定 =====
+    var isSystemSettingsLoaded = false;
+
+    function loadSystemSettings() {
+        if (isSystemSettingsLoaded) return;
+        showToast('info', 'システム設定を読み込み中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                document.getElementById('sysCourseName').value = res.courseName || '';
+                document.getElementById('sysPostHour').value = res.postHour || '';
+                document.getElementById('sysPdfFolderId').value = res.pdfFolderId || '';
+                document.getElementById('sysEventPdfFolderId').value = res.eventPdfFolderId || '';
+                document.getElementById('sysGeminiModelName').value = res.geminiModelName || 'gemini-1.5-flash';
+
+                // 担当学年の反映
+                var gradeSelect = document.getElementById('sysGradeSelect');
+                if (gradeSelect) {
+                    gradeSelect.value = res.grade || '3';
+                    // 学年変更イベントの登録
+                    gradeSelect.onchange = function () {
+                        var newGrade = this.value;
+                        showToast('info', '学年設定を変更中...');
+                        google.script.run
+                            .withSuccessHandler(function (r) {
+                                if (r.success) {
+                                    showToast('success', r.message);
+                                    // 標準時数エディタの内容も再描画する
+                                    stdHoursData = r.data;
+                                    renderStdHoursEditor(r.data);
+                                } else {
+                                    showToast('error', 'エラー: ' + r.error);
+                                }
+                            })
+                            .withFailureHandler(function (e) {
+                                showToast('error', '通信エラー: ' + e.message);
+                            })
+                            .saveGrade(newGrade);
+                    };
+                }
+
+                // APIキー（マスク表示対応）
+                document.getElementById('sysGeminiApiKey').value = res.geminiApiKey || '';
+
+                isSystemSettingsLoaded = true;
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '設定の読み込みに失敗しました: ' + e.message);
+            })
+            .getAppSettings();
+    }
+
+    function saveSystemSettings() {
+        var settings = {
+            courseName: document.getElementById('sysCourseName').value,
+            postHour: document.getElementById('sysPostHour').value,
+            pdfFolderId: document.getElementById('sysPdfFolderId').value,
+            eventPdfFolderId: document.getElementById('sysEventPdfFolderId').value,
+            geminiApiKey: document.getElementById('sysGeminiApiKey').value,
+            geminiModelName: document.getElementById('sysGeminiModelName').value
+        };
+
+        showToast('info', 'システム設定を保存中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', res.message);
+                    // 保存後、念のため再取得してリフレッシュ
+                    isSystemSettingsLoaded = false;
+                    loadSystemSettings();
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '設定の保存に失敗しました: ' + e.message);
+            })
+            .saveAppSettings(settings);
+    }
+
+    function fetchSettingCourseList() {
+        var inputBtn = event.target;
+        inputBtn.disabled = true;
+        inputBtn.textContent = '取得中...';
+
+        google.script.run
+            .withSuccessHandler(function (courses) {
+                inputBtn.disabled = false;
+                inputBtn.textContent = '一覧取得';
+                if (!courses || courses.length === 0) {
+                    showToast('error', '有効なクラスが見つかりません');
+                    return;
+                }
+                var select = document.getElementById('sysCourseSelect');
+                select.innerHTML = '<option value="">-- 一覧から選択するか直打ちしてください --</option>';
+                courses.forEach(function (c) {
+                    var opt = document.createElement('option');
+                    opt.value = c;
+                    opt.textContent = c;
+                    select.appendChild(opt);
+                });
+                select.style.display = 'block';
+                showToast('success', 'コース一覧を取得しました');
+            })
+            .withFailureHandler(function (e) {
+                inputBtn.disabled = false;
+                inputBtn.textContent = '一覧取得';
+                showToast('error', 'コース取得エラー: ' + e.message);
+            })
+            .getCourseListForDashboard();
+    }
+
+    async function confirmGenerateCalendar() {
+        var year = document.getElementById('sysCalYear').value;
+        var startMondayStr = document.getElementById('sysCalStartMonday').value;
+
+        if (!year || !startMondayStr) {
+            showToast('error', '対象年度と第1週目の月曜日を入力してください。');
+            return;
+        }
+
+        var swalResult = await Swal.fire({
+            title: '🗓️ カレンダー再生成',
+            html: year + '年度のカレンダー（起点: ' + startMondayStr + '）をデータベースに展開します。<br><small>既存の行事や週案データは消えません</small>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '再生成する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#e65100'
+        });
+        if (!swalResult.isConfirmed) return;
+
+        showToast('info', 'カレンダー生成中...（数秒〜十数秒かかります）');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', res.message);
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '致命的なエラー: ' + e.message);
+            })
+            .generateAnnualCalendar(year, startMondayStr);
+    }
+
+    // ===================================================
+    // ===== タスク管理（TODO自動抽出） ロジック (Phase 6)
+    // ===================================================
+
+    // ===== 初期リロード制御 =====
+    var taskDataLoaded = false;
+    // switchView内部ハック：taskタブ開いた瞬間に未ロードならロードする仕組みを追加するため関数上書きかイベント処理が必要だが、
+    // ここではグローバルのswitchView内のif文を後で追記・あるいは個別に叩く想定とする。
+    // (既にあるswitchView定義に直接入れると競合リスクがあるため、一時的にポーリングかHTML側onclickに直接追記等の対処が必要。今回は直接switchView内から呼び出される想定)
+
+    // ===== UI切替関連 =====
+    function toggleAiTaskMode() {
+        var mode = document.querySelector('input[name="aiTaskMode"]:checked').value;
+        document.getElementById('aiTaskScheduleMode').style.display = (mode === 'schedule') ? 'block' : 'none';
+        document.getElementById('aiTaskTextMode').style.display = (mode === 'text') ? 'block' : 'none';
+        cancelAiTaskPreview(); // モード切替時はプレビューを隠す
+    }
+
+    // ===== タスクロードと描画 =====
+    let allTaskData = [];
+
+    function loadTasks() {
+        var container = document.getElementById('taskListContainer');
+        container.innerHTML = '<div style="text-align:center; padding: 20px;"><div class="spinner-lg"></div><p>タスクを読み込み中...</p></div>';
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    allTaskData = res.tasks || [];
+                    STATE.tasks = allTaskData;
+                    taskDataLoaded = true;
+                    if (document.getElementById('taskListContainer')) renderTaskList();
+                    if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+                } else {
+                    if (container) container.innerHTML = '<div style="color:var(--danger); padding:20px;">読込エラー: ' + res.error + '</div>';
+                    showToast('error', 'タスク取得エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                container.innerHTML = '<div style="color:var(--danger); padding:20px;">通信エラー</div>';
+                showToast('error', '致命的な通信エラー: ' + e.message);
+            })
+            .getTasksFromWebApp();
+    }
+
+    function renderTaskList() {
+        var container = document.getElementById('taskListContainer');
+        var showCompleted = document.getElementById('chkShowCompletedTasks').checked;
+
+        var filtered = allTaskData;
+        if (!showCompleted) {
+            filtered = allTaskData.filter(t => t.status !== '完了');
+        }
+
+        // 期日でソート（未設定は後回し）
+        filtered.sort((a, b) => {
+            if (!a.dueDate) return 1;
+            if (!b.dueDate) return -1;
+            return a.dueDate.localeCompare(b.dueDate);
+        });
+
+        if (filtered.length === 0) {
+            container.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; background: var(--surface-2); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-hint);">現在登録されているタスクはありません。🎉</div>';
+            return;
+        }
+
+        var todayStr = formatDateLocal(new Date());
+
+        container.innerHTML = filtered.map(t => {
+            var isComp = (t.status === '完了');
+            var compClass = isComp ? ' completed' : '';
+            var isUrgent = !isComp && t.dueDate && (t.dueDate <= todayStr);
+            var dateBadgeClass = isUrgent ? 'task-date-badge urgent' : 'task-date-badge';
+            var dateDisplay = t.dueDate ? t.dueDate.replace('2026-', '').replace('-', '/') : '期日未設定';
+            var checkedStr = isComp ? 'checked' : '';
+
+            return `
+                <div class="task-card${compClass}">
+                    <div class="task-checkbox-wrapper">
+                        <input type="checkbox" ${checkedStr} onchange="toggleTaskStatus('${t.id}', this.checked)">
+                    </div>
+                    <div class="task-content-wrapper">
+                        <div class="task-title">${escHtml(t.content)}</div>
+                        <div class="task-meta">
+                            ${t.resource ? `<div class="task-meta-item"><i class="bi bi-box-seam task-meta-icon"></i> ${escHtml(t.resource)}</div>` : ''}
+                            ${t.source ? `<div class="task-meta-item"><i class="bi bi-journal-text task-meta-icon"></i> ${escHtml(t.source)}</div>` : ''}
+                            <div class="task-meta-item mt-1">
+                                <span class="${dateBadgeClass}"><i class="bi bi-calendar-event"></i> ${dateDisplay}</span>
+                            </div>
+                        </div>
+                        <div class="task-actions">
+                            <button class="task-del-btn" onclick="deleteTaskById('${t.id}')" title="プレビュー/削除"><i class="bi bi-trash3"></i></button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderWeeklyTaskPanel() {
+        var container = document.getElementById('sidebarTaskList');
+        if (!container) return;
+
+        if (!taskDataLoaded || !STATE.weekData || !STATE.weekData.days) {
+            container.innerHTML = '<div class="st-empty">タスク読込中...</div>';
+            return;
+        }
+
+        var startStr = STATE.weekData.days[0].date.replace(/\//g, '-');
+        var endStr = STATE.weekData.days[6].date.replace(/\//g, '-');
+
+        var weekTasks = allTaskData.filter(t => {
+            if (t.status === '完了') {
+                return t.dueDate >= startStr && t.dueDate <= endStr;
+            } else {
+                if (!t.dueDate) return true; // 期限未設定は常に表示
+                if (t.dueDate <= endStr) return true; // 当週を含め、過去の未完了は「やるべき」として表示
+                return false; // 来週以降のタスクは隠す
+            }
+        });
+
+        weekTasks.sort((a, b) => {
+            if (!a.dueDate) return 1;
+            if (!b.dueDate) return -1;
+            return a.dueDate.localeCompare(b.dueDate);
+        });
+
+        if (weekTasks.length === 0) {
+            container.innerHTML = '<div class="st-empty">今週のタスクはありません🎉</div>';
+            return;
+        }
+
+        container.innerHTML = weekTasks.map(t => {
+            var isComp = (t.status === '完了');
+            var compClass = isComp ? ' completed' : '';
+            var checkedStr = isComp ? 'checked' : '';
+            var dateDisplay = t.dueDate ? t.dueDate.replace('2026-', '').replace('-', '/') : '未設定';
+
+            return `
+                <div class="sidebar-task-card${compClass}">
+                    <div class="st-checkbox-wrapper">
+                        <input type="checkbox" ${checkedStr} onchange="toggleTaskStatus('${t.id}', this.checked)">
+                    </div>
+                    <div class="st-content">
+                        <div class="st-title">${escHtml(t.content)}</div>
+                        <div class="st-meta">
+                            期日: ${dateDisplay}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // ===== 個別タスクステータス操作 =====
+    function toggleTaskStatus(taskId, isCompleted) {
+        var newStatus = isCompleted ? '完了' : '未着手';
+        // UI即座反映
+        var targetTask = allTaskData.find(t => t.id === taskId);
+        if (targetTask) targetTask.status = newStatus;
+        if (document.getElementById('taskListContainer')) renderTaskList();
+        if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+
+        // サーバー通信
+        google.script.run
+            .withFailureHandler(function (e) {
+                showToast('error', 'ステータス更新失敗: ' + e.message);
+                if (targetTask) targetTask.status = isCompleted ? '未着手' : '完了'; // ロールバック
+                if (document.getElementById('taskListContainer')) renderTaskList();
+                if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+            })
+            .updateTaskStatusFromWebApp(taskId, newStatus);
+    }
+
+    async function deleteTaskById(taskId) {
+        var result = await Swal.fire({
+            title: 'タスク削除',
+            text: 'このタスクを削除しますか？ 元に戻せません。',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '削除する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#ea4335'
+        });
+        if (!result.isConfirmed) return;
+
+        // UI即座反映（一時削除）
+        allTaskData = allTaskData.filter(t => t.id !== taskId);
+        if (document.getElementById('taskListContainer')) renderTaskList();
+        if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) {
+                    showToast('error', '削除エラー: ' + res.error);
+                    loadTasks(); // エラー時は再取得
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+                loadTasks();
+            })
+            .deleteTaskFromWebApp(taskId);
+    }
+
+    // ===== 手動・強制追加（プレハブ）=====
+    async function showManualTaskInput() {
+        const { value: formValues } = await Swal.fire({
+            title: '手動タスク追加',
+            html: `
+                <input id="swal-input1" class="swal2-input" placeholder="タスク内容 (必須)" style="width:80%">
+                <input id="swal-input2" class="swal2-input" placeholder="準備物・リソース" style="width:80%">
+                <div style="margin-top:10px;text-align:left;width:80%;margin:10px auto;">
+                    <label style="font-size:0.8rem;color:var(--text-sub);">期日:</label>
+                    <input id="swal-input3" type="date" class="form-control" style="font-family:inherit;">
+                </div>
+            `,
+            focusConfirm: false,
+            showCancelButton: true,
+            confirmButtonText: '追加',
+            cancelButtonText: 'キャンセル',
+            preConfirm: () => {
+                var content = document.getElementById('swal-input1').value;
+                if (!content) { Swal.showValidationMessage('タスク内容は入力必須です'); return false; }
+                return {
+                    content: content,
+                    resource: document.getElementById('swal-input2').value,
+                    dueDate: document.getElementById('swal-input3').value,
+                    source: '手動追加'
+                };
+            }
+        });
+
+        if (formValues) {
+            showToast('info', '保存中...');
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (res.success) {
+                        showToast('success', 'タスクを手動追加しました');
+                        loadTasks();
+                    } else {
+                        showToast('error', '追加エラー: ' + res.error);
+                    }
+                })
+                .withFailureHandler(e => showToast('error', e.message))
+                .saveTasksFromWebApp([formValues]);
+        }
+    }
+
+    // ===== AI抽出とプレビュー操作 =====
+    let aiPreviewTasks = [];
+
+    function runAiTaskExtraction(mode) {
+        var statusMsg = 'AI抽出を実行中...（数秒〜十数秒かかります）';
+        showToast('info', statusMsg);
+
+        // 既存のプレビューをクリア
+        cancelAiTaskPreview();
+
+        if (mode === 'schedule') {
+            var start = document.getElementById('aiTaskStartDate').value;
+            var end = document.getElementById('aiTaskEndDate').value;
+            if (!start || !end) {
+                showToast('error', '抽出期間の開始日と終了日を指定してください。');
+                return;
+            }
+            google.script.run
+                .withSuccessHandler(handleAiExtractionResult)
+                .withFailureHandler(handleAiExtractionError)
+                .extractTasksFromSchedule_WebApp(start, end);
+        } else if (mode === 'text') {
+            var text = document.getElementById('aiTaskTextInput').value;
+            if (!text || text.trim() === '') {
+                showToast('error', '解析するテキストを入力またはペーストしてください。');
+                return;
+            }
+            google.script.run
+                .withSuccessHandler(handleAiExtractionResult)
+                .withFailureHandler(handleAiExtractionError)
+                .extractTasksFromText_WebApp(text);
+        }
+    }
+
+    function handleAiExtractionResult(res) {
+        if (res.success) {
+            aiPreviewTasks = res.tasks || [];
+            showToast('success', 'AIタスク抽出が完了しました！');
+            renderAiTaskPreview();
+        } else {
+            showToast('error', '抽出エラー: ' + res.error);
+        }
+    }
+
+    function handleAiExtractionError(e) {
+        showToast('error', 'AIサーバとの通信エラー: ' + e.message);
+    }
+
+    function renderAiTaskPreview() {
+        document.getElementById('aiTaskPreviewArea').style.display = 'block';
+        var listEl = document.getElementById('aiTaskPreviewList');
+
+        if (aiPreviewTasks.length === 0) {
+            listEl.innerHTML = '<div style="color:var(--text-hint);">抽出されたタスクはありません。</div>';
+            return;
+        }
+
+        listEl.innerHTML = aiPreviewTasks.map((t, idx) => `
+            <div style="background:var(--surface); border:1px solid #1a73e8; border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.85rem;">
+                <div style="font-weight:bold; color:var(--text-main); margin-bottom:4px;"><span class="material-symbols-outlined fs-6">task_alt</span> ${escHtml(t.task)}</div>
+                <div style="color:var(--text-sub); display:flex; gap:10px;">
+                    <span><i class="bi bi-box-seam"></i> ${escHtml(t.resource || '設定なし')}</span>
+                    <span><i class="bi bi-calendar-event"></i> ${t.dueDate || '未設定'}</span>
+                    <span><i class="bi bi-journal-text"></i> ${escHtml(t.source || '不明')}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function cancelAiTaskPreview() {
+        document.getElementById('aiTaskPreviewArea').style.display = 'none';
+        aiPreviewTasks = [];
+    }
+
+    function confirmAiTaskSave() {
+        if (!aiPreviewTasks || aiPreviewTasks.length === 0) return;
+
+        // 保存用フォーマットに変換
+        var saveTasks = aiPreviewTasks.map(t => ({
+            content: t.task,
+            resource: t.resource,
+            dueDate: t.dueDate,
+            source: t.source
+        }));
+
+        showToast('info', 'タスクリストに保存中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', res.message);
+                    cancelAiTaskPreview(); // プレビュークリア
+                    loadTasks();          // 一覧リロード
+                } else {
+                    showToast('error', '保存エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(e => showToast('error', '通信エラー: ' + e.message))
+            .saveTasksFromWebApp(saveTasks);
+    }
+
+</script>
