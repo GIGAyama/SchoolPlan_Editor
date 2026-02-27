@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Noto+Sans+JP:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #1a73e8;
+            --bg-color: #ffffff;
+            --text-main: #202124;
+            --text-sub: #5f6368;
+        }
+
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden;
+        }
+
+        .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            width: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+            animation: fadeIn 0.4s cubic-bezier(0.2, 0, 0, 1) forwards;
+        }
+
+        /* Modern Spinner Container */
+        .spinner-box {
+            position: relative;
+            width: 60px;
+            height: 60px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Dynamic Gradient Spinner */
+        .spinner {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: conic-gradient(from 0deg, transparent 0%, transparent 30%, var(--primary-color) 100%);
+            animation: spin 1.2s linear infinite;
+            z-index: 2;
+        }
+
+        .spinner::before {
+            content: '';
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            right: 4px;
+            bottom: 4px;
+            background-color: var(--bg-color);
+            border-radius: 50%;
+            /* To prevent background color mismatch in dark mode, wait we just use white */
+        }
+
+        /* Core Dot */
+        .spinner-box::after {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: var(--primary-color);
+            border-radius: 50%;
+            z-index: 3;
+            animation: pulse-dot 1.2s ease-in-out infinite alternate;
+        }
+
+        /* Outer Ripple Effect */
+        .ripple {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(26, 115, 232, 0.4);
+            border-radius: 50%;
+            animation: ripple 2s cubic-bezier(0.1, 0.5, 0.3, 1) infinite;
+            z-index: 1;
+        }
+
+        .loading-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+        }
+
+        .loading-desc {
+            font-size: 0.9rem;
+            color: var(--text-sub);
+            line-height: 1.5;
+            max-width: 90%;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes pulse-dot {
+            0% {
+                transform: scale(0.8);
+                opacity: 0.8;
+            }
+
+            100% {
+                transform: scale(1.2);
+                opacity: 1;
+            }
+        }
+
+        @keyframes ripple {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            100% {
+                transform: scale(2.2);
+                opacity: 0;
+            }
+        }
+
+        @keyframes fadeIn {
+            0% {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="loading-container">
+        <div class="spinner-box">
+            <div class="ripple"></div>
+            <div class="spinner"></div>
+        </div>
+        <div class="loading-title">
+            <?!= title ?>
+        </div>
+        <div class="loading-desc">
+            <?!= message ?>
+        </div>
+    </div>
+
+    <script>
+        // 画面ロード時に自動的にサーバー側の関数を実行する
+        window.onload = function () {
+            const functionName = '<?!= functionName ?>';
+
+            if (!functionName || functionName === 'null') {
+                // 関数指定がない場合は単なる表示用（外部から google.script.host.close() されるのを待つ）
+                return;
+            }
+
+            // サーバー関数を実行
+            google.script.run
+                .withSuccessHandler(function (result) {
+                    // 処理が成功したらモーダルを閉じる
+                    google.script.host.close();
+                    // もし戻り値があれば、GAS側でどう扱うかを制御できるが、今回はトースト等で完了を出すためここでは閉じるだけ
+                })
+                .withFailureHandler(function (error) {
+                    // エラーが発生した場合もモーダルを閉じ、エラーをクライアント側ではなくサーバー側（利用元）で表示すべきだが、
+                    // ダイアログ経由だとエラーが飲み込まれるため、エラー表示用関数を呼ぶか、Alertを出す
+                    document.querySelector('.loading-title').innerText = "エラーが発生しました";
+                    document.querySelector('.loading-desc').innerText = error.message;
+                    document.querySelector('.loading-title').style.color = "#d93025";
+                    document.querySelector('.spinner-box').style.display = "none";
+                    // 3秒後に閉じる
+                    setTimeout(function () {
+                        google.script.host.close();
+                    }, 3000);
+                })
+                .executeServerFunctionForModal(functionName);
+        };
+    </script>
+</body>
+
+</html>
