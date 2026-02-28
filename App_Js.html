@@ -981,6 +981,18 @@
         { label: '手書き風', value: "'Yusei Magic', cursive" }
     ];
 
+    // WordArt gradient/effect presets
+    var NW_WORDART_PRESETS = [
+        { key: 'ocean',  label: '海',      emoji: '🌊', bg: 'linear-gradient(135deg,#0077b6,#00b4d8,#90e0ef)', shadow: '' },
+        { key: 'sunset', label: '夕焼け',  emoji: '🌅', bg: 'linear-gradient(135deg,#f77f00,#d62828,#fcbf49)', shadow: '' },
+        { key: 'forest', label: '森',      emoji: '🌿', bg: 'linear-gradient(135deg,#1b4332,#52b788,#b7e4c7)', shadow: '' },
+        { key: 'gold',   label: 'ゴールド',emoji: '✨', bg: 'linear-gradient(135deg,#b8860b,#ffd700,#b8860b)', shadow: '1px 1px 3px rgba(0,0,0,0.3)' },
+        { key: 'sakura', label: '桜',      emoji: '🌸', bg: 'linear-gradient(135deg,#ff85a1,#ffa8c5,#ffcce0)', shadow: '' },
+        { key: 'space',  label: '宇宙',    emoji: '🔭', bg: 'linear-gradient(135deg,#240046,#7b2d8b,#c77dff)', shadow: '0 0 12px rgba(199,125,255,0.6)' },
+        { key: 'shadow', label: '影付き',  emoji: '🖊', bg: '', color: '#222', shadow: '3px 3px 0 #888,6px 6px 0 #ccc' },
+        { key: 'pop',    label: 'ポップ',  emoji: '🎉', bg: 'linear-gradient(135deg,#ff006e,#fb5607,#ffbe0b,#3a86ff)', shadow: '2px 2px 0 rgba(0,0,0,0.2)' }
+    ];
+
     var NW = {
         blocks: [],
         nextId: 1,
@@ -1130,6 +1142,13 @@
                 break;
             case 'divider':
                 break;
+            case 'wordart':
+                block.content = data.content || 'ワードアート';
+                block.fontSize = data.fontSize || 40;
+                block.align = data.align || 'center';
+                block.fontFamily = data.fontFamily || '';
+                block.preset = data.preset || 'ocean';
+                break;
         }
         // Block decoration (all block types)
         block.borderColor = data.borderColor || '';
@@ -1269,7 +1288,7 @@
             });
             fmt += '</select>'
                 + '<select onchange="NW.setFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
-            [9,10,11,12,14,16,18,20,24,28,32].forEach(function(s) {
+            [9,10,11,12,14,16,18,20,24,28,32,36,40,48,56,64,72].forEach(function(s) {
                 fmt += '<option value="' + s + '"' + (s === block.fontSize ? ' selected' : '') + '>' + s + '</option>';
             });
             fmt += '</select>'
@@ -1282,6 +1301,36 @@
                 + '<button title="背景色" onclick="NW.pickColor(\'' + block.id + '\',\'bgColor\')" style="position:relative;"><span class="material-symbols-outlined">format_color_fill</span><span class="nw-color-dot" style="background:' + (block.bgColor || 'transparent') + ';border:1px solid #ccc;"></span></button>'
                 + '</div><div class="nw-act-sep"></div>';
             actions.insertAdjacentHTML('beforeend', fmt);
+        }
+
+        // WordArt toolbar
+        if (block.type === 'wordart') {
+            var waFmt = '<div class="nw-fmt-toolbar">'
+                + '<select onchange="NW.setWordArtProp(\'' + block.id + '\',\'fontFamily\',this.value)" title="フォント">';
+            waFmt += '<option value=""' + (!block.fontFamily ? ' selected' : '') + '>標準</option>';
+            NW_FONTS.forEach(function(f) {
+                waFmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
+            });
+            waFmt += '</select>'
+                + '<select onchange="NW.setWordArtProp(\'' + block.id + '\',\'fontSize\',this.value)" title="フォントサイズ">';
+            [24,28,32,36,40,48,56,64,72].forEach(function(s) {
+                waFmt += '<option value="' + s + '"' + (s === (block.fontSize || 40) ? ' selected' : '') + '>' + s + '</option>';
+            });
+            waFmt += '</select>'
+                + '<select onchange="NW.setWordArtProp(\'' + block.id + '\',\'align\',this.value)" title="揃え">'
+                + '<option value="left"' + (block.align === 'left' ? ' selected' : '') + '>左</option>'
+                + '<option value="center"' + (!block.align || block.align === 'center' ? ' selected' : '') + '>中央</option>'
+                + '<option value="right"' + (block.align === 'right' ? ' selected' : '') + '>右</option>'
+                + '</select>'
+                + '<div class="nw-act-sep"></div>';
+            // Preset buttons
+            NW_WORDART_PRESETS.forEach(function(p) {
+                waFmt += '<button title="' + p.label + '" onclick="NW.setWordArtProp(\'' + block.id + '\',\'preset\',\'' + p.key + '\')" class="nw-wa-preset-btn' + (block.preset === p.key ? ' nw-active' : '') + '">' + p.emoji + '</button>';
+            });
+            waFmt += '<div class="nw-act-sep"></div>'
+                + '<button onclick="NW.editWordArt(\'' + block.id + '\')" title="テキストを編集"><span class="material-symbols-outlined">edit</span></button>'
+                + '</div><div class="nw-act-sep"></div>';
+            actions.insertAdjacentHTML('beforeend', waFmt);
         }
 
         // Gallery toolbar: column count
@@ -1540,6 +1589,33 @@
 
             case 'divider':
                 div.innerHTML = '<hr class="nw-divider-content">';
+                break;
+
+            case 'wordart':
+                div.className = 'nw-wordart-block';
+                var waPreset = NW_WORDART_PRESETS.find(function(p) { return p.key === (block.preset || 'ocean'); }) || NW_WORDART_PRESETS[0];
+                var waText = document.createElement('div');
+                waText.className = 'nw-wordart-text';
+                waText.textContent = block.content || 'ワードアート';
+                waText.style.fontSize = (block.fontSize || 40) + 'px';
+                waText.style.textAlign = block.align || 'center';
+                waText.style.fontWeight = '700';
+                waText.style.lineHeight = '1.2';
+                if (block.fontFamily) waText.style.fontFamily = block.fontFamily;
+                if (waPreset.bg) {
+                    waText.style.background = waPreset.bg;
+                    waText.style.webkitBackgroundClip = 'text';
+                    waText.style.backgroundClip = 'text';
+                    waText.style.webkitTextFillColor = 'transparent';
+                    waText.style.color = 'transparent';
+                } else {
+                    waText.style.color = waPreset.color || '#222';
+                }
+                if (waPreset.shadow) waText.style.textShadow = waPreset.shadow;
+                waText.style.cursor = 'pointer';
+                waText.title = 'クリックしてテキストを編集';
+                (function(bid) { waText.addEventListener('click', function() { NW.editWordArt(bid); }); })(block.id);
+                div.appendChild(waText);
                 break;
         }
         return div;
@@ -1849,6 +1925,35 @@
             block.qrSize = result.value.qrSize;
             NW.render();
         });
+    };
+
+    // ---- WordArt editor ----
+    NW.editWordArt = function(id) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        Swal.fire({
+            title: 'ワードアートのテキスト',
+            input: 'text',
+            inputValue: block.content || '',
+            inputPlaceholder: 'テキストを入力...',
+            showCancelButton: true,
+            confirmButtonText: '確定',
+            cancelButtonText: 'キャンセル'
+        }).then(function(result) {
+            if (result.isConfirmed) {
+                NW.pushHistory();
+                block.content = result.value;
+                NW.render();
+            }
+        });
+    };
+
+    NW.setWordArtProp = function(id, prop, value) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        if (prop === 'fontSize') value = parseInt(value, 10);
+        block[prop] = value;
+        NW.render();
     };
 
     // ---- Block decoration ----
@@ -2252,46 +2357,50 @@
             .getNewsletterData(mondayStr);
     };
 
-    // ---- Print via iframe ----
-    NW.printNewsletter = function() {
+    // ---- Build print-ready HTML (shared between print and Classroom post) ----
+    NW._PRINT_FONTS = 'https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap';
+    NW._PRINT_CSS = '@page{size:A4 portrait;margin:15mm 18mm;}'
+        + 'body{font-family:"Zen Maru Gothic",sans-serif;font-size:12px;color:#202124;margin:0;padding:0;}'
+        + 'table{width:100%;border-collapse:collapse;}th{background:#1a73e8;color:#fff;padding:4px 6px;font-size:11px;text-align:center;}'
+        + 'td{padding:3px 5px;border:1px solid #dadce0;text-align:center;font-size:11px;}'
+        + 'hr{border:none;border-top:1px solid #dadce0;margin:8px 0;}img{max-width:100%;}'
+        + '.nw-float-wrapper{display:flex;gap:12px;align-items:flex-start;}'
+        + '.nw-float-wrapper.nw-float-right{flex-direction:row-reverse;}'
+        + '.nw-float-img-side{flex-shrink:0;}.nw-float-img-side img{width:100%;}'
+        + '.nw-float-text-side{flex:1;min-width:0;line-height:1.7;text-align:left;}'
+        + '.nw-gallery-grid{display:grid;gap:8px;}.nw-gallery-cell img{width:100%;display:block;}.nw-gallery-caption{font-size:10px;text-align:center;padding:2px;}'
+        + '.nw-qrcode-block{text-align:center;padding:8px;}.nw-qrcode-block img{display:block;margin:0 auto;}.nw-qrcode-label{font-size:10px;text-align:center;margin-top:4px;}'
+        + '.nw-wordart-block{padding:4px 0;}.nw-wordart-text{display:block;font-weight:700;line-height:1.2;word-break:break-word;}';
+
+    NW.buildPrintHTML = function() {
         NW.saveEditable();
-        if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
         var page = document.getElementById('nwEditorPage');
         var clone = page.cloneNode(true);
         clone.querySelectorAll('.nw-block-handle,.nw-block-actions,.nw-schedule-options,.nw-empty-editor,.nw-image-placeholder,.nw-gallery-add,.nw-gallery-remove,.nw-page-break-marker').forEach(function(el) { el.remove(); });
         clone.querySelectorAll('.nw-block').forEach(function(el) {
             var decoBorder = el.getAttribute('data-deco-border');
-            if (decoBorder) {
-                el.style.border = '2px solid ' + decoBorder;
-            } else {
-                el.style.border = 'none';
-            }
+            el.style.border = decoBorder ? ('2px solid ' + decoBorder) : 'none';
             el.style.padding = '2px';
         });
-        // Clean up interactive styles for print
         clone.querySelectorAll('[style*="cursor"]').forEach(function(el) { el.style.cursor = 'default'; });
         clone.querySelectorAll('[contenteditable]').forEach(function(el) { el.removeAttribute('contenteditable'); });
+        return '<!DOCTYPE html><html><head>'
+            + '<meta charset="utf-8">'
+            + '<style>' + NW._PRINT_CSS + '</style>'
+            + '<link href="' + NW._PRINT_FONTS + '" rel="stylesheet">'
+            + '</head><body>' + clone.innerHTML + '</body></html>';
+    };
+
+    // ---- Print via iframe ----
+    NW.printNewsletter = function() {
+        if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
+        var html = NW.buildPrintHTML();
         var iframe = document.createElement('iframe');
         iframe.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:210mm;height:297mm;';
         document.body.appendChild(iframe);
         var doc = iframe.contentDocument;
         doc.open();
-        doc.write('<!DOCTYPE html><html><head>'
-            + '<style>'
-            + '@page{size:A4 portrait;margin:15mm 18mm;}'
-            + 'body{font-family:"Zen Maru Gothic",sans-serif;font-size:12px;color:#202124;margin:0;padding:0;}'
-            + 'table{width:100%;border-collapse:collapse;}th{background:#1a73e8;color:#fff;padding:4px 6px;font-size:11px;text-align:center;}'
-            + 'td{padding:3px 5px;border:1px solid #dadce0;text-align:center;font-size:11px;}'
-            + 'hr{border:none;border-top:1px solid #dadce0;margin:8px 0;}img{max-width:100%;}'
-            + '.nw-float-wrapper{display:flex;gap:12px;align-items:flex-start;}'
-            + '.nw-float-wrapper.nw-float-right{flex-direction:row-reverse;}'
-            + '.nw-float-img-side{flex-shrink:0;}.nw-float-img-side img{width:100%;}'
-            + '.nw-float-text-side{flex:1;min-width:0;line-height:1.7;text-align:left;}'
-            + '.nw-gallery-grid{display:grid;gap:8px;}.nw-gallery-cell img{width:100%;display:block;}.nw-gallery-caption{font-size:10px;text-align:center;padding:2px;}'
-            + '.nw-qrcode-block{text-align:center;padding:8px;}.nw-qrcode-block img{display:block;margin:0 auto;}.nw-qrcode-label{font-size:10px;text-align:center;margin-top:4px;}'
-            + '</style>'
-            + '<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap" rel="stylesheet">'
-            + '</head><body>' + clone.innerHTML + '</body></html>');
+        doc.write(html);
         doc.close();
         iframe.onload = function() {
             setTimeout(function() {
@@ -2301,28 +2410,33 @@
         };
     };
 
-    // ---- Classroom post ----
+    // ---- Classroom post (ブロックエディタのHTMLを直接投稿) ----
     NW.postToClassroom = function() {
-        var mondayStr = NW.mondayStr || STATE.mondayStr;
-        if (!mondayStr) { showToast('error', '週を選択してください'); return; }
+        if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
         Swal.fire({
             title: 'Classroomに投稿',
-            input: 'textarea',
-            inputLabel: '付加メッセージ（任意）',
-            inputPlaceholder: 'Classroomへのメッセージ...',
+            html: '<div style="text-align:left;">'
+                + '<p style="font-size:0.85rem;color:var(--text-sub);margin-bottom:8px;">学級通信エディタの現在の内容をPDFに変換してClassroomに投稿します。</p>'
+                + '<label style="font-size:0.85rem;font-weight:600;">付加メッセージ（任意）</label>'
+                + '<textarea id="swalCrMsg" class="swal2-textarea" placeholder="Classroomへのメッセージ..." style="margin-top:6px;min-height:80px;"></textarea>'
+                + '</div>',
             showCancelButton: true,
-            confirmButtonText: '投稿',
-            cancelButtonText: 'キャンセル'
+            confirmButtonText: '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:text-bottom;">rocket_launch</span> 投稿',
+            cancelButtonText: 'キャンセル',
+            preConfirm: function() {
+                return document.getElementById('swalCrMsg').value;
+            }
         }).then(function(result) {
             if (!result.isConfirmed) return;
-            showToast('info', 'Classroomに投稿しています...');
+            showToast('info', 'PDFを生成してClassroomに投稿しています...');
+            var htmlContent = NW.buildPrintHTML();
             google.script.run
                 .withSuccessHandler(function(res) {
                     if (res.success) showToast('success', res.message);
                     else showToast('error', '投稿失敗: ' + res.error);
                 })
                 .withFailureHandler(function(e) { showToast('error', '通信エラー: ' + e.message); })
-                .postNewsletterToClassroomFromWeb(mondayStr, result.value || null);
+                .postNewsletterToClassroomFromWeb(result.value || '学級通信をお届けします。', htmlContent);
         });
     };
 

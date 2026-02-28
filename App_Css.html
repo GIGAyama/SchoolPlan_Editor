@@ -1195,6 +1195,43 @@
         pointer-events: none;
     }
 
+    /* --- WordArt block --- */
+    .nw-wordart-block {
+        padding: 8px 4px;
+        min-height: 40px;
+    }
+
+    .nw-wordart-text {
+        display: block;
+        font-weight: 700;
+        line-height: 1.2;
+        word-break: break-word;
+        transition: opacity 0.15s;
+    }
+
+    .nw-wordart-text:hover {
+        opacity: 0.85;
+    }
+
+    /* WordArt palette button: gradient accent */
+    .nw-palette-btn-wordart {
+        background: linear-gradient(135deg, #e8f0fe, #fce4ec);
+        border-color: #c5cae9;
+    }
+
+    .nw-palette-btn-wordart:hover {
+        background: linear-gradient(135deg, #c5cae9, #f8bbd0);
+        border-color: #7986cb;
+        color: #3949ab;
+    }
+
+    /* WordArt preset button in toolbar */
+    .nw-wa-preset-btn {
+        font-size: 1.1rem !important;
+        padding: 2px 4px !important;
+        min-width: 28px;
+    }
+
     /* --- A4 Page break markers --- */
     .nw-page-break-marker {
         position: absolute;

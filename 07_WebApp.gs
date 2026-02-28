@@ -514,22 +514,49 @@ function generateNewsletterPdf(mondayDateStr) {
 }
 
 /**
- * [Webアプリ API] 学級通信PDFをClassroomへ投稿します。
- * @param {string} mondayDateStr 対象週の月曜日の日付
- * @param {string} [customMessage] Classroomへの付加メッセージ（任意）
+ * [Webアプリ API] 学級通信HTMLをPDFに変換してClassroomへ投稿します。
+ * エディタのHTMLを直接受け取り、Drive経由でPDF化してClassroomに投稿します。
+ * @param {string} customMessage Classroomへの付加メッセージ
+ * @param {string} htmlContent 学級通信エディタのHTML文字列
  * @returns {Object} { success, message }
  */
-function postNewsletterToClassroomFromWeb(mondayDateStr, customMessage) {
+function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
   try {
-    const pdfResult = generateNewsletterPdf(mondayDateStr);
-    if (!pdfResult.success) throw new Error(pdfResult.error);
-
-    const pdfFile = DriveApp.getFileById(pdfResult.viewUrl.match(/\/d\/(.*?)\/view/)[1]);
     const courseName = getCourseNameSafe_();
+    const formattedDate = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd_HHmm');
+    const fileName = '学級通信_' + formattedDate;
+    const folder = getOrCreateNwFolder_();
 
-    postToClassroomStream(courseName, pdfFile, customMessage || '学級通信をお届けします。');
+    let classroomFile;
+    try {
+      // HTML → Google Doc → PDF (Drive Advanced Serviceが必要)
+      const htmlBlob = Utilities.newBlob(htmlContent, 'text/html', fileName + '.html');
+      const inserted = Drive.Files.insert(
+        { title: fileName, mimeType: 'application/vnd.google-apps.document' },
+        htmlBlob
+      );
+      const pdfBlob = DriveApp.getFileById(inserted.id).getAs('application/pdf');
+      pdfBlob.setName(fileName + '.pdf');
+      classroomFile = folder.createFile(pdfBlob);
+      // 変換用の中間ファイル（Googleドキュメント）を削除
+      DriveApp.getFileById(inserted.id).setTrashed(true);
+    } catch (convErr) {
+      // フォールバック: Drive Advanced Serviceが無効な場合はHTMLファイルをそのまま投稿
+      logError('postNewsletterToClassroomFromWeb (HTML→PDF変換失敗、HTMLで代替)', convErr);
+      const htmlBlob = Utilities.newBlob(htmlContent, 'text/html', fileName + '.html');
+      classroomFile = folder.createFile(htmlBlob);
+    }
 
-    logInfo(`学級通信をClassroom「${courseName}」に投稿完了`);
+    classroomFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const courseId = getCourseIdByName(courseName);
+    const announcement = {
+      text: customMessage || '学級通信をお届けします。',
+      materials: [{ driveFile: { driveFile: { id: classroomFile.getId() } } }]
+    };
+    Classroom.Courses.Announcements.create(announcement, courseId);
+
+    logInfo(`学級通信をClassroom「${courseName}」に投稿完了: ${classroomFile.getName()}`);
     return { success: true, message: `「${courseName}」に学級通信を投稿しました！` };
   } catch (e) {
     logError('postNewsletterToClassroomFromWeb', e);
