@@ -201,6 +201,13 @@
                         <span class="material-symbols-outlined fs-6">folder_open</span> 開く
                     </button>
                     <div class="nw-act-sep-v"></div>
+                    <button class="btn btn-outline btn-sm" onclick="NW.saveAsTemplate()" title="テンプレートとして保存">
+                        <span class="material-symbols-outlined fs-6">bookmark_add</span> テンプレ保存
+                    </button>
+                    <button class="btn btn-outline btn-sm" onclick="NW.openTemplates()" title="テンプレートから作成">
+                        <span class="material-symbols-outlined fs-6">bookmarks</span> テンプレート
+                    </button>
+                    <div class="nw-act-sep-v"></div>
                     <div class="week-mini-nav">
                         <button class="btn-icon" onclick="NW.navWeek(-1)">‹</button>
                         <span id="nwWeekLabel" style="font-size:0.82rem;font-weight:600;">－</span>
@@ -213,11 +220,12 @@
                     <button class="btn btn-outline btn-sm" onclick="NW.printNewsletter()">
                         <span class="material-symbols-outlined fs-6">print</span> 印刷
                     </button>
-                    <button class="btn btn-outline btn-sm" onclick="NW.generatePdf()">
-                        <span class="material-symbols-outlined fs-6">picture_as_pdf</span> PDF
-                    </button>
                     <button class="btn btn-primary btn-sm" onclick="NW.postToClassroom()">
                         <span class="material-symbols-outlined fs-6">rocket_launch</span> Classroom投稿
+                    </button>
+                    <div class="nw-act-sep-v"></div>
+                    <button class="btn btn-outline btn-sm" onclick="NW.showHelp()" title="ヘルプ">
+                        <span class="material-symbols-outlined fs-6">help</span>
                     </button>
                 </div>
             </div>
@@ -241,8 +249,16 @@
                     <button class="nw-palette-btn" onclick="NW.addBlock('schedule')">
                         <span class="material-symbols-outlined">calendar_month</span> 時間割
                     </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('qrcode')">
+                        <span class="material-symbols-outlined">qr_code_2</span> QRコード
+                    </button>
                     <button class="nw-palette-btn" onclick="NW.addBlock('divider')">
                         <span class="material-symbols-outlined">horizontal_rule</span> 区切り線
+                    </button>
+                    <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+                    <div class="nw-palette-label">AI機能</div>
+                    <button class="nw-palette-btn" onclick="NW.generateAIText()" style="border-color:var(--primary);color:var(--primary);">
+                        <span class="material-symbols-outlined">auto_awesome</span> AI生成
                     </button>
                 </div>
 
