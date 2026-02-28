@@ -672,105 +672,358 @@
         font-size: 0.9rem;
     }
 
-    /* ===== 学級通信レイアウト ===== */
-    .newsletter-layout {
+    /* ===== 学級通信ブロックエディタ ===== */
+    .nw-header-actions {
         display: flex;
-        gap: 0;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+    }
+
+    .nw-header-actions .week-mini-nav {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .nw-editor-layout {
+        display: flex;
         flex: 1;
         overflow: hidden;
     }
 
-    .newsletter-sidebar {
-        width: 260px;
+    .nw-block-palette {
+        width: 150px;
         flex-shrink: 0;
         background: var(--surface);
         border-right: 1px solid var(--border);
-        padding: 16px;
-        overflow-y: auto;
+        padding: 12px;
         display: flex;
         flex-direction: column;
-        gap: 12px;
-    }
-
-    .newsletter-main {
-        flex: 1;
+        gap: 6px;
         overflow-y: auto;
-        padding: 20px;
-        background: var(--surface-2);
     }
 
-    .nw-card {
-        background: var(--surface-2);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: 14px;
-    }
-
-    .nw-label {
-        font-size: 0.75rem;
+    .nw-palette-label {
+        font-size: 0.7rem;
         font-weight: 700;
         color: var(--text-sub);
-        margin-bottom: 10px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
+        margin-bottom: 4px;
     }
 
-    .week-mini-nav {
+    .nw-palette-btn {
         display: flex;
         align-items: center;
-        justify-content: space-between;
         gap: 6px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+        font-size: 0.78rem;
+        cursor: pointer;
+        transition: all 0.15s;
+        font-family: inherit;
+        color: var(--text-main);
     }
 
-    .nw-preview {
+    .nw-palette-btn:hover {
+        background: var(--primary-light);
+        border-color: var(--primary);
+        color: var(--primary);
+    }
+
+    .nw-palette-btn .material-symbols-outlined {
+        font-size: 18px;
+    }
+
+    .nw-page-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 24px;
+        background: var(--surface-3);
+        display: flex;
+        justify-content: center;
+    }
+
+    .nw-a4-page {
+        width: 210mm;
+        min-height: 297mm;
+        background: white;
+        box-shadow: var(--shadow-md);
+        padding: 15mm 18mm;
+        position: relative;
+    }
+
+    /* --- Block container --- */
+    .nw-block {
+        position: relative;
+        margin: 0;
+        padding: 4px 4px 4px 28px;
+        border: 2px solid transparent;
+        border-radius: 4px;
+        transition: border-color 0.15s;
+        min-height: 20px;
+    }
+
+    .nw-block:hover {
+        border-color: #e8f0fe;
+    }
+
+    .nw-block.nw-block-selected {
+        border-color: var(--primary);
+    }
+
+    .nw-block.nw-drag-over {
+        border-top: 3px solid var(--primary);
+    }
+
+    /* --- Drag handle --- */
+    .nw-block-handle {
+        position: absolute;
+        left: 2px;
+        top: 50%;
+        transform: translateY(-50%);
+        cursor: grab;
+        color: var(--text-hint);
+        opacity: 0;
+        transition: opacity 0.15s;
+        font-size: 18px;
+        user-select: none;
+        display: flex;
+        align-items: center;
+    }
+
+    .nw-block:hover .nw-block-handle {
+        opacity: 1;
+    }
+
+    /* --- Block action buttons --- */
+    .nw-block-actions {
+        position: absolute;
+        right: 4px;
+        top: 2px;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        opacity: 0;
+        transition: opacity 0.15s;
         background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 24px;
-        min-height: 300px;
+        border-radius: 4px;
+        padding: 2px;
+        z-index: 10;
     }
 
-    .nw-empty {
+    .nw-block:hover .nw-block-actions {
+        opacity: 1;
+    }
+
+    .nw-block-actions button {
+        border: none;
+        background: none;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 3px;
+        color: var(--text-sub);
+        display: flex;
+        align-items: center;
+    }
+
+    .nw-block-actions button:hover {
+        background: var(--surface-2);
+        color: var(--primary);
+    }
+
+    .nw-block-actions .material-symbols-outlined {
+        font-size: 16px;
+    }
+
+    .nw-act-sep {
+        width: 1px;
+        height: 16px;
+        background: var(--border);
+        margin: 0 2px;
+    }
+
+    /* --- Font / format toolbar (inside actions) --- */
+    .nw-fmt-toolbar {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+    }
+
+    .nw-fmt-toolbar select {
+        font-size: 0.72rem;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        background: var(--surface-2);
+        padding: 1px 2px;
+        font-family: inherit;
+        cursor: pointer;
+    }
+
+    .nw-fmt-toolbar button {
+        font-size: 0.72rem;
+        border: none;
+        background: none;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-family: inherit;
+        display: flex;
+        align-items: center;
+        color: var(--text-sub);
+    }
+
+    .nw-fmt-toolbar button:hover {
+        background: var(--surface-2);
+        color: var(--primary);
+    }
+
+    .nw-fmt-toolbar button.nw-active {
+        color: var(--primary);
+        background: var(--primary-light);
+    }
+
+    /* --- Heading / Text blocks --- */
+    .nw-heading-content {
+        outline: none;
+        font-weight: 700;
+        line-height: 1.4;
+    }
+
+    .nw-text-content {
+        outline: none;
+        line-height: 1.7;
+        min-height: 1.5em;
+    }
+
+    [contenteditable]:empty::before {
+        content: attr(data-placeholder);
+        color: var(--text-hint);
+        pointer-events: none;
+    }
+
+    /* --- Image block --- */
+    .nw-image-block {
+        text-align: center;
+    }
+
+    .nw-image-block img {
+        max-width: 100%;
+        border-radius: 4px;
+    }
+
+    .nw-image-placeholder {
+        border: 2px dashed var(--border);
+        border-radius: var(--radius-sm);
+        padding: 24px;
         text-align: center;
         color: var(--text-hint);
-        padding: 60px 20px;
-        font-size: 0.88rem;
+        cursor: pointer;
+        transition: all 0.15s;
     }
 
-    .nw-schedule-table {
+    .nw-image-placeholder:hover {
+        border-color: var(--primary);
+        color: var(--primary);
+        background: var(--primary-light);
+    }
+
+    /* --- Image + text wrapping (float layout) --- */
+    .nw-float-wrapper {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .nw-float-wrapper.nw-float-right {
+        flex-direction: row-reverse;
+    }
+
+    .nw-float-img-side {
+        flex-shrink: 0;
+    }
+
+    .nw-float-img-side img {
+        display: block;
+        border-radius: 4px;
+    }
+
+    .nw-float-text-side {
+        flex: 1;
+        min-width: 0;
+        outline: none;
+        line-height: 1.7;
+    }
+
+    .nw-float-text-side:empty::before {
+        content: 'テキストを入力...';
+        color: var(--text-hint);
+        pointer-events: none;
+    }
+
+    /* --- Schedule block --- */
+    .nw-schedule-block table {
         width: 100%;
         border-collapse: collapse;
-        margin-top: 16px;
-        font-size: 0.85rem;
+        font-size: 0.82rem;
     }
 
-    .nw-schedule-table th {
+    .nw-schedule-block th {
         background: var(--primary);
         color: white;
-        padding: 8px 12px;
-        text-align: left;
+        padding: 5px 8px;
+        text-align: center;
         font-weight: 600;
+        font-size: 0.78rem;
     }
 
-    .nw-schedule-table td {
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border);
+    .nw-schedule-block td {
+        padding: 4px 6px;
+        border: 1px solid var(--border);
+        text-align: center;
+        font-size: 0.78rem;
     }
 
-    .nw-schedule-table tr:nth-child(even) td {
+    .nw-schedule-block tr:nth-child(even) td {
         background: var(--surface-2);
     }
 
-    .nw-title {
-        font-size: 1.1rem;
-        font-weight: 700;
-        margin-bottom: 6px;
+    .nw-schedule-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        padding: 8px 0;
+        font-size: 0.75rem;
+        color: var(--text-sub);
+        border-top: 1px solid var(--border);
+        margin-top: 8px;
     }
 
-    .nw-date {
-        font-size: 0.8rem;
-        color: var(--text-sub);
-        margin-bottom: 16px;
+    .nw-schedule-options label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+    }
+
+    /* --- Divider block --- */
+    .nw-divider-content {
+        border: none;
+        border-top: 2px solid var(--border);
+        margin: 8px 0;
+    }
+
+    /* --- Empty editor state --- */
+    .nw-empty-editor {
+        text-align: center;
+        color: var(--text-hint);
+        padding: 80px 20px;
+        font-size: 0.88rem;
+        line-height: 1.8;
     }
 
     .pdf-result-link {
@@ -792,6 +1045,17 @@
     .pdf-result-link:hover {
         background: var(--primary);
         color: white;
+    }
+
+    /* --- Print styles for newsletter --- */
+    @media print {
+        .nw-block-handle, .nw-block-actions, .nw-schedule-options {
+            display: none !important;
+        }
+        .nw-block {
+            border: none !important;
+            padding-left: 0 !important;
+        }
     }
 
     /* ===== データ連携タブ ===== */

@@ -186,52 +186,61 @@
             </div>
         </div>
 
-        <!-- ===== 学級通信ジェネレータービュー ===== -->
+        <!-- ===== 学級通信ブロックエディタ ===== -->
         <div id="view-newsletter" class="view">
             <div class="section-header-bar">
-                <h2><span class="material-symbols-outlined fs-6">newspaper</span> 学級通信ジェネレーター</h2>
+                <h2><span class="material-symbols-outlined fs-6">newspaper</span> 学級通信エディタ</h2>
+                <div class="nw-header-actions">
+                    <div class="week-mini-nav">
+                        <button class="btn-icon" onclick="NW.navWeek(-1)">‹</button>
+                        <span id="nwWeekLabel" style="font-size:0.82rem;font-weight:600;">－</span>
+                        <button class="btn-icon" onclick="NW.navWeek(1)">›</button>
+                    </div>
+                    <button class="btn btn-outline btn-sm" onclick="NW.loadScheduleData()">
+                        <span class="material-symbols-outlined fs-6">sync</span> 予定を読込
+                    </button>
+                    <button class="btn btn-outline btn-sm" onclick="NW.printNewsletter()">
+                        <span class="material-symbols-outlined fs-6">print</span> 印刷
+                    </button>
+                    <button class="btn btn-outline btn-sm" onclick="NW.generatePdf()">
+                        <span class="material-symbols-outlined fs-6">picture_as_pdf</span> PDF
+                    </button>
+                    <button class="btn btn-primary btn-sm" onclick="NW.postToClassroom()">
+                        <span class="material-symbols-outlined fs-6">rocket_launch</span> Classroom投稿
+                    </button>
+                </div>
             </div>
-            <div class="newsletter-layout">
 
-                <!-- 左ペイン: 週選択 + アクション -->
-                <div class="newsletter-sidebar">
-                    <div class="nw-card">
-                        <div class="nw-label">対象週を選択</div>
-                        <div class="week-mini-nav">
-                            <button class="btn-icon" onclick="navigateNwWeek(-1)">‹</button>
-                            <span id="nwWeekLabel" style="font-size:0.82rem;font-weight:600;">－</span>
-                            <button class="btn-icon" onclick="navigateNwWeek(1)">›</button>
+            <div class="nw-editor-layout">
+                <!-- 左: ブロックパレット -->
+                <div class="nw-block-palette">
+                    <div class="nw-palette-label">ブロック追加</div>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('heading')">
+                        <span class="material-symbols-outlined">title</span> 見出し
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('text')">
+                        <span class="material-symbols-outlined">notes</span> テキスト
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('image')">
+                        <span class="material-symbols-outlined">image</span> 画像
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('schedule')">
+                        <span class="material-symbols-outlined">calendar_month</span> 時間割
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('divider')">
+                        <span class="material-symbols-outlined">horizontal_rule</span> 区切り線
+                    </button>
+                </div>
+
+                <!-- 中央: A4ページエディタ -->
+                <div class="nw-page-scroll">
+                    <div class="nw-a4-page" id="nwEditorPage">
+                        <div class="nw-empty-editor" id="nwEmptyState">
+                            左のパレットからブロックを追加するか、<br>
+                            「予定を読込」で週案データを取り込んでください。
                         </div>
-                        <button class="btn btn-primary" style="width:100%;margin-top:12px;"
-                            onclick="loadNewsletterPreview()">
-                            📄 予定を読み込む
-                        </button>
-                    </div>
-                    <div class="nw-card">
-                        <div class="nw-label">追記メッセージ（任意）</div>
-                        <textarea id="nwCustomMessage" rows="4" placeholder="学級通信への追記メモ..."
-                            style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:0.82rem;resize:vertical;"></textarea>
-                    </div>
-                    <div class="nw-card">
-                        <div class="nw-label">アクション</div>
-                        <button class="btn btn-outline d-flex align-items-center gap-1 w-100 justify-content-center"
-                            style="margin-bottom:8px;" onclick="generateNwPdf()">
-                            <span class="material-symbols-outlined fs-6">post_add</span> 自動生成</button>
-                        <button
-                            class="btn btn-primary d-flex align-items-center gap-1 mt-2 w-100 justify-content-center"
-                            onclick="postNewsletterToClassroom()">
-                            <span class="material-symbols-outlined fs-6">rocket_launch</span> Classroomに投稿
-                        </button>
                     </div>
                 </div>
-
-                <!-- 右ペイン: 週案データプレビュー -->
-                <div class="newsletter-main">
-                    <div id="nwPreviewArea" class="nw-preview">
-                        <div class="nw-empty">← 左から週を選択し、「予定を読み込む」をクリックしてください</div>
-                    </div>
-                </div>
-
             </div>
         </div>
 

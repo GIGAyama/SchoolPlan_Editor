@@ -11,7 +11,6 @@
         editBuffer: null,
         hoursYear: (new Date().getMonth() + 1 <= 3) ? new Date().getFullYear() - 1 : new Date().getFullYear(),
         hoursMonth: new Date().getMonth() + 1,
-        nwMondayStr: null,
         hoursSummaryData: null,
         tasks: null
     };
@@ -33,9 +32,8 @@
         document.getElementById('view-' + viewName).classList.add('active');
         document.querySelector('.nav-btn[data-view="' + viewName + '"]').classList.add('active');
         STATE.view = viewName;
-        if (viewName === 'newsletter' && !STATE.nwMondayStr) {
-            STATE.nwMondayStr = STATE.mondayStr;
-            if (STATE.nwMondayStr) document.getElementById('nwWeekLabel').textContent = STATE.nwMondayStr + '週';
+        if (viewName === 'newsletter') {
+            NW.init();
         }
         if (viewName === 'integration') {
             checkProcessingStatus();
@@ -974,96 +972,589 @@
             .generateWeeklyPlanPdf(STATE.mondayStr);
     }
 
-    // ===== 学級通信: 週ナビ =====
-    function navigateNwWeek(delta) {
-        var base = STATE.nwMondayStr || STATE.mondayStr;
+    // ===== 学級通信ブロックエディタ (NW module) =====
+    var NW = {
+        blocks: [],
+        nextId: 1,
+        mondayStr: null,
+        dragId: null,
+        scheduleData: null,
+        initialized: false
+    };
+
+    NW.init = function() {
+        if (NW.initialized) return;
+        NW.mondayStr = STATE.mondayStr;
+        if (NW.mondayStr) {
+            document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+        }
+        NW.initialized = true;
+    };
+
+    NW.navWeek = function(delta) {
+        var base = NW.mondayStr || STATE.mondayStr;
         if (!base) return;
         var parts = base.split('/');
         var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
         d.setDate(d.getDate() + delta * 7);
-        STATE.nwMondayStr = formatDateLocal(d);
-        document.getElementById('nwWeekLabel').textContent = STATE.nwMondayStr + '週';
-    }
+        NW.mondayStr = formatDateLocal(d);
+        document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+    };
 
-    // ===== 学級通信: 予定プレビュー =====
-    function loadNewsletterPreview() {
-        var mondayStr = STATE.nwMondayStr || STATE.mondayStr;
+    NW.genId = function() { return 'nwb-' + (NW.nextId++); };
+
+    // ---- Block CRUD ----
+    NW.addBlock = function(type, afterId, data) {
+        var block = { id: NW.genId(), type: type };
+        data = data || {};
+        switch (type) {
+            case 'heading':
+                block.content = data.content || '見出し';
+                block.fontSize = data.fontSize || 18;
+                block.align = data.align || 'center';
+                block.bold = data.bold !== undefined ? data.bold : true;
+                break;
+            case 'text':
+                block.content = data.content || '';
+                block.fontSize = data.fontSize || 12;
+                block.align = data.align || 'left';
+                block.bold = !!data.bold;
+                break;
+            case 'image':
+                block.src = data.src || '';
+                block.width = data.width || 50;
+                block.float = data.float || 'none';
+                block.wrapText = data.wrapText || '';
+                break;
+            case 'schedule':
+                block.weekData = data.weekData || null;
+                block.options = {
+                    showRecess: true,
+                    showAfterSchool: true,
+                    showHomework: true,
+                    showItems: true,
+                    displayMode: 'subject'
+                };
+                if (data.options) {
+                    for (var k in data.options) block.options[k] = data.options[k];
+                }
+                break;
+            case 'divider':
+                break;
+        }
+        if (afterId) {
+            var idx = NW.blocks.findIndex(function(b) { return b.id === afterId; });
+            NW.blocks.splice(idx + 1, 0, block);
+        } else {
+            NW.blocks.push(block);
+        }
+        NW.render();
+        return block;
+    };
+
+    NW.removeBlock = function(id) {
+        NW.blocks = NW.blocks.filter(function(b) { return b.id !== id; });
+        NW.render();
+    };
+
+    NW.moveBlock = function(id, dir) {
+        var idx = NW.blocks.findIndex(function(b) { return b.id === id; });
+        if (idx < 0) return;
+        var newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= NW.blocks.length) return;
+        NW.saveEditable();
+        var tmp = NW.blocks[idx];
+        NW.blocks[idx] = NW.blocks[newIdx];
+        NW.blocks[newIdx] = tmp;
+        NW.render();
+    };
+
+    NW.duplicateBlock = function(id) {
+        var orig = NW.blocks.find(function(b) { return b.id === id; });
+        if (!orig) return;
+        NW.saveEditable();
+        var clone = JSON.parse(JSON.stringify(orig));
+        clone.id = NW.genId();
+        var idx = NW.blocks.findIndex(function(b) { return b.id === id; });
+        NW.blocks.splice(idx + 1, 0, clone);
+        NW.render();
+    };
+
+    // ---- Save contenteditable before re-render ----
+    NW.saveEditable = function() {
+        NW.blocks.forEach(function(block) {
+            if (block.type === 'heading' || block.type === 'text') {
+                var el = document.querySelector('[data-block-id="' + block.id + '"] [contenteditable]');
+                if (el) block.content = el.innerHTML;
+            }
+            if (block.type === 'image' && block.float !== 'none') {
+                var wt = document.querySelector('[data-block-id="' + block.id + '"] .nw-float-text-side');
+                if (wt) block.wrapText = wt.innerHTML;
+            }
+        });
+    };
+
+    // ---- Rendering ----
+    NW.render = function() {
+        NW.saveEditable();
+        var page = document.getElementById('nwEditorPage');
+        if (NW.blocks.length === 0) {
+            page.innerHTML = '<div class="nw-empty-editor" id="nwEmptyState">'
+                + '左のパレットからブロックを追加するか、<br>'
+                + '「予定を読込」で週案データを取り込んでください。</div>';
+            return;
+        }
+        page.innerHTML = '';
+        NW.blocks.forEach(function(block) {
+            page.appendChild(NW.renderBlock(block));
+        });
+    };
+
+    NW.renderBlock = function(block) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'nw-block';
+        wrapper.setAttribute('data-block-id', block.id);
+        wrapper.setAttribute('draggable', 'true');
+
+        // Drag handle
+        var handle = document.createElement('span');
+        handle.className = 'nw-block-handle material-symbols-outlined';
+        handle.textContent = 'drag_indicator';
+        wrapper.appendChild(handle);
+
+        // Action bar
+        var actions = document.createElement('div');
+        actions.className = 'nw-block-actions';
+
+        // Format toolbar for text/heading blocks
+        if (block.type === 'heading' || block.type === 'text') {
+            var fmt = '<div class="nw-fmt-toolbar">'
+                + '<select onchange="NW.setFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
+            [9,10,11,12,14,16,18,20,24,28,32].forEach(function(s) {
+                fmt += '<option value="' + s + '"' + (s === block.fontSize ? ' selected' : '') + '>' + s + '</option>';
+            });
+            fmt += '</select>'
+                + '<button title="太字" onclick="NW.toggleBold(\'' + block.id + '\')" class="' + (block.bold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
+                + '<button title="左揃え" onclick="NW.setAlign(\'' + block.id + '\',\'left\')" class="' + (block.align === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
+                + '<button title="中央" onclick="NW.setAlign(\'' + block.id + '\',\'center\')" class="' + (block.align === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
+                + '<button title="右揃え" onclick="NW.setAlign(\'' + block.id + '\',\'right\')" class="' + (block.align === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+                + '</div><div class="nw-act-sep"></div>';
+            actions.insertAdjacentHTML('beforeend', fmt);
+        }
+
+        // Float toolbar for image blocks with src
+        if (block.type === 'image' && block.src) {
+            var imgFmt = '<div class="nw-fmt-toolbar">'
+                + '<button title="回り込みなし" onclick="NW.setFloat(\'' + block.id + '\',\'none\')" class="' + (block.float === 'none' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">crop_free</span></button>'
+                + '<button title="左に画像" onclick="NW.setFloat(\'' + block.id + '\',\'left\')" class="' + (block.float === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_image_left</span></button>'
+                + '<button title="右に画像" onclick="NW.setFloat(\'' + block.id + '\',\'right\')" class="' + (block.float === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_image_right</span></button>'
+                + '<select onchange="NW.setImageWidth(\'' + block.id + '\',this.value)" title="画像幅">';
+            [25,30,40,50,60,75,100].forEach(function(w) {
+                imgFmt += '<option value="' + w + '"' + (w === block.width ? ' selected' : '') + '>' + w + '%</option>';
+            });
+            imgFmt += '</select></div><div class="nw-act-sep"></div>';
+            actions.insertAdjacentHTML('beforeend', imgFmt);
+        }
+
+        // Common action buttons: up, down, duplicate, delete
+        actions.insertAdjacentHTML('beforeend',
+            '<button title="上へ" onclick="NW.moveBlock(\'' + block.id + '\',-1)"><span class="material-symbols-outlined">arrow_upward</span></button>'
+            + '<button title="下へ" onclick="NW.moveBlock(\'' + block.id + '\',1)"><span class="material-symbols-outlined">arrow_downward</span></button>'
+            + '<button title="複製" onclick="NW.duplicateBlock(\'' + block.id + '\')"><span class="material-symbols-outlined">content_copy</span></button>'
+            + '<button title="削除" onclick="NW.removeBlock(\'' + block.id + '\')"><span class="material-symbols-outlined">delete</span></button>');
+        wrapper.appendChild(actions);
+
+        // Content area
+        wrapper.appendChild(NW.renderContent(block));
+
+        // Drag & drop events
+        wrapper.addEventListener('dragstart', function(e) {
+            NW.dragId = block.id;
+            e.dataTransfer.effectAllowed = 'move';
+            wrapper.style.opacity = '0.4';
+        });
+        wrapper.addEventListener('dragend', function() {
+            wrapper.style.opacity = '1';
+            NW.dragId = null;
+            document.querySelectorAll('.nw-drag-over').forEach(function(el) { el.classList.remove('nw-drag-over'); });
+        });
+        wrapper.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            wrapper.classList.add('nw-drag-over');
+        });
+        wrapper.addEventListener('dragleave', function() {
+            wrapper.classList.remove('nw-drag-over');
+        });
+        wrapper.addEventListener('drop', function(e) {
+            e.preventDefault();
+            wrapper.classList.remove('nw-drag-over');
+            if (!NW.dragId || NW.dragId === block.id) return;
+            NW.saveEditable();
+            var fromIdx = NW.blocks.findIndex(function(b) { return b.id === NW.dragId; });
+            var toIdx = NW.blocks.findIndex(function(b) { return b.id === block.id; });
+            if (fromIdx < 0 || toIdx < 0) return;
+            var moved = NW.blocks.splice(fromIdx, 1)[0];
+            NW.blocks.splice(toIdx, 0, moved);
+            NW.render();
+        });
+
+        return wrapper;
+    };
+
+    NW.renderContent = function(block) {
+        var div = document.createElement('div');
+        switch (block.type) {
+            case 'heading':
+                div.className = 'nw-heading-content';
+                div.contentEditable = 'true';
+                div.innerHTML = block.content;
+                div.style.fontSize = block.fontSize + 'px';
+                div.style.textAlign = block.align;
+                if (block.bold) div.style.fontWeight = '700';
+                div.setAttribute('data-placeholder', '見出しを入力...');
+                div.addEventListener('blur', function() { block.content = div.innerHTML; });
+                break;
+
+            case 'text':
+                div.className = 'nw-text-content';
+                div.contentEditable = 'true';
+                div.innerHTML = block.content;
+                div.style.fontSize = block.fontSize + 'px';
+                div.style.textAlign = block.align;
+                if (block.bold) div.style.fontWeight = '700';
+                div.setAttribute('data-placeholder', 'テキストを入力...');
+                div.addEventListener('blur', function() { block.content = div.innerHTML; });
+                // Enter key → new text block below
+                div.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        block.content = div.innerHTML;
+                        var newBlock = NW.addBlock('text', block.id);
+                        setTimeout(function() {
+                            var newEl = document.querySelector('[data-block-id="' + newBlock.id + '"] [contenteditable]');
+                            if (newEl) newEl.focus();
+                        }, 50);
+                    }
+                    // Backspace on empty → delete block
+                    if (e.key === 'Backspace' && !div.textContent.trim() && !div.innerHTML.includes('<img')) {
+                        e.preventDefault();
+                        NW.removeBlock(block.id);
+                    }
+                });
+                break;
+
+            case 'image':
+                div.className = 'nw-image-block';
+                if (block.src) {
+                    if (block.float !== 'none') {
+                        // Float layout: image + text side by side
+                        var floatDiv = document.createElement('div');
+                        floatDiv.className = 'nw-float-wrapper' + (block.float === 'right' ? ' nw-float-right' : '');
+                        var imgSide = document.createElement('div');
+                        imgSide.className = 'nw-float-img-side';
+                        imgSide.style.width = block.width + '%';
+                        var img = document.createElement('img');
+                        img.src = block.src;
+                        img.style.width = '100%';
+                        imgSide.appendChild(img);
+                        var textSide = document.createElement('div');
+                        textSide.className = 'nw-float-text-side';
+                        textSide.contentEditable = 'true';
+                        textSide.innerHTML = block.wrapText;
+                        textSide.addEventListener('blur', function() { block.wrapText = textSide.innerHTML; });
+                        floatDiv.appendChild(imgSide);
+                        floatDiv.appendChild(textSide);
+                        div.appendChild(floatDiv);
+                    } else {
+                        // Centered image, no wrapping
+                        var imgEl = document.createElement('img');
+                        imgEl.src = block.src;
+                        imgEl.style.width = block.width + '%';
+                        div.appendChild(imgEl);
+                    }
+                } else {
+                    var ph = document.createElement('div');
+                    ph.className = 'nw-image-placeholder';
+                    ph.innerHTML = '<span class="material-symbols-outlined" style="font-size:32px;display:block;">add_photo_alternate</span>クリックして画像をアップロード';
+                    ph.addEventListener('click', function() { NW.uploadImage(block.id); });
+                    div.appendChild(ph);
+                }
+                break;
+
+            case 'schedule':
+                div.className = 'nw-schedule-block';
+                div.innerHTML = NW.renderScheduleHTML(block);
+                break;
+
+            case 'divider':
+                div.innerHTML = '<hr class="nw-divider-content">';
+                break;
+        }
+        return div;
+    };
+
+    // ---- Schedule table rendering ----
+    NW.renderScheduleHTML = function(block) {
+        var data = block.weekData || NW.scheduleData;
+        if (!data || !data.days) {
+            return '<div style="color:var(--text-hint);text-align:center;padding:16px;">'
+                + '「予定を読込」をクリックして週案データを読み込んでください</div>';
+        }
+        var opts = block.options;
+        var days = data.days.slice(0, 5);
+        var html = '<table><thead><tr><th style="width:60px;">曜日</th>';
+        for (var p = 1; p <= 6; p++) html += '<th>' + p + '</th>';
+        if (opts.showRecess) html += '<th>中休</th><th>昼休</th>';
+        if (opts.showAfterSchool) html += '<th>放課後</th>';
+        if (opts.showHomework) html += '<th>宿題</th>';
+        if (opts.showItems) html += '<th>持ち物</th>';
+        html += '</tr></thead><tbody>';
+
+        days.forEach(function(day) {
+            var ev = day.event ? '<span style="color:#d32f2f;font-size:0.68rem;">【' + escHtml(day.event) + '】</span><br>' : '';
+            html += '<tr><td style="font-weight:600;white-space:nowrap;">' + ev + escHtml(day.dayLabel)
+                + '<br><span style="font-size:0.68rem;color:var(--text-sub);">' + escHtml(day.date.slice(5)) + '</span></td>';
+            day.periods.forEach(function(per) {
+                var cell = '';
+                if (per.subject) {
+                    cell = escHtml(per.subject);
+                    if (opts.displayMode === 'subjectUnit' && per.unit) {
+                        cell += '<br><span style="font-size:0.65rem;color:var(--text-sub);">' + escHtml(per.unit) + '</span>';
+                    } else if (opts.displayMode === 'full') {
+                        if (per.unit) cell += '<br><span style="font-size:0.65rem;color:var(--text-sub);">' + escHtml(per.unit) + '</span>';
+                        if (per.content) cell += '<br><span style="font-size:0.6rem;color:var(--text-hint);">' + escHtml(per.content) + '</span>';
+                    }
+                }
+                html += '<td>' + cell + '</td>';
+            });
+            if (opts.showRecess) {
+                html += '<td style="font-size:0.7rem;">' + escHtml(day.recess1 || '') + '</td>';
+                html += '<td style="font-size:0.7rem;">' + escHtml(day.recess2 || '') + '</td>';
+            }
+            if (opts.showAfterSchool) html += '<td style="font-size:0.7rem;">' + escHtml(day.afterschool || '') + '</td>';
+            if (opts.showHomework) html += '<td style="font-size:0.7rem;">' + escHtml(day.homework || '') + '</td>';
+            if (opts.showItems) html += '<td style="font-size:0.7rem;">' + escHtml(day.items || '') + '</td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+
+        // Options panel
+        html += '<div class="nw-schedule-options">'
+            + '<label><input type="checkbox"' + (opts.showRecess ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + block.id + '\',\'showRecess\',this.checked)"> 休み時間</label>'
+            + '<label><input type="checkbox"' + (opts.showAfterSchool ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + block.id + '\',\'showAfterSchool\',this.checked)"> 放課後</label>'
+            + '<label><input type="checkbox"' + (opts.showHomework ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + block.id + '\',\'showHomework\',this.checked)"> 宿題</label>'
+            + '<label><input type="checkbox"' + (opts.showItems ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + block.id + '\',\'showItems\',this.checked)"> 持ち物</label>'
+            + '<span style="color:var(--border);">|</span>'
+            + '<label><input type="radio" name="sm_' + block.id + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + block.id + '\',\'subject\')"> 教科のみ</label>'
+            + '<label><input type="radio" name="sm_' + block.id + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + block.id + '\',\'subjectUnit\')"> 教科+単元</label>'
+            + '<label><input type="radio" name="sm_' + block.id + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + block.id + '\',\'full\')"> 詳細</label>'
+            + '</div>';
+        return html;
+    };
+
+    // ---- Block property setters ----
+    NW.setFontSize = function(id, size) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        block.fontSize = parseInt(size, 10);
+        var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
+        if (el) el.style.fontSize = block.fontSize + 'px';
+    };
+
+    NW.toggleBold = function(id) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        block.bold = !block.bold;
+        NW.saveEditable();
+        NW.render();
+    };
+
+    NW.setAlign = function(id, align) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        block.align = align;
+        var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
+        if (el) el.style.textAlign = align;
+        // Update active state of align buttons
+        var acts = document.querySelector('[data-block-id="' + id + '"] .nw-fmt-toolbar');
+        if (acts) {
+            acts.querySelectorAll('button[title*="揃え"], button[title="中央"]').forEach(function(btn) { btn.classList.remove('nw-active'); });
+            var titles = { left: '左揃え', center: '中央', right: '右揃え' };
+            var activeBtn = acts.querySelector('button[title="' + titles[align] + '"]');
+            if (activeBtn) activeBtn.classList.add('nw-active');
+        }
+    };
+
+    NW.setFloat = function(id, val) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        NW.saveEditable();
+        block.float = val;
+        NW.render();
+    };
+
+    NW.setImageWidth = function(id, w) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        block.width = parseInt(w, 10);
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-float-img-side');
+        if (el) { el.style.width = block.width + '%'; return; }
+        var img = document.querySelector('[data-block-id="' + id + '"] img');
+        if (img) img.style.width = block.width + '%';
+    };
+
+    NW.toggleSchedOpt = function(id, key, val) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        block.options[key] = val;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    NW.setSchedMode = function(id, mode) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        block.options.displayMode = mode;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    // ---- Image upload (FileReader → base64) ----
+    NW.uploadImage = function(blockId) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = function(e) {
+            var file = e.target.files[0];
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function(evt) {
+                var block = NW.blocks.find(function(b) { return b.id === blockId; });
+                if (block) { block.src = evt.target.result; NW.render(); }
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    };
+
+    // ---- Load schedule data from backend ----
+    NW.loadScheduleData = function() {
+        var mondayStr = NW.mondayStr || STATE.mondayStr;
         if (!mondayStr) { showToast('error', '週を選択してください'); return; }
-        document.getElementById('nwPreviewArea').innerHTML = '<div class="loading-state"><div class="spinner-lg"></div></div>';
+        showToast('info', '週案データを読み込み中...');
         google.script.run
-            .withSuccessHandler(function (data) {
-                if (!data.success) { document.getElementById('nwPreviewArea').innerHTML = '<div class="nw-empty">データ取得失敗: ' + data.error + '</div>'; return; }
-                renderNewsletterPreview(data);
+            .withSuccessHandler(function(data) {
+                if (!data.success) { showToast('error', 'データ取得失敗: ' + data.error); return; }
+                NW.scheduleData = data;
+                showToast('success', '週案データを読み込みました');
+                var hasSchedule = NW.blocks.some(function(b) { return b.type === 'schedule'; });
+                if (hasSchedule) {
+                    NW.blocks.forEach(function(b) { if (b.type === 'schedule') b.weekData = data; });
+                    NW.render();
+                } else if (NW.blocks.length === 0) {
+                    // Auto-create default layout
+                    NW.addBlock('heading', null, { content: data.title || '学級通信', fontSize: 20 });
+                    NW.addBlock('text', null, { content: data.date + '〜 の予定', fontSize: 11, align: 'center' });
+                    NW.addBlock('divider');
+                    NW.addBlock('schedule', null, { weekData: data });
+                    NW.addBlock('divider');
+                    NW.addBlock('text', null, { content: '', fontSize: 12 });
+                } else {
+                    NW.render();
+                }
             })
-            .withFailureHandler(function (e) {
-                document.getElementById('nwPreviewArea').innerHTML = '<div class="nw-empty">通信エラー: ' + e.message + '</div>';
+            .withFailureHandler(function(e) {
+                showToast('error', '通信エラー: ' + e.message);
             })
             .getNewsletterData(mondayStr);
-    }
+    };
 
-    function renderNewsletterPreview(data) {
-        var rows = '';
-        data.days.slice(0, 5).forEach(function (day) {
-            var subjects = day.periods.filter(function (p) { return p.subject; }).map(function (p) { return p.subject; }).join('・') || '（記録なし）';
-            var ev = day.event ? '<span style="color:#d32f2f;font-weight:700;">【' + escHtml(day.event) + '】</span> ' : '';
-            rows += '<tr><td style="font-weight:700;width:80px;">' + day.dayLabel + '（' + escHtml(day.date.slice(5)) + '）</td><td>' + ev + escHtml(subjects) + '</td></tr>';
-            if (day.homework) rows += '<tr><td style="color:var(--text-sub);font-size:0.75rem;">宿題</td><td style="font-size:0.75rem;color:var(--text-sub);">' + escHtml(day.homework) + '</td></tr>';
-        });
-        document.getElementById('nwPreviewArea').innerHTML =
-            '<div class="nw-title"><span class="material-symbols-outlined fs-6">newspaper</span> ' + escHtml(data.title) + '</div>'
-            + '<div class="nw-date">対象週: ' + escHtml(data.date) + '〜</div>'
-            + '<table class="nw-schedule-table"><thead><tr><th>曜日</th><th>授業・内容</th></tr></thead><tbody>' + rows + '</tbody></table>'
-            + '<p style="color:var(--text-sub);font-size:0.75rem;margin-top:16px;">※ 「学級通信」シートにデータが入力済みの場合は、そのPDFが出力されます。</p>';
-    }
+    // ---- Print via iframe ----
+    NW.printNewsletter = function() {
+        NW.saveEditable();
+        if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
+        var page = document.getElementById('nwEditorPage');
+        var clone = page.cloneNode(true);
+        clone.querySelectorAll('.nw-block-handle,.nw-block-actions,.nw-schedule-options,.nw-empty-editor,.nw-image-placeholder').forEach(function(el) { el.remove(); });
+        clone.querySelectorAll('.nw-block').forEach(function(el) { el.style.border = 'none'; el.style.paddingLeft = '0'; });
+        var iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:210mm;height:297mm;';
+        document.body.appendChild(iframe);
+        var doc = iframe.contentDocument;
+        doc.open();
+        doc.write('<!DOCTYPE html><html><head>'
+            + '<style>'
+            + '@page{size:A4 portrait;margin:15mm 18mm;}'
+            + 'body{font-family:"Zen Maru Gothic",sans-serif;font-size:12px;color:#202124;margin:0;padding:0;}'
+            + 'table{width:100%;border-collapse:collapse;}th{background:#1a73e8;color:#fff;padding:4px 6px;font-size:11px;text-align:center;}'
+            + 'td{padding:3px 5px;border:1px solid #dadce0;text-align:center;font-size:11px;}'
+            + 'hr{border:none;border-top:1px solid #dadce0;margin:8px 0;}img{max-width:100%;}'
+            + '.nw-float-wrapper{display:flex;gap:12px;align-items:flex-start;}'
+            + '.nw-float-wrapper.nw-float-right{flex-direction:row-reverse;}'
+            + '.nw-float-img-side{flex-shrink:0;}.nw-float-img-side img{width:100%;}'
+            + '.nw-float-text-side{flex:1;min-width:0;line-height:1.7;}'
+            + '</style>'
+            + '<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">'
+            + '</head><body>' + clone.innerHTML + '</body></html>');
+        doc.close();
+        iframe.onload = function() {
+            setTimeout(function() {
+                iframe.contentWindow.print();
+                setTimeout(function() { document.body.removeChild(iframe); }, 1000);
+            }, 500);
+        };
+    };
 
-    // ===== 学級通信: PDF生成 =====
-    function generateNwPdf() {
-        var mondayStr = STATE.nwMondayStr || STATE.mondayStr;
+    // ---- PDF (backend) ----
+    NW.generatePdf = function() {
+        var mondayStr = NW.mondayStr || STATE.mondayStr;
         if (!mondayStr) { showToast('error', '週を選択してください'); return; }
-
-        var btn = document.querySelector('#view-newsletter .btn-outline');
-        if (btn) { btn.disabled = true; btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 生成中...'; }
         showToast('info', '学級通信PDFを生成中...');
         google.script.run
-            .withSuccessHandler(function (result) {
-                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">move_to_inbox</span> 学級通信シートをPDF化'; }
+            .withSuccessHandler(function(result) {
                 if (result.success) {
-                    var preview = document.getElementById('nwPreviewArea');
-                    preview.insertAdjacentHTML('beforeend',
-                        '<div style="margin-top:16px"><a href="' + result.viewUrl + '" target="_blank" class="pdf-result-link"><span class="material-symbols-outlined fs-6">description</span> PDFを開く: ' + escHtml(result.fileName) + '</a></div>');
                     showToast('success', 'PDF生成完了！');
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'PDF生成完了',
+                        html: '<a href="' + result.viewUrl + '" target="_blank" class="pdf-result-link">'
+                            + '<span class="material-symbols-outlined fs-6">description</span> PDFを開く: '
+                            + escHtml(result.fileName) + '</a>',
+                        confirmButtonText: '閉じる'
+                    });
                 } else {
                     showToast('error', 'PDF生成失敗: ' + result.error);
                 }
             })
-            .withFailureHandler(function (e) {
-                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">move_to_inbox</span> 学級通信シートをPDF化'; }
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(function(e) { showToast('error', '通信エラー: ' + e.message); })
             .generateNewsletterPdf(mondayStr);
-    }
+    };
 
-    // ===== 学級通信: Classroom投稿 =====
-    function postNwToClassroom() {
-        var mondayStr = STATE.nwMondayStr || STATE.mondayStr;
+    // ---- Classroom post ----
+    NW.postToClassroom = function() {
+        var mondayStr = NW.mondayStr || STATE.mondayStr;
         if (!mondayStr) { showToast('error', '週を選択してください'); return; }
-
-        var customMsg = document.getElementById('nwCustomMessage').value.trim();
-        var btn = document.querySelector('#view-newsletter [style*="background:#34a853"]');
-        if (btn) { btn.disabled = true; btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 投稿中...'; }
-        showToast('info', 'Classroomに投稿しています...');
-        google.script.run
-            .withSuccessHandler(function (result) {
-                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">rocket_launch</span> Classroomに投稿'; }
-                if (result.success) showToast('success', '' + result.message);
-                else showToast('error', '投稿失敗: ' + result.error);
-            })
-            .withFailureHandler(function (e) {
-                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">rocket_launch</span> Classroomに投稿'; }
-                showToast('error', '通信エラー: ' + e.message);
-            })
-            .postNewsletterToClassroomFromWeb(mondayStr, customMsg || null);
-    }
+        Swal.fire({
+            title: 'Classroomに投稿',
+            input: 'textarea',
+            inputLabel: '付加メッセージ（任意）',
+            inputPlaceholder: 'Classroomへのメッセージ...',
+            showCancelButton: true,
+            confirmButtonText: '投稿',
+            cancelButtonText: 'キャンセル'
+        }).then(function(result) {
+            if (!result.isConfirmed) return;
+            showToast('info', 'Classroomに投稿しています...');
+            google.script.run
+                .withSuccessHandler(function(res) {
+                    if (res.success) showToast('success', res.message);
+                    else showToast('error', '投稿失敗: ' + res.error);
+                })
+                .withFailureHandler(function(e) { showToast('error', '通信エラー: ' + e.message); })
+                .postNewsletterToClassroomFromWeb(mondayStr, result.value || null);
+        });
+    };
 
     // ===== データ連携 (PDF処理) =====
     function fetchPdfList(type) {
