@@ -1197,39 +1197,57 @@
 
     /* --- WordArt block --- */
     .nw-wordart-block {
-        padding: 8px 4px;
-        min-height: 40px;
+        padding: 12px 8px;
+        min-height: 50px;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
 
     .nw-wordart-text {
         display: block;
-        font-weight: 700;
-        line-height: 1.2;
+        font-weight: 900;
+        line-height: 1.3;
         word-break: break-word;
-        transition: opacity 0.15s;
+        padding: 4px 0;
+        transition: transform 0.15s, opacity 0.15s;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
     }
 
     .nw-wordart-text:hover {
-        opacity: 0.85;
+        opacity: 0.88;
+        transform: scale(1.01);
     }
 
     /* WordArt palette button: gradient accent */
     .nw-palette-btn-wordart {
-        background: linear-gradient(135deg, #e8f0fe, #fce4ec);
+        background: linear-gradient(135deg, #e8f0fe 0%, #fce4ec 50%, #fff8e1 100%);
         border-color: #c5cae9;
+        font-weight: 600;
     }
 
     .nw-palette-btn-wordart:hover {
-        background: linear-gradient(135deg, #c5cae9, #f8bbd0);
+        background: linear-gradient(135deg, #c5cae9, #f8bbd0, #ffe082);
         border-color: #7986cb;
         color: #3949ab;
     }
 
     /* WordArt preset button in toolbar */
     .nw-wa-preset-btn {
-        font-size: 1.1rem !important;
-        padding: 2px 4px !important;
-        min-width: 28px;
+        font-size: 1.15rem !important;
+        padding: 2px 5px !important;
+        min-width: 30px;
+        border-radius: 4px;
+        transition: transform 0.1s;
+    }
+
+    .nw-wa-preset-btn:hover {
+        transform: scale(1.2);
+    }
+
+    .nw-wa-preset-btn.nw-active {
+        box-shadow: 0 0 0 2px var(--primary);
+        transform: scale(1.1);
     }
 
     /* --- A4 Page break markers --- */

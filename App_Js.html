@@ -982,15 +982,41 @@
     ];
 
     // WordArt gradient/effect presets
+    // bg: グラデーション背景(テキストクリップ), color: 単色, shadow: text-shadow,
+    // stroke: -webkit-text-stroke, transform: CSS transform, letterSpacing: 間隔
     var NW_WORDART_PRESETS = [
-        { key: 'ocean',  label: '海',      emoji: '🌊', bg: 'linear-gradient(135deg,#0077b6,#00b4d8,#90e0ef)', shadow: '' },
-        { key: 'sunset', label: '夕焼け',  emoji: '🌅', bg: 'linear-gradient(135deg,#f77f00,#d62828,#fcbf49)', shadow: '' },
-        { key: 'forest', label: '森',      emoji: '🌿', bg: 'linear-gradient(135deg,#1b4332,#52b788,#b7e4c7)', shadow: '' },
-        { key: 'gold',   label: 'ゴールド',emoji: '✨', bg: 'linear-gradient(135deg,#b8860b,#ffd700,#b8860b)', shadow: '1px 1px 3px rgba(0,0,0,0.3)' },
-        { key: 'sakura', label: '桜',      emoji: '🌸', bg: 'linear-gradient(135deg,#ff85a1,#ffa8c5,#ffcce0)', shadow: '' },
-        { key: 'space',  label: '宇宙',    emoji: '🔭', bg: 'linear-gradient(135deg,#240046,#7b2d8b,#c77dff)', shadow: '0 0 12px rgba(199,125,255,0.6)' },
-        { key: 'shadow', label: '影付き',  emoji: '🖊', bg: '', color: '#222', shadow: '3px 3px 0 #888,6px 6px 0 #ccc' },
-        { key: 'pop',    label: 'ポップ',  emoji: '🎉', bg: 'linear-gradient(135deg,#ff006e,#fb5607,#ffbe0b,#3a86ff)', shadow: '2px 2px 0 rgba(0,0,0,0.2)' }
+        { key: 'rainbow', label: 'レインボー', emoji: '🌈',
+          bg: 'linear-gradient(90deg,#ff0000,#ff8c00,#ffd700,#00c853,#2196f3,#9c27b0,#ff0000)',
+          shadow: '2px 2px 4px rgba(0,0,0,0.3)', stroke: '', transform: '', letterSpacing: '0.05em' },
+        { key: 'ocean',  label: '海', emoji: '🌊',
+          bg: 'linear-gradient(135deg,#003d5b,#0077b6,#00b4d8,#90e0ef,#caf0f8)',
+          shadow: '0 4px 12px rgba(0,119,182,0.5)', stroke: '', transform: '', letterSpacing: '0.03em' },
+        { key: 'sunset', label: '夕焼け', emoji: '🌅',
+          bg: 'linear-gradient(135deg,#9d0208,#d00000,#e85d04,#faa307,#ffba08)',
+          shadow: '3px 3px 8px rgba(157,2,8,0.4)', stroke: '', transform: '', letterSpacing: '0.03em' },
+        { key: 'gold',   label: 'ゴールド', emoji: '✨',
+          bg: 'linear-gradient(135deg,#6b4e00,#b8860b,#daa520,#ffd700,#fff8b0,#ffd700,#daa520,#b8860b)',
+          shadow: '2px 2px 4px rgba(0,0,0,0.4),0 0 20px rgba(255,215,0,0.3)', stroke: '', transform: '', letterSpacing: '0.04em' },
+        { key: 'neon',   label: 'ネオン', emoji: '💡',
+          bg: '', color: '#00ff88',
+          shadow: '0 0 7px #00ff88,0 0 10px #00ff88,0 0 21px #00ff88,0 0 42px #00c96a,0 0 82px #00c96a',
+          stroke: '', transform: '', letterSpacing: '0.06em' },
+        { key: 'metal',  label: 'メタリック', emoji: '⚔️',
+          bg: 'linear-gradient(180deg,#f5f5f5 0%,#c0c0c0 20%,#f5f5f5 40%,#808080 60%,#c0c0c0 80%,#f5f5f5 100%)',
+          shadow: '1px 1px 0 #666,2px 2px 0 #555,3px 3px 2px rgba(0,0,0,0.4)', stroke: '1px #888', transform: '', letterSpacing: '0.04em' },
+        { key: 'sakura', label: '桜', emoji: '🌸',
+          bg: 'linear-gradient(135deg,#ff2e7e,#ff6b9d,#ffaec9,#ff6b9d,#ff2e7e)',
+          shadow: '0 3px 10px rgba(255,107,157,0.5)', stroke: '', transform: '', letterSpacing: '0.03em' },
+        { key: 'retro3d', label: '3D', emoji: '🎮',
+          bg: '', color: '#ff6b35',
+          shadow: '1px 1px 0 #c0392b,2px 2px 0 #c0392b,3px 3px 0 #c0392b,4px 4px 0 #c0392b,5px 5px 0 #c0392b,6px 6px 12px rgba(0,0,0,0.4)',
+          stroke: '', transform: '', letterSpacing: '0.05em' },
+        { key: 'outline', label: 'アウトライン', emoji: '🔲',
+          bg: '', color: 'transparent',
+          shadow: '', stroke: '3px #1a73e8', transform: '', letterSpacing: '0.04em' },
+        { key: 'pop',    label: 'ポップ', emoji: '🎉',
+          bg: 'linear-gradient(135deg,#ff006e,#fb5607,#ffbe0b,#8338ec,#3a86ff)',
+          shadow: '3px 3px 0 rgba(0,0,0,0.3)', stroke: '', transform: 'rotate(-2deg)', letterSpacing: '0.06em' }
     ];
 
     var NW = {
@@ -1147,7 +1173,7 @@
                 block.fontSize = data.fontSize || 40;
                 block.align = data.align || 'center';
                 block.fontFamily = data.fontFamily || '';
-                block.preset = data.preset || 'ocean';
+                block.preset = data.preset || 'rainbow';
                 break;
         }
         // Block decoration (all block types)
@@ -1593,25 +1619,41 @@
 
             case 'wordart':
                 div.className = 'nw-wordart-block';
-                var waPreset = NW_WORDART_PRESETS.find(function(p) { return p.key === (block.preset || 'ocean'); }) || NW_WORDART_PRESETS[0];
+                var waPreset = NW_WORDART_PRESETS.find(function(p) { return p.key === (block.preset || 'rainbow'); }) || NW_WORDART_PRESETS[0];
+                // ネオン等暗い背景が映えるプリセットには背景を追加
+                if (waPreset.key === 'neon') {
+                    div.style.background = '#1a1a2e';
+                    div.style.borderRadius = '8px';
+                    div.style.padding = '16px 8px';
+                }
                 var waText = document.createElement('div');
                 waText.className = 'nw-wordart-text';
                 waText.textContent = block.content || 'ワードアート';
                 waText.style.fontSize = (block.fontSize || 40) + 'px';
                 waText.style.textAlign = block.align || 'center';
-                waText.style.fontWeight = '700';
-                waText.style.lineHeight = '1.2';
+                waText.style.fontWeight = '900';
+                waText.style.lineHeight = '1.3';
                 if (block.fontFamily) waText.style.fontFamily = block.fontFamily;
+                if (waPreset.letterSpacing) waText.style.letterSpacing = waPreset.letterSpacing;
+                if (waPreset.transform) waText.style.transform = waPreset.transform;
+                // グラデーション背景クリップ or 単色
                 if (waPreset.bg) {
                     waText.style.background = waPreset.bg;
+                    waText.style.backgroundSize = '200% auto';
                     waText.style.webkitBackgroundClip = 'text';
                     waText.style.backgroundClip = 'text';
                     waText.style.webkitTextFillColor = 'transparent';
                     waText.style.color = 'transparent';
-                } else {
-                    waText.style.color = waPreset.color || '#222';
+                } else if (waPreset.color) {
+                    waText.style.color = waPreset.color;
+                    if (waPreset.color === 'transparent' && waPreset.stroke) {
+                        waText.style.webkitTextFillColor = 'transparent';
+                    }
                 }
                 if (waPreset.shadow) waText.style.textShadow = waPreset.shadow;
+                if (waPreset.stroke) {
+                    waText.style.webkitTextStroke = waPreset.stroke;
+                }
                 waText.style.cursor = 'pointer';
                 waText.title = 'クリックしてテキストを編集';
                 (function(bid) { waText.addEventListener('click', function() { NW.editWordArt(bid); }); })(block.id);
@@ -2237,6 +2279,7 @@
             });
             google.script.run
                 .withSuccessHandler(function(res) {
+                    if (!res) { showToast('error', '保存失敗: サーバーから応答がありません'); return; }
                     if (res.success) showToast('success', res.message);
                     else showToast('error', '保存失敗: ' + res.error);
                 })
@@ -2249,8 +2292,9 @@
         showToast('info', '保存済み一覧を読み込み中...');
         google.script.run
             .withSuccessHandler(function(res) {
+                if (!res) { showToast('error', 'データ取得に失敗しました'); return; }
                 if (!res.success) { showToast('error', '取得失敗: ' + res.error); return; }
-                if (res.list.length === 0) { showToast('info', '保存済みの学級通信はありません'); return; }
+                if (!res.list || res.list.length === 0) { showToast('info', '保存済みの学級通信はありません'); return; }
                 var html = '<div style="max-height:400px;overflow-y:auto;">';
                 html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">';
                 html += '<thead><tr style="border-bottom:2px solid #dadce0;"><th style="text-align:left;padding:8px;">タイトル</th><th style="padding:8px;">対象週</th><th style="padding:8px;">保存日時</th><th style="padding:8px;">操作</th></tr></thead><tbody>';
@@ -2277,24 +2321,39 @@
             .getNewsletterSaveList();
     };
 
+    NW._applyLoadedData = function(data) {
+        NW.blocks = data.blocks || [];
+        NW.nextId = data.nextId || 1;
+        if (data.mondayStr) {
+            NW.mondayStr = data.mondayStr;
+            document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+        }
+        if (data.scheduleData) NW.scheduleData = data.scheduleData;
+        NW._history = [];
+        NW._historyIdx = -1;
+        NW.render();
+        NW.pushHistory();
+        showToast('success', '読み込みました');
+    };
+
     NW.doLoadFromSheet = function(fileId) {
+        if (!fileId) { showToast('error', 'ファイルIDが見つかりません'); return; }
         showToast('info', '読み込み中...');
         google.script.run
             .withSuccessHandler(function(res) {
-                if (!res.success) { showToast('error', '読込失敗: ' + res.error); return; }
-                var data = res.data;
-                NW.blocks = data.blocks || [];
-                NW.nextId = data.nextId || 1;
-                if (data.mondayStr) {
-                    NW.mondayStr = data.mondayStr;
-                    document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+                if (!res) { showToast('error', '読込失敗: サーバーから応答がありません'); return; }
+                if (!res.success) { showToast('error', '読込失敗: ' + (res.error || '不明なエラー')); return; }
+                // サーバーが jsonString を返した場合（大きいデータ向け）
+                if (res.jsonString) {
+                    try {
+                        NW._applyLoadedData(JSON.parse(res.jsonString));
+                    } catch (pe) {
+                        showToast('error', '読込失敗: JSONパースエラー');
+                    }
+                    return;
                 }
-                if (data.scheduleData) NW.scheduleData = data.scheduleData;
-                NW._history = [];
-                NW._historyIdx = -1;
-                NW.render();
-                NW.pushHistory();
-                showToast('success', '読み込みました');
+                if (!res.data) { showToast('error', '読込失敗: データが空です'); return; }
+                NW._applyLoadedData(res.data);
             })
             .withFailureHandler(function(e) { showToast('error', '通信エラー: ' + e.message); })
             .loadNewsletterData(fileId);
@@ -2313,6 +2372,7 @@
             if (!result.isConfirmed) return;
             google.script.run
                 .withSuccessHandler(function(res) {
+                    if (!res) { showToast('error', '削除失敗: サーバーから応答がありません'); return; }
                     if (res.success) {
                         showToast('success', '削除しました');
                         NW.openFromSheet();
@@ -2370,7 +2430,7 @@
         + '.nw-float-text-side{flex:1;min-width:0;line-height:1.7;text-align:left;}'
         + '.nw-gallery-grid{display:grid;gap:8px;}.nw-gallery-cell img{width:100%;display:block;}.nw-gallery-caption{font-size:10px;text-align:center;padding:2px;}'
         + '.nw-qrcode-block{text-align:center;padding:8px;}.nw-qrcode-block img{display:block;margin:0 auto;}.nw-qrcode-label{font-size:10px;text-align:center;margin-top:4px;}'
-        + '.nw-wordart-block{padding:4px 0;}.nw-wordart-text{display:block;font-weight:700;line-height:1.2;word-break:break-word;}';
+        + '.nw-wordart-block{padding:8px 4px;}.nw-wordart-text{display:block;font-weight:900;line-height:1.3;word-break:break-word;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
 
     NW.buildPrintHTML = function() {
         NW.saveEditable();
@@ -2432,6 +2492,7 @@
             var htmlContent = NW.buildPrintHTML();
             google.script.run
                 .withSuccessHandler(function(res) {
+                    if (!res) { showToast('error', '投稿失敗: サーバーから応答がありません'); return; }
                     if (res.success) showToast('success', res.message);
                     else showToast('error', '投稿失敗: ' + res.error);
                 })

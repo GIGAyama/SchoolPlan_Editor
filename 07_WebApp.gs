@@ -529,11 +529,12 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
 
     let classroomFile;
     try {
-      // HTML → Google Doc → PDF (Drive Advanced Serviceが必要)
+      // HTML → Google Doc (convert:true) → PDF (Drive Advanced Serviceが必要)
       const htmlBlob = Utilities.newBlob(htmlContent, 'text/html', fileName + '.html');
       const inserted = Drive.Files.insert(
-        { title: fileName, mimeType: 'application/vnd.google-apps.document' },
-        htmlBlob
+        { title: fileName, parents: [{ id: folder.getId() }] },
+        htmlBlob,
+        { convert: true }
       );
       const pdfBlob = DriveApp.getFileById(inserted.id).getAs('application/pdf');
       pdfBlob.setName(fileName + '.pdf');
@@ -580,6 +581,7 @@ function getOrCreateNwFolder_() {
 
 /**
  * [Web API] 学級通信のブロックデータをDrive+シートに保存します。
+ * シート列構成: ID | Title | Date | FileId | TargetWeek (5列)
  * @param {string} title タイトル
  * @param {string} mondayStr 対象週
  * @param {string} jsonString ブロックデータJSON
@@ -595,11 +597,13 @@ function saveNewsletterData(title, mondayStr, jsonString) {
     const fileName = 'nw_' + new Date().getTime() + '.json';
     const file = folder.createFile(fileName, jsonString, 'application/json');
 
+    // 5列構成: ID(タイムスタンプ), Title, Date, FileId, TargetWeek
     sheet.appendRow([
+      new Date().getTime(),
       title || '無題',
-      mondayStr || '',
       new Date(),
-      file.getId()
+      file.getId(),
+      mondayStr || ''
     ]);
 
     logInfo(`学級通信保存: ${title} (${mondayStr})`);
@@ -612,6 +616,8 @@ function saveNewsletterData(title, mondayStr, jsonString) {
 
 /**
  * [Web API] 保存済み学級通信の一覧を取得します。
+ * シート列構成: A=ID | B=Title | C=Date | D=FileId | E=TargetWeek
+ * 旧4列形式 (Title|MondayStr|Date|FileId) にも対応
  * @returns {Object} { success, list: [{rowIndex, title, mondayStr, savedAt, fileId}] }
  */
 function getNewsletterSaveList() {
@@ -620,15 +626,37 @@ function getNewsletterSaveList() {
     const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
     if (!sheet || sheet.getLastRow() < 2) return { success: true, list: [] };
 
-    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
+    const lastCol = Math.min(Math.max(sheet.getLastColumn(), 4), 5);
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastCol).getValues();
+
+    // ヘッダー行で形式を判定
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const firstHeader = String(headers[0] || '').trim().toUpperCase();
+    const is5col = (firstHeader === 'ID' || lastCol >= 5);
+
     const list = data.map(function(row, i) {
-      return {
-        rowIndex: i + 2,
-        title: row[0] || '無題',
-        mondayStr: row[1] || '',
-        savedAt: row[2] ? Utilities.formatDate(new Date(row[2]), 'JST', 'yyyy/MM/dd HH:mm') : '',
-        fileId: row[3] || ''
-      };
+      if (is5col) {
+        // 新5列形式: ID | Title | Date | FileId | TargetWeek
+        return {
+          rowIndex: i + 2,
+          title: String(row[1] || '無題'),
+          mondayStr: String(row[4] || ''),
+          savedAt: row[2] ? Utilities.formatDate(new Date(row[2]), 'JST', 'yyyy/MM/dd HH:mm') : '',
+          fileId: String(row[3] || '')
+        };
+      } else {
+        // 旧4列形式: Title | MondayStr | Date | FileId
+        return {
+          rowIndex: i + 2,
+          title: String(row[0] || '無題'),
+          mondayStr: String(row[1] || ''),
+          savedAt: row[2] ? Utilities.formatDate(new Date(row[2]), 'JST', 'yyyy/MM/dd HH:mm') : '',
+          fileId: String(row[3] || '')
+        };
+      }
+    }).filter(function(item) {
+      // fileIdが空の行は除外
+      return item.fileId && item.fileId.length > 5;
     }).reverse();
 
     return { success: true, list: list };
@@ -645,9 +673,20 @@ function getNewsletterSaveList() {
  */
 function loadNewsletterData(fileId) {
   try {
-    const file = DriveApp.getFileById(fileId);
+    if (!fileId || String(fileId).length < 5) {
+      return { success: false, error: 'ファイルIDが無効です' };
+    }
+    const file = DriveApp.getFileById(String(fileId));
     const json = file.getBlob().getDataAsString();
-    return { success: true, data: JSON.parse(json) };
+    const parsed = JSON.parse(json);
+    // GASの google.script.run 転送サイズ上限対策:
+    // 画像データ(base64)が含まれると巨大になるため、サイズチェック
+    const resultStr = JSON.stringify(parsed);
+    if (resultStr.length > 500000) {
+      // 大きすぎる場合は直接JSONテキストを返し、クライアント側でパース
+      return { success: true, jsonString: resultStr };
+    }
+    return { success: true, data: parsed };
   } catch (e) {
     logError('loadNewsletterData', e);
     return { success: false, error: e.message };
