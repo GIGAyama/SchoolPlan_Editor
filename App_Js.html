@@ -1012,12 +1012,15 @@
         });
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
-            if (STATE.currentView !== 'newsletter') return;
+            if (STATE.view !== 'newsletter') return;
+            var mod = e.ctrlKey || e.metaKey;
+            if (!mod) return;
+            var k = e.key.toLowerCase();
             // Ctrl+Z = undo, Ctrl+Shift+Z / Ctrl+Y = redo
-            if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); NW.undo(); }
-            if ((e.ctrlKey || e.metaKey) && (e.key === 'Z' || e.key === 'y') && (e.shiftKey || e.key === 'y')) { e.preventDefault(); NW.redo(); }
-            if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); NW.saveToSheet(); }
-            if ((e.ctrlKey || e.metaKey) && e.key === 'p') { e.preventDefault(); NW.printNewsletter(); }
+            if (k === 'z' && !e.shiftKey) { e.preventDefault(); NW.undo(); return; }
+            if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); NW.redo(); return; }
+            if (k === 's') { e.preventDefault(); NW.saveToSheet(); return; }
+            if (k === 'p') { e.preventDefault(); NW.printNewsletter(); return; }
         });
         // Restore from localStorage if available
         if (NW.blocks.length === 0) NW.autoRestore();
@@ -1220,15 +1223,21 @@
     NW.renderPageBreaks = function() {
         var page = document.getElementById('nwEditorPage');
         page.querySelectorAll('.nw-page-break-marker').forEach(function(el) { el.remove(); });
-        // A4 content area height = 297mm - 30mm (top+bottom padding) = 267mm
-        var mmToPx = page.offsetWidth / 210; // scale based on current render width
-        var pageH = 267 * mmToPx;
+        // Derive px-per-mm from the known CSS padding-top (15mm)
+        var cs = window.getComputedStyle(page);
+        var paddingTopPx = parseFloat(cs.paddingTop);
+        if (!paddingTopPx || paddingTopPx <= 0) return;
+        var mmToPx = paddingTopPx / 15; // padding-top = 15mm
+        // Print uses @page{margin:15mm 18mm}, printable height = 267mm per page
+        var pageContentH = 267 * mmToPx;
         var totalH = page.scrollHeight;
-        var breakNum = Math.floor(totalH / pageH);
-        for (var i = 1; i <= breakNum; i++) {
+        // First break at paddingTop + 267mm; subsequent every 267mm
+        for (var i = 1; ; i++) {
+            var y = paddingTopPx + pageContentH * i;
+            if (y >= totalH - 10) break;
             var marker = document.createElement('div');
             marker.className = 'nw-page-break-marker';
-            marker.style.top = (i * pageH) + 'px';
+            marker.style.top = y + 'px';
             marker.setAttribute('data-page', 'ページ ' + i + ' / ' + (i + 1));
             page.appendChild(marker);
         }
@@ -1308,6 +1317,14 @@
             actions.insertAdjacentHTML('beforeend', imgFmt);
         }
 
+        // QR code toolbar: edit button
+        if (block.type === 'qrcode' && block.url) {
+            var qrFmt = '<div class="nw-fmt-toolbar">'
+                + '<button title="QRコード編集" onclick="NW.editQrCode(\'' + block.id + '\')"><span class="material-symbols-outlined">edit</span></button>'
+                + '</div><div class="nw-act-sep"></div>';
+            actions.insertAdjacentHTML('beforeend', qrFmt);
+        }
+
         // Common action buttons: decoration, up, down, duplicate, delete
         actions.insertAdjacentHTML('beforeend',
             '<button title="装飾" onclick="NW.openDecoration(\'' + block.id + '\')"><span class="material-symbols-outlined">palette</span></button>'
@@ -1318,9 +1335,12 @@
             + '<button title="削除" onclick="NW.removeBlock(\'' + block.id + '\')"><span class="material-symbols-outlined">delete</span></button>');
         wrapper.appendChild(actions);
 
-        // Apply block decoration
+        // Apply block decoration via CSS custom properties (to avoid overriding hover/selected)
         if (block.blockBgColor) wrapper.style.background = block.blockBgColor;
-        if (block.borderColor) wrapper.style.borderColor = block.borderColor;
+        if (block.borderColor) {
+            wrapper.setAttribute('data-deco-border', block.borderColor);
+            wrapper.style.setProperty('--deco-border', block.borderColor);
+        }
         if (block.borderRadius) wrapper.style.borderRadius = block.borderRadius + 'px';
 
         // Content area
@@ -1349,13 +1369,16 @@
             e.preventDefault();
             wrapper.classList.remove('nw-drag-over');
             if (!NW.dragId || NW.dragId === block.id) return;
+            NW.pushHistory();
             NW.saveEditable();
             var fromIdx = NW.blocks.findIndex(function(b) { return b.id === NW.dragId; });
             var toIdx = NW.blocks.findIndex(function(b) { return b.id === block.id; });
             if (fromIdx < 0 || toIdx < 0) return;
             var moved = NW.blocks.splice(fromIdx, 1)[0];
             NW.blocks.splice(toIdx, 0, moved);
+            NW._skipHistory = true;
             NW.render();
+            NW._skipHistory = false;
         });
 
         return wrapper;
@@ -1496,15 +1519,16 @@
                     qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=' + block.qrSize + 'x' + block.qrSize + '&data=' + encodeURIComponent(block.url);
                     qrImg.alt = 'QR Code';
                     qrImg.style.width = block.qrSize + 'px';
+                    qrImg.style.cursor = 'pointer';
+                    qrImg.title = 'クリックしてQRコードを編集';
+                    (function(bid) { qrImg.addEventListener('click', function() { NW.editQrCode(bid); }); })(block.id);
                     div.appendChild(qrImg);
-                    if (block.label) {
-                        var lbl = document.createElement('div');
-                        lbl.className = 'nw-qrcode-label';
-                        lbl.contentEditable = 'true';
-                        lbl.innerHTML = block.label;
-                        lbl.addEventListener('blur', function() { block.label = lbl.innerHTML; });
-                        div.appendChild(lbl);
-                    }
+                    var lbl = document.createElement('div');
+                    lbl.className = 'nw-qrcode-label';
+                    lbl.contentEditable = 'true';
+                    lbl.innerHTML = block.label || '';
+                    lbl.addEventListener('blur', function() { block.label = lbl.innerHTML; });
+                    div.appendChild(lbl);
                 } else {
                     var qrPh = document.createElement('div');
                     qrPh.className = 'nw-image-placeholder';
@@ -1770,9 +1794,7 @@
         var isText = (prop === 'color');
         var currentVal = block[prop] || '';
         var html = '<div class="nw-color-grid">';
-        if (!isText) {
-            html += '<button class="nw-color-swatch nw-color-none" data-val="" title="なし">&times;</button>';
-        }
+        html += '<button class="nw-color-swatch nw-color-none' + (!currentVal ? ' nw-color-selected' : '') + '" data-val="" title="' + (isText ? 'デフォルト' : 'なし') + '">' + (isText ? 'A' : '&times;') + '</button>';
         NW_COLORS.forEach(function(c) {
             html += '<button class="nw-color-swatch' + (currentVal === c ? ' nw-color-selected' : '') + '" style="background:' + c + ';" data-val="' + c + '" title="' + c + '"></button>';
         });
@@ -1944,10 +1966,12 @@
     NW.applyTemplate = function(index) {
         var templates = JSON.parse(localStorage.getItem('nw_templates') || '[]');
         if (!templates[index]) return;
-        NW.pushHistory();
         NW.blocks = JSON.parse(JSON.stringify(templates[index].blocks));
         NW.blocks.forEach(function(b) { b.id = NW.genId(); });
+        NW._history = [];
+        NW._historyIdx = -1;
         NW.render();
+        NW.pushHistory();
         showToast('success', 'テンプレートを適用しました');
     };
 
@@ -1991,7 +2015,6 @@
             google.script.run
                 .withSuccessHandler(function(res) {
                     if (!res.success) { showToast('error', 'AI生成失敗: ' + res.error); return; }
-                    NW.pushHistory();
                     NW.addBlock('text', null, { content: res.text.replace(/\n/g, '<br>'), fontSize: 12 });
                     showToast('success', 'AI文章を追加しました');
                 })
@@ -2077,8 +2100,11 @@
             NW.blocks = [];
             NW.nextId = 1;
             NW.scheduleData = null;
+            NW._history = [];
+            NW._historyIdx = -1;
             localStorage.removeItem('nw_autosave');
             NW.render();
+            NW.pushHistory();
         });
     };
 
@@ -2159,7 +2185,10 @@
                     document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
                 }
                 if (data.scheduleData) NW.scheduleData = data.scheduleData;
+                NW._history = [];
+                NW._historyIdx = -1;
                 NW.render();
+                NW.pushHistory();
                 showToast('success', '読み込みました');
             })
             .withFailureHandler(function(e) { showToast('error', '通信エラー: ' + e.message); })
@@ -2231,9 +2260,17 @@
         var clone = page.cloneNode(true);
         clone.querySelectorAll('.nw-block-handle,.nw-block-actions,.nw-schedule-options,.nw-empty-editor,.nw-image-placeholder,.nw-gallery-add,.nw-gallery-remove,.nw-page-break-marker').forEach(function(el) { el.remove(); });
         clone.querySelectorAll('.nw-block').forEach(function(el) {
-            if (!el.style.borderColor || el.style.borderColor === 'transparent') { el.style.border = 'none'; }
-            el.style.paddingLeft = '0';
+            var decoBorder = el.getAttribute('data-deco-border');
+            if (decoBorder) {
+                el.style.border = '2px solid ' + decoBorder;
+            } else {
+                el.style.border = 'none';
+            }
+            el.style.padding = '2px';
         });
+        // Clean up interactive styles for print
+        clone.querySelectorAll('[style*="cursor"]').forEach(function(el) { el.style.cursor = 'default'; });
+        clone.querySelectorAll('[contenteditable]').forEach(function(el) { el.removeAttribute('contenteditable'); });
         var iframe = document.createElement('iframe');
         iframe.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:210mm;height:297mm;';
         document.body.appendChild(iframe);
