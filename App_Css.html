@@ -1069,6 +1069,89 @@
         margin: 8px 0;
     }
 
+    /* --- Gallery block --- */
+    .nw-gallery-grid {
+        display: grid;
+        gap: 8px;
+    }
+
+    .nw-gallery-cell {
+        position: relative;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+        background: var(--surface-2);
+    }
+
+    .nw-gallery-cell img {
+        width: 100%;
+        display: block;
+    }
+
+    .nw-gallery-caption {
+        font-size: 0.72rem;
+        color: var(--text-sub);
+        text-align: center;
+        padding: 4px 6px;
+        outline: none;
+        min-height: 1.2em;
+    }
+
+    .nw-gallery-caption:empty::before {
+        content: 'キャプション...';
+        color: var(--text-hint);
+        pointer-events: none;
+    }
+
+    .nw-gallery-add {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px dashed var(--border);
+        border-radius: 4px;
+        min-height: 80px;
+        cursor: pointer;
+        color: var(--text-hint);
+        transition: all 0.15s;
+    }
+
+    .nw-gallery-add:hover {
+        border-color: var(--primary);
+        color: var(--primary);
+        background: var(--primary-light);
+    }
+
+    .nw-gallery-remove {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        background: rgba(0,0,0,0.5);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 22px;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 14px;
+        opacity: 0;
+        transition: opacity 0.15s;
+    }
+
+    .nw-gallery-cell:hover .nw-gallery-remove {
+        opacity: 1;
+    }
+
+    /* --- Header separator --- */
+    .nw-act-sep-v {
+        width: 1px;
+        height: 24px;
+        background: var(--border);
+        margin: 0 4px;
+    }
+
     /* --- Empty editor state --- */
     .nw-empty-editor {
         text-align: center;

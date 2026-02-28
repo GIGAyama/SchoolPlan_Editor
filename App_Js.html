@@ -973,13 +973,22 @@
     }
 
     // ===== 学級通信ブロックエディタ (NW module) =====
+    var NW_FONTS = [
+        { label: '丸ゴシック', value: "'Zen Maru Gothic', sans-serif" },
+        { label: 'ゴシック', value: "'Noto Sans JP', sans-serif" },
+        { label: '明朝体', value: "'Noto Serif JP', serif" },
+        { label: '教科書体', value: "'Klee One', cursive" },
+        { label: '手書き風', value: "'Yusei Magic', cursive" }
+    ];
+
     var NW = {
         blocks: [],
         nextId: 1,
         mondayStr: null,
         dragId: null,
         scheduleData: null,
-        initialized: false
+        initialized: false,
+        _saveTimer: null
     };
 
     NW.init = function() {
@@ -996,6 +1005,8 @@
             });
             if (blockEl) blockEl.classList.add('nw-block-selected');
         });
+        // Restore from localStorage if available
+        if (NW.blocks.length === 0) NW.autoRestore();
         NW.initialized = true;
     };
 
@@ -1021,12 +1032,14 @@
                 block.fontSize = data.fontSize || 18;
                 block.align = data.align || 'center';
                 block.bold = data.bold !== undefined ? data.bold : true;
+                block.fontFamily = data.fontFamily || '';
                 break;
             case 'text':
                 block.content = data.content || '';
                 block.fontSize = data.fontSize || 12;
                 block.align = data.align || 'left';
                 block.bold = !!data.bold;
+                block.fontFamily = data.fontFamily || '';
                 break;
             case 'image':
                 block.src = data.src || '';
@@ -1034,6 +1047,10 @@
                 block.float = data.float || 'none';
                 block.wrapText = data.wrapText || '';
                 block.wrapAlign = data.wrapAlign || 'left';
+                break;
+            case 'gallery':
+                block.images = data.images || [];
+                block.columns = data.columns || 2;
                 break;
             case 'schedule':
                 block.weekData = data.weekData || null;
@@ -1100,6 +1117,12 @@
                 var wt = document.querySelector('[data-block-id="' + block.id + '"] .nw-float-text-side');
                 if (wt) block.wrapText = wt.innerHTML;
             }
+            if (block.type === 'gallery') {
+                var cells = document.querySelectorAll('[data-block-id="' + block.id + '"] .nw-gallery-caption');
+                cells.forEach(function(cap, i) {
+                    if (block.images[i]) block.images[i].caption = cap.innerHTML;
+                });
+            }
         });
     };
 
@@ -1111,12 +1134,14 @@
             page.innerHTML = '<div class="nw-empty-editor" id="nwEmptyState">'
                 + '左のパレットからブロックを追加するか、<br>'
                 + '「予定を読込」で週案データを取り込んでください。</div>';
+            NW.autoSave();
             return;
         }
         page.innerHTML = '';
         NW.blocks.forEach(function(block) {
             page.appendChild(NW.renderBlock(block));
         });
+        NW.autoSave();
     };
 
     NW.renderBlock = function(block) {
@@ -1138,6 +1163,12 @@
         // Format toolbar for text/heading blocks
         if (block.type === 'heading' || block.type === 'text') {
             var fmt = '<div class="nw-fmt-toolbar">'
+                + '<select onchange="NW.setFontFamily(\'' + block.id + '\',this.value)" title="フォント">';
+            fmt += '<option value=""' + (!block.fontFamily ? ' selected' : '') + '>標準</option>';
+            NW_FONTS.forEach(function(f) {
+                fmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
+            });
+            fmt += '</select>'
                 + '<select onchange="NW.setFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
             [9,10,11,12,14,16,18,20,24,28,32].forEach(function(s) {
                 fmt += '<option value="' + s + '"' + (s === block.fontSize ? ' selected' : '') + '>' + s + '</option>';
@@ -1149,6 +1180,16 @@
                 + '<button title="右揃え" onclick="NW.setAlign(\'' + block.id + '\',\'right\')" class="' + (block.align === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
                 + '</div><div class="nw-act-sep"></div>';
             actions.insertAdjacentHTML('beforeend', fmt);
+        }
+
+        // Gallery toolbar: column count
+        if (block.type === 'gallery') {
+            var galFmt = '<div class="nw-fmt-toolbar"><select onchange="NW.setGalleryColumns(\'' + block.id + '\',this.value)" title="列数">';
+            [2,3,4].forEach(function(c) {
+                galFmt += '<option value="' + c + '"' + (c === block.columns ? ' selected' : '') + '>' + c + '列</option>';
+            });
+            galFmt += '</select></div><div class="nw-act-sep"></div>';
+            actions.insertAdjacentHTML('beforeend', galFmt);
         }
 
         // Float toolbar for image blocks with src
@@ -1230,6 +1271,7 @@
                 div.style.fontSize = block.fontSize + 'px';
                 div.style.textAlign = block.align;
                 if (block.bold) div.style.fontWeight = '700';
+                if (block.fontFamily) div.style.fontFamily = block.fontFamily;
                 div.setAttribute('data-placeholder', '見出しを入力...');
                 div.addEventListener('blur', function() { block.content = div.innerHTML; });
                 break;
@@ -1241,6 +1283,7 @@
                 div.style.fontSize = block.fontSize + 'px';
                 div.style.textAlign = block.align;
                 if (block.bold) div.style.fontWeight = '700';
+                if (block.fontFamily) div.style.fontFamily = block.fontFamily;
                 div.setAttribute('data-placeholder', 'テキストを入力...');
                 div.addEventListener('blur', function() { block.content = div.innerHTML; });
                 // Enter key → new text block below
@@ -1299,6 +1342,42 @@
                     ph.addEventListener('click', function() { NW.uploadImage(block.id); });
                     div.appendChild(ph);
                 }
+                break;
+
+            case 'gallery':
+                div.className = 'nw-gallery-grid';
+                div.style.gridTemplateColumns = 'repeat(' + block.columns + ', 1fr)';
+                block.images.forEach(function(img, i) {
+                    var cell = document.createElement('div');
+                    cell.className = 'nw-gallery-cell';
+                    if (img.src) {
+                        var imgEl = document.createElement('img');
+                        imgEl.src = img.src;
+                        cell.appendChild(imgEl);
+                        var rmBtn = document.createElement('button');
+                        rmBtn.className = 'nw-gallery-remove';
+                        rmBtn.innerHTML = '&times;';
+                        (function(idx) {
+                            rmBtn.addEventListener('click', function(e) {
+                                e.stopPropagation();
+                                NW.removeGalleryImage(block.id, idx);
+                            });
+                        })(i);
+                        cell.appendChild(rmBtn);
+                    }
+                    var cap = document.createElement('div');
+                    cap.className = 'nw-gallery-caption';
+                    cap.contentEditable = 'true';
+                    cap.innerHTML = img.caption || '';
+                    cap.addEventListener('blur', function() { img.caption = cap.innerHTML; });
+                    cell.appendChild(cap);
+                    div.appendChild(cell);
+                });
+                var addCell = document.createElement('div');
+                addCell.className = 'nw-gallery-add';
+                addCell.innerHTML = '<span class="material-symbols-outlined" style="font-size:28px;">add_photo_alternate</span>';
+                addCell.addEventListener('click', function() { NW.addGalleryImage(block.id); });
+                div.appendChild(addCell);
                 break;
 
             case 'schedule':
@@ -1410,6 +1489,14 @@
         if (el) el.style.fontSize = block.fontSize + 'px';
     };
 
+    NW.setFontFamily = function(id, family) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        block.fontFamily = family;
+        var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
+        if (el) el.style.fontFamily = family || 'inherit';
+    };
+
     NW.toggleBold = function(id) {
         var block = NW.blocks.find(function(b) { return b.id === id; });
         if (!block) return;
@@ -1502,6 +1589,218 @@
         input.click();
     };
 
+    // ---- Gallery image management ----
+    NW.addGalleryImage = function(blockId) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true;
+        input.onchange = function(e) {
+            var files = Array.from(e.target.files);
+            var block = NW.blocks.find(function(b) { return b.id === blockId; });
+            if (!block) return;
+            var loaded = 0;
+            files.forEach(function(file) {
+                var reader = new FileReader();
+                reader.onload = function(evt) {
+                    block.images.push({ src: evt.target.result, caption: '' });
+                    loaded++;
+                    if (loaded === files.length) NW.render();
+                };
+                reader.readAsDataURL(file);
+            });
+        };
+        input.click();
+    };
+
+    NW.removeGalleryImage = function(blockId, index) {
+        var block = NW.blocks.find(function(b) { return b.id === blockId; });
+        if (!block) return;
+        block.images.splice(index, 1);
+        NW.render();
+    };
+
+    NW.setGalleryColumns = function(id, cols) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        block.columns = parseInt(cols, 10);
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-gallery-grid');
+        if (el) el.style.gridTemplateColumns = 'repeat(' + block.columns + ', 1fr)';
+    };
+
+    // ---- localStorage auto-save / restore ----
+    NW.autoSave = function() {
+        clearTimeout(NW._saveTimer);
+        NW._saveTimer = setTimeout(function() {
+            try {
+                var data = { blocks: NW.blocks, nextId: NW.nextId, mondayStr: NW.mondayStr };
+                localStorage.setItem('nw_autosave', JSON.stringify(data));
+            } catch(e) {
+                // Quota exceeded - try without base64 images
+                try {
+                    var stripped = JSON.parse(JSON.stringify(NW.blocks));
+                    stripped.forEach(function(b) {
+                        if (b.src && b.src.length > 1000) b.src = '';
+                        if (b.images) b.images.forEach(function(img) {
+                            if (img.src && img.src.length > 1000) img.src = '';
+                        });
+                    });
+                    localStorage.setItem('nw_autosave', JSON.stringify({
+                        blocks: stripped, nextId: NW.nextId, mondayStr: NW.mondayStr
+                    }));
+                } catch(ignore) {}
+            }
+        }, 800);
+    };
+
+    NW.autoRestore = function() {
+        try {
+            var saved = localStorage.getItem('nw_autosave');
+            if (!saved) return false;
+            var data = JSON.parse(saved);
+            if (data.blocks && data.blocks.length > 0) {
+                NW.blocks = data.blocks;
+                NW.nextId = data.nextId || 1;
+                if (data.mondayStr) {
+                    NW.mondayStr = data.mondayStr;
+                    document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+                }
+                NW.render();
+                return true;
+            }
+        } catch(e) {}
+        return false;
+    };
+
+    // ---- New / Save / Open ----
+    NW.newNewsletter = function() {
+        if (NW.blocks.length === 0) return;
+        Swal.fire({
+            title: '新規作成',
+            text: '現在の編集内容を破棄して新しい学級通信を作成しますか？',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '新規作成',
+            cancelButtonText: 'キャンセル'
+        }).then(function(result) {
+            if (!result.isConfirmed) return;
+            NW.blocks = [];
+            NW.nextId = 1;
+            NW.scheduleData = null;
+            localStorage.removeItem('nw_autosave');
+            NW.render();
+        });
+    };
+
+    NW.saveToSheet = function() {
+        NW.saveEditable();
+        if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
+        var titleBlock = NW.blocks.find(function(b) { return b.type === 'heading'; });
+        var defaultTitle = titleBlock ? titleBlock.content.replace(/<[^>]*>/g, '') : '無題';
+        Swal.fire({
+            title: '学級通信を保存',
+            input: 'text',
+            inputLabel: 'タイトル',
+            inputValue: defaultTitle,
+            showCancelButton: true,
+            confirmButtonText: '保存',
+            cancelButtonText: 'キャンセル'
+        }).then(function(result) {
+            if (!result.isConfirmed) return;
+            showToast('info', '保存中...');
+            var jsonStr = JSON.stringify({
+                blocks: NW.blocks,
+                nextId: NW.nextId,
+                mondayStr: NW.mondayStr,
+                scheduleData: NW.scheduleData
+            });
+            google.script.run
+                .withSuccessHandler(function(res) {
+                    if (res.success) showToast('success', res.message);
+                    else showToast('error', '保存失敗: ' + res.error);
+                })
+                .withFailureHandler(function(e) { showToast('error', '通信エラー: ' + e.message); })
+                .saveNewsletterData(result.value || defaultTitle, NW.mondayStr || '', jsonStr);
+        });
+    };
+
+    NW.openFromSheet = function() {
+        showToast('info', '保存済み一覧を読み込み中...');
+        google.script.run
+            .withSuccessHandler(function(res) {
+                if (!res.success) { showToast('error', '取得失敗: ' + res.error); return; }
+                if (res.list.length === 0) { showToast('info', '保存済みの学級通信はありません'); return; }
+                var html = '<div style="max-height:400px;overflow-y:auto;">';
+                html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">';
+                html += '<thead><tr style="border-bottom:2px solid #dadce0;"><th style="text-align:left;padding:8px;">タイトル</th><th style="padding:8px;">対象週</th><th style="padding:8px;">保存日時</th><th style="padding:8px;">操作</th></tr></thead><tbody>';
+                res.list.forEach(function(item) {
+                    html += '<tr style="border-bottom:1px solid #f1f3f4;">'
+                        + '<td style="padding:8px;font-weight:600;">' + escHtml(item.title) + '</td>'
+                        + '<td style="padding:8px;text-align:center;">' + escHtml(item.mondayStr) + '</td>'
+                        + '<td style="padding:8px;text-align:center;font-size:0.78rem;color:#5f6368;">' + escHtml(item.savedAt) + '</td>'
+                        + '<td style="padding:8px;text-align:center;white-space:nowrap;">'
+                        + '<button class="btn btn-primary btn-sm" onclick="NW.doLoadFromSheet(\'' + item.fileId + '\');Swal.close();">開く</button> '
+                        + '<button class="btn btn-outline btn-sm" style="color:#ea4335;border-color:#ea4335;" onclick="NW.doDeleteFromSheet(' + item.rowIndex + ',\'' + item.fileId + '\');Swal.close();">削除</button>'
+                        + '</td></tr>';
+                });
+                html += '</tbody></table></div>';
+                Swal.fire({
+                    title: '保存済み学級通信',
+                    html: html,
+                    width: 700,
+                    showConfirmButton: false,
+                    showCloseButton: true
+                });
+            })
+            .withFailureHandler(function(e) { showToast('error', '通信エラー: ' + e.message); })
+            .getNewsletterSaveList();
+    };
+
+    NW.doLoadFromSheet = function(fileId) {
+        showToast('info', '読み込み中...');
+        google.script.run
+            .withSuccessHandler(function(res) {
+                if (!res.success) { showToast('error', '読込失敗: ' + res.error); return; }
+                var data = res.data;
+                NW.blocks = data.blocks || [];
+                NW.nextId = data.nextId || 1;
+                if (data.mondayStr) {
+                    NW.mondayStr = data.mondayStr;
+                    document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+                }
+                if (data.scheduleData) NW.scheduleData = data.scheduleData;
+                NW.render();
+                showToast('success', '読み込みました');
+            })
+            .withFailureHandler(function(e) { showToast('error', '通信エラー: ' + e.message); })
+            .loadNewsletterData(fileId);
+    };
+
+    NW.doDeleteFromSheet = function(rowIndex, fileId) {
+        Swal.fire({
+            title: '削除確認',
+            text: 'この学級通信を削除しますか？',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '削除',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#ea4335'
+        }).then(function(result) {
+            if (!result.isConfirmed) return;
+            google.script.run
+                .withSuccessHandler(function(res) {
+                    if (res.success) {
+                        showToast('success', '削除しました');
+                        NW.openFromSheet();
+                    } else {
+                        showToast('error', '削除失敗: ' + res.error);
+                    }
+                })
+                .withFailureHandler(function(e) { showToast('error', '通信エラー: ' + e.message); })
+                .deleteNewsletterData(rowIndex, fileId);
+        });
+    };
+
     // ---- Load schedule data from backend ----
     NW.loadScheduleData = function() {
         var mondayStr = NW.mondayStr || STATE.mondayStr;
@@ -1540,7 +1839,7 @@
         if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
         var page = document.getElementById('nwEditorPage');
         var clone = page.cloneNode(true);
-        clone.querySelectorAll('.nw-block-handle,.nw-block-actions,.nw-schedule-options,.nw-empty-editor,.nw-image-placeholder').forEach(function(el) { el.remove(); });
+        clone.querySelectorAll('.nw-block-handle,.nw-block-actions,.nw-schedule-options,.nw-empty-editor,.nw-image-placeholder,.nw-gallery-add,.nw-gallery-remove').forEach(function(el) { el.remove(); });
         clone.querySelectorAll('.nw-block').forEach(function(el) { el.style.border = 'none'; el.style.paddingLeft = '0'; });
         var iframe = document.createElement('iframe');
         iframe.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:210mm;height:297mm;';
@@ -1557,9 +1856,10 @@
             + '.nw-float-wrapper{display:flex;gap:12px;align-items:flex-start;}'
             + '.nw-float-wrapper.nw-float-right{flex-direction:row-reverse;}'
             + '.nw-float-img-side{flex-shrink:0;}.nw-float-img-side img{width:100%;}'
-            + '.nw-float-text-side{flex:1;min-width:0;line-height:1.7;}'
+            + '.nw-float-text-side{flex:1;min-width:0;line-height:1.7;text-align:left;}'
+            + '.nw-gallery-grid{display:grid;gap:8px;}.nw-gallery-cell img{width:100%;display:block;}.nw-gallery-caption{font-size:10px;text-align:center;padding:2px;}'
             + '</style>'
-            + '<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap" rel="stylesheet">'
+            + '<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap" rel="stylesheet">'
             + '</head><body>' + clone.innerHTML + '</body></html>');
         doc.close();
         iframe.onload = function() {

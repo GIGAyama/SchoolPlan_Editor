@@ -5,6 +5,7 @@
 // --- シート名 ---
 const SHEET_NAME_DATABASE = "データベース";
 const SHEET_NAME_NEWSLETTER = "学級通信";
+const SHEET_NAME_NEWSLETTER_DATA = "学級通信データ";
 const SHEET_NAME_UNIT_MASTER = "単元マスタ";
 const SHEET_NAME_LOG = "ログ";
 const SHEET_NAME_TASK = "タスク";

@@ -538,6 +538,115 @@ function postNewsletterToClassroomFromWeb(mondayDateStr, customMessage) {
 }
 
 // ===================================================
+// ===== 学級通信データ 保存/読込 API =====
+// ===================================================
+
+/**
+ * 学級通信データ保存用フォルダを取得（なければ作成）
+ */
+function getOrCreateNwFolder_() {
+  const folderName = '学級通信データ';
+  const iter = DriveApp.getFoldersByName(folderName);
+  if (iter.hasNext()) return iter.next();
+  return DriveApp.createFolder(folderName);
+}
+
+/**
+ * [Web API] 学級通信のブロックデータをDrive+シートに保存します。
+ * @param {string} title タイトル
+ * @param {string} mondayStr 対象週
+ * @param {string} jsonString ブロックデータJSON
+ * @returns {Object} { success, message }
+ */
+function saveNewsletterData(title, mondayStr, jsonString) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
+    if (!sheet) throw new Error(`「${SHEET_NAME_NEWSLETTER_DATA}」シートが見つかりません`);
+
+    const folder = getOrCreateNwFolder_();
+    const fileName = 'nw_' + new Date().getTime() + '.json';
+    const file = folder.createFile(fileName, jsonString, 'application/json');
+
+    sheet.appendRow([
+      title || '無題',
+      mondayStr || '',
+      new Date(),
+      file.getId()
+    ]);
+
+    logInfo(`学級通信保存: ${title} (${mondayStr})`);
+    return { success: true, message: '保存しました' };
+  } catch (e) {
+    logError('saveNewsletterData', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Web API] 保存済み学級通信の一覧を取得します。
+ * @returns {Object} { success, list: [{rowIndex, title, mondayStr, savedAt, fileId}] }
+ */
+function getNewsletterSaveList() {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, list: [] };
+
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
+    const list = data.map(function(row, i) {
+      return {
+        rowIndex: i + 2,
+        title: row[0] || '無題',
+        mondayStr: row[1] || '',
+        savedAt: row[2] ? Utilities.formatDate(new Date(row[2]), 'JST', 'yyyy/MM/dd HH:mm') : '',
+        fileId: row[3] || ''
+      };
+    }).reverse();
+
+    return { success: true, list: list };
+  } catch (e) {
+    logError('getNewsletterSaveList', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Web API] 保存済み学級通信のデータを読み込みます。
+ * @param {string} fileId Google DriveのファイルID
+ * @returns {Object} { success, data: {blocks, nextId, mondayStr} }
+ */
+function loadNewsletterData(fileId) {
+  try {
+    const file = DriveApp.getFileById(fileId);
+    const json = file.getBlob().getDataAsString();
+    return { success: true, data: JSON.parse(json) };
+  } catch (e) {
+    logError('loadNewsletterData', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Web API] 保存済み学級通信を削除します。
+ * @param {number} rowIndex シートの行番号
+ * @param {string} fileId Google DriveのファイルID
+ * @returns {Object} { success }
+ */
+function deleteNewsletterData(rowIndex, fileId) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
+    if (sheet && rowIndex >= 2) sheet.deleteRow(rowIndex);
+    try { DriveApp.getFileById(fileId).setTrashed(true); } catch(ignore) {}
+    return { success: true };
+  } catch (e) {
+    logError('deleteNewsletterData', e);
+    return { success: false, error: e.message };
+  }
+}
+
+// ===================================================
 // ===== 固定時間割エディタ API (Phase 4 Step 1-2) =====
 // ===================================================
 
