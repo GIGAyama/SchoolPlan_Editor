@@ -943,7 +943,7 @@
                     if (el) el.textContent = settings.courseName || '未設定';
                 }
             })
-            .getSettingsForDashboard();
+            .getAppSettings();
     }
 
     // ===== PDF出力 =====
@@ -988,6 +988,14 @@
         if (NW.mondayStr) {
             document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
         }
+        // Event delegation: click to select/deselect blocks
+        document.getElementById('nwEditorPage').addEventListener('click', function(e) {
+            var blockEl = e.target.closest('.nw-block');
+            document.querySelectorAll('.nw-block.nw-block-selected').forEach(function(el) {
+                if (el !== blockEl) el.classList.remove('nw-block-selected');
+            });
+            if (blockEl) blockEl.classList.add('nw-block-selected');
+        });
         NW.initialized = true;
     };
 
@@ -1025,6 +1033,7 @@
                 block.width = data.width || 50;
                 block.float = data.float || 'none';
                 block.wrapText = data.wrapText || '';
+                block.wrapAlign = data.wrapAlign || 'left';
                 break;
             case 'schedule':
                 block.weekData = data.weekData || null;
@@ -1152,7 +1161,16 @@
             [25,30,40,50,60,75,100].forEach(function(w) {
                 imgFmt += '<option value="' + w + '"' + (w === block.width ? ' selected' : '') + '>' + w + '%</option>';
             });
-            imgFmt += '</select></div><div class="nw-act-sep"></div>';
+            imgFmt += '</select></div>';
+            // Text alignment buttons for wrap text (only when float is active)
+            if (block.float !== 'none') {
+                imgFmt += '<div class="nw-fmt-toolbar">'
+                    + '<button title="左揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'left\')" class="' + (block.wrapAlign === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
+                    + '<button title="中央" onclick="NW.setWrapAlign(\'' + block.id + '\',\'center\')" class="' + (block.wrapAlign === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
+                    + '<button title="右揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'right\')" class="' + (block.wrapAlign === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+                    + '</div>';
+            }
+            imgFmt += '<div class="nw-act-sep"></div>';
             actions.insertAdjacentHTML('beforeend', imgFmt);
         }
 
@@ -1261,6 +1279,7 @@
                         var textSide = document.createElement('div');
                         textSide.className = 'nw-float-text-side';
                         textSide.contentEditable = 'true';
+                        textSide.style.textAlign = block.wrapAlign || 'left';
                         textSide.innerHTML = block.wrapText;
                         textSide.addEventListener('blur', function() { block.wrapText = textSide.innerHTML; });
                         floatDiv.appendChild(imgSide);
@@ -1294,7 +1313,7 @@
         return div;
     };
 
-    // ---- Schedule table rendering ----
+    // ---- Schedule table rendering (transposed: days=columns, periods=rows) ----
     NW.renderScheduleHTML = function(block) {
         var data = block.weekData || NW.scheduleData;
         if (!data || !data.days) {
@@ -1303,52 +1322,81 @@
         }
         var opts = block.options;
         var days = data.days.slice(0, 5);
-        var html = '<table><thead><tr><th style="width:60px;">曜日</th>';
-        for (var p = 1; p <= 6; p++) html += '<th>' + p + '</th>';
-        if (opts.showRecess) html += '<th>中休</th><th>昼休</th>';
-        if (opts.showAfterSchool) html += '<th>放課後</th>';
-        if (opts.showHomework) html += '<th>宿題</th>';
-        if (opts.showItems) html += '<th>持ち物</th>';
+        var bid = block.id;
+
+        // Helper: render cell content based on displayMode
+        function cellContent(per) {
+            if (!per || !per.subject) return '';
+            var c = escHtml(per.subject);
+            if (opts.displayMode === 'subjectUnit' && per.unit) {
+                c += '<br><span class="nw-sched-sub">' + escHtml(per.unit) + '</span>';
+            } else if (opts.displayMode === 'full') {
+                if (per.unit) c += '<br><span class="nw-sched-sub">' + escHtml(per.unit) + '</span>';
+                if (per.content) c += '<br><span class="nw-sched-detail">' + escHtml(per.content) + '</span>';
+            }
+            return c;
+        }
+
+        // Header row: blank + day columns
+        var html = '<table><thead><tr><th class="nw-sched-label-col"></th>';
+        days.forEach(function(day) {
+            html += '<th>' + escHtml(day.dayLabel) + '<br><span class="nw-sched-date">' + escHtml(day.date.slice(5)) + '</span></th>';
+        });
         html += '</tr></thead><tbody>';
 
+        // Event row
+        html += '<tr><td class="nw-sched-label">行事</td>';
         days.forEach(function(day) {
-            var ev = day.event ? '<span style="color:#d32f2f;font-size:0.68rem;">【' + escHtml(day.event) + '】</span><br>' : '';
-            html += '<tr><td style="font-weight:600;white-space:nowrap;">' + ev + escHtml(day.dayLabel)
-                + '<br><span style="font-size:0.68rem;color:var(--text-sub);">' + escHtml(day.date.slice(5)) + '</span></td>';
-            day.periods.forEach(function(per) {
-                var cell = '';
-                if (per.subject) {
-                    cell = escHtml(per.subject);
-                    if (opts.displayMode === 'subjectUnit' && per.unit) {
-                        cell += '<br><span style="font-size:0.65rem;color:var(--text-sub);">' + escHtml(per.unit) + '</span>';
-                    } else if (opts.displayMode === 'full') {
-                        if (per.unit) cell += '<br><span style="font-size:0.65rem;color:var(--text-sub);">' + escHtml(per.unit) + '</span>';
-                        if (per.content) cell += '<br><span style="font-size:0.6rem;color:var(--text-hint);">' + escHtml(per.content) + '</span>';
-                    }
-                }
-                html += '<td>' + cell + '</td>';
-            });
-            if (opts.showRecess) {
-                html += '<td style="font-size:0.7rem;">' + escHtml(day.recess1 || '') + '</td>';
-                html += '<td style="font-size:0.7rem;">' + escHtml(day.recess2 || '') + '</td>';
-            }
-            if (opts.showAfterSchool) html += '<td style="font-size:0.7rem;">' + escHtml(day.afterschool || '') + '</td>';
-            if (opts.showHomework) html += '<td style="font-size:0.7rem;">' + escHtml(day.homework || '') + '</td>';
-            if (opts.showItems) html += '<td style="font-size:0.7rem;">' + escHtml(day.items || '') + '</td>';
-            html += '</tr>';
+            var ev = day.event ? '<span class="nw-sched-event">' + escHtml(day.event) + '</span>' : '';
+            html += '<td>' + ev + '</td>';
         });
+        html += '</tr>';
+
+        // Period rows (1-6)
+        for (var p = 0; p < 6; p++) {
+            html += '<tr><td class="nw-sched-label">' + (p + 1) + '校時</td>';
+            days.forEach(function(day) {
+                html += '<td>' + cellContent(day.periods[p]) + '</td>';
+            });
+            html += '</tr>';
+        }
+
+        // Optional rows
+        if (opts.showRecess) {
+            html += '<tr><td class="nw-sched-label">中休み</td>';
+            days.forEach(function(day) { html += '<td class="nw-sched-small">' + escHtml(day.recess1 || '') + '</td>'; });
+            html += '</tr><tr><td class="nw-sched-label">昼休み</td>';
+            days.forEach(function(day) { html += '<td class="nw-sched-small">' + escHtml(day.recess2 || '') + '</td>'; });
+            html += '</tr>';
+        }
+        if (opts.showAfterSchool) {
+            html += '<tr><td class="nw-sched-label">放課後</td>';
+            days.forEach(function(day) { html += '<td class="nw-sched-small">' + escHtml(day.afterschool || '') + '</td>'; });
+            html += '</tr>';
+        }
+        if (opts.showHomework) {
+            html += '<tr><td class="nw-sched-label">宿題</td>';
+            days.forEach(function(day) { html += '<td class="nw-sched-small">' + escHtml(day.homework || '') + '</td>'; });
+            html += '</tr>';
+        }
+        if (opts.showItems) {
+            html += '<tr><td class="nw-sched-label">持ち物</td>';
+            days.forEach(function(day) { html += '<td class="nw-sched-small">' + escHtml(day.items || '') + '</td>'; });
+            html += '</tr>';
+        }
+
         html += '</tbody></table>';
 
         // Options panel
         html += '<div class="nw-schedule-options">'
-            + '<label><input type="checkbox"' + (opts.showRecess ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + block.id + '\',\'showRecess\',this.checked)"> 休み時間</label>'
-            + '<label><input type="checkbox"' + (opts.showAfterSchool ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + block.id + '\',\'showAfterSchool\',this.checked)"> 放課後</label>'
-            + '<label><input type="checkbox"' + (opts.showHomework ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + block.id + '\',\'showHomework\',this.checked)"> 宿題</label>'
-            + '<label><input type="checkbox"' + (opts.showItems ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + block.id + '\',\'showItems\',this.checked)"> 持ち物</label>'
+            + '<label><input type="checkbox"' + (opts.showRecess ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showRecess\',this.checked)"> 休み時間</label>'
+            + '<label><input type="checkbox"' + (opts.showAfterSchool ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showAfterSchool\',this.checked)"> 放課後</label>'
+            + '<label><input type="checkbox"' + (opts.showHomework ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showHomework\',this.checked)"> 宿題</label>'
+            + '<label><input type="checkbox"' + (opts.showItems ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showItems\',this.checked)"> 持ち物</label>'
             + '<span style="color:var(--border);">|</span>'
-            + '<label><input type="radio" name="sm_' + block.id + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + block.id + '\',\'subject\')"> 教科のみ</label>'
-            + '<label><input type="radio" name="sm_' + block.id + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + block.id + '\',\'subjectUnit\')"> 教科+単元</label>'
-            + '<label><input type="radio" name="sm_' + block.id + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + block.id + '\',\'full\')"> 詳細</label>'
+            + '<label><input type="radio" name="sm_' + bid + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subject\')"> 教科のみ</label>'
+            + '<label><input type="radio" name="sm_' + bid + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subjectUnit\')"> 教科+単元</label>'
+            + '<label><input type="radio" name="sm_' + bid + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'full\')"> 詳細</label>'
             + '</div>';
         return html;
     };
@@ -1392,6 +1440,22 @@
         NW.saveEditable();
         block.float = val;
         NW.render();
+    };
+
+    NW.setWrapAlign = function(id, align) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        block.wrapAlign = align;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-float-text-side');
+        if (el) el.style.textAlign = align;
+        // Update active state of buttons
+        var acts = document.querySelector('[data-block-id="' + id + '"] .nw-block-actions');
+        if (acts) {
+            acts.querySelectorAll('.nw-fmt-toolbar:nth-child(2) button').forEach(function(btn) { btn.classList.remove('nw-active'); });
+            var titles = { left: '左揃え', center: '中央', right: '右揃え' };
+            var activeBtn = acts.querySelector('.nw-fmt-toolbar:nth-child(2) button[title="' + titles[align] + '"]');
+            if (activeBtn) activeBtn.classList.add('nw-active');
+        }
     };
 
     NW.setImageWidth = function(id, w) {

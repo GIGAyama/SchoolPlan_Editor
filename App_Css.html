@@ -799,25 +799,29 @@
         opacity: 1;
     }
 
-    /* --- Block action buttons --- */
+    /* --- Block action buttons (click-to-select) --- */
     .nw-block-actions {
         position: absolute;
-        right: 4px;
-        top: 2px;
+        right: 0;
+        bottom: 100%;
+        margin-bottom: 2px;
         display: flex;
         align-items: center;
         gap: 2px;
         opacity: 0;
+        pointer-events: none;
         transition: opacity 0.15s;
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 4px;
         padding: 2px;
         z-index: 10;
+        box-shadow: var(--shadow);
     }
 
-    .nw-block:hover .nw-block-actions {
+    .nw-block.nw-block-selected .nw-block-actions {
         opacity: 1;
+        pointer-events: auto;
     }
 
     .nw-block-actions button {
@@ -957,6 +961,7 @@
         min-width: 0;
         outline: none;
         line-height: 1.7;
+        text-align: left;
     }
 
     .nw-float-text-side:empty::before {
@@ -965,31 +970,78 @@
         pointer-events: none;
     }
 
-    /* --- Schedule block --- */
+    /* --- Schedule block (transposed: days=columns, periods=rows) --- */
     .nw-schedule-block table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 0.82rem;
+        font-size: 0.78rem;
+        table-layout: fixed;
     }
 
     .nw-schedule-block th {
         background: var(--primary);
         color: white;
-        padding: 5px 8px;
+        padding: 5px 4px;
         text-align: center;
         font-weight: 600;
         font-size: 0.78rem;
+        vertical-align: middle;
+    }
+
+    .nw-sched-label-col {
+        width: 52px;
+    }
+
+    .nw-sched-date {
+        font-size: 0.65rem;
+        font-weight: 400;
+        opacity: 0.85;
     }
 
     .nw-schedule-block td {
-        padding: 4px 6px;
+        padding: 4px 4px;
         border: 1px solid var(--border);
         text-align: center;
         font-size: 0.78rem;
+        vertical-align: top;
+        word-break: break-all;
+    }
+
+    .nw-sched-label {
+        background: var(--surface-3);
+        font-weight: 600;
+        font-size: 0.72rem;
+        color: var(--text-sub);
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    .nw-sched-event {
+        color: #d32f2f;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+
+    .nw-sched-sub {
+        font-size: 0.65rem;
+        color: var(--text-sub);
+    }
+
+    .nw-sched-detail {
+        font-size: 0.6rem;
+        color: var(--text-hint);
+    }
+
+    .nw-sched-small {
+        font-size: 0.7rem;
     }
 
     .nw-schedule-block tr:nth-child(even) td {
         background: var(--surface-2);
+    }
+
+    .nw-schedule-block tr:nth-child(even) .nw-sched-label {
+        background: var(--surface-3);
     }
 
     .nw-schedule-options {
