@@ -981,42 +981,15 @@
         { label: '手書き風', value: "'Yusei Magic', cursive" }
     ];
 
-    // WordArt gradient/effect presets
-    // bg: グラデーション背景(テキストクリップ), color: 単色, shadow: text-shadow,
-    // stroke: -webkit-text-stroke, transform: CSS transform, letterSpacing: 間隔
-    var NW_WORDART_PRESETS = [
-        { key: 'rainbow', label: 'レインボー', emoji: '🌈',
-          bg: 'linear-gradient(90deg,#ff0000,#ff8c00,#ffd700,#00c853,#2196f3,#9c27b0,#ff0000)',
-          shadow: '2px 2px 4px rgba(0,0,0,0.3)', stroke: '', transform: '', letterSpacing: '0.05em' },
-        { key: 'ocean',  label: '海', emoji: '🌊',
-          bg: 'linear-gradient(135deg,#003d5b,#0077b6,#00b4d8,#90e0ef,#caf0f8)',
-          shadow: '0 4px 12px rgba(0,119,182,0.5)', stroke: '', transform: '', letterSpacing: '0.03em' },
-        { key: 'sunset', label: '夕焼け', emoji: '🌅',
-          bg: 'linear-gradient(135deg,#9d0208,#d00000,#e85d04,#faa307,#ffba08)',
-          shadow: '3px 3px 8px rgba(157,2,8,0.4)', stroke: '', transform: '', letterSpacing: '0.03em' },
-        { key: 'gold',   label: 'ゴールド', emoji: '✨',
-          bg: 'linear-gradient(135deg,#6b4e00,#b8860b,#daa520,#ffd700,#fff8b0,#ffd700,#daa520,#b8860b)',
-          shadow: '2px 2px 4px rgba(0,0,0,0.4),0 0 20px rgba(255,215,0,0.3)', stroke: '', transform: '', letterSpacing: '0.04em' },
-        { key: 'neon',   label: 'ネオン', emoji: '💡',
-          bg: '', color: '#00ff88',
-          shadow: '0 0 7px #00ff88,0 0 10px #00ff88,0 0 21px #00ff88,0 0 42px #00c96a,0 0 82px #00c96a',
-          stroke: '', transform: '', letterSpacing: '0.06em' },
-        { key: 'metal',  label: 'メタリック', emoji: '⚔️',
-          bg: 'linear-gradient(180deg,#f5f5f5 0%,#c0c0c0 20%,#f5f5f5 40%,#808080 60%,#c0c0c0 80%,#f5f5f5 100%)',
-          shadow: '1px 1px 0 #666,2px 2px 0 #555,3px 3px 2px rgba(0,0,0,0.4)', stroke: '1px #888', transform: '', letterSpacing: '0.04em' },
-        { key: 'sakura', label: '桜', emoji: '🌸',
-          bg: 'linear-gradient(135deg,#ff2e7e,#ff6b9d,#ffaec9,#ff6b9d,#ff2e7e)',
-          shadow: '0 3px 10px rgba(255,107,157,0.5)', stroke: '', transform: '', letterSpacing: '0.03em' },
-        { key: 'retro3d', label: '3D', emoji: '🎮',
-          bg: '', color: '#ff6b35',
-          shadow: '1px 1px 0 #c0392b,2px 2px 0 #c0392b,3px 3px 0 #c0392b,4px 4px 0 #c0392b,5px 5px 0 #c0392b,6px 6px 12px rgba(0,0,0,0.4)',
-          stroke: '', transform: '', letterSpacing: '0.05em' },
-        { key: 'outline', label: 'アウトライン', emoji: '🔲',
-          bg: '', color: 'transparent',
-          shadow: '', stroke: '3px #1a73e8', transform: '', letterSpacing: '0.04em' },
-        { key: 'pop',    label: 'ポップ', emoji: '🎉',
-          bg: 'linear-gradient(135deg,#ff006e,#fb5607,#ffbe0b,#8338ec,#3a86ff)',
-          shadow: '3px 3px 0 rgba(0,0,0,0.3)', stroke: '', transform: 'rotate(-2deg)', letterSpacing: '0.06em' }
+    // WordArt: エフェクト自由組み合わせ式のデフォルト色リスト
+    var NW_WA_GRAD_PRESETS = [
+        { c1: '#ff0000', c2: '#0000ff', label: '赤→青' },
+        { c1: '#ff8c00', c2: '#ff006e', label: '橙→桃' },
+        { c1: '#ffd700', c2: '#b8860b', label: 'ゴールド' },
+        { c1: '#00c853', c2: '#0077b6', label: '緑→青' },
+        { c1: '#ff2e7e', c2: '#ffcce0', label: '桜' },
+        { c1: '#240046', c2: '#c77dff', label: '紫' },
+        { c1: '#ff0000', c2: '#9c27b0', label: '虹', extra: ',#ff8c00,#ffd700,#00c853,#2196f3' }
     ];
 
     var NW = {
@@ -1170,10 +1143,28 @@
                 break;
             case 'wordart':
                 block.content = data.content || 'ワードアート';
-                block.fontSize = data.fontSize || 40;
+                block.fontSize = data.fontSize || 48;
                 block.align = data.align || 'center';
                 block.fontFamily = data.fontFamily || '';
-                block.preset = data.preset || 'rainbow';
+                block.waColor = data.waColor || '#202124';
+                block.waGradient = data.waGradient || false;
+                block.waGradC1 = data.waGradC1 || '#ff0000';
+                block.waGradC2 = data.waGradC2 || '#0000ff';
+                block.waGradAngle = data.waGradAngle || 135;
+                block.waGradExtra = data.waGradExtra || '';
+                block.waStroke = data.waStroke || false;
+                block.waStrokeColor = data.waStrokeColor || '#1a73e8';
+                block.waStrokeWidth = data.waStrokeWidth || 3;
+                block.waShadow = data.waShadow || false;
+                block.waShadowColor = data.waShadowColor || '#888888';
+                block.waShadowX = data.waShadowX || 3;
+                block.waShadowY = data.waShadowY || 3;
+                block.waShadowBlur = data.waShadowBlur || 6;
+                block.wa3d = data.wa3d || false;
+                block.wa3dColor = data.wa3dColor || '#c0392b';
+                block.wa3dDepth = data.wa3dDepth || 5;
+                block.waBgDark = data.waBgDark || false;
+                block.waSpacing = data.waSpacing || 2;
                 break;
         }
         // Block decoration (all block types)
@@ -1329,32 +1320,32 @@
             actions.insertAdjacentHTML('beforeend', fmt);
         }
 
-        // WordArt toolbar
+        // WordArt toolbar: font/size/align + effect toggles + settings
         if (block.type === 'wordart') {
+            var bid = block.id;
             var waFmt = '<div class="nw-fmt-toolbar">'
-                + '<select onchange="NW.setWordArtProp(\'' + block.id + '\',\'fontFamily\',this.value)" title="フォント">';
+                + '<select onchange="NW.waSet(\'' + bid + '\',\'fontFamily\',this.value)" title="フォント">';
             waFmt += '<option value=""' + (!block.fontFamily ? ' selected' : '') + '>標準</option>';
             NW_FONTS.forEach(function(f) {
-                waFmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
+                waFmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + '>' + f.label + '</option>';
             });
             waFmt += '</select>'
-                + '<select onchange="NW.setWordArtProp(\'' + block.id + '\',\'fontSize\',this.value)" title="フォントサイズ">';
-            [24,28,32,36,40,48,56,64,72].forEach(function(s) {
-                waFmt += '<option value="' + s + '"' + (s === (block.fontSize || 40) ? ' selected' : '') + '>' + s + '</option>';
+                + '<select onchange="NW.waSet(\'' + bid + '\',\'fontSize\',this.value)" title="サイズ">';
+            [28,32,36,40,48,56,64,72,96].forEach(function(s) {
+                waFmt += '<option value="' + s + '"' + (s === (block.fontSize || 48) ? ' selected' : '') + '>' + s + '</option>';
             });
             waFmt += '</select>'
-                + '<select onchange="NW.setWordArtProp(\'' + block.id + '\',\'align\',this.value)" title="揃え">'
-                + '<option value="left"' + (block.align === 'left' ? ' selected' : '') + '>左</option>'
-                + '<option value="center"' + (!block.align || block.align === 'center' ? ' selected' : '') + '>中央</option>'
-                + '<option value="right"' + (block.align === 'right' ? ' selected' : '') + '>右</option>'
-                + '</select>'
-                + '<div class="nw-act-sep"></div>';
-            // Preset buttons
-            NW_WORDART_PRESETS.forEach(function(p) {
-                waFmt += '<button title="' + p.label + '" onclick="NW.setWordArtProp(\'' + block.id + '\',\'preset\',\'' + p.key + '\')" class="nw-wa-preset-btn' + (block.preset === p.key ? ' nw-active' : '') + '">' + p.emoji + '</button>';
-            });
-            waFmt += '<div class="nw-act-sep"></div>'
-                + '<button onclick="NW.editWordArt(\'' + block.id + '\')" title="テキストを編集"><span class="material-symbols-outlined">edit</span></button>'
+                + '<button title="左揃え" onclick="NW.waSet(\'' + bid + '\',\'align\',\'left\')" class="' + (block.align === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
+                + '<button title="中央" onclick="NW.waSet(\'' + bid + '\',\'align\',\'center\')" class="' + (block.align === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
+                + '<button title="右揃え" onclick="NW.waSet(\'' + bid + '\',\'align\',\'right\')" class="' + (block.align === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+                + '<div class="nw-act-sep"></div>'
+                + '<button title="グラデーション" onclick="NW.waToggle(\'' + bid + '\',\'waGradient\')" class="nw-wa-fx-btn' + (block.waGradient ? ' nw-active' : '') + '"><span class="material-symbols-outlined">gradient</span></button>'
+                + '<button title="アウトライン" onclick="NW.waToggle(\'' + bid + '\',\'waStroke\')" class="nw-wa-fx-btn' + (block.waStroke ? ' nw-active' : '') + '"><span class="material-symbols-outlined">border_color</span></button>'
+                + '<button title="影" onclick="NW.waToggle(\'' + bid + '\',\'waShadow\')" class="nw-wa-fx-btn' + (block.waShadow ? ' nw-active' : '') + '"><span class="material-symbols-outlined">blur_on</span></button>'
+                + '<button title="3D立体" onclick="NW.waToggle(\'' + bid + '\',\'wa3d\')" class="nw-wa-fx-btn' + (block.wa3d ? ' nw-active' : '') + '"><span class="material-symbols-outlined">view_in_ar</span></button>'
+                + '<div class="nw-act-sep"></div>'
+                + '<button onclick="NW.openWordArtSettings(\'' + bid + '\')" title="スタイル詳細設定"><span class="material-symbols-outlined">tune</span></button>'
+                + '<button onclick="NW.editWordArt(\'' + bid + '\')" title="テキスト編集"><span class="material-symbols-outlined">edit</span></button>'
                 + '</div><div class="nw-act-sep"></div>';
             actions.insertAdjacentHTML('beforeend', waFmt);
         }
@@ -1619,41 +1610,17 @@
 
             case 'wordart':
                 div.className = 'nw-wordart-block';
-                var waPreset = NW_WORDART_PRESETS.find(function(p) { return p.key === (block.preset || 'rainbow'); }) || NW_WORDART_PRESETS[0];
-                // ネオン等暗い背景が映えるプリセットには背景を追加
-                if (waPreset.key === 'neon') {
-                    div.style.background = '#1a1a2e';
-                    div.style.borderRadius = '8px';
-                    div.style.padding = '16px 8px';
-                }
+                if (block.waBgDark) { div.style.background = '#1a1a2e'; div.style.borderRadius = '8px'; div.style.padding = '16px 8px'; }
                 var waText = document.createElement('div');
                 waText.className = 'nw-wordart-text';
                 waText.textContent = block.content || 'ワードアート';
-                waText.style.fontSize = (block.fontSize || 40) + 'px';
+                waText.style.fontSize = (block.fontSize || 48) + 'px';
                 waText.style.textAlign = block.align || 'center';
                 waText.style.fontWeight = '900';
                 waText.style.lineHeight = '1.3';
                 if (block.fontFamily) waText.style.fontFamily = block.fontFamily;
-                if (waPreset.letterSpacing) waText.style.letterSpacing = waPreset.letterSpacing;
-                if (waPreset.transform) waText.style.transform = waPreset.transform;
-                // グラデーション背景クリップ or 単色
-                if (waPreset.bg) {
-                    waText.style.background = waPreset.bg;
-                    waText.style.backgroundSize = '200% auto';
-                    waText.style.webkitBackgroundClip = 'text';
-                    waText.style.backgroundClip = 'text';
-                    waText.style.webkitTextFillColor = 'transparent';
-                    waText.style.color = 'transparent';
-                } else if (waPreset.color) {
-                    waText.style.color = waPreset.color;
-                    if (waPreset.color === 'transparent' && waPreset.stroke) {
-                        waText.style.webkitTextFillColor = 'transparent';
-                    }
-                }
-                if (waPreset.shadow) waText.style.textShadow = waPreset.shadow;
-                if (waPreset.stroke) {
-                    waText.style.webkitTextStroke = waPreset.stroke;
-                }
+                if (block.waSpacing) waText.style.letterSpacing = block.waSpacing + 'px';
+                NW._applyWordArtFx(waText, block);
                 waText.style.cursor = 'pointer';
                 waText.title = 'クリックしてテキストを編集';
                 (function(bid) { waText.addEventListener('click', function() { NW.editWordArt(bid); }); })(block.id);
@@ -1969,7 +1936,63 @@
         });
     };
 
-    // ---- WordArt editor ----
+    // ---- WordArt editor (エフェクト自由組み合わせ式) ----
+    // エフェクト適用ヘルパー
+    NW._applyWordArtFx = function(el, b) {
+        var shadows = [];
+        // グラデーション
+        if (b.waGradient) {
+            var grad = 'linear-gradient(' + (b.waGradAngle || 135) + 'deg,' + (b.waGradC1 || '#ff0000') + (b.waGradExtra || '') + ',' + (b.waGradC2 || '#0000ff') + ')';
+            el.style.background = grad;
+            el.style.webkitBackgroundClip = 'text';
+            el.style.backgroundClip = 'text';
+            el.style.webkitTextFillColor = 'transparent';
+            el.style.color = 'transparent';
+        } else if (b.waStroke && !b.waGradient) {
+            // アウトラインのみの場合、塗りを透明に
+            el.style.webkitTextFillColor = 'transparent';
+            el.style.color = 'transparent';
+        } else {
+            el.style.color = b.waColor || '#202124';
+        }
+        // アウトライン
+        if (b.waStroke) {
+            el.style.webkitTextStroke = (b.waStrokeWidth || 3) + 'px ' + (b.waStrokeColor || '#1a73e8');
+        }
+        // 3D立体 (積み重ねtext-shadow)
+        if (b.wa3d) {
+            var d3c = b.wa3dColor || '#c0392b';
+            for (var d = 1; d <= (b.wa3dDepth || 5); d++) {
+                shadows.push(d + 'px ' + d + 'px 0 ' + d3c);
+            }
+            shadows.push((b.wa3dDepth || 5) + 1 + 'px ' + ((b.wa3dDepth || 5) + 1) + 'px 10px rgba(0,0,0,0.3)');
+        }
+        // 影
+        if (b.waShadow) {
+            shadows.push((b.waShadowX || 3) + 'px ' + (b.waShadowY || 3) + 'px ' + (b.waShadowBlur || 6) + 'px ' + (b.waShadowColor || '#888888'));
+        }
+        if (shadows.length) el.style.textShadow = shadows.join(',');
+    };
+
+    // ツールバー: プロパティ設定
+    NW.waSet = function(id, prop, value) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        if (prop === 'fontSize') value = parseInt(value, 10);
+        block[prop] = value;
+        NW.render();
+    };
+
+    // ツールバー: エフェクトON/OFFトグル
+    NW.waToggle = function(id, prop) {
+        var block = NW.blocks.find(function(b) { return b.id === id; });
+        if (!block) return;
+        NW.pushHistory();
+        block[prop] = !block[prop];
+        NW.render();
+    };
+
+    // テキスト編集
     NW.editWordArt = function(id) {
         var block = NW.blocks.find(function(b) { return b.id === id; });
         if (!block) return;
@@ -1978,24 +2001,165 @@
             input: 'text',
             inputValue: block.content || '',
             inputPlaceholder: 'テキストを入力...',
-            showCancelButton: true,
-            confirmButtonText: '確定',
-            cancelButtonText: 'キャンセル'
+            showCancelButton: true, confirmButtonText: '確定', cancelButtonText: 'キャンセル'
         }).then(function(result) {
-            if (result.isConfirmed) {
-                NW.pushHistory();
-                block.content = result.value;
-                NW.render();
-            }
+            if (result.isConfirmed) { NW.pushHistory(); block.content = result.value; NW.render(); }
         });
     };
 
-    NW.setWordArtProp = function(id, prop, value) {
-        var block = NW.blocks.find(function(b) { return b.id === id; });
-        if (!block) return;
-        if (prop === 'fontSize') value = parseInt(value, 10);
-        block[prop] = value;
-        NW.render();
+    // 詳細設定ダイアログ
+    NW.openWordArtSettings = function(id) {
+        var b = NW.blocks.find(function(bl) { return bl.id === id; });
+        if (!b) return;
+        // 旧preset形式を変換
+        if (b.preset && b.waGradient === undefined) {
+            b.waColor = '#202124'; b.waGradient = false; b.waStroke = false;
+            b.waShadow = false; b.wa3d = false; b.waBgDark = false; b.waSpacing = 2;
+            b.waGradC1 = '#ff0000'; b.waGradC2 = '#0000ff'; b.waGradAngle = 135;
+            b.waGradExtra = ''; b.waStrokeColor = '#1a73e8'; b.waStrokeWidth = 3;
+            b.waShadowColor = '#888888'; b.waShadowX = 3; b.waShadowY = 3; b.waShadowBlur = 6;
+            b.wa3dColor = '#c0392b'; b.wa3dDepth = 5;
+            delete b.preset;
+        }
+        var html = '<div style="text-align:left;">'
+            + '<div id="waLivePrev" style="background:' + (b.waBgDark ? '#1a1a2e' : '#f8f9fa') + ';border-radius:8px;padding:20px 12px;margin-bottom:12px;text-align:center;overflow:hidden;min-height:60px;">'
+            + '<div id="waLiveText" style="font-weight:900;line-height:1.3;">プレビュー</div></div>'
+            // 文字色・字間
+            + '<div style="display:flex;gap:10px;margin-bottom:10px;align-items:end;">'
+            + '<div style="flex:1;"><label style="font-size:0.8rem;font-weight:600;display:block;">文字色</label>'
+            + '<input type="color" id="waColor" value="' + (b.waColor || '#202124') + '" style="width:100%;height:32px;border:1px solid #dadce0;border-radius:4px;cursor:pointer;"></div>'
+            + '<div style="flex:1;"><label style="font-size:0.8rem;font-weight:600;display:block;">字間 <span id="waSpVal">' + (b.waSpacing || 0) + '</span>px</label>'
+            + '<input type="range" id="waSpacing" min="0" max="20" value="' + (b.waSpacing || 0) + '" style="width:100%;"></div></div>'
+            // グラデーション
+            + '<div class="wa-s-group"><label><input type="checkbox" id="waGradOn"' + (b.waGradient ? ' checked' : '') + '> <strong>グラデーション</strong></label>'
+            + '<div id="waGradP" style="' + (b.waGradient ? '' : 'display:none;') + 'padding:8px;background:#f1f3f4;border-radius:4px;margin-top:4px;">'
+            + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+            + '<input type="color" id="waGC1" value="' + (b.waGradC1 || '#ff0000') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;cursor:pointer;">'
+            + '<span style="font-size:1.2rem;">→</span>'
+            + '<input type="color" id="waGC2" value="' + (b.waGradC2 || '#0000ff') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;cursor:pointer;">'
+            + '<select id="waGA" style="padding:4px;border:1px solid #dadce0;border-radius:4px;">';
+        [0,45,90,135,180,225,270,315].forEach(function(a) {
+            html += '<option value="' + a + '"' + ((b.waGradAngle || 135) === a ? ' selected' : '') + '>' + a + '°</option>';
+        });
+        html += '</select>'
+            + '<label style="font-size:0.75rem;"><input type="checkbox" id="waGMulti"' + (b.waGradExtra ? ' checked' : '') + '> 多色</label>'
+            + '</div></div></div>'
+            // アウトライン
+            + '<div class="wa-s-group"><label><input type="checkbox" id="waStrokeOn"' + (b.waStroke ? ' checked' : '') + '> <strong>アウトライン</strong></label>'
+            + '<div id="waStrokeP" style="' + (b.waStroke ? '' : 'display:none;') + 'padding:8px;background:#f1f3f4;border-radius:4px;margin-top:4px;">'
+            + '<div style="display:flex;gap:8px;align-items:center;">'
+            + '<input type="color" id="waSC" value="' + (b.waStrokeColor || '#1a73e8') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;">'
+            + '<span style="font-size:0.8rem;">太さ <span id="waSwVal">' + (b.waStrokeWidth || 3) + '</span>px</span>'
+            + '<input type="range" id="waSW" min="1" max="8" value="' + (b.waStrokeWidth || 3) + '" style="flex:1;"></div></div></div>'
+            // 影
+            + '<div class="wa-s-group"><label><input type="checkbox" id="waShadowOn"' + (b.waShadow ? ' checked' : '') + '> <strong>影</strong></label>'
+            + '<div id="waShadowP" style="' + (b.waShadow ? '' : 'display:none;') + 'padding:8px;background:#f1f3f4;border-radius:4px;margin-top:4px;">'
+            + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+            + '<input type="color" id="waShC" value="' + (b.waShadowColor || '#888888') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;">'
+            + '<span style="font-size:0.75rem;">X<span id="waShXv">' + (b.waShadowX || 3) + '</span></span><input type="range" id="waShX" min="0" max="20" value="' + (b.waShadowX || 3) + '" style="width:60px;">'
+            + '<span style="font-size:0.75rem;">Y<span id="waShYv">' + (b.waShadowY || 3) + '</span></span><input type="range" id="waShY" min="0" max="20" value="' + (b.waShadowY || 3) + '" style="width:60px;">'
+            + '<span style="font-size:0.75rem;">ぼかし<span id="waShBv">' + (b.waShadowBlur || 6) + '</span></span><input type="range" id="waShB" min="0" max="30" value="' + (b.waShadowBlur || 6) + '" style="width:60px;">'
+            + '</div></div></div>'
+            // 3D
+            + '<div class="wa-s-group"><label><input type="checkbox" id="wa3dOn"' + (b.wa3d ? ' checked' : '') + '> <strong>3D立体</strong></label>'
+            + '<div id="wa3dP" style="' + (b.wa3d ? '' : 'display:none;') + 'padding:8px;background:#f1f3f4;border-radius:4px;margin-top:4px;">'
+            + '<div style="display:flex;gap:8px;align-items:center;">'
+            + '<input type="color" id="wa3dC" value="' + (b.wa3dColor || '#c0392b') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;">'
+            + '<span style="font-size:0.8rem;">奥行き <span id="wa3dDv">' + (b.wa3dDepth || 5) + '</span></span>'
+            + '<input type="range" id="wa3dD" min="1" max="12" value="' + (b.wa3dDepth || 5) + '" style="flex:1;"></div></div></div>'
+            // 暗背景
+            + '<div class="wa-s-group"><label><input type="checkbox" id="waBgDark"' + (b.waBgDark ? ' checked' : '') + '> <strong>暗い背景</strong>（ネオン・発光向け）</label></div>'
+            + '</div>';
+
+        Swal.fire({
+            title: 'ワードアート スタイル設定',
+            html: html,
+            width: 520,
+            showCancelButton: true, confirmButtonText: '適用', cancelButtonText: 'キャンセル',
+            didOpen: function() {
+                var prevEl = document.getElementById('waLiveText');
+                prevEl.textContent = b.content || 'プレビュー';
+                prevEl.style.fontSize = (b.fontSize || 48) + 'px';
+                if (b.fontFamily) prevEl.style.fontFamily = b.fontFamily;
+                function refreshPrev() {
+                    var tmp = {
+                        waColor: document.getElementById('waColor').value,
+                        waGradient: document.getElementById('waGradOn').checked,
+                        waGradC1: document.getElementById('waGC1').value,
+                        waGradC2: document.getElementById('waGC2').value,
+                        waGradAngle: parseInt(document.getElementById('waGA').value, 10),
+                        waGradExtra: document.getElementById('waGMulti').checked ? ',#ff8c00,#ffd700,#00c853,#2196f3' : '',
+                        waStroke: document.getElementById('waStrokeOn').checked,
+                        waStrokeColor: document.getElementById('waSC').value,
+                        waStrokeWidth: parseInt(document.getElementById('waSW').value, 10),
+                        waShadow: document.getElementById('waShadowOn').checked,
+                        waShadowColor: document.getElementById('waShC').value,
+                        waShadowX: parseInt(document.getElementById('waShX').value, 10),
+                        waShadowY: parseInt(document.getElementById('waShY').value, 10),
+                        waShadowBlur: parseInt(document.getElementById('waShB').value, 10),
+                        wa3d: document.getElementById('wa3dOn').checked,
+                        wa3dColor: document.getElementById('wa3dC').value,
+                        wa3dDepth: parseInt(document.getElementById('wa3dD').value, 10)
+                    };
+                    // Reset styles
+                    prevEl.style.cssText = 'font-weight:900;line-height:1.3;font-size:' + (b.fontSize || 48) + 'px;' + (b.fontFamily ? 'font-family:' + b.fontFamily + ';' : '');
+                    prevEl.style.letterSpacing = document.getElementById('waSpacing').value + 'px';
+                    NW._applyWordArtFx(prevEl, tmp);
+                    document.getElementById('waLivePrev').style.background = document.getElementById('waBgDark').checked ? '#1a1a2e' : '#f8f9fa';
+                    // Update value labels
+                    document.getElementById('waSpVal').textContent = document.getElementById('waSpacing').value;
+                    document.getElementById('waSwVal').textContent = document.getElementById('waSW').value;
+                    document.getElementById('waShXv').textContent = document.getElementById('waShX').value;
+                    document.getElementById('waShYv').textContent = document.getElementById('waShY').value;
+                    document.getElementById('waShBv').textContent = document.getElementById('waShB').value;
+                    document.getElementById('wa3dDv').textContent = document.getElementById('wa3dD').value;
+                }
+                // Toggle panels
+                ['waGradOn:waGradP','waStrokeOn:waStrokeP','waShadowOn:waShadowP','wa3dOn:wa3dP'].forEach(function(pair) {
+                    var parts = pair.split(':');
+                    document.getElementById(parts[0]).addEventListener('change', function() {
+                        document.getElementById(parts[1]).style.display = this.checked ? '' : 'none';
+                        refreshPrev();
+                    });
+                });
+                // Bind all inputs to live preview
+                document.querySelectorAll('#waColor,#waSpacing,#waGC1,#waGC2,#waGA,#waGMulti,#waSC,#waSW,#waShC,#waShX,#waShY,#waShB,#wa3dC,#wa3dD,#waBgDark').forEach(function(el) {
+                    el.addEventListener('input', refreshPrev);
+                    el.addEventListener('change', refreshPrev);
+                });
+                refreshPrev();
+            },
+            preConfirm: function() {
+                return {
+                    waColor: document.getElementById('waColor').value,
+                    waSpacing: parseInt(document.getElementById('waSpacing').value, 10),
+                    waGradient: document.getElementById('waGradOn').checked,
+                    waGradC1: document.getElementById('waGC1').value,
+                    waGradC2: document.getElementById('waGC2').value,
+                    waGradAngle: parseInt(document.getElementById('waGA').value, 10),
+                    waGradExtra: document.getElementById('waGMulti').checked ? ',#ff8c00,#ffd700,#00c853,#2196f3' : '',
+                    waStroke: document.getElementById('waStrokeOn').checked,
+                    waStrokeColor: document.getElementById('waSC').value,
+                    waStrokeWidth: parseInt(document.getElementById('waSW').value, 10),
+                    waShadow: document.getElementById('waShadowOn').checked,
+                    waShadowColor: document.getElementById('waShC').value,
+                    waShadowX: parseInt(document.getElementById('waShX').value, 10),
+                    waShadowY: parseInt(document.getElementById('waShY').value, 10),
+                    waShadowBlur: parseInt(document.getElementById('waShB').value, 10),
+                    wa3d: document.getElementById('wa3dOn').checked,
+                    wa3dColor: document.getElementById('wa3dC').value,
+                    wa3dDepth: parseInt(document.getElementById('wa3dD').value, 10),
+                    waBgDark: document.getElementById('waBgDark').checked
+                };
+            }
+        }).then(function(result) {
+            if (!result.isConfirmed) return;
+            NW.pushHistory();
+            var v = result.value;
+            for (var key in v) b[key] = v[key];
+            delete b.preset; // 旧形式プロパティを削除
+            NW.render();
+        });
     };
 
     // ---- Block decoration ----
@@ -2470,7 +2634,107 @@
         };
     };
 
-    // ---- Classroom post (ブロックエディタのHTMLを直接投稿) ----
+    // ---- Google Docs互換HTML生成 (Classroom投稿用) ----
+    // DOM cloneではなく、ブロックデータからシンプルなHTML構造を直接生成
+    NW.buildClassroomHTML = function() {
+        NW.saveEditable();
+        var body = '';
+        // A4 printable area ≈ 174mm ≈ 550px
+        var pageW = 550;
+        NW.blocks.forEach(function(block) {
+            // ブロックデコレーション: 枠線・背景
+            var bdrS = '';
+            if (block.borderColor) bdrS += 'border:2px solid ' + block.borderColor + ';';
+            if (block.blockBgColor) bdrS += 'background-color:' + block.blockBgColor + ';';
+            if (block.borderRadius) bdrS += 'border-radius:' + block.borderRadius + 'px;';
+            if (bdrS) bdrS += 'padding:4px;margin:2px 0;';
+            var wrapOpen = bdrS ? '<div style="' + bdrS + '">' : '';
+            var wrapClose = bdrS ? '</div>' : '';
+
+            switch (block.type) {
+                case 'heading':
+                    var hs = 'font-size:' + block.fontSize + 'px;text-align:' + (block.align || 'center') + ';margin:4px 0;';
+                    if (block.bold) hs += 'font-weight:bold;';
+                    if (block.color) hs += 'color:' + block.color + ';';
+                    if (block.bgColor) hs += 'background-color:' + block.bgColor + ';';
+                    if (block.fontFamily) hs += 'font-family:' + block.fontFamily + ';';
+                    body += wrapOpen + '<p style="' + hs + '">' + (block.content || '') + '</p>' + wrapClose;
+                    break;
+                case 'text':
+                    var ts = 'font-size:' + block.fontSize + 'px;text-align:' + (block.align || 'left') + ';margin:2px 0;line-height:1.7;';
+                    if (block.bold) ts += 'font-weight:bold;';
+                    if (block.color) ts += 'color:' + block.color + ';';
+                    if (block.bgColor) ts += 'background-color:' + block.bgColor + ';';
+                    if (block.fontFamily) ts += 'font-family:' + block.fontFamily + ';';
+                    body += wrapOpen + '<p style="' + ts + '">' + (block.content || '&nbsp;') + '</p>' + wrapClose;
+                    break;
+                case 'image':
+                    if (!block.src) break;
+                    var imgW = Math.round(pageW * (block.width || 50) / 100);
+                    if (block.float !== 'none' && block.wrapText) {
+                        // 回り込み → table化
+                        var imgCell = '<td style="width:' + imgW + 'px;vertical-align:top;padding:4px;"><img src="' + block.src + '" width="' + imgW + '"></td>';
+                        var txtCell = '<td style="vertical-align:top;padding:4px;font-size:12px;line-height:1.7;">' + (block.wrapText || '') + '</td>';
+                        body += wrapOpen + '<table style="width:100%;border:none;"><tr>'
+                            + (block.float === 'right' ? txtCell + imgCell : imgCell + txtCell)
+                            + '</tr></table>' + wrapClose;
+                    } else {
+                        body += wrapOpen + '<p style="text-align:center;margin:4px 0;"><img src="' + block.src + '" width="' + imgW + '"></p>' + wrapClose;
+                    }
+                    break;
+                case 'gallery':
+                    var cols = block.columns || 2;
+                    var gw = Math.round((pageW - cols * 8) / cols);
+                    body += wrapOpen + '<table style="width:100%;border:none;border-collapse:collapse;"><tr>';
+                    (block.images || []).forEach(function(img, i) {
+                        if (img.src) {
+                            body += '<td style="width:' + Math.round(100 / cols) + '%;text-align:center;vertical-align:top;padding:4px;border:none;">'
+                                + '<img src="' + img.src + '" width="' + gw + '" style="display:block;margin:0 auto;">'
+                                + (img.caption ? '<p style="font-size:9px;text-align:center;margin:2px 0;">' + img.caption + '</p>' : '')
+                                + '</td>';
+                            if ((i + 1) % cols === 0 && i < block.images.length - 1) body += '</tr><tr>';
+                        }
+                    });
+                    body += '</tr></table>' + wrapClose;
+                    break;
+                case 'schedule':
+                    body += wrapOpen + NW.renderScheduleHTML(block) + wrapClose;
+                    break;
+                case 'qrcode':
+                    if (block.url) {
+                        body += wrapOpen + '<p style="text-align:center;margin:4px 0;"><img src="https://api.qrserver.com/v1/create-qr-code/?size='
+                            + (block.qrSize || 200) + 'x' + (block.qrSize || 200)
+                            + '&data=' + encodeURIComponent(block.url) + '" width="' + (block.qrSize || 200) + '"></p>';
+                        if (block.label) body += '<p style="text-align:center;font-size:10px;margin:2px 0;">' + block.label + '</p>';
+                        body += wrapClose;
+                    }
+                    break;
+                case 'divider':
+                    body += '<hr style="border:none;border-top:1px solid #dadce0;margin:6px 0;">';
+                    break;
+                case 'wordart':
+                    // Google DocsはCSSグラデーション非対応 → 太字＋色で代替表現
+                    var wc = block.waColor || '#202124';
+                    if (block.waGradient) wc = block.waGradC1 || '#ff0000';
+                    var ws = 'font-size:' + (block.fontSize || 48) + 'px;text-align:' + (block.align || 'center')
+                        + ';font-weight:900;color:' + wc + ';margin:4px 0;';
+                    if (block.fontFamily) ws += 'font-family:' + block.fontFamily + ';';
+                    if (block.waSpacing) ws += 'letter-spacing:' + block.waSpacing + 'px;';
+                    body += wrapOpen + '<p style="' + ws + '">' + escHtml(block.content || '') + '</p>' + wrapClose;
+                    break;
+            }
+        });
+
+        return '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            + '<style>body{font-family:sans-serif;font-size:12px;color:#202124;margin:8px;padding:0;}'
+            + 'p{margin:4px 0;}table{width:100%;border-collapse:collapse;}'
+            + 'th{background-color:#1a73e8;color:#ffffff;padding:4px 6px;font-size:11px;text-align:center;}'
+            + 'td{padding:3px 5px;border:1px solid #dadce0;text-align:center;font-size:11px;}'
+            + 'img{max-width:100%;}</style></head>'
+            + '<body>' + body + '</body></html>';
+    };
+
+    // ---- Classroom post (Google Docs互換HTMLで投稿) ----
     NW.postToClassroom = function() {
         if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
         Swal.fire({
@@ -2489,7 +2753,7 @@
         }).then(function(result) {
             if (!result.isConfirmed) return;
             showToast('info', 'PDFを生成してClassroomに投稿しています...');
-            var htmlContent = NW.buildPrintHTML();
+            var htmlContent = NW.buildClassroomHTML();
             google.script.run
                 .withSuccessHandler(function(res) {
                     if (!res) { showToast('error', '投稿失敗: サーバーから応答がありません'); return; }

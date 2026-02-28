@@ -1209,17 +1209,16 @@
         line-height: 1.3;
         word-break: break-word;
         padding: 4px 0;
-        transition: transform 0.15s, opacity 0.15s;
+        transition: opacity 0.15s;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }
 
     .nw-wordart-text:hover {
         opacity: 0.88;
-        transform: scale(1.01);
     }
 
-    /* WordArt palette button: gradient accent */
+    /* WordArt palette button */
     .nw-palette-btn-wordart {
         background: linear-gradient(135deg, #e8f0fe 0%, #fce4ec 50%, #fff8e1 100%);
         border-color: #c5cae9;
@@ -1232,22 +1231,31 @@
         color: #3949ab;
     }
 
-    /* WordArt preset button in toolbar */
-    .nw-wa-preset-btn {
-        font-size: 1.15rem !important;
-        padding: 2px 5px !important;
-        min-width: 30px;
-        border-radius: 4px;
-        transition: transform 0.1s;
+    /* WordArt effect toggle buttons */
+    .nw-wa-fx-btn {
+        transition: all 0.12s;
     }
 
-    .nw-wa-preset-btn:hover {
-        transform: scale(1.2);
+    .nw-wa-fx-btn.nw-active {
+        background: var(--primary-light) !important;
+        color: var(--primary) !important;
+        border-color: var(--primary) !important;
     }
 
-    .nw-wa-preset-btn.nw-active {
-        box-shadow: 0 0 0 2px var(--primary);
-        transform: scale(1.1);
+    /* WordArt settings dialog */
+    .wa-s-group {
+        margin: 6px 0;
+        padding: 4px 0;
+        border-bottom: 1px solid #f1f3f4;
+    }
+
+    .wa-s-group label {
+        cursor: pointer;
+        font-size: 0.85rem;
+    }
+
+    .wa-s-group input[type="range"] {
+        vertical-align: middle;
     }
 
     /* --- A4 Page break markers --- */
