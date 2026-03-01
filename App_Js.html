@@ -2584,17 +2584,48 @@
     // ---- Build print-ready HTML (shared between print and Classroom post) ----
     NW._PRINT_FONTS = 'https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap';
     NW._PRINT_CSS = '@page{size:A4 portrait;margin:15mm 18mm;}'
-        + 'body{font-family:"Zen Maru Gothic",sans-serif;font-size:12px;color:#202124;margin:0;padding:0;}'
-        + 'table{width:100%;border-collapse:collapse;}th{background:#1a73e8;color:#fff;padding:4px 6px;font-size:11px;text-align:center;}'
-        + 'td{padding:3px 5px;border:1px solid #dadce0;text-align:center;font-size:11px;}'
+        + 'body{font-family:"Zen Maru Gothic",sans-serif;font-size:12px;color:#202124;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+        // Block container
+        + '.nw-block{margin:0;}'
+        // Heading / Text
+        + '.nw-heading-content{font-weight:700;line-height:1.4;}'
+        + '.nw-text-content{line-height:1.7;min-height:1.5em;}'
+        // Divider
+        + '.nw-divider-content{border:none;border-top:2px solid #dadce0;margin:8px 0;}'
+        // Generic table / hr / img
+        + 'table{width:100%;border-collapse:collapse;}'
         + 'hr{border:none;border-top:1px solid #dadce0;margin:8px 0;}img{max-width:100%;}'
+        // Schedule table (matches editor CSS with resolved variables)
+        + '.nw-schedule-block table{width:100%;border-collapse:collapse;font-size:0.78rem;table-layout:fixed;}'
+        + '.nw-schedule-block th{background:#1a73e8;color:#fff;padding:5px 4px;text-align:center;font-weight:600;font-size:0.78rem;vertical-align:middle;}'
+        + '.nw-sched-label-col{width:52px;}'
+        + '.nw-sched-date{font-size:0.65rem;font-weight:400;opacity:0.85;}'
+        + '.nw-schedule-block td{padding:4px;border:1px solid #dadce0;text-align:center;font-size:0.78rem;vertical-align:top;word-break:break-all;}'
+        + '.nw-sched-label{background:#f1f3f4;font-weight:600;font-size:0.72rem;color:#5f6368;text-align:center;white-space:nowrap;}'
+        + '.nw-sched-event{color:#d32f2f;font-size:0.7rem;font-weight:600;}'
+        + '.nw-sched-sub{font-size:0.65rem;color:#5f6368;}'
+        + '.nw-sched-detail{font-size:0.6rem;color:#9aa0a6;}'
+        + '.nw-sched-small{font-size:0.7rem;}'
+        + '.nw-schedule-block tr:nth-child(even) td{background:#f8f9fa;}'
+        + '.nw-schedule-block tr:nth-child(even) .nw-sched-label{background:#f1f3f4;}'
+        // Image
+        + '.nw-image-block{text-align:center;}.nw-image-block img{max-width:100%;border-radius:4px;}'
+        // Float (image + text wrap)
         + '.nw-float-wrapper{display:flex;gap:12px;align-items:flex-start;}'
         + '.nw-float-wrapper.nw-float-right{flex-direction:row-reverse;}'
-        + '.nw-float-img-side{flex-shrink:0;}.nw-float-img-side img{width:100%;}'
+        + '.nw-float-img-side{flex-shrink:0;}.nw-float-img-side img{display:block;width:100%;border-radius:4px;}'
         + '.nw-float-text-side{flex:1;min-width:0;line-height:1.7;text-align:left;}'
-        + '.nw-gallery-grid{display:grid;gap:8px;}.nw-gallery-cell img{width:100%;display:block;}.nw-gallery-caption{font-size:10px;text-align:center;padding:2px;}'
-        + '.nw-qrcode-block{text-align:center;padding:8px;}.nw-qrcode-block img{display:block;margin:0 auto;}.nw-qrcode-label{font-size:10px;text-align:center;margin-top:4px;}'
-        + '.nw-wordart-block{padding:8px 4px;}.nw-wordart-text{display:block;font-weight:900;line-height:1.3;word-break:break-word;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
+        // Gallery
+        + '.nw-gallery-grid{display:grid;gap:8px;}'
+        + '.nw-gallery-cell{position:relative;border:1px solid #dadce0;border-radius:4px;overflow:hidden;}'
+        + '.nw-gallery-cell img{width:100%;display:block;}'
+        + '.nw-gallery-caption{font-size:0.72rem;color:#5f6368;text-align:center;padding:4px 6px;}'
+        // QR code
+        + '.nw-qrcode-block{text-align:center;padding:8px;}.nw-qrcode-block img{display:block;margin:0 auto;border-radius:4px;}'
+        + '.nw-qrcode-label{font-size:0.82rem;color:#5f6368;text-align:center;margin-top:6px;}'
+        // WordArt
+        + '.nw-wordart-block{padding:12px 8px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+        + '.nw-wordart-text{display:block;font-weight:900;line-height:1.3;word-break:break-word;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
 
     NW.buildPrintHTML = function() {
         NW.saveEditable();
