@@ -529,36 +529,15 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
     const fileName = '学級通信_' + formattedDate;
     const folder = getOrCreateNwFolder_();
 
-    let classroomFile;
-    try {
-      // HTML → Google Doc (convert:true) して、そのままドキュメントとして投稿
-      // Classroomはドキュメントのプレビューをネイティブに表示できる
-      const htmlBlob = Utilities.newBlob(htmlContent, 'text/html', fileName + '.html');
-      const inserted = Drive.Files.insert(
-        { title: fileName, parents: [{ id: folder.getId() }] },
-        htmlBlob,
-        { convert: true }
-      );
-      classroomFile = DriveApp.getFileById(inserted.id);
-    } catch (convErr) {
-      // フォールバック: Drive Advanced Serviceが無効な場合
-      // DocumentAppで空のドキュメントを作成し、HTMLの主要テキストを挿入
-      logError('postNewsletterToClassroomFromWeb (Drive変換失敗、DocumentApp代替)', convErr);
-      const doc = DocumentApp.create(fileName);
-      const body = doc.getBody();
-      // HTMLタグを除去してプレーンテキストとして挿入
-      var plainText = htmlContent.replace(/<style[\s\S]*?<\/style>/gi, '')
-                                 .replace(/<[^>]+>/g, '\n')
-                                 .replace(/\n{3,}/g, '\n\n')
-                                 .trim();
-      body.setText(plainText);
-      doc.saveAndClose();
-      // フォルダに移動
-      var file = DriveApp.getFileById(doc.getId());
-      folder.addFile(file);
-      DriveApp.getRootFolder().removeFile(file);
-      classroomFile = file;
-    }
+    // HTML → Google Doc (convert:true) して、そのままドキュメントとして投稿
+    // Classroomはドキュメントのプレビューをネイティブに表示できる
+    const htmlBlob = Utilities.newBlob(htmlContent, 'text/html', fileName + '.html');
+    const inserted = Drive.Files.insert(
+      { title: fileName, parents: [{ id: folder.getId() }] },
+      htmlBlob,
+      { convert: true }
+    );
+    const classroomFile = DriveApp.getFileById(inserted.id);
 
     classroomFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
