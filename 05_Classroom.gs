@@ -29,8 +29,8 @@ function setTriggers() {
   }
 }
 
-/** 
- * アカウント連携クラス一覧を初期設定シートに取得します。
+/**
+ * アカウント連携クラス一覧を取得して表示します。
  */
 function listCoursesToSheet() {
   try {
@@ -44,28 +44,12 @@ function listCoursesToSheet() {
       pageToken = response.nextPageToken;
     } while (pageToken);
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME_SETTINGS);
-    if (!sheet) {
-      // 初期設定シートが削除済みの場合はログのみ
+    if (courses.length === 0) {
+      SpreadsheetApp.getUi().alert("有効なクラスが見つかりませんでした。");
+    } else {
       const names = courses.map(c => c.name);
       logInfo('クラス一覧: ' + names.join(', '));
       SpreadsheetApp.getUi().alert('クラス一覧の取得が完了しました。\n' + names.join('\n'));
-      return;
-    }
-
-    const startCell = sheet.getRange(SETTINGS_RANGE_COURSE_LIST_OUTPUT);
-    const startRow = startCell.getRow();
-    const startCol = startCell.getColumn();
-    const lastRow = Math.max(startRow, sheet.getLastRow());
-    sheet.getRange(startRow, startCol, lastRow - startRow + 1, 1).clearContent();
-
-    if (courses.length === 0) {
-      startCell.setValue("（有効なコースが見つかりませんでした）");
-      SpreadsheetApp.getUi().alert("有効なクラスが見つかりませんでした。");
-    } else {
-      const courseNames = courses.map(c => [c.name]);
-      sheet.getRange(startRow, startCol, courseNames.length, 1).setValues(courseNames);
-      SpreadsheetApp.getUi().alert('クラス一覧の取得が完了しました。');
     }
   } catch (e) {
     logError("listCoursesToSheet", e);
@@ -82,7 +66,6 @@ function postScheduleToClassroom() {
     const databaseSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!databaseSheet) throw new Error("データベースシートなし");
 
-    // 設定はスクリプトプロパティ経由で取得（初期設定シートへの直接アクセス不要）
     const courseName = getCourseNameSafe_();
     const courseId = getCourseIdByName(courseName);
     if (!courseId) throw new Error(`クラス「${courseName}」見つからず`);

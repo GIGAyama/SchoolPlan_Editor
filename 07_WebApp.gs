@@ -514,25 +514,214 @@ function generateNewsletterPdf(mondayDateStr) {
 }
 
 /**
- * [Webアプリ API] 学級通信PDFをClassroomへ投稿します。
- * @param {string} mondayDateStr 対象週の月曜日の日付
- * @param {string} [customMessage] Classroomへの付加メッセージ（任意）
+ * [Webアプリ API] 学級通信HTMLをGoogleドキュメントに変換してClassroomへ投稿します。
+ * Drive REST API (v3) を UrlFetchApp 経由で呼び出し、
+ * HTMLをGoogleドキュメントに変換してそのまま添付します。
+ * (Drive Advanced Serviceは不要)
+ * @param {string} customMessage Classroomへの付加メッセージ
+ * @param {string} htmlContent 学級通信エディタのHTML文字列
  * @returns {Object} { success, message }
  */
-function postNewsletterToClassroomFromWeb(mondayDateStr, customMessage) {
+function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
   try {
-    const pdfResult = generateNewsletterPdf(mondayDateStr);
-    if (!pdfResult.success) throw new Error(pdfResult.error);
-
-    const pdfFile = DriveApp.getFileById(pdfResult.viewUrl.match(/\/d\/(.*?)\/view/)[1]);
     const courseName = getCourseNameSafe_();
+    const formattedDate = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd_HHmm');
+    const fileName = '学級通信_' + formattedDate;
+    const folder = getOrCreateNwFolder_();
 
-    postToClassroomStream(courseName, pdfFile, customMessage || '学級通信をお届けします。');
+    // Drive REST API v3 で HTML → Google Doc 変換アップロード
+    const boundary = 'nw_boundary_' + formattedDate;
+    const metadata = JSON.stringify({
+      name: fileName,
+      mimeType: 'application/vnd.google-apps.document',
+      parents: [folder.getId()]
+    });
+    const payload =
+      '--' + boundary + '\r\n' +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      metadata + '\r\n' +
+      '--' + boundary + '\r\n' +
+      'Content-Type: text/html; charset=UTF-8\r\n\r\n' +
+      htmlContent + '\r\n' +
+      '--' + boundary + '--';
 
-    logInfo(`学級通信をClassroom「${courseName}」に投稿完了`);
+    const resp = UrlFetchApp.fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+      {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() },
+        contentType: 'multipart/related; boundary=' + boundary,
+        payload: Utilities.newBlob(payload).getBytes(),
+        muteHttpExceptions: true
+      }
+    );
+    if (resp.getResponseCode() !== 200) {
+      const errBody = JSON.parse(resp.getContentText());
+      throw new Error('Drive API: ' + (errBody.error ? errBody.error.message : resp.getContentText()));
+    }
+    const fileId = JSON.parse(resp.getContentText()).id;
+    const classroomFile = DriveApp.getFileById(fileId);
+
+    classroomFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const courseId = getCourseIdByName(courseName);
+    const announcement = {
+      text: customMessage || '学級通信をお届けします。',
+      materials: [{ driveFile: { driveFile: { id: classroomFile.getId() } } }]
+    };
+    Classroom.Courses.Announcements.create(announcement, courseId);
+
+    logInfo(`学級通信をClassroom「${courseName}」に投稿完了: ${classroomFile.getName()}`);
     return { success: true, message: `「${courseName}」に学級通信を投稿しました！` };
   } catch (e) {
     logError('postNewsletterToClassroomFromWeb', e);
+    return { success: false, error: e.message };
+  }
+}
+
+// ===================================================
+// ===== 学級通信データ 保存/読込 API =====
+// ===================================================
+
+/**
+ * 学級通信データ保存用フォルダを取得（なければ作成）
+ */
+function getOrCreateNwFolder_() {
+  const folderName = '学級通信データ';
+  const iter = DriveApp.getFoldersByName(folderName);
+  if (iter.hasNext()) return iter.next();
+  return DriveApp.createFolder(folderName);
+}
+
+/**
+ * [Web API] 学級通信のブロックデータをDrive+シートに保存します。
+ * シート列構成: ID | Title | Date | FileId | TargetWeek (5列)
+ * @param {string} title タイトル
+ * @param {string} mondayStr 対象週
+ * @param {string} jsonString ブロックデータJSON
+ * @returns {Object} { success, message }
+ */
+function saveNewsletterData(title, mondayStr, jsonString) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
+    if (!sheet) throw new Error(`「${SHEET_NAME_NEWSLETTER_DATA}」シートが見つかりません`);
+
+    const folder = getOrCreateNwFolder_();
+    const fileName = 'nw_' + new Date().getTime() + '.json';
+    const file = folder.createFile(fileName, jsonString, 'application/json');
+
+    // 5列構成: ID(タイムスタンプ), Title, Date, FileId, TargetWeek
+    sheet.appendRow([
+      new Date().getTime(),
+      title || '無題',
+      new Date(),
+      file.getId(),
+      mondayStr || ''
+    ]);
+
+    logInfo(`学級通信保存: ${title} (${mondayStr})`);
+    return { success: true, message: '保存しました' };
+  } catch (e) {
+    logError('saveNewsletterData', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Web API] 保存済み学級通信の一覧を取得します。
+ * シート列構成: A=ID | B=Title | C=Date | D=FileId | E=TargetWeek
+ * 旧4列形式 (Title|MondayStr|Date|FileId) にも対応
+ * @returns {Object} { success, list: [{rowIndex, title, mondayStr, savedAt, fileId}] }
+ */
+function getNewsletterSaveList() {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, list: [] };
+
+    const lastCol = Math.min(Math.max(sheet.getLastColumn(), 4), 5);
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastCol).getValues();
+
+    // ヘッダー行で形式を判定
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const firstHeader = String(headers[0] || '').trim().toUpperCase();
+    const is5col = (firstHeader === 'ID' || lastCol >= 5);
+
+    const list = data.map(function(row, i) {
+      if (is5col) {
+        // 新5列形式: ID | Title | Date | FileId | TargetWeek
+        return {
+          rowIndex: i + 2,
+          title: String(row[1] || '無題'),
+          mondayStr: String(row[4] || ''),
+          savedAt: row[2] ? Utilities.formatDate(new Date(row[2]), 'JST', 'yyyy/MM/dd HH:mm') : '',
+          fileId: String(row[3] || '')
+        };
+      } else {
+        // 旧4列形式: Title | MondayStr | Date | FileId
+        return {
+          rowIndex: i + 2,
+          title: String(row[0] || '無題'),
+          mondayStr: String(row[1] || ''),
+          savedAt: row[2] ? Utilities.formatDate(new Date(row[2]), 'JST', 'yyyy/MM/dd HH:mm') : '',
+          fileId: String(row[3] || '')
+        };
+      }
+    }).filter(function(item) {
+      // fileIdが空の行は除外
+      return item.fileId && item.fileId.length > 5;
+    }).reverse();
+
+    return { success: true, list: list };
+  } catch (e) {
+    logError('getNewsletterSaveList', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Web API] 保存済み学級通信のデータを読み込みます。
+ * @param {string} fileId Google DriveのファイルID
+ * @returns {Object} { success, data: {blocks, nextId, mondayStr} }
+ */
+function loadNewsletterData(fileId) {
+  try {
+    if (!fileId || String(fileId).length < 5) {
+      return { success: false, error: 'ファイルIDが無効です' };
+    }
+    const file = DriveApp.getFileById(String(fileId));
+    const json = file.getBlob().getDataAsString();
+    const parsed = JSON.parse(json);
+    // GASの google.script.run 転送サイズ上限対策:
+    // 画像データ(base64)が含まれると巨大になるため、サイズチェック
+    const resultStr = JSON.stringify(parsed);
+    if (resultStr.length > 500000) {
+      // 大きすぎる場合は直接JSONテキストを返し、クライアント側でパース
+      return { success: true, jsonString: resultStr };
+    }
+    return { success: true, data: parsed };
+  } catch (e) {
+    logError('loadNewsletterData', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Web API] 保存済み学級通信を削除します。
+ * @param {number} rowIndex シートの行番号
+ * @param {string} fileId Google DriveのファイルID
+ * @returns {Object} { success }
+ */
+function deleteNewsletterData(rowIndex, fileId) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
+    if (sheet && rowIndex >= 2) sheet.deleteRow(rowIndex);
+    try { DriveApp.getFileById(fileId).setTrashed(true); } catch(ignore) {}
+    return { success: true };
+  } catch (e) {
+    logError('deleteNewsletterData', e);
     return { success: false, error: e.message };
   }
 }
@@ -545,7 +734,6 @@ const SP_KEY_TIMETABLE = 'fixedTimetableData';
 
 /**
  * [エディタ API] 固定時間割データを取得します。
- * 最初は「初期設定」シートから取得し、以降はスクリプトプロパティから。
  */
 function getTimetableForEditor() {
   try {
@@ -554,21 +742,6 @@ function getTimetableForEditor() {
 
     if (savedJson) {
       return { success: true, data: JSON.parse(savedJson) };
-    }
-
-    // フォールバック: 初期設定シートから読み込み
-    const ss = getSs_();
-    const shSettings = ss.getSheetByName(SHEET_NAME_SETTINGS);
-    if (shSettings) {
-      const raw = shSettings.getRange(SETTINGS_RANGE_TIMETABLE).getValues();
-      // 5行(月〜金) x 8列(時程, 朝学習, 1校時〜6校時)
-      const data = raw.map((row, i) => ({
-        day: i, // 0=月, 1=火, ..., 4=金
-        time: row[0] || '',
-        morning: row[1] || '',
-        periods: [row[2] || '', row[3] || '', row[4] || '', row[5] || '', row[6] || '', row[7] || '']
-      }));
-      return { success: true, data: data };
     }
 
     // デフォルト空データ
@@ -592,22 +765,6 @@ function saveTimetableFromEditor(timetableData) {
       throw new Error('無効な時間割データです。');
     }
     PropertiesService.getScriptProperties().setProperty(SP_KEY_TIMETABLE, JSON.stringify(timetableData));
-
-    // 初期設定シートへのバックシンク（後方互換）
-    try {
-      const ss = getSs_();
-      const shSettings = ss.getSheetByName(SHEET_NAME_SETTINGS);
-      if (shSettings) {
-        const rows = timetableData.map(d => [
-          d.time || '', d.morning || '',
-          d.periods[0] || '', d.periods[1] || '', d.periods[2] || '',
-          d.periods[3] || '', d.periods[4] || '', d.periods[5] || ''
-        ]);
-        shSettings.getRange(SETTINGS_RANGE_TIMETABLE).setValues(rows);
-      }
-    } catch (syncErr) {
-      logInfo('初期設定シートへのバックシンクはスキップされました: ' + syncErr.message);
-    }
 
     return { success: true, message: '固定時間割を保存しました。' };
   } catch (e) {
@@ -637,17 +794,16 @@ function applyTimetableToWeek(mondayStr) {
 // ===================================================
 
 /**
- * Phase 5: 不要になったシートを削除し、残存シートを保護します。
+ * 残存シートを保護します。
  * メニューから実行されることを想定しています。
  */
-function executePhase5Cleanup() {
+function protectSheets() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
-    '⚠️ Phase 5: シート整理の実行',
-    '以下の操作を実行します。\n\n' +
-    '【削除】「初期設定」「週案入力用」シート\n' +
-    '【保護】「データベース」「単元マスタ」「ログ」「週案」「学級通信」シート\n\n' +
-    '削除されたシートは元に戻せません。本当に実行しますか？',
+    'シート保護の実行',
+    '以下のシートを保護します。\n\n' +
+    '「データベース」「単元マスタ」「ログ」「学級通信」\n\n' +
+    '実行しますか？',
     ui.ButtonSet.YES_NO
   );
 
@@ -659,26 +815,6 @@ function executePhase5Cleanup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const results = [];
 
-  // --- シート削除 ---
-  // ※「初期設定」シートは週案シートの数式・条件付き書式が依存しているため、Webアプリでの完全再現後に削除する
-  const sheetsToDelete = ['週案入力用'];
-  sheetsToDelete.forEach(name => {
-    try {
-      const sheet = ss.getSheetByName(name);
-      if (sheet) {
-        ss.deleteSheet(sheet);
-        results.push(`「${name}」シートを削除しました。`);
-        logInfo(`Phase 5: 「${name}」シートを削除しました。`);
-      } else {
-        results.push(`「${name}」シートは既に存在しません。`);
-      }
-    } catch (e) {
-      results.push(`「${name}」シートの削除に失敗: ${e.message}`);
-      logError(`Phase 5: シート削除失敗 (${name})`, e);
-    }
-  });
-
-  // --- シート保護 ---
   const sheetsToProtect = [
     SHEET_NAME_DATABASE, SHEET_NAME_UNIT_MASTER, SHEET_NAME_LOG,
     SHEET_NAME_NEWSLETTER
@@ -689,28 +825,27 @@ function executePhase5Cleanup() {
     try {
       const sheet = ss.getSheetByName(name);
       if (sheet) {
-        // 既存の保護を解除してから再設定
         sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove());
-        
-        const protection = sheet.protect().setDescription(`Phase 5: ${name} (自動保護)`);
+
+        const protection = sheet.protect().setDescription(`${name} (自動保護)`);
         protection.addEditor(owner);
         protection.removeEditors(protection.getEditors().filter(u => u.getEmail() !== owner.getEmail()));
         if (protection.canDomainEdit()) {
           protection.setDomainEdit(false);
         }
-        results.push(`🔒 「${name}」シートを保護しました。`);
-        logInfo(`Phase 5: 「${name}」シートを保護しました。`);
+        results.push(`「${name}」シートを保護しました。`);
+        logInfo(`「${name}」シートを保護しました。`);
       } else {
         results.push(`「${name}」シートが見つかりません（スキップ）。`);
       }
     } catch (e) {
       results.push(`「${name}」シートの保護に失敗: ${e.message}`);
-      logError(`Phase 5: シート保護失敗 (${name})`, e);
+      logError(`シート保護失敗 (${name})`, e);
     }
   });
 
-  ui.alert('Phase 5 完了', results.join('\n'), ui.ButtonSet.OK);
-  logInfo('Phase 5 クリーンアップ完了:\n' + results.join('\n'));
+  ui.alert('完了', results.join('\n'), ui.ButtonSet.OK);
+  logInfo('シート保護完了:\n' + results.join('\n'));
 }
 
 // ===================================================
@@ -1140,6 +1275,154 @@ function deleteTaskFromWebApp(taskId) {
     return { success: isSuccess };
   } catch (e) {
     logError('deleteTaskFromWebApp', e);
+    return { success: false, error: e.message };
+  }
+}
+
+// ===================================================
+// ===== 単元マスタ管理 WebApp API =====
+// ===================================================
+
+/**
+ * [Webアプリ API] 単元マスタの全データを取得します
+ * @returns {Object} { success, rows: [{subject, unitName, totalHours, hourNum, activity, rowIndex}], subjects: string[] }
+ */
+function getUnitMasterData() {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) return { success: true, rows: [], subjects: [] };
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { success: true, rows: [], subjects: [] };
+
+    const data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+    const subjectSet = new Set();
+    const rows = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const r = data[i];
+      const subject = r[MASTER_COL_SUBJECT - 1] || '';
+      if (subject) subjectSet.add(subject);
+      rows.push({
+        rowIndex: i + 2, // シート上の実際の行番号(1-based)
+        subject: subject,
+        unitName: r[MASTER_COL_UNIT_NAME - 1] || '',
+        totalHours: r[MASTER_COL_TOTAL_HOURS - 1] || '',
+        hourNum: r[MASTER_COL_HOUR_NUM - 1] || '',
+        activity: r[MASTER_COL_ACTIVITY - 1] || ''
+      });
+    }
+
+    return { success: true, rows: rows, subjects: [...subjectSet] };
+  } catch (e) {
+    logError('getUnitMasterData', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 単元マスタの指定行を更新します
+ * @param {number} rowIndex シート上の行番号 (1-based)
+ * @param {Object} data {subject, unitName, totalHours, hourNum, activity}
+ * @returns {Object} { success: boolean }
+ */
+function updateUnitMasterRow(rowIndex, data) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) throw new Error('単元マスタシートが見つかりません');
+
+    sheet.getRange(rowIndex, 1, 1, 5).setValues([[
+      data.subject || '',
+      data.unitName || '',
+      data.totalHours || '',
+      data.hourNum || '',
+      data.activity || ''
+    ]]);
+
+    return { success: true };
+  } catch (e) {
+    logError('updateUnitMasterRow', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 単元マスタの指定位置に新しい行を挿入します
+ * @param {number} afterRowIndex この行の後に挿入 (1-based)。0の場合はヘッダー直後(2行目)に挿入
+ * @param {Object} data {subject, unitName, totalHours, hourNum, activity}
+ * @returns {Object} { success: boolean, newRowIndex: number }
+ */
+function insertUnitMasterRow(afterRowIndex, data) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) throw new Error('単元マスタシートが見つかりません');
+
+    const insertAt = afterRowIndex > 0 ? afterRowIndex + 1 : 2;
+    sheet.insertRowBefore(insertAt);
+    sheet.getRange(insertAt, 1, 1, 5).setValues([[
+      data.subject || '',
+      data.unitName || '',
+      data.totalHours || '',
+      data.hourNum || '',
+      data.activity || ''
+    ]]);
+
+    return { success: true, newRowIndex: insertAt };
+  } catch (e) {
+    logError('insertUnitMasterRow', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 単元マスタの指定行を削除します
+ * @param {number} rowIndex シート上の行番号 (1-based)
+ * @returns {Object} { success: boolean }
+ */
+function deleteUnitMasterRow(rowIndex) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) throw new Error('単元マスタシートが見つかりません');
+
+    if (rowIndex < 2) throw new Error('ヘッダー行は削除できません');
+    sheet.deleteRow(rowIndex);
+    return { success: true };
+  } catch (e) {
+    logError('deleteUnitMasterRow', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 単元マスタの複数行を一括更新します
+ * @param {Object[]} updates [{rowIndex, data: {subject, unitName, totalHours, hourNum, activity}}]
+ * @returns {Object} { success: boolean, count: number }
+ */
+function batchUpdateUnitMaster(updates) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) throw new Error('単元マスタシートが見つかりません');
+
+    let count = 0;
+    for (const u of updates) {
+      sheet.getRange(u.rowIndex, 1, 1, 5).setValues([[
+        u.data.subject || '',
+        u.data.unitName || '',
+        u.data.totalHours || '',
+        u.data.hourNum || '',
+        u.data.activity || ''
+      ]]);
+      count++;
+    }
+
+    return { success: true, count: count };
+  } catch (e) {
+    logError('batchUpdateUnitMaster', e);
     return { success: false, error: e.message };
   }
 }

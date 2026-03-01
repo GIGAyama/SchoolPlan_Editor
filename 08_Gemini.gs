@@ -134,6 +134,98 @@ ${scheduleText}
 }
 
 /**
+ * Gemini APIを呼び出してフリーテキスト（非JSON）を取得する汎用ラッパー
+ * @param {string} prompt
+ * @returns {string} 生成されたテキスト
+ */
+function callGeminiAPIText_(prompt) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('sp_geminiApiKey');
+  if (!apiKey) {
+    throw new Error('sp_geminiApiKeyが設定されていません。設定画面からGemini APIキーを登録してください。');
+  }
+
+  const payload = {
+    contents: [{
+      parts: [{ text: prompt }]
+    }],
+    generationConfig: {
+      temperature: 0.7
+    }
+  };
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(`${GEMINI_API_URL}?key=${apiKey}`, options);
+  const json = JSON.parse(response.getContentText());
+
+  if (response.getResponseCode() !== 200) {
+    logError('Gemini API Error', new Error(response.getContentText()));
+    throw new Error('AIサーバとの通信でエラーが発生しました。');
+  }
+
+  if (json.candidates && json.candidates.length > 0) {
+    return json.candidates[0].content.parts[0].text || '';
+  }
+
+  return '';
+}
+
+/**
+ * [Webアプリ API] 学級通信の本文をGemini AIで自動生成する
+ * @param {string} mondayDateStr "YYYY/MM/DD" 形式の月曜日
+ * @param {string} genType 生成タイプ (intro, event, study, notice, free)
+ * @param {string} extraInstructions 追加指示
+ * @returns {Object} { success: boolean, text: string }
+ */
+function generateNewsletterAI(mondayDateStr, genType, extraInstructions) {
+  try {
+    // 週案データを取得してコンテキストに使う
+    let scheduleContext = '';
+    try {
+      const data = getNewsletterData(mondayDateStr);
+      if (data.success && data.days) {
+        scheduleContext = '\n【今週のスケジュール】\n';
+        data.days.forEach(day => {
+          scheduleContext += `${day.dayLabel}(${day.date}): `;
+          if (day.event) scheduleContext += `行事:${day.event} `;
+          day.periods.forEach((p, i) => {
+            if (p && p.subject) scheduleContext += `${i+1}時間目:${p.subject} `;
+          });
+          scheduleContext += '\n';
+        });
+      }
+    } catch(ignore) {}
+
+    const typePrompts = {
+      intro: 'クラスの学級通信に掲載する「今週のあいさつ文・はじめの文」を書いてください。季節感や子どもたちの成長に触れた温かい文章で、3〜5文程度にしてください。',
+      event: '今週の行事やイベントを紹介する文章を書いてください。保護者が読んで楽しめるよう、子どもたちの様子や準備のことにも触れてください。3〜5文程度。',
+      study: '今週の学習内容や授業の様子を保護者に伝える文章を書いてください。子どもたちが頑張っていることや成長したことを具体的に触れてください。3〜5文程度。',
+      notice: '保護者へのお知らせ・連絡事項を書いてください。丁寧だが簡潔な表現で、重要な点が伝わるようにしてください。',
+      free: '学級通信に掲載する文章を書いてください。'
+    };
+
+    const prompt = `あなたは小学校の担任教員です。保護者向けの学級通信の本文を日本語で作成してください。
+文章のみを出力し、タイトルや装飾は不要です。自然で温かみのある文体で書いてください。
+
+${typePrompts[genType] || typePrompts.free}
+${scheduleContext}
+${extraInstructions ? '\n【追加の指示】\n' + extraInstructions : ''}`;
+
+    const text = callGeminiAPIText_(prompt);
+    return { success: true, text: text };
+
+  } catch (e) {
+    logError('generateNewsletterAI', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
  * [Webアプリ API] フリーテキスト（議事録等）からタスクを抽出
  * @param {string} text 議事録などのテキスト
  * @returns {Object} { success: boolean, tasks: Object[] }

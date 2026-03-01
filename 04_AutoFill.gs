@@ -160,3 +160,109 @@ function calculateAutoFillForWebApp(mondayStr, days) {
     return { success: false, error: e.message };
   }
 }
+
+// ===================================================
+// ===== 一括自動入力（拡張Auto-Fill） =====
+// ===================================================
+
+/**
+ * [Webアプリ API] 指定週の翌週以降のすべての週について、
+ * 単元マスタに基づいて「単元名」と「学習内容」を一括で自動入力し直します。
+ * 教科名（時間割）は変更しません。
+ *
+ * @param {string} baseMondayStr 基準となる週の月曜日 "yyyy/MM/dd"
+ * @returns {Object} { success: boolean, message: string, updatedCells: number }
+ */
+function batchAutoFillFromWeek(baseMondayStr) {
+  try {
+    const ss = getSs_();
+    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!dbSheet || !masterSheet) throw new Error("必要なシートが見つかりません。");
+
+    const dbData = dbSheet.getDataRange().getValues();
+    const masterData = masterSheet.getDataRange().getValues();
+    const dbCols = getDbColumns();
+
+    // 基準週の翌週月曜を計算
+    const baseMonday = parseDate_(baseMondayStr);
+    const nextMonday = new Date(baseMonday);
+    nextMonday.setDate(nextMonday.getDate() + 7);
+
+    // 教科ごとの進捗を追跡（遅延初期化: 初遭遇時にfindLastLesson_で取得）
+    const runningProgress = {};
+
+    // DB列マッピング（6校時分）
+    const periodCols = [];
+    if (dbCols.PERIOD1 && dbCols.UNIT1 && dbCols.CONTENT1)
+      periodCols.push({ subj: dbCols.PERIOD1, unit: dbCols.UNIT1, content: dbCols.CONTENT1 });
+    if (dbCols.PERIOD2 && dbCols.UNIT2 && dbCols.CONTENT2)
+      periodCols.push({ subj: dbCols.PERIOD2, unit: dbCols.UNIT2, content: dbCols.CONTENT2 });
+    if (dbCols.PERIOD3 && dbCols.UNIT3 && dbCols.CONTENT3)
+      periodCols.push({ subj: dbCols.PERIOD3, unit: dbCols.UNIT3, content: dbCols.CONTENT3 });
+    if (dbCols.PERIOD4 && dbCols.UNIT4 && dbCols.CONTENT4)
+      periodCols.push({ subj: dbCols.PERIOD4, unit: dbCols.UNIT4, content: dbCols.CONTENT4 });
+    if (dbCols.PERIOD5 && dbCols.UNIT5 && dbCols.CONTENT5)
+      periodCols.push({ subj: dbCols.PERIOD5, unit: dbCols.UNIT5, content: dbCols.CONTENT5 });
+    if (dbCols.PERIOD6 && dbCols.UNIT6 && dbCols.CONTENT6)
+      periodCols.push({ subj: dbCols.PERIOD6, unit: dbCols.UNIT6, content: dbCols.CONTENT6 });
+
+    let updatedCells = 0;
+    let isModified = false;
+
+    // 翌週月曜以降の全DB行を前方走査
+    for (let i = 1; i < dbData.length; i++) {
+      const row = dbData[i];
+      const rowDate = row[dbCols.DATE - 1];
+
+      // 日付でない行、または翌週月曜より前の行はスキップ
+      if (!(rowDate instanceof Date) || rowDate < nextMonday) continue;
+
+      // 各コマを処理
+      for (const pc of periodCols) {
+        const subject = row[pc.subj - 1];
+        if (!subject || typeof subject !== 'string' || subject.includes('行事')) continue;
+
+        try {
+          // 教科の前回進捗を取得（初遭遇時のみDB検索）
+          const lastLesson = runningProgress[subject] || findLastLesson_(dbData, subject, nextMonday);
+
+          // 次の時数を決定
+          const nextLesson = determineNextLesson_(lastLesson, masterData, subject);
+
+          if (nextLesson && nextLesson.unitName) {
+            const newUnit = nextLesson.unitName + ' ' + nextLesson.currentHour + '/' + nextLesson.totalHours;
+            const newContent = findActivityFromMaster_(masterData, subject, nextLesson.unitName, nextLesson.currentHour);
+
+            // 変更がある場合のみ更新
+            if (row[pc.unit - 1] !== newUnit || row[pc.content - 1] !== newContent) {
+              row[pc.unit - 1] = newUnit;
+              row[pc.content - 1] = newContent;
+              isModified = true;
+              updatedCells++;
+            }
+
+            // 進捗を更新
+            runningProgress[subject] = nextLesson;
+          }
+        } catch (e) {
+          Logger.log('[batchAutoFill] ' + formatDate(rowDate) + ' ' + subject + ': ' + e.message);
+        }
+      }
+    }
+
+    // 変更があればDB一括書き戻し
+    if (isModified) {
+      dbSheet.getRange(1, 1, dbData.length, dbData[0].length).setValues(dbData);
+    }
+
+    return {
+      success: true,
+      message: updatedCells + 'コマの単元・学習内容を更新しました',
+      updatedCells: updatedCells
+    };
+  } catch (e) {
+    logError('batchAutoFillFromWeek', e);
+    return { success: false, error: e.message };
+  }
+}

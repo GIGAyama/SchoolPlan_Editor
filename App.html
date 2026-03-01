@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>週案エディタ</title>
-    <!-- GIGA Standard v2: Zen Maru Gothic -->
-    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap"
+    <!-- GIGA Standard v2: Zen Maru Gothic + Newsletter Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap"
         rel="stylesheet">
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -43,20 +43,23 @@
                 <button class="nav-btn active" data-view="plan" onclick="switchView('plan')">
                     <span class="material-symbols-outlined">calendar_view_week</span> 週案
                 </button>
-                <button class="nav-btn" data-view="hours" onclick="switchView('hours')">
-                    <span class="material-symbols-outlined">bar_chart</span> 時数
+                <button class="nav-btn" data-view="task" onclick="switchView('task')">
+                    <span class="material-symbols-outlined">task_alt</span> タスク
+                </button>
+                <button class="nav-btn" data-view="unitmaster" onclick="switchView('unitmaster')">
+                    <span class="material-symbols-outlined">menu_book</span> 単元
                 </button>
                 <button class="nav-btn" data-view="newsletter" onclick="switchView('newsletter')">
                     <span class="material-symbols-outlined">newspaper</span> 学級通信
                 </button>
-                <button class="nav-btn" data-view="settings" onclick="switchView('settings')">
-                    <span class="material-symbols-outlined">settings</span> 設定
-                </button>
-                <button class="nav-btn" data-view="task" onclick="switchView('task')">
-                    <span class="material-symbols-outlined">task_alt</span> タスク
+                <button class="nav-btn" data-view="hours" onclick="switchView('hours')">
+                    <span class="material-symbols-outlined">bar_chart</span> 時数
                 </button>
                 <button class="nav-btn" data-view="integration" onclick="switchView('integration')">
                     <span class="material-symbols-outlined">cable</span> データ連携
+                </button>
+                <button class="nav-btn" data-view="settings" onclick="switchView('settings')">
+                    <span class="material-symbols-outlined">settings</span> 設定
                 </button>
             </nav>
         </header>
@@ -105,11 +108,19 @@
                     <button class="btn btn-outline d-flex align-items-center gap-1" id="printBtn"
                         onclick="printWeeklyPlan()"><span class="material-symbols-outlined fs-6">print</span>
                         印刷</button>
-                    <button class="btn btn-outline d-flex align-items-center gap-1" id="autoFillBtn"
+                    <button class="btn btn-outline align-items-center gap-1" id="timetableApplyBtn"
+                        onclick="applyTimetableToCurrentWeek()"
+                        style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
+                            class="material-symbols-outlined fs-6">calendar_month</span> 時間割反映</button>
+                    <button class="btn btn-outline align-items-center gap-1" id="autoFillBtn"
                         onclick="autoFillPlan()"
                         style="display:none; color: var(--primary); border-color: var(--primary);"><span
                             class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力</button>
-                    <button class="btn btn-primary d-flex align-items-center gap-1" id="saveBtn"
+                    <button class="btn btn-outline align-items-center gap-1" id="batchAutoFillBtn"
+                        onclick="runBatchAutoFill()"
+                        style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
+                            class="material-symbols-outlined fs-6">fast_forward</span> 以降を一括自動入力</button>
+                    <button class="btn btn-primary align-items-center gap-1" id="saveBtn"
                         onclick="saveWeeklyPlan()" style="display:none"><span
                             class="material-symbols-outlined fs-6">save</span>
                         保存する</button>
@@ -186,52 +197,94 @@
             </div>
         </div>
 
-        <!-- ===== 学級通信ジェネレータービュー ===== -->
+        <!-- ===== 学級通信ブロックエディタ ===== -->
         <div id="view-newsletter" class="view">
             <div class="section-header-bar">
-                <h2><span class="material-symbols-outlined fs-6">newspaper</span> 学級通信ジェネレーター</h2>
+                <h2><span class="material-symbols-outlined fs-6">newspaper</span> 学級通信エディタ</h2>
+                <div class="nw-header-actions">
+                    <button class="btn btn-outline btn-sm" onclick="NW.newNewsletter()">
+                        <span class="material-symbols-outlined fs-6">note_add</span> 新規
+                    </button>
+                    <button class="btn btn-outline btn-sm" onclick="NW.saveToSheet()">
+                        <span class="material-symbols-outlined fs-6">save</span> 保存
+                    </button>
+                    <button class="btn btn-outline btn-sm" onclick="NW.openFromSheet()">
+                        <span class="material-symbols-outlined fs-6">folder_open</span> 開く
+                    </button>
+                    <div class="nw-act-sep-v"></div>
+                    <button class="btn btn-outline btn-sm" onclick="NW.saveAsTemplate()" title="テンプレートとして保存">
+                        <span class="material-symbols-outlined fs-6">bookmark_add</span> テンプレ保存
+                    </button>
+                    <button class="btn btn-outline btn-sm" onclick="NW.openTemplates()" title="テンプレートから作成">
+                        <span class="material-symbols-outlined fs-6">bookmarks</span> テンプレート
+                    </button>
+                    <div class="nw-act-sep-v"></div>
+                    <div class="week-mini-nav">
+                        <button class="btn-icon" onclick="NW.navWeek(-1)">‹</button>
+                        <span id="nwWeekLabel" style="font-size:0.82rem;font-weight:600;">－</span>
+                        <button class="btn-icon" onclick="NW.navWeek(1)">›</button>
+                    </div>
+                    <button class="btn btn-outline btn-sm" onclick="NW.loadScheduleData()">
+                        <span class="material-symbols-outlined fs-6">sync</span> 予定を読込
+                    </button>
+                    <div class="nw-act-sep-v"></div>
+                    <button class="btn btn-outline btn-sm" onclick="NW.printNewsletter()">
+                        <span class="material-symbols-outlined fs-6">print</span> 印刷
+                    </button>
+                    <button class="btn btn-primary btn-sm" onclick="NW.postToClassroom()">
+                        <span class="material-symbols-outlined fs-6">rocket_launch</span> Classroom投稿
+                    </button>
+                    <div class="nw-act-sep-v"></div>
+                    <button class="btn btn-outline btn-sm" onclick="NW.showHelp()" title="ヘルプ">
+                        <span class="material-symbols-outlined fs-6">help</span>
+                    </button>
+                </div>
             </div>
-            <div class="newsletter-layout">
 
-                <!-- 左ペイン: 週選択 + アクション -->
-                <div class="newsletter-sidebar">
-                    <div class="nw-card">
-                        <div class="nw-label">対象週を選択</div>
-                        <div class="week-mini-nav">
-                            <button class="btn-icon" onclick="navigateNwWeek(-1)">‹</button>
-                            <span id="nwWeekLabel" style="font-size:0.82rem;font-weight:600;">－</span>
-                            <button class="btn-icon" onclick="navigateNwWeek(1)">›</button>
+            <div class="nw-editor-layout">
+                <!-- 左: ブロックパレット -->
+                <div class="nw-block-palette">
+                    <div class="nw-palette-label">ブロック追加</div>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('heading')">
+                        <span class="material-symbols-outlined">title</span> 見出し
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('text')">
+                        <span class="material-symbols-outlined">notes</span> テキスト
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('image')">
+                        <span class="material-symbols-outlined">image</span> 画像
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('gallery')">
+                        <span class="material-symbols-outlined">auto_awesome_mosaic</span> ギャラリー
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('schedule')">
+                        <span class="material-symbols-outlined">calendar_month</span> 時間割
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('qrcode')">
+                        <span class="material-symbols-outlined">qr_code_2</span> QRコード
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('divider')">
+                        <span class="material-symbols-outlined">horizontal_rule</span> 区切り線
+                    </button>
+                    <button class="nw-palette-btn nw-palette-btn-wordart" onclick="NW.addBlock('wordart')">
+                        <span class="material-symbols-outlined">title</span> ワードアート
+                    </button>
+                    <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
+                    <div class="nw-palette-label">AI機能</div>
+                    <button class="nw-palette-btn" onclick="NW.generateAIText()" style="border-color:var(--primary);color:var(--primary);">
+                        <span class="material-symbols-outlined">auto_awesome</span> AI生成
+                    </button>
+                </div>
+
+                <!-- 中央: A4ページエディタ -->
+                <div class="nw-page-scroll">
+                    <div class="nw-a4-page" id="nwEditorPage">
+                        <div class="nw-empty-editor" id="nwEmptyState">
+                            左のパレットからブロックを追加するか、<br>
+                            「予定を読込」で週案データを取り込んでください。
                         </div>
-                        <button class="btn btn-primary" style="width:100%;margin-top:12px;"
-                            onclick="loadNewsletterPreview()">
-                            📄 予定を読み込む
-                        </button>
-                    </div>
-                    <div class="nw-card">
-                        <div class="nw-label">追記メッセージ（任意）</div>
-                        <textarea id="nwCustomMessage" rows="4" placeholder="学級通信への追記メモ..."
-                            style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:0.82rem;resize:vertical;"></textarea>
-                    </div>
-                    <div class="nw-card">
-                        <div class="nw-label">アクション</div>
-                        <button class="btn btn-outline d-flex align-items-center gap-1 w-100 justify-content-center"
-                            style="margin-bottom:8px;" onclick="generateNwPdf()">
-                            <span class="material-symbols-outlined fs-6">post_add</span> 自動生成</button>
-                        <button
-                            class="btn btn-primary d-flex align-items-center gap-1 mt-2 w-100 justify-content-center"
-                            onclick="postNewsletterToClassroom()">
-                            <span class="material-symbols-outlined fs-6">rocket_launch</span> Classroomに投稿
-                        </button>
                     </div>
                 </div>
-
-                <!-- 右ペイン: 週案データプレビュー -->
-                <div class="newsletter-main">
-                    <div id="nwPreviewArea" class="nw-preview">
-                        <div class="nw-empty">← 左から週を選択し、「予定を読み込む」をクリックしてください</div>
-                    </div>
-                </div>
-
             </div>
         </div>
 
@@ -273,7 +326,9 @@
                         <!-- Classroom連携 -->
                         <div
                             style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
-                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);">🏫 Google Classroom
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">school</span> Google Classroom
                                 連携</h4>
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
                                 <div>
@@ -352,7 +407,7 @@
 
                         <!-- 保存ボタン -->
                         <div style="display:flex; justify-content:flex-end;">
-                            <button class="btn btn-primary" onclick="saveSystemSettings()">💾 システム設定を保存</button>
+                            <button class="btn btn-primary" onclick="saveSystemSettings()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">save</span> システム設定を保存</button>
                         </div>
                     </div>
                 </div>
@@ -362,7 +417,7 @@
             <div style="padding: 0 20px 20px;">
                 <div class="integration-section" style="border:1px solid #ffcc80;">
                     <div class="integration-header" style="background:#fff3e0;">
-                        <span class="integration-icon">🗓️</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">calendar_month</span></span>
                         <span class="integration-title" style="color:#e65100;">年間カレンダー生成機能（年度更新）</span>
                     </div>
                     <div class="integration-body" style="display:flex; flex-direction:column; gap:16px;">
@@ -386,7 +441,7 @@
                         </div>
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
                             <button class="btn" style="background-color:#e65100; color:white;"
-                                onclick="confirmGenerateCalendar()">⚠️ カレンダーを再生成する</button>
+                                onclick="confirmGenerateCalendar()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">warning</span> カレンダーを再生成する</button>
                         </div>
                     </div>
                 </div>
@@ -396,7 +451,7 @@
             <div style="padding: 0 20px 20px;">
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">⏱️</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">schedule</span></span>
                         <span class="integration-title">固定時間割エディタ</span>
                     </div>
                     <div class="integration-body">
@@ -425,13 +480,13 @@
                         </div>
                         <div
                             style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px; flex-wrap:wrap; align-items:center;">
-                            <button class="btn btn-outline" onclick="loadTimetableEditor()">⭯ 再読み込み</button>
-                            <button class="btn btn-primary" onclick="saveTimetable()">💾 保存</button>
+                            <button class="btn btn-outline" onclick="loadTimetableEditor()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">refresh</span> 再読み込み</button>
+                            <button class="btn btn-primary" onclick="saveTimetable()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">save</span> 保存</button>
                         </div>
                         <hr style="margin: 16px 0; border:none; border-top:1px dashed var(--border);">
                         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                             <span style="font-size:0.8rem;font-weight:600;color:var(--text-sub)">‣ 選択中の週に転記:</span>
-                            <button class="btn btn-outline" onclick="applyTimetableToCurrentWeek()">⏱️ 今の週に展開</button>
+                            <button class="btn btn-outline" onclick="applyTimetableToCurrentWeek()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">schedule</span> 今の週に展開</button>
                         </div>
                     </div>
                 </div>
@@ -441,7 +496,7 @@
             <div style="padding: 0 20px 20px;">
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">📅</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">event_note</span></span>
                         <span class="integration-title">年間一括転記（長期休業期間の設定）</span>
                     </div>
                     <div class="integration-body">
@@ -450,17 +505,17 @@
                         </p>
                         <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;">
                             <div class="vacation-card">
-                                <strong>🌻 夏休み</strong>
+                                <strong><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">wb_sunny</span> 夏休み</strong>
                                 <label>開始日<input type="date" id="vacSummerStart"></label>
                                 <label>終了日<input type="date" id="vacSummerEnd"></label>
                             </div>
                             <div class="vacation-card">
-                                <strong>⛄ 冬休み</strong>
+                                <strong><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">ac_unit</span> 冬休み</strong>
                                 <label>開始日<input type="date" id="vacWinterStart"></label>
                                 <label>終了日<input type="date" id="vacWinterEnd"></label>
                             </div>
                             <div class="vacation-card">
-                                <strong>🌸 春休み</strong>
+                                <strong><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">local_florist</span> 春休み</strong>
                                 <label>開始日<input type="date" id="vacSpringStart"></label>
                                 <label>終了日<input type="date" id="vacSpringEnd"></label>
                             </div>
@@ -493,8 +548,8 @@
                             <!-- JSで動的に生成 -->
                         </div>
                         <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
-                            <button class="btn btn-outline" onclick="loadStandardHours()">⭯ 再読み込み</button>
-                            <button class="btn btn-primary" onclick="saveStdHours()">💾 保存</button>
+                            <button class="btn btn-outline" onclick="loadStandardHours()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">refresh</span> 再読み込み</button>
+                            <button class="btn btn-primary" onclick="saveStdHours()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">save</span> 保存</button>
                         </div>
                     </div>
                 </div>
@@ -504,7 +559,7 @@
         <!-- ===== タスク（TODO）ダッシュボードビュー ===== -->
         <div id="view-task" class="view">
             <div class="section-header-bar" style="margin-bottom: 20px;">
-                <h2>☑️ タスク・準備物管理</h2>
+                <h2><span class="material-symbols-outlined fs-6">task_alt</span> タスク・準備物管理</h2>
             </div>
 
             <div style="padding: 0 20px 20px; display: flex; flex-direction: column; gap: 20px;">
@@ -512,7 +567,7 @@
                 <!-- 1. AI抽出コンソール -->
                 <div class="integration-section">
                     <div class="integration-header" style="background: linear-gradient(135deg, #1aa260, #137746);">
-                        <span class="integration-icon">✨</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">auto_awesome</span></span>
                         <span class="integration-title">AI タスク抽出コンソール</span>
                     </div>
                     <div class="integration-body">
@@ -525,11 +580,11 @@
                             style="display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
                             <label style="font-weight: bold; font-size: 0.85rem; cursor: pointer;">
                                 <input type="radio" name="aiTaskMode" value="schedule" checked
-                                    onchange="toggleAiTaskMode()"> 📅 予定解析（先読み）
+                                    onchange="toggleAiTaskMode()"> <span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">event</span> 予定解析（先読み）
                             </label>
                             <label
                                 style="font-weight: bold; font-size: 0.85rem; cursor: pointer; color: var(--text-sub);">
-                                <input type="radio" name="aiTaskMode" value="text" onchange="toggleAiTaskMode()"> 📝
+                                <input type="radio" name="aiTaskMode" value="text" onchange="toggleAiTaskMode()"> <span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">edit_note</span>
                                 フリーテキスト解析（議事録等）
                             </label>
                         </div>
@@ -566,14 +621,14 @@
                         <!-- 抽出結果プレビュー領域 -->
                         <div id="aiTaskPreviewArea"
                             style="display:none; margin-top: 15px; padding: 10px; background: var(--primary-light); border: 1px solid #1a73e8; border-radius: 8px;">
-                            <strong style="color: #1a73e8; font-size: 0.85rem;">✨ 抽出結果プレビュー（まだ保存されていません）</strong>
+                            <strong style="color: #1a73e8; font-size: 0.85rem;"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">auto_awesome</span> 抽出結果プレビュー（まだ保存されていません）</strong>
                             <div id="aiTaskPreviewList" style="margin-top: 10px; max-height: 200px; overflow-y: auto;">
                                 <!-- JSで動的生成 -->
                             </div>
                             <div style="text-align: right; margin-top: 10px;">
                                 <button class="btn btn-outline btn-sm me-2"
                                     onclick="cancelAiTaskPreview()">キャンセル</button>
-                                <button class="btn btn-primary btn-sm" onclick="confirmAiTaskSave()">💾
+                                <button class="btn btn-primary btn-sm" onclick="confirmAiTaskSave()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">save</span>
                                     リストに確定・追加する</button>
                             </div>
                         </div>
@@ -583,7 +638,7 @@
                 <!-- 2. ダッシュボード（タスク一覧） -->
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">📋</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">checklist</span></span>
                         <span class="integration-title">現在のタスク・準備物</span>
                     </div>
                     <div class="integration-body" style="padding-top: 0;">
@@ -615,6 +670,47 @@
             </div>
         </div>
 
+        <!-- ===== 単元マスタビュー ===== -->
+        <div id="view-unitmaster" class="view">
+            <div class="section-header-bar" style="margin-bottom: 0;">
+                <h2><span class="material-symbols-outlined fs-6">menu_book</span> 単元マスタ編集</h2>
+            </div>
+
+            <!-- フィルタ・操作バー -->
+            <div class="um-toolbar">
+                <div class="um-filters">
+                    <select id="umFilterSubject" class="form-select form-select-sm" onchange="renderUnitMasterTable()" style="width: auto; min-width: 140px;">
+                        <option value="">全教科</option>
+                    </select>
+                    <input type="text" id="umFilterUnit" class="form-control form-control-sm" placeholder="単元名で検索..." oninput="renderUnitMasterTable()" style="width: 200px;">
+                </div>
+                <div class="um-actions">
+                    <span id="umRowCount" class="um-row-count"></span>
+                    <button class="btn btn-outline btn-sm" onclick="loadUnitMasterData()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">refresh</span> 更新</button>
+                    <button class="btn btn-primary btn-sm" onclick="showAddUnitMasterRow()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">add</span> 行追加</button>
+                </div>
+            </div>
+
+            <!-- テーブル本体 -->
+            <div class="um-table-wrapper">
+                <table class="um-table" id="umTable">
+                    <thead>
+                        <tr>
+                            <th class="um-th-subject">教科名</th>
+                            <th class="um-th-unit">単元名</th>
+                            <th class="um-th-total">総時数</th>
+                            <th class="um-th-hour">時数</th>
+                            <th class="um-th-activity">学習活動</th>
+                            <th class="um-th-actions">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="umTableBody">
+                        <tr><td colspan="6" style="text-align:center; padding:40px; color:var(--text-hint);">読み込み中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- ===== データ連携ビュー ===== -->
         <div id="view-integration" class="view">
             <div class="section-header-bar" style="margin-bottom: 20px;">
@@ -625,7 +721,7 @@
                 <!-- 指導計画PDF -->
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">📖</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">library_books</span></span>
                         <span class="integration-title">指導計画PDFの読み込み（単元マスタ自動構築）</span>
                     </div>
                     <div class="integration-body">
@@ -647,7 +743,7 @@
                         </div>
                         <div class="integration-row" style="justify-content: flex-end;">
                             <button class="btn btn-primary" id="startUnitBtn" onclick="startProcessing('unit')"
-                                disabled>▶ 単元マスタ再構築を開始</button>
+                                disabled><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">play_arrow</span> 単元マスタ再構築を開始</button>
                         </div>
                     </div>
                 </div>
@@ -655,7 +751,7 @@
                 <!-- 行事予定PDF -->
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">📅</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">event_note</span></span>
                         <span class="integration-title">行事予定PDFの読み込み</span>
                     </div>
                     <div class="integration-body">
@@ -682,7 +778,7 @@
                                     style="height:34px;padding:0 12px;border:1px solid var(--border);border-radius:6px;width:120px;" />
                             </div>
                             <button class="btn btn-primary" id="startEventBtn" onclick="startProcessing('event')"
-                                disabled>▶ 行事予定読み込みを開始</button>
+                                disabled><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">play_arrow</span> 行事予定読み込みを開始</button>
                         </div>
                     </div>
                 </div>

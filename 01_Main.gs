@@ -1,5 +1,5 @@
 /**
- * @fileoverview 基本機能・メニュー関連、初期設定等のメインファイル
+ * @fileoverview 基本機能・メニュー関連のメインファイル
  */
 
 /** 
@@ -24,16 +24,16 @@ function onOpen() {
       .addItem('明日の予定を投稿', 'postScheduleToClassroom')
       .addItem('学級通信を投稿', 'autoPostToClassroom'))
     .addSeparator()
-    .addSubMenu(ui.createMenu('初期設定・その他')
+    .addSubMenu(ui.createMenu('その他')
       .addItem('指導計画PDFの読み込み', 'createUnitMasterFromPdfs_UI')
       .addItem('行事予定PDFをフォルダから読込', 'importEventsFromFolder_UI')
       .addSeparator()
       .addItem('データベースの入力内容をクリア', 'clearDatabaseDataWithConfirmation')
       .addItem('（PDF読込処理を強制停止）', 'resetAllPdfProcessing_UI')
-      .addItem('クラス一覧をシートに取得', 'listCoursesToSheet')
+      .addItem('クラス一覧を取得', 'listCoursesToSheet')
       .addItem('DB列等のキャッシュをクリア', 'clearDbColumnsCache')
       .addSeparator()
-      .addItem('Phase 5: シート整理を実行', 'executePhase5Cleanup'));
+      .addItem('シート保護を実行', 'protectSheets'));
 
   menu.addToUi();
 }
