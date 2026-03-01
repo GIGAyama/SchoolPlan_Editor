@@ -1278,3 +1278,151 @@ function deleteTaskFromWebApp(taskId) {
     return { success: false, error: e.message };
   }
 }
+
+// ===================================================
+// ===== 単元マスタ管理 WebApp API =====
+// ===================================================
+
+/**
+ * [Webアプリ API] 単元マスタの全データを取得します
+ * @returns {Object} { success, rows: [{subject, unitName, totalHours, hourNum, activity, rowIndex}], subjects: string[] }
+ */
+function getUnitMasterData() {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) return { success: true, rows: [], subjects: [] };
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { success: true, rows: [], subjects: [] };
+
+    const data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+    const subjectSet = new Set();
+    const rows = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const r = data[i];
+      const subject = r[MASTER_COL_SUBJECT - 1] || '';
+      if (subject) subjectSet.add(subject);
+      rows.push({
+        rowIndex: i + 2, // シート上の実際の行番号(1-based)
+        subject: subject,
+        unitName: r[MASTER_COL_UNIT_NAME - 1] || '',
+        totalHours: r[MASTER_COL_TOTAL_HOURS - 1] || '',
+        hourNum: r[MASTER_COL_HOUR_NUM - 1] || '',
+        activity: r[MASTER_COL_ACTIVITY - 1] || ''
+      });
+    }
+
+    return { success: true, rows: rows, subjects: [...subjectSet] };
+  } catch (e) {
+    logError('getUnitMasterData', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 単元マスタの指定行を更新します
+ * @param {number} rowIndex シート上の行番号 (1-based)
+ * @param {Object} data {subject, unitName, totalHours, hourNum, activity}
+ * @returns {Object} { success: boolean }
+ */
+function updateUnitMasterRow(rowIndex, data) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) throw new Error('単元マスタシートが見つかりません');
+
+    sheet.getRange(rowIndex, 1, 1, 5).setValues([[
+      data.subject || '',
+      data.unitName || '',
+      data.totalHours || '',
+      data.hourNum || '',
+      data.activity || ''
+    ]]);
+
+    return { success: true };
+  } catch (e) {
+    logError('updateUnitMasterRow', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 単元マスタの指定位置に新しい行を挿入します
+ * @param {number} afterRowIndex この行の後に挿入 (1-based)。0の場合はヘッダー直後(2行目)に挿入
+ * @param {Object} data {subject, unitName, totalHours, hourNum, activity}
+ * @returns {Object} { success: boolean, newRowIndex: number }
+ */
+function insertUnitMasterRow(afterRowIndex, data) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) throw new Error('単元マスタシートが見つかりません');
+
+    const insertAt = afterRowIndex > 0 ? afterRowIndex + 1 : 2;
+    sheet.insertRowBefore(insertAt);
+    sheet.getRange(insertAt, 1, 1, 5).setValues([[
+      data.subject || '',
+      data.unitName || '',
+      data.totalHours || '',
+      data.hourNum || '',
+      data.activity || ''
+    ]]);
+
+    return { success: true, newRowIndex: insertAt };
+  } catch (e) {
+    logError('insertUnitMasterRow', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 単元マスタの指定行を削除します
+ * @param {number} rowIndex シート上の行番号 (1-based)
+ * @returns {Object} { success: boolean }
+ */
+function deleteUnitMasterRow(rowIndex) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) throw new Error('単元マスタシートが見つかりません');
+
+    if (rowIndex < 2) throw new Error('ヘッダー行は削除できません');
+    sheet.deleteRow(rowIndex);
+    return { success: true };
+  } catch (e) {
+    logError('deleteUnitMasterRow', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 単元マスタの複数行を一括更新します
+ * @param {Object[]} updates [{rowIndex, data: {subject, unitName, totalHours, hourNum, activity}}]
+ * @returns {Object} { success: boolean, count: number }
+ */
+function batchUpdateUnitMaster(updates) {
+  try {
+    const ss = getSs_();
+    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!sheet) throw new Error('単元マスタシートが見つかりません');
+
+    let count = 0;
+    for (const u of updates) {
+      sheet.getRange(u.rowIndex, 1, 1, 5).setValues([[
+        u.data.subject || '',
+        u.data.unitName || '',
+        u.data.totalHours || '',
+        u.data.hourNum || '',
+        u.data.activity || ''
+      ]]);
+      count++;
+    }
+
+    return { success: true, count: count };
+  } catch (e) {
+    logError('batchUpdateUnitMaster', e);
+    return { success: false, error: e.message };
+  }
+}

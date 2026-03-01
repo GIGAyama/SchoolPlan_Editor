@@ -46,6 +46,9 @@
                 <button class="nav-btn" data-view="task" onclick="switchView('task')">
                     <span class="material-symbols-outlined">task_alt</span> タスク
                 </button>
+                <button class="nav-btn" data-view="unitmaster" onclick="switchView('unitmaster')">
+                    <span class="material-symbols-outlined">menu_book</span> 単元
+                </button>
                 <button class="nav-btn" data-view="newsletter" onclick="switchView('newsletter')">
                     <span class="material-symbols-outlined">newspaper</span> 学級通信
                 </button>
@@ -656,6 +659,47 @@
                     </div>
                 </div>
 
+            </div>
+        </div>
+
+        <!-- ===== 単元マスタビュー ===== -->
+        <div id="view-unitmaster" class="view">
+            <div class="section-header-bar" style="margin-bottom: 0;">
+                <h2><span class="material-symbols-outlined fs-6">menu_book</span> 単元マスタ編集</h2>
+            </div>
+
+            <!-- フィルタ・操作バー -->
+            <div class="um-toolbar">
+                <div class="um-filters">
+                    <select id="umFilterSubject" class="form-select form-select-sm" onchange="renderUnitMasterTable()" style="width: auto; min-width: 140px;">
+                        <option value="">全教科</option>
+                    </select>
+                    <input type="text" id="umFilterUnit" class="form-control form-control-sm" placeholder="単元名で検索..." oninput="renderUnitMasterTable()" style="width: 200px;">
+                </div>
+                <div class="um-actions">
+                    <span id="umRowCount" class="um-row-count"></span>
+                    <button class="btn btn-outline btn-sm" onclick="loadUnitMasterData()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">refresh</span> 更新</button>
+                    <button class="btn btn-primary btn-sm" onclick="showAddUnitMasterRow()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">add</span> 行追加</button>
+                </div>
+            </div>
+
+            <!-- テーブル本体 -->
+            <div class="um-table-wrapper">
+                <table class="um-table" id="umTable">
+                    <thead>
+                        <tr>
+                            <th class="um-th-subject">教科名</th>
+                            <th class="um-th-unit">単元名</th>
+                            <th class="um-th-total">総時数</th>
+                            <th class="um-th-hour">時数</th>
+                            <th class="um-th-activity">学習活動</th>
+                            <th class="um-th-actions">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="umTableBody">
+                        <tr><td colspan="6" style="text-align:center; padding:40px; color:var(--text-hint);">読み込み中...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 

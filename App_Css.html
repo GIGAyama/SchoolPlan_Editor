@@ -1817,6 +1817,149 @@
         word-break: break-all;
     }
 
+    /* ===== 単元マスタ ===== */
+    .um-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 20px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+        position: sticky;
+        top: var(--header-h);
+        z-index: 89;
+    }
+
+    .um-filters {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .um-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .um-row-count {
+        font-size: 0.78rem;
+        color: var(--text-sub);
+        white-space: nowrap;
+    }
+
+    .um-table-wrapper {
+        flex: 1;
+        overflow: auto;
+        padding: 0 20px 20px;
+    }
+
+    .um-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 0.82rem;
+        margin-top: 12px;
+    }
+
+    .um-table thead {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+    }
+
+    .um-table th {
+        background: var(--surface-3);
+        color: var(--text-sub);
+        font-weight: 600;
+        padding: 8px 10px;
+        border-bottom: 2px solid var(--border);
+        white-space: nowrap;
+        text-align: left;
+    }
+
+    .um-th-subject { width: 100px; }
+    .um-th-unit { width: 180px; }
+    .um-th-total { width: 60px; text-align: center !important; }
+    .um-th-hour { width: 60px; text-align: center !important; }
+    .um-th-activity { min-width: 200px; }
+    .um-th-actions { width: 100px; text-align: center !important; }
+
+    .um-table td {
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+    }
+
+    .um-table tbody tr:hover {
+        background: var(--primary-light);
+    }
+
+    .um-table tbody tr.um-editing {
+        background: #fffde7;
+    }
+
+    .um-table tbody tr.um-unit-first td {
+        border-top: 2px solid var(--primary);
+    }
+
+    .um-cell-center { text-align: center; }
+
+    .um-table .um-input {
+        width: 100%;
+        padding: 4px 6px;
+        border: 1px solid var(--primary);
+        border-radius: 4px;
+        font-size: 0.82rem;
+        font-family: inherit;
+        background: white;
+        box-sizing: border-box;
+    }
+
+    .um-table .um-input:focus {
+        outline: none;
+        border-color: var(--primary-dark);
+        box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2);
+    }
+
+    .um-table .um-input-sm {
+        width: 50px;
+        text-align: center;
+    }
+
+    .um-btn-group {
+        display: flex;
+        gap: 4px;
+        justify-content: center;
+    }
+
+    .um-btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-sub);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s;
+        padding: 0;
+    }
+
+    .um-btn:hover { background: var(--surface-3); color: var(--text-main); }
+    .um-btn-save { color: var(--secondary); }
+    .um-btn-save:hover { background: #e6f4ea; color: #137746; }
+    .um-btn-cancel { color: var(--text-hint); }
+    .um-btn-cancel:hover { background: var(--surface-3); color: var(--text-main); }
+    .um-btn-danger:hover { background: #fce8e6; color: var(--danger); }
+    .um-btn-insert { color: var(--primary); }
+    .um-btn-insert:hover { background: var(--primary-light); color: var(--primary-dark); }
+
     /* ===== フッター ===== */
     footer.giga-footer {
         background: var(--surface);

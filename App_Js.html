@@ -56,6 +56,9 @@
         if (viewName === 'task' && !taskDataLoaded) {
             loadTasks();
         }
+        if (viewName === 'unitmaster' && !umDataLoaded) {
+            loadUnitMasterData();
+        }
     }
 
     // ===== 単元マスタ読み込み =====
@@ -3870,6 +3873,279 @@
             })
             .withFailureHandler(e => showToast('error', '通信エラー: ' + e.message))
             .saveTasksFromWebApp(saveTasks);
+    }
+
+    // ===================================================
+    // ===== 単元マスタ管理ロジック =====
+    // ===================================================
+
+    var umDataLoaded = false;
+    var umAllRows = [];       // サーバーから取得した全行データ
+    var umEditingRowIndex = null; // 現在編集中の行（シート行番号）
+
+    function loadUnitMasterData() {
+        var tbody = document.getElementById('umTableBody');
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:40px;"><div class="spinner-lg"></div><p>単元マスタを読み込み中...</p></td></tr>';
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    umAllRows = res.rows || [];
+                    umDataLoaded = true;
+                    // 教科フィルタのプルダウンを更新
+                    var sel = document.getElementById('umFilterSubject');
+                    var currentVal = sel.value;
+                    sel.innerHTML = '<option value="">全教科</option>';
+                    (res.subjects || []).forEach(function (s) {
+                        var opt = document.createElement('option');
+                        opt.value = s;
+                        opt.textContent = s;
+                        sel.appendChild(opt);
+                    });
+                    sel.value = currentVal; // フィルタ値を維持
+                    renderUnitMasterTable();
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--danger);padding:20px;">読込エラー: ' + escHtml(res.error) + '</td></tr>';
+                }
+            })
+            .withFailureHandler(function (e) {
+                tbody.innerHTML = '<tr><td colspan="6" style="color:var(--danger);padding:20px;">通信エラー: ' + escHtml(e.message) + '</td></tr>';
+            })
+            .getUnitMasterData();
+    }
+
+    function getFilteredUmRows() {
+        var subjectFilter = document.getElementById('umFilterSubject').value;
+        var unitFilter = (document.getElementById('umFilterUnit').value || '').trim().toLowerCase();
+        return umAllRows.filter(function (r) {
+            if (subjectFilter && r.subject !== subjectFilter) return false;
+            if (unitFilter && (r.unitName || '').toLowerCase().indexOf(unitFilter) === -1) return false;
+            return true;
+        });
+    }
+
+    function renderUnitMasterTable() {
+        var filtered = getFilteredUmRows();
+        var tbody = document.getElementById('umTableBody');
+        var countEl = document.getElementById('umRowCount');
+        countEl.textContent = filtered.length + ' / ' + umAllRows.length + ' 件';
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:40px; color:var(--text-hint);">該当するデータがありません</td></tr>';
+            return;
+        }
+
+        // 単元の先頭行を判定（同教科+同単元の最初の行）
+        var prevKey = '';
+        var html = '';
+        for (var i = 0; i < filtered.length; i++) {
+            var r = filtered[i];
+            var key = r.subject + '||' + r.unitName;
+            var isFirst = (key !== prevKey);
+            prevKey = key;
+            var isEditing = (umEditingRowIndex === r.rowIndex);
+            var trClass = (isFirst ? ' um-unit-first' : '') + (isEditing ? ' um-editing' : '');
+
+            if (isEditing) {
+                html += '<tr class="' + trClass.trim() + '" data-row="' + r.rowIndex + '">'
+                    + '<td><input class="um-input" id="umEditSubject" value="' + escAttr(r.subject) + '"></td>'
+                    + '<td><input class="um-input" id="umEditUnitName" value="' + escAttr(r.unitName) + '"></td>'
+                    + '<td class="um-cell-center"><input class="um-input um-input-sm" id="umEditTotal" type="number" min="0" value="' + escAttr(String(r.totalHours)) + '"></td>'
+                    + '<td class="um-cell-center"><input class="um-input um-input-sm" id="umEditHour" type="number" min="0" value="' + escAttr(String(r.hourNum)) + '"></td>'
+                    + '<td><input class="um-input" id="umEditActivity" value="' + escAttr(r.activity) + '"></td>'
+                    + '<td><div class="um-btn-group">'
+                    + '<button class="um-btn um-btn-save" onclick="saveUmEdit(' + r.rowIndex + ')" title="保存"><span class="material-symbols-outlined" style="font-size:18px;">check</span></button>'
+                    + '<button class="um-btn um-btn-cancel" onclick="cancelUmEdit()" title="キャンセル"><span class="material-symbols-outlined" style="font-size:18px;">close</span></button>'
+                    + '</div></td></tr>';
+            } else {
+                html += '<tr class="' + trClass.trim() + '" data-row="' + r.rowIndex + '">'
+                    + '<td>' + escHtml(r.subject) + '</td>'
+                    + '<td>' + escHtml(r.unitName) + '</td>'
+                    + '<td class="um-cell-center">' + escHtml(String(r.totalHours)) + '</td>'
+                    + '<td class="um-cell-center">' + escHtml(String(r.hourNum)) + '</td>'
+                    + '<td>' + escHtml(r.activity) + '</td>'
+                    + '<td><div class="um-btn-group">'
+                    + '<button class="um-btn" onclick="startUmEdit(' + r.rowIndex + ')" title="編集"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>'
+                    + '<button class="um-btn um-btn-insert" onclick="insertUmRowAfter(' + r.rowIndex + ')" title="この行の後に追加"><span class="material-symbols-outlined" style="font-size:18px;">add</span></button>'
+                    + '<button class="um-btn um-btn-danger" onclick="deleteUmRow(' + r.rowIndex + ')" title="削除"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>'
+                    + '</div></td></tr>';
+            }
+        }
+        tbody.innerHTML = html;
+    }
+
+    function escAttr(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // --- 編集 ---
+    function startUmEdit(rowIndex) {
+        umEditingRowIndex = rowIndex;
+        renderUnitMasterTable();
+        // 最初の入力欄にフォーカス
+        setTimeout(function () {
+            var el = document.getElementById('umEditSubject');
+            if (el) el.focus();
+        }, 50);
+    }
+
+    function cancelUmEdit() {
+        umEditingRowIndex = null;
+        renderUnitMasterTable();
+    }
+
+    function saveUmEdit(rowIndex) {
+        var data = {
+            subject: document.getElementById('umEditSubject').value.trim(),
+            unitName: document.getElementById('umEditUnitName').value.trim(),
+            totalHours: document.getElementById('umEditTotal').value.trim(),
+            hourNum: document.getElementById('umEditHour').value.trim(),
+            activity: document.getElementById('umEditActivity').value.trim()
+        };
+
+        if (!data.subject) { showToast('error', '教科名を入力してください'); return; }
+
+        // UIを即座に反映
+        var localRow = umAllRows.find(function (r) { return r.rowIndex === rowIndex; });
+        if (localRow) {
+            localRow.subject = data.subject;
+            localRow.unitName = data.unitName;
+            localRow.totalHours = data.totalHours;
+            localRow.hourNum = data.hourNum;
+            localRow.activity = data.activity;
+        }
+        umEditingRowIndex = null;
+        renderUnitMasterTable();
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '保存しました');
+                } else {
+                    showToast('error', '保存エラー: ' + res.error);
+                    loadUnitMasterData(); // ロールバック
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+                loadUnitMasterData();
+            })
+            .updateUnitMasterRow(rowIndex, data);
+    }
+
+    // --- 行追加（ヘッダーの「行追加」ボタン） ---
+    async function showAddUnitMasterRow() {
+        var result = await Swal.fire({
+            title: '単元マスタに行追加',
+            html:
+                '<div style="text-align:left;font-size:0.85rem;">' +
+                '<label class="mb-1"><strong>教科名</strong></label>' +
+                '<input id="swalUmSubject" class="swal2-input" placeholder="例: 国語" style="font-size:0.85rem;">' +
+                '<label class="mb-1 mt-2"><strong>単元名</strong></label>' +
+                '<input id="swalUmUnit" class="swal2-input" placeholder="例: ごんぎつね" style="font-size:0.85rem;">' +
+                '<label class="mb-1 mt-2"><strong>総時数</strong></label>' +
+                '<input id="swalUmTotal" class="swal2-input" type="number" min="0" value="1" style="font-size:0.85rem;">' +
+                '<label class="mb-1 mt-2"><strong>時数（何時間目）</strong></label>' +
+                '<input id="swalUmHour" class="swal2-input" type="number" min="0" value="1" style="font-size:0.85rem;">' +
+                '<label class="mb-1 mt-2"><strong>学習活動</strong></label>' +
+                '<input id="swalUmActivity" class="swal2-input" placeholder="学習活動の内容" style="font-size:0.85rem;">' +
+                '</div>',
+            focusConfirm: false,
+            showCancelButton: true,
+            confirmButtonText: '追加',
+            cancelButtonText: 'キャンセル',
+            preConfirm: function () {
+                var subject = document.getElementById('swalUmSubject').value.trim();
+                if (!subject) { Swal.showValidationMessage('教科名を入力してください'); return false; }
+                return {
+                    subject: subject,
+                    unitName: document.getElementById('swalUmUnit').value.trim(),
+                    totalHours: document.getElementById('swalUmTotal').value.trim(),
+                    hourNum: document.getElementById('swalUmHour').value.trim(),
+                    activity: document.getElementById('swalUmActivity').value.trim()
+                };
+            }
+        });
+        if (!result.isConfirmed) return;
+
+        showToast('info', '行を追加中...');
+        // 最後の行の後に追加
+        var lastRow = umAllRows.length > 0 ? umAllRows[umAllRows.length - 1].rowIndex : 1;
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '行を追加しました');
+                    loadUnitMasterData();
+                } else {
+                    showToast('error', '追加エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .insertUnitMasterRow(lastRow, result.value);
+    }
+
+    // --- 行挿入（特定行の後）---
+    function insertUmRowAfter(afterRowIndex) {
+        // 前の行のデータをコピーして挿入（教科名と単元名を引き継ぐ）
+        var srcRow = umAllRows.find(function (r) { return r.rowIndex === afterRowIndex; });
+        var newData = {
+            subject: srcRow ? srcRow.subject : '',
+            unitName: srcRow ? srcRow.unitName : '',
+            totalHours: srcRow ? srcRow.totalHours : '',
+            hourNum: srcRow ? (parseInt(srcRow.hourNum, 10) + 1) || '' : '',
+            activity: ''
+        };
+
+        showToast('info', '行を挿入中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '行を挿入しました');
+                    loadUnitMasterData();
+                } else {
+                    showToast('error', '挿入エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .insertUnitMasterRow(afterRowIndex, newData);
+    }
+
+    // --- 行削除 ---
+    async function deleteUmRow(rowIndex) {
+        var targetRow = umAllRows.find(function (r) { return r.rowIndex === rowIndex; });
+        var msg = targetRow
+            ? (targetRow.subject + ' / ' + targetRow.unitName + ' (' + targetRow.hourNum + '時間目)')
+            : '行 ' + rowIndex;
+
+        var result = await Swal.fire({
+            title: '行を削除',
+            text: '「' + msg + '」を削除しますか？ 元に戻せません。',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '削除する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#ea4335'
+        });
+        if (!result.isConfirmed) return;
+
+        showToast('info', '行を削除中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '削除しました');
+                    loadUnitMasterData();
+                } else {
+                    showToast('error', '削除エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .deleteUnitMasterRow(rowIndex);
     }
 
 </script>
