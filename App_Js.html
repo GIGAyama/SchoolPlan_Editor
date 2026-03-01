@@ -379,13 +379,13 @@
         if (!days) return;
 
         document.getElementById('saveBtn').disabled = true;
-        document.getElementById('saveBtn').textContent = '保存中...';
+        document.getElementById('saveBtn').innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 保存中...';
         showToast('info', '保存中...');
 
         google.script.run
             .withSuccessHandler(function (result) {
                 document.getElementById('saveBtn').disabled = false;
-                document.getElementById('saveBtn').textContent = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
+                document.getElementById('saveBtn').innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 if (result.success) {
                     STATE.weekData.days = days;
                     cancelEdit();
@@ -396,7 +396,7 @@
             })
             .withFailureHandler(function (e) {
                 document.getElementById('saveBtn').disabled = false;
-                document.getElementById('saveBtn').textContent = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
+                document.getElementById('saveBtn').innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 showToast('error', '通信エラー: ' + e.message);
             })
             .saveWeeklyPlanData(STATE.mondayStr, days);
@@ -409,12 +409,12 @@
         if (!currentDays) return;
 
         var btn = document.getElementById('autoFillBtn');
-        if (btn) { btn.disabled = true; btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 計算中...'; }
+        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 計算中...'; }
         showToast('info', '単元マスタから学習内容を自動計算しています...');
 
         google.script.run
             .withSuccessHandler(function (result) {
-                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力'; }
+                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力'; }
                 if (result.success) {
                     STATE.weekData.days = result.days;
                     // 編集状態のまま画面を再描画（AIの結果を反映）
@@ -425,7 +425,7 @@
                 }
             })
             .withFailureHandler(function (e) {
-                if (btn) { btn.disabled = false; btn.textContent = '<span class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力'; }
+                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力'; }
                 showToast('error', '通信エラー: ' + e.message);
             })
             .calculateAutoFillForWebApp(STATE.mondayStr, currentDays);
@@ -442,7 +442,7 @@
         var btn = document.getElementById('printBtn');
         if (btn) {
             btn.disabled = true;
-            btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 準備中...';
+            btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 準備中...';
         }
 
         var printFrame = document.getElementById('printFrame');
@@ -757,7 +757,7 @@
         setTimeout(function () {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = '<span class="material-symbols-outlined fs-6">print</span> 印刷';
+                btn.innerHTML = '<span class="material-symbols-outlined fs-6">print</span> 印刷';
             }
             printFrame.contentWindow.focus();
             printFrame.contentWindow.print();
@@ -951,12 +951,12 @@
         if (!STATE.mondayStr) { showToast('error', '週のデータを読み込んでください'); return; }
         var btn = document.getElementById('pdfBtn');
         btn.disabled = true;
-        btn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 生成中...';
+        btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 生成中...';
         showToast('info', 'PDFを生成しています...');
         google.script.run
             .withSuccessHandler(function (result) {
                 btn.disabled = false;
-                btn.textContent = '<span class="material-symbols-outlined fs-6">description</span> PDF出力';
+                btn.innerHTML = '<span class="material-symbols-outlined fs-6">description</span> PDF出力';
                 if (result.success) {
                     showToast('success', 'PDF生成完了！');
                     window.open(result.viewUrl, '_blank');
@@ -966,7 +966,7 @@
             })
             .withFailureHandler(function (e) {
                 btn.disabled = false;
-                btn.textContent = '<span class="material-symbols-outlined fs-6">description</span> PDF出力';
+                btn.innerHTML = '<span class="material-symbols-outlined fs-6">description</span> PDF出力';
                 showToast('error', '通信エラー: ' + e.message);
             })
             .generateWeeklyPlanPdf(STATE.mondayStr);
@@ -2740,7 +2740,7 @@
         Swal.fire({
             title: 'Classroomに投稿',
             html: '<div style="text-align:left;">'
-                + '<p style="font-size:0.85rem;color:var(--text-sub);margin-bottom:8px;">学級通信エディタの現在の内容をPDFに変換してClassroomに投稿します。</p>'
+                + '<p style="font-size:0.85rem;color:var(--text-sub);margin-bottom:8px;">学級通信エディタの現在の内容をGoogleドキュメントに変換してClassroomに投稿します。</p>'
                 + '<label style="font-size:0.85rem;font-weight:600;">付加メッセージ（任意）</label>'
                 + '<textarea id="swalCrMsg" class="swal2-textarea" placeholder="Classroomへのメッセージ..." style="margin-top:6px;min-height:80px;"></textarea>'
                 + '</div>',
@@ -2752,7 +2752,7 @@
             }
         }).then(function(result) {
             if (!result.isConfirmed) return;
-            showToast('info', 'PDFを生成してClassroomに投稿しています...');
+            showToast('info', 'Googleドキュメントを作成してClassroomに投稿しています...');
             var htmlContent = NW.buildClassroomHTML();
             google.script.run
                 .withSuccessHandler(function(res) {
@@ -2984,19 +2984,19 @@
 
                 if (res.unitStatus.isRunning) {
                     unitBtn.disabled = true;
-                    unitBtn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...';
+                    unitBtn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...';
                     unitStatusMsg.innerHTML = '<span style="color:var(--danger)">実行中 (残件: ' + res.unitStatus.remaining + ' / 全 ' + res.unitStatus.total + ')</span>';
                 } else {
-                    unitBtn.textContent = '▶ 単元マスタ再構築を開始';
+                    unitBtn.innerHTML = '<span class="material-symbols-outlined fs-6">play_arrow</span> 単元マスタ再構築を開始';
                     updateSelection('unit');
                 }
 
                 if (res.eventStatus.isRunning) {
                     eventBtn.disabled = true;
-                    eventBtn.textContent = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...';
+                    eventBtn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...';
                     eventStatusMsg.innerHTML = '<span style="color:var(--danger)">実行中 (残件: ' + res.eventStatus.remaining + ' / 全 ' + res.eventStatus.total + ')</span>';
                 } else {
-                    eventBtn.textContent = '▶ 行事予定読み込みを開始';
+                    eventBtn.innerHTML = '<span class="material-symbols-outlined fs-6">play_arrow</span> 行事予定読み込みを開始';
                     updateSelection('event');
                 }
 
@@ -3009,7 +3009,7 @@
 
     async function resetPdfProcessing() {
         var result = await Swal.fire({
-            title: '⚠️ 強制リセット',
+            title: '強制リセット',
             text: 'バックグラウンドで実行中のすべての処理キューを強制的に破棄します。よろしいですか？',
             icon: 'warning',
             showCancelButton: true,
@@ -3218,7 +3218,7 @@
         };
 
         var swalResult = await Swal.fire({
-            title: '⚠️ 年間一括転記',
+            title: '年間一括転記',
             text: '長期休業期間を除外し、今後のすべての週に固定時間割を一括転記します。既存のデータは上書きされます。',
             icon: 'warning',
             showCancelButton: true,
@@ -3467,7 +3467,7 @@
         }
 
         var swalResult = await Swal.fire({
-            title: '🗓️ カレンダー再生成',
+            title: 'カレンダー再生成',
             html: year + '年度のカレンダー（起点: ' + startMondayStr + '）をデータベースに展開します。<br><small>既存の行事や週案データは消えません</small>',
             icon: 'warning',
             showCancelButton: true,

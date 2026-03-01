@@ -514,8 +514,10 @@ function generateNewsletterPdf(mondayDateStr) {
 }
 
 /**
- * [Webアプリ API] 学級通信HTMLをPDFに変換してClassroomへ投稿します。
- * エディタのHTMLを直接受け取り、Drive経由でPDF化してClassroomに投稿します。
+ * [Webアプリ API] 学級通信HTMLをGoogleドキュメントに変換してClassroomへ投稿します。
+ * Google ClassroomはGoogleドキュメントをネイティブにプレビュー表示できるため、
+ * PDFやHTMLではなくGoogle Docs形式で投稿することで、
+ * Classroom画面上でも整ったレイアウトで閲覧できます。
  * @param {string} customMessage Classroomへの付加メッセージ
  * @param {string} htmlContent 学級通信エディタのHTML文字列
  * @returns {Object} { success, message }
@@ -529,23 +531,33 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
 
     let classroomFile;
     try {
-      // HTML → Google Doc (convert:true) → PDF (Drive Advanced Serviceが必要)
+      // HTML → Google Doc (convert:true) して、そのままドキュメントとして投稿
+      // Classroomはドキュメントのプレビューをネイティブに表示できる
       const htmlBlob = Utilities.newBlob(htmlContent, 'text/html', fileName + '.html');
       const inserted = Drive.Files.insert(
         { title: fileName, parents: [{ id: folder.getId() }] },
         htmlBlob,
         { convert: true }
       );
-      const pdfBlob = DriveApp.getFileById(inserted.id).getAs('application/pdf');
-      pdfBlob.setName(fileName + '.pdf');
-      classroomFile = folder.createFile(pdfBlob);
-      // 変換用の中間ファイル（Googleドキュメント）を削除
-      DriveApp.getFileById(inserted.id).setTrashed(true);
+      classroomFile = DriveApp.getFileById(inserted.id);
     } catch (convErr) {
-      // フォールバック: Drive Advanced Serviceが無効な場合はHTMLファイルをそのまま投稿
-      logError('postNewsletterToClassroomFromWeb (HTML→PDF変換失敗、HTMLで代替)', convErr);
-      const htmlBlob = Utilities.newBlob(htmlContent, 'text/html', fileName + '.html');
-      classroomFile = folder.createFile(htmlBlob);
+      // フォールバック: Drive Advanced Serviceが無効な場合
+      // DocumentAppで空のドキュメントを作成し、HTMLの主要テキストを挿入
+      logError('postNewsletterToClassroomFromWeb (Drive変換失敗、DocumentApp代替)', convErr);
+      const doc = DocumentApp.create(fileName);
+      const body = doc.getBody();
+      // HTMLタグを除去してプレーンテキストとして挿入
+      var plainText = htmlContent.replace(/<style[\s\S]*?<\/style>/gi, '')
+                                 .replace(/<[^>]+>/g, '\n')
+                                 .replace(/\n{3,}/g, '\n\n')
+                                 .trim();
+      body.setText(plainText);
+      doc.saveAndClose();
+      // フォルダに移動
+      var file = DriveApp.getFileById(doc.getId());
+      folder.addFile(file);
+      DriveApp.getRootFolder().removeFile(file);
+      classroomFile = file;
     }
 
     classroomFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);

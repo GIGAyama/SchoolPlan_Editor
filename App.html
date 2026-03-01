@@ -315,7 +315,9 @@
                         <!-- Classroom連携 -->
                         <div
                             style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
-                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);">🏫 Google Classroom
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">school</span> Google Classroom
                                 連携</h4>
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
                                 <div>
@@ -394,7 +396,7 @@
 
                         <!-- 保存ボタン -->
                         <div style="display:flex; justify-content:flex-end;">
-                            <button class="btn btn-primary" onclick="saveSystemSettings()">💾 システム設定を保存</button>
+                            <button class="btn btn-primary" onclick="saveSystemSettings()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">save</span> システム設定を保存</button>
                         </div>
                     </div>
                 </div>
@@ -404,7 +406,7 @@
             <div style="padding: 0 20px 20px;">
                 <div class="integration-section" style="border:1px solid #ffcc80;">
                     <div class="integration-header" style="background:#fff3e0;">
-                        <span class="integration-icon">🗓️</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">calendar_month</span></span>
                         <span class="integration-title" style="color:#e65100;">年間カレンダー生成機能（年度更新）</span>
                     </div>
                     <div class="integration-body" style="display:flex; flex-direction:column; gap:16px;">
@@ -428,7 +430,7 @@
                         </div>
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
                             <button class="btn" style="background-color:#e65100; color:white;"
-                                onclick="confirmGenerateCalendar()">⚠️ カレンダーを再生成する</button>
+                                onclick="confirmGenerateCalendar()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">warning</span> カレンダーを再生成する</button>
                         </div>
                     </div>
                 </div>
@@ -438,7 +440,7 @@
             <div style="padding: 0 20px 20px;">
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">⏱️</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">schedule</span></span>
                         <span class="integration-title">固定時間割エディタ</span>
                     </div>
                     <div class="integration-body">
@@ -467,13 +469,13 @@
                         </div>
                         <div
                             style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px; flex-wrap:wrap; align-items:center;">
-                            <button class="btn btn-outline" onclick="loadTimetableEditor()">⭯ 再読み込み</button>
-                            <button class="btn btn-primary" onclick="saveTimetable()">💾 保存</button>
+                            <button class="btn btn-outline" onclick="loadTimetableEditor()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">refresh</span> 再読み込み</button>
+                            <button class="btn btn-primary" onclick="saveTimetable()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">save</span> 保存</button>
                         </div>
                         <hr style="margin: 16px 0; border:none; border-top:1px dashed var(--border);">
                         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                             <span style="font-size:0.8rem;font-weight:600;color:var(--text-sub)">‣ 選択中の週に転記:</span>
-                            <button class="btn btn-outline" onclick="applyTimetableToCurrentWeek()">⏱️ 今の週に展開</button>
+                            <button class="btn btn-outline" onclick="applyTimetableToCurrentWeek()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">schedule</span> 今の週に展開</button>
                         </div>
                     </div>
                 </div>
@@ -483,7 +485,7 @@
             <div style="padding: 0 20px 20px;">
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">📅</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">event_note</span></span>
                         <span class="integration-title">年間一括転記（長期休業期間の設定）</span>
                     </div>
                     <div class="integration-body">
@@ -492,17 +494,17 @@
                         </p>
                         <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;">
                             <div class="vacation-card">
-                                <strong>🌻 夏休み</strong>
+                                <strong><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">wb_sunny</span> 夏休み</strong>
                                 <label>開始日<input type="date" id="vacSummerStart"></label>
                                 <label>終了日<input type="date" id="vacSummerEnd"></label>
                             </div>
                             <div class="vacation-card">
-                                <strong>⛄ 冬休み</strong>
+                                <strong><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">ac_unit</span> 冬休み</strong>
                                 <label>開始日<input type="date" id="vacWinterStart"></label>
                                 <label>終了日<input type="date" id="vacWinterEnd"></label>
                             </div>
                             <div class="vacation-card">
-                                <strong>🌸 春休み</strong>
+                                <strong><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">local_florist</span> 春休み</strong>
                                 <label>開始日<input type="date" id="vacSpringStart"></label>
                                 <label>終了日<input type="date" id="vacSpringEnd"></label>
                             </div>
@@ -535,8 +537,8 @@
                             <!-- JSで動的に生成 -->
                         </div>
                         <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
-                            <button class="btn btn-outline" onclick="loadStandardHours()">⭯ 再読み込み</button>
-                            <button class="btn btn-primary" onclick="saveStdHours()">💾 保存</button>
+                            <button class="btn btn-outline" onclick="loadStandardHours()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">refresh</span> 再読み込み</button>
+                            <button class="btn btn-primary" onclick="saveStdHours()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">save</span> 保存</button>
                         </div>
                     </div>
                 </div>
@@ -546,7 +548,7 @@
         <!-- ===== タスク（TODO）ダッシュボードビュー ===== -->
         <div id="view-task" class="view">
             <div class="section-header-bar" style="margin-bottom: 20px;">
-                <h2>☑️ タスク・準備物管理</h2>
+                <h2><span class="material-symbols-outlined fs-6">task_alt</span> タスク・準備物管理</h2>
             </div>
 
             <div style="padding: 0 20px 20px; display: flex; flex-direction: column; gap: 20px;">
@@ -554,7 +556,7 @@
                 <!-- 1. AI抽出コンソール -->
                 <div class="integration-section">
                     <div class="integration-header" style="background: linear-gradient(135deg, #1aa260, #137746);">
-                        <span class="integration-icon">✨</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">auto_awesome</span></span>
                         <span class="integration-title">AI タスク抽出コンソール</span>
                     </div>
                     <div class="integration-body">
@@ -567,11 +569,11 @@
                             style="display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
                             <label style="font-weight: bold; font-size: 0.85rem; cursor: pointer;">
                                 <input type="radio" name="aiTaskMode" value="schedule" checked
-                                    onchange="toggleAiTaskMode()"> 📅 予定解析（先読み）
+                                    onchange="toggleAiTaskMode()"> <span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">event</span> 予定解析（先読み）
                             </label>
                             <label
                                 style="font-weight: bold; font-size: 0.85rem; cursor: pointer; color: var(--text-sub);">
-                                <input type="radio" name="aiTaskMode" value="text" onchange="toggleAiTaskMode()"> 📝
+                                <input type="radio" name="aiTaskMode" value="text" onchange="toggleAiTaskMode()"> <span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">edit_note</span>
                                 フリーテキスト解析（議事録等）
                             </label>
                         </div>
@@ -608,14 +610,14 @@
                         <!-- 抽出結果プレビュー領域 -->
                         <div id="aiTaskPreviewArea"
                             style="display:none; margin-top: 15px; padding: 10px; background: var(--primary-light); border: 1px solid #1a73e8; border-radius: 8px;">
-                            <strong style="color: #1a73e8; font-size: 0.85rem;">✨ 抽出結果プレビュー（まだ保存されていません）</strong>
+                            <strong style="color: #1a73e8; font-size: 0.85rem;"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">auto_awesome</span> 抽出結果プレビュー（まだ保存されていません）</strong>
                             <div id="aiTaskPreviewList" style="margin-top: 10px; max-height: 200px; overflow-y: auto;">
                                 <!-- JSで動的生成 -->
                             </div>
                             <div style="text-align: right; margin-top: 10px;">
                                 <button class="btn btn-outline btn-sm me-2"
                                     onclick="cancelAiTaskPreview()">キャンセル</button>
-                                <button class="btn btn-primary btn-sm" onclick="confirmAiTaskSave()">💾
+                                <button class="btn btn-primary btn-sm" onclick="confirmAiTaskSave()"><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">save</span>
                                     リストに確定・追加する</button>
                             </div>
                         </div>
@@ -625,7 +627,7 @@
                 <!-- 2. ダッシュボード（タスク一覧） -->
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">📋</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">checklist</span></span>
                         <span class="integration-title">現在のタスク・準備物</span>
                     </div>
                     <div class="integration-body" style="padding-top: 0;">
@@ -667,7 +669,7 @@
                 <!-- 指導計画PDF -->
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">📖</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">library_books</span></span>
                         <span class="integration-title">指導計画PDFの読み込み（単元マスタ自動構築）</span>
                     </div>
                     <div class="integration-body">
@@ -689,7 +691,7 @@
                         </div>
                         <div class="integration-row" style="justify-content: flex-end;">
                             <button class="btn btn-primary" id="startUnitBtn" onclick="startProcessing('unit')"
-                                disabled>▶ 単元マスタ再構築を開始</button>
+                                disabled><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">play_arrow</span> 単元マスタ再構築を開始</button>
                         </div>
                     </div>
                 </div>
@@ -697,7 +699,7 @@
                 <!-- 行事予定PDF -->
                 <div class="integration-section">
                     <div class="integration-header">
-                        <span class="integration-icon">📅</span>
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">event_note</span></span>
                         <span class="integration-title">行事予定PDFの読み込み</span>
                     </div>
                     <div class="integration-body">
@@ -724,7 +726,7 @@
                                     style="height:34px;padding:0 12px;border:1px solid var(--border);border-radius:6px;width:120px;" />
                             </div>
                             <button class="btn btn-primary" id="startEventBtn" onclick="startProcessing('event')"
-                                disabled>▶ 行事予定読み込みを開始</button>
+                                disabled><span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">play_arrow</span> 行事予定読み込みを開始</button>
                         </div>
                     </div>
                 </div>
