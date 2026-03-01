@@ -23,6 +23,7 @@
         goToToday();
         loadAnnualHoursView();
         loadSettingsView();
+        loadTasks(); // タスクをページ読み込み時に初期ロード（デフォルトでリスト表示）
     };
 
     // ===== ビュー切り替え =====
@@ -53,8 +54,12 @@
         if (viewName === 'hours' && STATE.mondayStr) {
             loadHoursSummary();
         }
-        if (viewName === 'task' && !taskDataLoaded) {
-            loadTasks();
+        if (viewName === 'task') {
+            if (!taskDataLoaded && !taskLoading) {
+                loadTasks();
+            } else if (taskDataLoaded) {
+                renderTaskList(); // データ読み込み済みの場合は再描画
+            }
         }
         if (viewName === 'unitmaster' && !umDataLoaded) {
             loadUnitMasterData();
@@ -151,12 +156,8 @@
                 updateWeekHeader(data.days, data.weekNum);
                 loadHoursSummary(); // 週変更時に時数集計も更新
 
-                // 週案表示時にタスクパネルも更新する
-                if (taskDataLoaded) {
-                    renderWeeklyTaskPanel();
-                } else {
-                    loadTasks();
-                }
+                // 週案表示時にタスクパネルを更新する（loadTasks はwindow.onloadで管理）
+                renderWeeklyTaskPanel();
             })
             .withFailureHandler(function (e) {
                 console.error('[DEBUG] getWeeklyPlanData FAILED:', e.message);
@@ -3535,9 +3536,7 @@
 
     // ===== 初期リロード制御 =====
     var taskDataLoaded = false;
-    // switchView内部ハック：taskタブ開いた瞬間に未ロードならロードする仕組みを追加するため関数上書きかイベント処理が必要だが、
-    // ここではグローバルのswitchView内のif文を後で追記・あるいは個別に叩く想定とする。
-    // (既にあるswitchView定義に直接入れると競合リスクがあるため、一時的にポーリングかHTML側onclickに直接追記等の対処が必要。今回は直接switchView内から呼び出される想定)
+    var taskLoading = false; // 二重呼び出し防止フラグ
 
     // ===== UI切替関連 =====
     function toggleAiTaskMode() {
@@ -3551,11 +3550,14 @@
     let allTaskData = [];
 
     function loadTasks() {
+        if (taskLoading) return; // 二重呼び出し防止
+        taskLoading = true;
         var container = document.getElementById('taskListContainer');
-        container.innerHTML = '<div style="text-align:center; padding: 20px;"><div class="spinner-lg"></div><p>タスクを読み込み中...</p></div>';
+        if (container) container.innerHTML = '<div style="text-align:center; padding: 20px;"><div class="spinner-lg"></div><p>タスクを読み込み中...</p></div>';
 
         google.script.run
             .withSuccessHandler(function (res) {
+                taskLoading = false;
                 if (res.success) {
                     allTaskData = res.tasks || [];
                     STATE.tasks = allTaskData;
@@ -3568,7 +3570,8 @@
                 }
             })
             .withFailureHandler(function (e) {
-                container.innerHTML = '<div style="color:var(--danger); padding:20px;">通信エラー</div>';
+                taskLoading = false;
+                if (container) container.innerHTML = '<div style="color:var(--danger); padding:20px;">通信エラー</div>';
                 showToast('error', '致命的な通信エラー: ' + e.message);
             })
             .getTasksFromWebApp();
