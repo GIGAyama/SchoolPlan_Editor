@@ -108,11 +108,15 @@
                     <button class="btn btn-outline d-flex align-items-center gap-1" id="printBtn"
                         onclick="printWeeklyPlan()"><span class="material-symbols-outlined fs-6">print</span>
                         印刷</button>
-                    <button class="btn btn-outline d-flex align-items-center gap-1" id="autoFillBtn"
+                    <button class="btn btn-outline align-items-center gap-1" id="timetableApplyBtn"
+                        onclick="applyTimetableToCurrentWeek()"
+                        style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
+                            class="material-symbols-outlined fs-6">calendar_month</span> 時間割反映</button>
+                    <button class="btn btn-outline align-items-center gap-1" id="autoFillBtn"
                         onclick="autoFillPlan()"
                         style="display:none; color: var(--primary); border-color: var(--primary);"><span
                             class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力</button>
-                    <button class="btn btn-primary d-flex align-items-center gap-1" id="saveBtn"
+                    <button class="btn btn-primary align-items-center gap-1" id="saveBtn"
                         onclick="saveWeeklyPlan()" style="display:none"><span
                             class="material-symbols-outlined fs-6">save</span>
                         保存する</button>

@@ -330,6 +330,7 @@
         var editBtn = document.getElementById('editToggleBtn');
         var pdfBtn = document.getElementById('pdfBtn');
         var autoFillBtn = document.getElementById('autoFillBtn');
+        var timetableBtn = document.getElementById('timetableApplyBtn');
         var saveBtn = document.getElementById('saveBtn');
         var cancelBtn = document.getElementById('cancelBtn');
         if (STATE.editMode) {
@@ -337,14 +338,16 @@
             label.textContent = '編集モード';
             editBtn.style.display = 'none';
             if (pdfBtn) pdfBtn.style.display = 'none';
-            if (autoFillBtn) autoFillBtn.style.display = '';
-            saveBtn.style.display = '';
+            if (timetableBtn) timetableBtn.style.display = 'flex';
+            if (autoFillBtn) autoFillBtn.style.display = 'flex';
+            saveBtn.style.display = 'flex';
             cancelBtn.style.display = '';
         } else {
             dot.className = 'mode-dot view-dot';
             label.textContent = '閲覧モード';
             editBtn.style.display = '';
             if (pdfBtn) pdfBtn.style.display = '';
+            if (timetableBtn) timetableBtn.style.display = 'none';
             if (autoFillBtn) autoFillBtn.style.display = 'none';
             saveBtn.style.display = 'none';
             cancelBtn.style.display = 'none';
@@ -3972,10 +3975,6 @@
             }
         }
         tbody.innerHTML = html;
-    }
-
-    function escAttr(s) {
-        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     // --- 編集 ---
