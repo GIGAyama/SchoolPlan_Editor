@@ -515,9 +515,9 @@ function generateNewsletterPdf(mondayDateStr) {
 
 /**
  * [Webアプリ API] 学級通信HTMLをGoogleドキュメントに変換してClassroomへ投稿します。
- * Google ClassroomはGoogleドキュメントをネイティブにプレビュー表示できるため、
- * PDFやHTMLではなくGoogle Docs形式で投稿することで、
- * Classroom画面上でも整ったレイアウトで閲覧できます。
+ * Drive REST API (v3) を UrlFetchApp 経由で呼び出し、
+ * HTMLをGoogleドキュメントに変換してそのまま添付します。
+ * (Drive Advanced Serviceは不要)
  * @param {string} customMessage Classroomへの付加メッセージ
  * @param {string} htmlContent 学級通信エディタのHTML文字列
  * @returns {Object} { success, message }
@@ -529,15 +529,38 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
     const fileName = '学級通信_' + formattedDate;
     const folder = getOrCreateNwFolder_();
 
-    // HTML → Google Doc (convert:true) して、そのままドキュメントとして投稿
-    // Classroomはドキュメントのプレビューをネイティブに表示できる
-    const htmlBlob = Utilities.newBlob(htmlContent, 'text/html', fileName + '.html');
-    const inserted = Drive.Files.insert(
-      { title: fileName, parents: [{ id: folder.getId() }] },
-      htmlBlob,
-      { convert: true }
+    // Drive REST API v3 で HTML → Google Doc 変換アップロード
+    const boundary = 'nw_boundary_' + formattedDate;
+    const metadata = JSON.stringify({
+      name: fileName,
+      mimeType: 'application/vnd.google-apps.document',
+      parents: [folder.getId()]
+    });
+    const payload =
+      '--' + boundary + '\r\n' +
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+      metadata + '\r\n' +
+      '--' + boundary + '\r\n' +
+      'Content-Type: text/html; charset=UTF-8\r\n\r\n' +
+      htmlContent + '\r\n' +
+      '--' + boundary + '--';
+
+    const resp = UrlFetchApp.fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+      {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() },
+        contentType: 'multipart/related; boundary=' + boundary,
+        payload: Utilities.newBlob(payload).getBytes(),
+        muteHttpExceptions: true
+      }
     );
-    const classroomFile = DriveApp.getFileById(inserted.id);
+    if (resp.getResponseCode() !== 200) {
+      const errBody = JSON.parse(resp.getContentText());
+      throw new Error('Drive API: ' + (errBody.error ? errBody.error.message : resp.getContentText()));
+    }
+    const fileId = JSON.parse(resp.getContentText()).id;
+    const classroomFile = DriveApp.getFileById(fileId);
 
     classroomFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
