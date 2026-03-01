@@ -332,6 +332,7 @@
         var pdfBtn = document.getElementById('pdfBtn');
         var autoFillBtn = document.getElementById('autoFillBtn');
         var timetableBtn = document.getElementById('timetableApplyBtn');
+        var batchAutoFillBtn = document.getElementById('batchAutoFillBtn');
         var saveBtn = document.getElementById('saveBtn');
         var cancelBtn = document.getElementById('cancelBtn');
         if (STATE.editMode) {
@@ -341,6 +342,7 @@
             if (pdfBtn) pdfBtn.style.display = 'none';
             if (timetableBtn) timetableBtn.style.display = 'flex';
             if (autoFillBtn) autoFillBtn.style.display = 'flex';
+            if (batchAutoFillBtn) batchAutoFillBtn.style.display = 'flex';
             saveBtn.style.display = 'flex';
             cancelBtn.style.display = '';
         } else {
@@ -350,6 +352,7 @@
             if (pdfBtn) pdfBtn.style.display = '';
             if (timetableBtn) timetableBtn.style.display = 'none';
             if (autoFillBtn) autoFillBtn.style.display = 'none';
+            if (batchAutoFillBtn) batchAutoFillBtn.style.display = 'flex';
             saveBtn.style.display = 'none';
             cancelBtn.style.display = 'none';
         }
@@ -438,6 +441,85 @@
             .calculateAutoFillForWebApp(STATE.mondayStr, currentDays);
     }
 
+    // ===== 翌週以降を一括自動入力 =====
+    async function runBatchAutoFill() {
+        if (!STATE.mondayStr) return;
+
+        // 編集モード中なら先に保存を促す
+        if (STATE.editMode) {
+            var saveFirst = await Swal.fire({
+                title: '未保存の変更があります',
+                text: '一括自動入力を実行する前に、現在の週を保存しますか？',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '保存して実行',
+                cancelButtonText: 'キャンセル'
+            });
+            if (!saveFirst.isConfirmed) return;
+
+            // 保存を実行し完了を待つ
+            var saved = await new Promise(function (resolve) {
+                var days = collectCurrentEditData();
+                if (!days) { resolve(false); return; }
+                google.script.run
+                    .withSuccessHandler(function (result) {
+                        if (result.success) {
+                            STATE.weekData.days = days;
+                            cancelEdit();
+                            showToast('success', result.message);
+                            resolve(true);
+                        } else {
+                            showToast('error', '保存失敗: ' + result.error);
+                            resolve(false);
+                        }
+                    })
+                    .withFailureHandler(function (e) {
+                        showToast('error', '通信エラー: ' + e.message);
+                        resolve(false);
+                    })
+                    .saveWeeklyPlanData(STATE.mondayStr, days);
+            });
+            if (!saved) return;
+        }
+
+        // 確認ダイアログ
+        var result = await Swal.fire({
+            title: '翌週以降を一括自動入力',
+            html: '<div style="text-align:left;font-size:0.85rem;">'
+                + '<p>現在表示中の週（<strong>' + STATE.mondayStr + '〜</strong>）の進捗を基準に、'
+                + '<strong>翌週以降のすべての週</strong>の単元名と学習内容を自動入力し直します。</p>'
+                + '<p style="color:var(--danger);margin-top:8px;">⚠ 翌週以降の単元名・学習内容は上書きされます。<br>教科名（時間割）は変更されません。</p>'
+                + '<p style="color:var(--text-sub);margin-top:8px;font-size:0.8rem;">※ 先に「固定時間割の転記」で教科名を入れておく必要があります。</p>'
+                + '</div>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '実行する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8'
+        });
+        if (!result.isConfirmed) return;
+
+        // 実行
+        var btn = document.getElementById('batchAutoFillBtn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...'; }
+        showToast('info', '一括自動入力を実行中...（数秒〜十数秒かかります）');
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">fast_forward</span> 以降を一括自動入力'; }
+                if (res.success) {
+                    showToast('success', res.message);
+                    loadWeeklyPlan(); // 現在の週をリロード
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">fast_forward</span> 以降を一括自動入力'; }
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .batchAutoFillFromWeek(STATE.mondayStr);
+    }
 
     // ===== 週案印刷 (HTMLベース) =====
     function printWeeklyPlan() {
