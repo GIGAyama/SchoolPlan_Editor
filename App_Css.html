@@ -1794,6 +1794,67 @@
     }
 
     /* ===== タスク管理（TODOダッシュボード） ===== */
+    /* ===== タスク: リスト表示 ===== */
+    .task-list-view {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .task-list-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        font-size: 0.82rem;
+        transition: background 0.1s;
+    }
+
+    .task-list-item:hover {
+        background: var(--primary-light);
+    }
+
+    .task-list-item.completed {
+        opacity: 0.5;
+        background: var(--surface-3);
+    }
+
+    .task-list-item.completed .task-list-title {
+        text-decoration: line-through;
+        color: var(--text-hint);
+    }
+
+    .task-list-item input[type="checkbox"] {
+        flex-shrink: 0;
+        width: 16px;
+        height: 16px;
+        accent-color: var(--secondary);
+        cursor: pointer;
+    }
+
+    .task-list-title {
+        flex: 1;
+        min-width: 0;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .task-list-resource {
+        flex-shrink: 0;
+        font-size: 0.75rem;
+        color: var(--text-sub);
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* ===== タスク: カード表示 ===== */
     .task-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -2136,5 +2197,176 @@
         flex-shrink: 0;
         margin: 0;
         padding: 8px 0;
+    }
+
+    /* ===== モバイル対応 ===== */
+    @media (max-width: 768px) {
+
+        /* ヘッダー */
+        .app-header {
+            height: auto;
+            padding: 8px 12px;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .header-left {
+            gap: 8px;
+        }
+
+        .app-logo {
+            font-size: 1.2rem;
+        }
+
+        .app-title {
+            font-size: 0.85rem;
+        }
+
+        .app-subtitle {
+            display: none;
+        }
+
+        /* ナビを横スクロール */
+        .header-nav {
+            flex: 1 0 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            gap: 2px;
+            padding-bottom: 2px;
+        }
+
+        .nav-btn {
+            height: 30px;
+            padding: 0 10px;
+            font-size: 0.72rem;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        /* 週ナビ */
+        .week-nav {
+            padding: 8px 10px;
+            gap: 6px;
+        }
+
+        .week-label {
+            font-size: 0.85rem;
+        }
+
+        .btn-icon {
+            width: 30px;
+            height: 30px;
+            font-size: 1.1rem;
+        }
+
+        .btn-today {
+            height: 28px;
+            padding: 0 10px;
+            font-size: 0.72rem;
+        }
+
+        /* 編集ツールバー */
+        .edit-toolbar {
+            padding: 6px 10px;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .toolbar-actions {
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .toolbar-actions .btn {
+            font-size: 0.72rem;
+            padding: 4px 8px;
+        }
+
+        /* 週案レイアウト: 縦方向 */
+        .plan-layout {
+            flex-direction: column;
+        }
+
+        /* サイドバーを下部に固定幅100% */
+        .weekly-task-sidebar {
+            width: 100% !important;
+            max-height: 200px;
+            border-left: none !important;
+            border-top: 1px solid var(--border);
+        }
+
+        /* グリッド最小幅 */
+        .week-grid {
+            min-width: 600px;
+        }
+
+        .week-grid-wrapper {
+            padding: 8px 6px;
+        }
+
+        .grid-cell {
+            font-size: 0.7rem;
+            padding: 3px 4px;
+        }
+
+        /* 学級通信 */
+        .nw-editor-layout {
+            flex-direction: column;
+        }
+
+        .nw-block-palette {
+            width: 100% !important;
+            flex-direction: row !important;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border-right: none !important;
+            border-bottom: 1px solid var(--border);
+            height: auto !important;
+            padding: 6px !important;
+            gap: 4px !important;
+        }
+
+        .nw-block-palette .palette-item {
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .nw-a4-page {
+            width: 100% !important;
+            min-width: auto !important;
+            transform: none !important;
+            zoom: 0.7;
+        }
+
+        /* タスク */
+        .task-grid {
+            grid-template-columns: 1fr;
+        }
+
+        /* section-header-bar wrap */
+        .section-header-bar {
+            padding: 10px 12px;
+            gap: 6px;
+        }
+
+        .section-header-bar h2 {
+            font-size: 0.85rem;
+        }
+
+        /* 設定画面 */
+        .integration-body [style*="grid-template-columns"] {
+            grid-template-columns: 1fr !important;
+        }
+
+        /* 時数集計テーブル */
+        .hours-summary-table {
+            font-size: 0.72rem;
+        }
+
+        /* フッター */
+        footer.giga-footer {
+            font-size: 0.7rem;
+            padding: 6px 0;
+        }
     }
 </style>
