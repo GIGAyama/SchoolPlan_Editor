@@ -37,7 +37,8 @@ function getAppSettings() {
       // APIキーは冒頭4文字だけ見せてマスク（セキュリティのため）
       geminiApiKey     : apiKey ? apiKey.substring(0, 4) + '••••••••••••••••••••' : '',
       geminiModelName  : props.getProperty(SP_KEY_GEMINI_MODEL_NAME) || 'gemini-1.5-flash',
-      grade            : props.getProperty(SCRIPT_PROP_GRADE) || '3'
+      grade            : props.getProperty(SCRIPT_PROP_GRADE) || '3',
+      moduleEnabled    : props.getProperty('moduleEnabled') === 'true'
     };
   } catch(e) {
     logError('getAppSettings', e);
@@ -67,6 +68,9 @@ function saveAppSettings(settings) {
       propsToSave[SP_KEY_GEMINI_API_KEY] = newApiKey;
     }
     props.setProperties(propsToSave, false);
+
+    // モジュール学習設定
+    props.setProperty('moduleEnabled', settings.moduleEnabled ? 'true' : 'false');
 
     // 自動投稿トリガーを時刻設定に基づいて更新（時刻が指定されている場合のみ）
     const postHour = parseInt(settings.postHour, 10);
