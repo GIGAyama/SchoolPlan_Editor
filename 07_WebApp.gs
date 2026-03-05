@@ -31,7 +31,8 @@ function doGet(e) {
     .evaluate()
     .setTitle('週案エディタ')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0');
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setFaviconUrl('https://drive.google.com/uc?id=1xr9GxBO6n_vsSrH7xrRtk-WAwr8zM-1n&.png');
 }
 
 /**
@@ -1044,6 +1045,9 @@ function getHoursSummary(mondayStr) {
     const dbCols = getDbColumns();
     const dbData = dbSheet.getDataRange().getValues();
 
+    // モジュール学習設定
+    const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
+
     // 対象週の月曜日
     const targetMonday = new Date(mondayStr.replace(/-/g, '/'));
     targetMonday.setHours(0,0,0,0);
@@ -1104,6 +1108,23 @@ function getHoursSummary(mondayStr) {
         }
         }
       });
+
+      // モジュール学習: 朝学習に教科名が入っていれば 1/3 時間を加算
+      if (moduleEnabled && dbCols.MORNING) {
+        const morningVal = (dbData[i][dbCols.MORNING - 1] || '').toString().trim();
+        if (morningVal) {
+          const morningSubject = morningVal.replace(/　/g, ' ').split(/[\s]/)[0].trim();
+          if (morningSubject && !/^\d/.test(morningSubject)) {
+            const moduleFraction = 1 / 3;
+            if (!cumulativeCount[morningSubject]) cumulativeCount[morningSubject] = 0;
+            cumulativeCount[morningSubject] += moduleFraction;
+            if (isThisWeek) {
+              if (!weeklyCount[morningSubject]) weeklyCount[morningSubject] = 0;
+              weeklyCount[morningSubject] += moduleFraction;
+            }
+          }
+        }
+      }
     }
 
     // 標準時数を取得
