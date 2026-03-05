@@ -97,6 +97,7 @@ function extractTasksFromSchedule_WebApp(startDateStr, endDateStr) {
         const dateStr = Utilities.formatDate(d, 'JST', 'yyyy-MM-dd');
         scheduleText += `\n【${dateStr}】\n`;
         if (row[cols.EVENT - 1]) scheduleText += `- 行事: ${row[cols.EVENT - 1]}\n`;
+        if (cols.MORNING && row[cols.MORNING - 1]) scheduleText += `- 朝学習: ${row[cols.MORNING - 1]}\n`;
         
         // 1〜6校時
         const periods = [cols.PERIOD1, cols.PERIOD2, cols.PERIOD3, cols.PERIOD4, cols.PERIOD5, cols.PERIOD6];
@@ -107,6 +108,8 @@ function extractTasksFromSchedule_WebApp(startDateStr, endDateStr) {
             scheduleText += `- ${idx + 1}校時 [${subject}] 内容: ${content}\n`;
           }
         });
+
+        if (cols.AFTERSCHOOL && row[cols.AFTERSCHOOL - 1]) scheduleText += `- 放課後: ${row[cols.AFTERSCHOOL - 1]}\n`;
       }
     }
 
@@ -117,8 +120,19 @@ function extractTasksFromSchedule_WebApp(startDateStr, endDateStr) {
     const systemPrompt = `
 あなたは有能な小学校教員のサポートAIです。
 以下の【スケジュール情報】を読み取り、教員が事前に準備・対応すべき【タスク（準備・連絡・調整など）】を洗い出してください。
-通常の授業（国語の音読など特別な準備が不要なもの）はタスク化しなくて構いません。
-実験器具、特別な印刷物、事前の機材準備、特別な行事対応などを抽出してください。
+
+【抽出対象】
+1. 行事関連（遠足・運動会・授業参観・避難訓練・集会・校外学習・入学式・卒業式 等）:
+   - 会場設営、事前配布物の印刷・配付、保護者への連絡、持ち物の確認指示、服装指示
+   - 係分担の確認・指示、写真撮影の手配、時程変更の周知 等
+2. 授業関連:
+   - 実験器具・教材の準備、特別な印刷物(ワークシート等)、ICT機器の手配
+   - 外部講師との事前調整、校外学習の下見 等
+3. 朝学習・放課後:
+   - テスト実施に伴う印刷、特別プログラムの準備 等
+
+【除外対象】
+- 通常の授業で特別な準備が不要なもの(国語の音読、算数の練習問題 等)
 
 【スケジュール情報】
 ${scheduleText}
