@@ -39,7 +39,8 @@
     #app {
         display: flex;
         flex-direction: column;
-        min-height: 100vh;
+        height: 100vh;
+        overflow: hidden;
     }
 
     /* ===== ヘッダー ===== */
@@ -119,10 +120,12 @@
         display: none;
         flex: 1;
         flex-direction: column;
+        min-height: 0;
     }
 
     .view.active {
         display: flex;
+        overflow: auto;
     }
 
     /* ===== 週ナビ ===== */
@@ -134,7 +137,7 @@
         background: var(--surface);
         border-bottom: 1px solid var(--border);
         position: sticky;
-        top: var(--header-h);
+        top: 0;
         z-index: 90;
     }
 
@@ -205,6 +208,9 @@
         padding: 8px 20px;
         background: var(--surface);
         border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 89;
     }
 
     .edit-hint {
@@ -263,7 +269,8 @@
     .plan-layout {
         display: flex;
         flex: 1;
-        overflow: hidden;
+        overflow: auto;
+        min-height: 0;
     }
 
     /* ===== 週案グリッド ===== */
@@ -437,6 +444,7 @@
     .edit-mode .grid-cell:not(.grid-label):not(.grid-header) {
         background: white;
         cursor: text;
+        overflow: visible;
     }
 
     .edit-mode .grid-cell:not(.grid-label):not(.grid-header):hover {
@@ -457,6 +465,7 @@
         padding: 0;
         color: inherit;
         line-height: 1.4;
+        overflow: hidden;
     }
 
     .grid-cell .period-subject {
@@ -518,6 +527,100 @@
         color: var(--primary);
     }
 
+    /* ===== UX強化: セル選択ハイライト ===== */
+    .grid-cell.selected {
+        outline: 2px solid var(--primary);
+        outline-offset: -2px;
+        background: #e8f0fe !important;
+        z-index: 2;
+        position: relative;
+    }
+
+    .grid-cell:not(.grid-label):not(.grid-header) {
+        cursor: pointer;
+    }
+
+    /* ===== UX強化: D&D ビジュアルフィードバック ===== */
+    .grid-cell.dragging {
+        opacity: 0.4;
+        background: #ffe0b2 !important;
+    }
+
+    .grid-cell.drag-over {
+        border: 2px dashed var(--primary) !important;
+        background: var(--primary-light) !important;
+        box-shadow: inset 0 0 0 2px rgba(26, 115, 232, 0.2);
+    }
+
+    .grid-cell[draggable="true"] {
+        cursor: grab;
+    }
+
+    .grid-cell[draggable="true"]:active {
+        cursor: grabbing;
+    }
+
+    /* ===== UX強化: 右クリックコンテキストメニュー ===== */
+    .context-menu {
+        position: absolute;
+        z-index: 9999;
+        background: white;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+        min-width: 200px;
+        padding: 4px 0;
+        font-size: 0.82rem;
+        animation: ctxFadeIn 0.12s ease-out;
+    }
+
+    @keyframes ctxFadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(-4px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .ctx-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        cursor: pointer;
+        transition: background 0.1s;
+        color: var(--text-main);
+    }
+
+    .ctx-item:hover {
+        background: var(--primary-light);
+        color: var(--primary);
+    }
+
+    .ctx-sep {
+        height: 1px;
+        background: var(--border);
+        margin: 4px 0;
+    }
+
+    /* ===== UX強化: kbd スタイル ===== */
+    kbd {
+        display: inline-block;
+        padding: 2px 6px;
+        font-size: 0.78rem;
+        font-family: 'Zen Maru Gothic', monospace;
+        color: #333;
+        background: #f5f5f5;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+        margin: 0 2px;
+    }
+
     /* ローディング */
     .loading-state {
         display: flex;
@@ -555,6 +658,9 @@
         border-bottom: 1px solid var(--border);
         flex-wrap: wrap;
         gap: 8px;
+        position: sticky;
+        top: 0;
+        z-index: 89;
     }
 
     .section-header-bar h2 {
@@ -693,6 +799,7 @@
         display: flex;
         flex: 1;
         overflow: hidden;
+        min-height: 0;
     }
 
     .nw-block-palette {
@@ -1132,7 +1239,7 @@
         position: absolute;
         top: 4px;
         right: 4px;
-        background: rgba(0,0,0,0.5);
+        background: rgba(0, 0, 0, 0.5);
         color: white;
         border: none;
         border-radius: 50%;
@@ -1369,9 +1476,13 @@
 
     /* --- Print styles for newsletter --- */
     @media print {
-        .nw-block-handle, .nw-block-actions, .nw-schedule-options {
+
+        .nw-block-handle,
+        .nw-block-actions,
+        .nw-schedule-options {
             display: none !important;
         }
+
         .nw-block {
             border: none !important;
             padding-left: 0 !important;
@@ -1890,12 +2001,32 @@
         text-align: left;
     }
 
-    .um-th-subject { width: 100px; }
-    .um-th-unit { width: 180px; }
-    .um-th-total { width: 60px; text-align: center !important; }
-    .um-th-hour { width: 60px; text-align: center !important; }
-    .um-th-activity { min-width: 200px; }
-    .um-th-actions { width: 100px; text-align: center !important; }
+    .um-th-subject {
+        width: 100px;
+    }
+
+    .um-th-unit {
+        width: 180px;
+    }
+
+    .um-th-total {
+        width: 60px;
+        text-align: center !important;
+    }
+
+    .um-th-hour {
+        width: 60px;
+        text-align: center !important;
+    }
+
+    .um-th-activity {
+        min-width: 200px;
+    }
+
+    .um-th-actions {
+        width: 100px;
+        text-align: center !important;
+    }
 
     .um-table td {
         padding: 6px 10px;
@@ -1915,7 +2046,9 @@
         border-top: 2px solid var(--primary);
     }
 
-    .um-cell-center { text-align: center; }
+    .um-cell-center {
+        text-align: center;
+    }
 
     .um-table .um-input {
         width: 100%;
@@ -1960,17 +2093,48 @@
         padding: 0;
     }
 
-    .um-btn:hover { background: var(--surface-3); color: var(--text-main); }
-    .um-btn-save { color: var(--secondary); }
-    .um-btn-save:hover { background: #e6f4ea; color: #137746; }
-    .um-btn-cancel { color: var(--text-hint); }
-    .um-btn-cancel:hover { background: var(--surface-3); color: var(--text-main); }
-    .um-btn-danger:hover { background: #fce8e6; color: var(--danger); }
-    .um-btn-insert { color: var(--primary); }
-    .um-btn-insert:hover { background: var(--primary-light); color: var(--primary-dark); }
+    .um-btn:hover {
+        background: var(--surface-3);
+        color: var(--text-main);
+    }
+
+    .um-btn-save {
+        color: var(--secondary);
+    }
+
+    .um-btn-save:hover {
+        background: #e6f4ea;
+        color: #137746;
+    }
+
+    .um-btn-cancel {
+        color: var(--text-hint);
+    }
+
+    .um-btn-cancel:hover {
+        background: var(--surface-3);
+        color: var(--text-main);
+    }
+
+    .um-btn-danger:hover {
+        background: #fce8e6;
+        color: var(--danger);
+    }
+
+    .um-btn-insert {
+        color: var(--primary);
+    }
+
+    .um-btn-insert:hover {
+        background: var(--primary-light);
+        color: var(--primary-dark);
+    }
 
     /* ===== フッター ===== */
     footer.giga-footer {
         background: var(--surface);
+        flex-shrink: 0;
+        margin: 0;
+        padding: 8px 0;
     }
 </style>
