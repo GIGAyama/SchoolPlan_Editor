@@ -57,7 +57,7 @@
                     <span class="material-symbols-outlined">bar_chart</span> 時数
                 </button>
                 <button class="nav-btn" data-view="integration" onclick="switchView('integration')">
-                    <span class="material-symbols-outlined">cable</span> データ連携
+                    <span class="material-symbols-outlined">cable</span> PDF読み込み
                 </button>
                 <button class="nav-btn" data-view="settings" onclick="switchView('settings')">
                     <span class="material-symbols-outlined">settings</span> 設定
@@ -112,10 +112,10 @@
                     <button class="btn btn-outline align-items-center gap-1" id="timetableApplyBtn"
                         onclick="applyTimetableToCurrentWeek()"
                         style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
-                            class="material-symbols-outlined fs-6">calendar_month</span> 時間割反映</button>
+                            class="material-symbols-outlined fs-6">calendar_month</span> 固定時間割反映</button>
                     <button class="btn btn-outline align-items-center gap-1" id="autoFillBtn" onclick="autoFillPlan()"
-                        style="display:none; color: var(--primary); border-color: var(--primary);"><span
-                            class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力</button>
+                        style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
+                            class="material-symbols-outlined fs-6">smart_toy</span> 単元自動入力</button>
                     <button class="btn btn-outline align-items-center gap-1" id="batchAutoFillBtn"
                         onclick="runBatchAutoFill()"
                         style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
@@ -323,6 +323,25 @@
                                     <option value="6">6年生</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <!-- モジュール学習設定 -->
+                        <div
+                            style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">timer</span> モジュール学習</h4>
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                <label class="form-check-label"
+                                    style="font-size:0.85rem; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                    <input type="checkbox" id="sysModuleEnabled" class="form-check-input"
+                                        style="width:18px; height:18px;">
+                                    朝学習欄の教科名を時数に加算する（1/3時間）
+                                </label>
+                            </div>
+                            <p style="font-size:0.75rem; color:var(--text-hint); margin-top:6px;">
+                                有効にすると、朝学習欄に教科名が入力されている日は、その教科の時数に1/3時間を自動加算します。
+                            </p>
                         </div>
 
                         <!-- Classroom連携 -->
@@ -683,6 +702,16 @@
                                 </label>
                             </div>
                             <div>
+                                <div class="btn-group me-2" role="group">
+                                    <button class="btn btn-outline btn-sm active" id="taskViewListBtn"
+                                        onclick="setTaskViewMode('list')" title="リスト表示"><span
+                                            class="material-symbols-outlined"
+                                            style="font-size:16px">view_list</span></button>
+                                    <button class="btn btn-outline btn-sm" id="taskViewCardBtn"
+                                        onclick="setTaskViewMode('card')" title="カード表示"><span
+                                            class="material-symbols-outlined"
+                                            style="font-size:16px">view_module</span></button>
+                                </div>
                                 <button class="btn btn-outline btn-sm" onclick="loadTasks()"><i
                                         class="bi bi-arrow-clockwise"></i> 更新</button>
                                 <button class="btn btn-outline btn-sm ms-2" onclick="showManualTaskInput()"><i
@@ -754,7 +783,7 @@
         <!-- ===== データ連携ビュー ===== -->
         <div id="view-integration" class="view">
             <div class="section-header-bar" style="margin-bottom: 20px;">
-                <h2><span class="material-symbols-outlined fs-6">cable</span> データ連携（PDF読み込み）</h2>
+                <h2><span class="material-symbols-outlined fs-6">cable</span> PDF読み込み</h2>
             </div>
 
             <div style="padding: 0 20px;">
