@@ -19,7 +19,8 @@
         undoStack: [],            // Undo履歴
         redoStack: [],            // Redo履歴
         dragSource: null,         // D&Dソース {day, period}
-        helpModalOpen: false      // ショートカットヘルプ表示中
+        helpModalOpen: false,     // ショートカットヘルプ表示中
+        taskViewMode: 'list'      // タスク表示モード: 'list' or 'card'
     };
 
     // UX: 行定義（セルナビゲーション用）
@@ -293,7 +294,7 @@
                         ta.setAttribute('data-day', i);
                         ta.style.minHeight = (rowDef.key === 'homework' || rowDef.key === 'items') ? '54px' : '28px';
                         ta.style.height = 'auto';
-                        ta.addEventListener('input', function() { autoResizeTextarea(this); });
+                        ta.addEventListener('input', function () { autoResizeTextarea(this); });
                         cell.appendChild(ta);
                     } else {
                         cell.textContent = val;
@@ -319,7 +320,7 @@
 
         // 編集モード時: 全textareaの高さを内容に合わせる
         if (isEdit) {
-            grid.querySelectorAll('textarea').forEach(function(ta) { autoResizeTextarea(ta); });
+            grid.querySelectorAll('textarea').forEach(function (ta) { autoResizeTextarea(ta); });
         }
     }
 
@@ -1044,6 +1045,50 @@
             return;
         }
 
+        Swal.fire({
+            title: '<span class="material-symbols-outlined">print</span> 印刷オプション',
+            html: '<div style="text-align:left;font-size:0.85rem;">'
+                + '<p style="color:var(--text-sub);margin-bottom:12px;">印刷に含める項目を選択してください</p>'
+                + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">'
+                + '<label><input type="checkbox" id="po_event" checked> 行事</label>'
+                + '<label><input type="checkbox" id="po_morning" checked> 朝学習</label>'
+                + '<label><input type="checkbox" id="po_recess1" checked> 中休み</label>'
+                + '<label><input type="checkbox" id="po_recess2" checked> 昼休み</label>'
+                + '<label><input type="checkbox" id="po_afterschool" checked> 放課後</label>'
+                + '<label><input type="checkbox" id="po_stats" checked> 教科時数表</label>'
+                + '</div>'
+                + '<hr style="margin:12px 0;">'
+                + '<label style="display:flex;align-items:center;gap:8px;">'
+                + 'フォントサイズ: <input type="range" id="po_fontSize" min="8" max="14" value="10" style="flex:1;">'
+                + '<span id="po_fontLabel">10px</span>'
+                + '</label>'
+                + '</div>',
+            width: 420,
+            confirmButtonText: '印刷する',
+            confirmButtonColor: '#1a73e8',
+            showCancelButton: true,
+            cancelButtonText: 'キャンセル',
+            didOpen: function () {
+                var slider = document.getElementById('po_fontSize');
+                var label = document.getElementById('po_fontLabel');
+                slider.addEventListener('input', function () { label.textContent = slider.value + 'px'; });
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            var opts = {
+                event: document.getElementById('po_event').checked,
+                morning: document.getElementById('po_morning').checked,
+                recess1: document.getElementById('po_recess1').checked,
+                recess2: document.getElementById('po_recess2').checked,
+                afterschool: document.getElementById('po_afterschool').checked,
+                stats: document.getElementById('po_stats').checked,
+                fontSize: parseInt(document.getElementById('po_fontSize').value)
+            };
+            printWeeklyPlanExec(opts);
+        });
+    }
+
+    function printWeeklyPlanExec(opts) {
         var btn = document.getElementById('printBtn');
         if (btn) {
             btn.disabled = true;
@@ -1068,7 +1113,7 @@
         html += '<style>';
         html += '@import url("https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap");';
         html += '@page { size: A4 portrait; margin: 10mm; }';
-        html += 'body { font-family: "Zen Maru Gothic", sans-serif; font-size: 10px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
+        html += 'body { font-family: "Zen Maru Gothic", sans-serif; font-size: ' + opts.fontSize + 'px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
         html += '.page { width: 100%; height: 100%; box-sizing: border-box; page-break-after: always; display: flex; flex-direction: column; }';
         html += '.page:last-child { page-break-after: auto; }';
         html += 'table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-bottom: 0; }';
@@ -1140,14 +1185,18 @@
         html += '</tr>';
 
         // 行事
-        html += '<tr><td class="row-header">時程<br>行事</td>';
-        for (var i = 0; i < 5; i++) { html += '<td class="event-cell">' + ((days[i] && days[i].event) ? days[i].event.replace(/\\n/g, '<br>') : '') + '</td>'; }
-        html += '</tr>';
+        if (opts.event) {
+            html += '<tr><td class="row-header">時程<br>行事</td>';
+            for (var i = 0; i < 5; i++) { html += '<td class="event-cell">' + ((days[i] && days[i].event) ? days[i].event.replace(/\\n/g, '<br>') : '') + '</td>'; }
+            html += '</tr>';
+        }
 
         // 朝学習
-        html += '<tr><td class="row-header">朝学習</td>';
-        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? days[i].morning.replace(/\\n/g, '<br>') : '') + '</td>'; }
-        html += '</tr>';
+        if (opts.morning) {
+            html += '<tr><td class="row-header">朝学習</td>';
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? days[i].morning.replace(/\\n/g, '<br>') : '') + '</td>'; }
+            html += '</tr>';
+        }
 
         // 1校時
         html += '<tr><td class="row-header">1校時</td>';
@@ -1160,9 +1209,11 @@
         html += '</tr>';
 
         // 中休み
-        html += '<tr class="recess-row"><td class="row-header">中休</td>';
-        for (var i = 0; i < 5; i++) { html += '<td></td>'; }
-        html += '</tr>';
+        if (opts.recess1) {
+            html += '<tr class="recess-row"><td class="row-header">中休</td>';
+            for (var i = 0; i < 5; i++) { html += '<td></td>'; }
+            html += '</tr>';
+        }
 
         // 3校時
         html += '<tr><td class="row-header">3校時</td>';
@@ -1175,9 +1226,11 @@
         html += '</tr>';
 
         // 昼休み
-        html += '<tr class="recess-row"><td class="row-header">昼休</td>';
-        for (var i = 0; i < 5; i++) { html += '<td></td>'; }
-        html += '</tr>';
+        if (opts.recess2) {
+            html += '<tr class="recess-row"><td class="row-header">昼休</td>';
+            for (var i = 0; i < 5; i++) { html += '<td></td>'; }
+            html += '</tr>';
+        }
 
         // 5校時
         html += '<tr><td class="row-header">5校時</td>';
@@ -1190,9 +1243,11 @@
         html += '</tr>';
 
         // 放課後
-        html += '<tr><td class="row-header">放課後</td>';
-        for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? days[i].afterschool.replace(/\\n/g, '<br>') : '') + '</td>'; }
-        html += '</tr>';
+        if (opts.afterschool) {
+            html += '<tr><td class="row-header">放課後</td>';
+            for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? days[i].afterschool.replace(/\\n/g, '<br>') : '') + '</td>'; }
+            html += '</tr>';
+        }
 
         html += '</table>';
         html += '</div>';
@@ -1218,16 +1273,20 @@
         };
 
         // 行事
-        html += '<tr><td class="row-header">時程<br>行事</td>';
-        html += '<td class="event-cell">' + renderWeekendContent("event", 5) + '</td>';
-        html += '<td class="event-cell">' + renderWeekendContent("event", 6) + '</td>';
-        html += '</tr>';
+        if (opts.event) {
+            html += '<tr><td class="row-header">時程<br>行事</td>';
+            html += '<td class="event-cell">' + renderWeekendContent("event", 5) + '</td>';
+            html += '<td class="event-cell">' + renderWeekendContent("event", 6) + '</td>';
+            html += '</tr>';
+        }
 
         // 朝学習
-        html += '<tr><td class="row-header">朝学習</td>';
-        html += '<td>' + renderWeekendContent("morning", 5) + '</td>';
-        html += '<td>' + renderWeekendContent("morning", 6) + '</td>';
-        html += '</tr>';
+        if (opts.morning) {
+            html += '<tr><td class="row-header">朝学習</td>';
+            html += '<td>' + renderWeekendContent("morning", 5) + '</td>';
+            html += '<td>' + renderWeekendContent("morning", 6) + '</td>';
+            html += '</tr>';
+        }
 
         // 1校時
         html += '<tr><td class="row-header">1校時</td>';
@@ -1242,7 +1301,7 @@
         html += '</tr>';
 
         // 中休み
-        html += '<tr class="recess-row"><td class="row-header">中休</td><td></td><td></td></tr>';
+        if (opts.recess1) { html += '<tr class="recess-row"><td class="row-header">中休</td><td></td><td></td></tr>'; }
 
         // 3校時
         html += '<tr><td class="row-header">3校時</td>';
@@ -1257,7 +1316,7 @@
         html += '</tr>';
 
         // 昼休み
-        html += '<tr class="recess-row"><td class="row-header">昼休</td><td></td><td></td></tr>';
+        if (opts.recess2) { html += '<tr class="recess-row"><td class="row-header">昼休</td><td></td><td></td></tr>'; }
 
         // 5校時
         html += '<tr><td class="row-header">5校時</td>';
@@ -1272,10 +1331,12 @@
         html += '</tr>';
 
         // 放課後
-        html += '<tr><td class="row-header">放課後</td>';
-        html += '<td class="afterschool-cell">' + renderWeekendContent("afterschool", 5) + '</td>';
-        html += '<td class="afterschool-cell">' + renderWeekendContent("afterschool", 6) + '</td>';
-        html += '</tr>';
+        if (opts.afterschool) {
+            html += '<tr><td class="row-header">放課後</td>';
+            html += '<td class="afterschool-cell">' + renderWeekendContent("afterschool", 5) + '</td>';
+            html += '<td class="afterschool-cell">' + renderWeekendContent("afterschool", 6) + '</td>';
+            html += '</tr>';
+        }
 
         html += '</table>';
         html += '</div>';
@@ -1283,38 +1344,40 @@
         // 右ペイン
         html += '<div class="page2-right">';
 
-        // 時数集計表 (2セットに分割して横並べ)
-        var summary = STATE.hoursSummaryData || [];
-        html += '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">';
+        // 時数集計表
+        if (opts.stats) {
+            var summary = STATE.hoursSummaryData || [];
+            html += '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">';
 
-        // 1列目 (0-9)
-        html += '<table class="stats-table" style="width:48%;">';
-        html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
-        for (var i = 0; i < 10; i++) {
-            var s = summary[i] || { subject: " ", weekly: " ", cumulative: " ", percent: " " };
-            html += '<tr>';
-            html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
-            html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
-            html += '<td>' + (s.cumulative !== undefined && s.cumulative !== "" ? s.cumulative : "&nbsp;") + '</td>';
-            html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
-            html += '</tr>';
-        }
-        html += '</table>';
+            // 1列目 (0-9)
+            html += '<table class="stats-table" style="width:48%;">';
+            html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
+            for (var i = 0; i < 10; i++) {
+                var s = summary[i] || { subject: " ", weekly: " ", cumulative: " ", percent: " " };
+                html += '<tr>';
+                html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
+                html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
+                html += '<td>' + (s.cumulative !== undefined && s.cumulative !== "" ? s.cumulative : "&nbsp;") + '</td>';
+                html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
+                html += '</tr>';
+            }
+            html += '</table>';
 
-        // 2列目 (10-18)
-        html += '<table class="stats-table" style="width:48%;">';
-        html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
-        for (var i = 10; i < 19; i++) {
-            var s = summary[i] || { subject: " ", weekly: " ", cumulative: " ", percent: " " };
-            html += '<tr>';
-            html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
-            html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
-            html += '<td>' + (s.cumulative !== undefined && s.cumulative !== "" ? s.cumulative : "&nbsp;") + '</td>';
-            html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
-            html += '</tr>';
-        }
-        html += '</table>';
-        html += '</div>';
+            // 2列目 (10-18)
+            html += '<table class="stats-table" style="width:48%;">';
+            html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
+            for (var i = 10; i < 19; i++) {
+                var s = summary[i] || { subject: " ", weekly: " ", cumulative: " ", percent: " " };
+                html += '<tr>';
+                html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
+                html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
+                html += '<td>' + (s.cumulative !== undefined && s.cumulative !== "" ? s.cumulative : "&nbsp;") + '</td>';
+                html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
+                html += '</tr>';
+            }
+            html += '</table>';
+            html += '</div>';
+        } // end if (opts.stats)
 
         // Todoリスト
         html += '<div class="todo-box">';
@@ -1733,6 +1796,7 @@
                     showAfterSchool: true,
                     showHomework: true,
                     showItems: true,
+                    showSaturday: false,
                     displayMode: 'subject'
                 };
                 if (data.options) {
@@ -2243,7 +2307,7 @@
                 + '「予定を読込」をクリックして週案データを読み込んでください</div>';
         }
         var opts = block.options;
-        var days = data.days.slice(0, 5);
+        var days = data.days.slice(0, opts.showSaturday ? 6 : 5);
         var bid = block.id;
 
         // Helper: render cell content based on displayMode
@@ -2315,6 +2379,7 @@
             + '<label><input type="checkbox"' + (opts.showAfterSchool ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showAfterSchool\',this.checked)"> 放課後</label>'
             + '<label><input type="checkbox"' + (opts.showHomework ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showHomework\',this.checked)"> 宿題</label>'
             + '<label><input type="checkbox"' + (opts.showItems ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showItems\',this.checked)"> 持ち物</label>'
+            + '<label><input type="checkbox"' + (opts.showSaturday ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showSaturday\',this.checked)"> 土曜日</label>'
             + '<span style="color:var(--border);">|</span>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subject\')"> 教科のみ</label>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subjectUnit\')"> 教科+単元</label>'
@@ -4025,6 +4090,9 @@
                 // APIキー（マスク表示対応）
                 document.getElementById('sysGeminiApiKey').value = res.geminiApiKey || '';
 
+                // モジュール学習
+                document.getElementById('sysModuleEnabled').checked = !!res.moduleEnabled;
+
                 isSystemSettingsLoaded = true;
             })
             .withFailureHandler(function (e) {
@@ -4040,7 +4108,8 @@
             pdfFolderId: document.getElementById('sysPdfFolderId').value,
             eventPdfFolderId: document.getElementById('sysEventPdfFolderId').value,
             geminiApiKey: document.getElementById('sysGeminiApiKey').value,
-            geminiModelName: document.getElementById('sysGeminiModelName').value
+            geminiModelName: document.getElementById('sysGeminiModelName').value,
+            moduleEnabled: document.getElementById('sysModuleEnabled').checked
         };
 
         showToast('info', 'システム設定を保存中...');
@@ -4192,11 +4261,14 @@
         });
 
         if (filtered.length === 0) {
-            container.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; background: var(--surface-2); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-hint);">現在登録されているタスクはありません。🎉</div>';
+            container.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; background: var(--surface-2); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-hint);">現在登録されているタスクはありません。</div>';
             return;
         }
 
         var todayStr = formatDateLocal(new Date());
+
+        // コンテナのクラスを表示モードに応じて切替
+        container.className = STATE.taskViewMode === 'list' ? 'task-list-view' : 'task-grid';
 
         container.innerHTML = filtered.map(t => {
             var isComp = (t.status === '完了');
@@ -4206,27 +4278,48 @@
             var dateDisplay = t.dueDate ? t.dueDate.replace('2026-', '').replace('-', '/') : '期日未設定';
             var checkedStr = isComp ? 'checked' : '';
 
-            return `
-                <div class="task-card${compClass}">
-                    <div class="task-checkbox-wrapper">
+            if (STATE.taskViewMode === 'list') {
+                // リスト表示（コンパクト1行）
+                return `
+                    <div class="task-list-item${compClass}">
                         <input type="checkbox" ${checkedStr} onchange="toggleTaskStatus('${t.id}', this.checked)">
+                        <span class="task-list-title">${escHtml(t.content)}</span>
+                        ${t.resource ? `<span class="task-list-resource"><i class="bi bi-box-seam"></i> ${escHtml(t.resource)}</span>` : ''}
+                        <span class="${dateBadgeClass}"><i class="bi bi-calendar-event"></i> ${dateDisplay}</span>
+                        <button class="task-del-btn" onclick="deleteTaskById('${t.id}')" title="削除"><i class="bi bi-trash3"></i></button>
                     </div>
-                    <div class="task-content-wrapper">
-                        <div class="task-title">${escHtml(t.content)}</div>
-                        <div class="task-meta">
-                            ${t.resource ? `<div class="task-meta-item"><i class="bi bi-box-seam task-meta-icon"></i> ${escHtml(t.resource)}</div>` : ''}
-                            ${t.source ? `<div class="task-meta-item"><i class="bi bi-journal-text task-meta-icon"></i> ${escHtml(t.source)}</div>` : ''}
-                            <div class="task-meta-item mt-1">
-                                <span class="${dateBadgeClass}"><i class="bi bi-calendar-event"></i> ${dateDisplay}</span>
+                `;
+            } else {
+                // カード表示（既存）
+                return `
+                    <div class="task-card${compClass}">
+                        <div class="task-checkbox-wrapper">
+                            <input type="checkbox" ${checkedStr} onchange="toggleTaskStatus('${t.id}', this.checked)">
+                        </div>
+                        <div class="task-content-wrapper">
+                            <div class="task-title">${escHtml(t.content)}</div>
+                            <div class="task-meta">
+                                ${t.resource ? `<div class="task-meta-item"><i class="bi bi-box-seam task-meta-icon"></i> ${escHtml(t.resource)}</div>` : ''}
+                                ${t.source ? `<div class="task-meta-item"><i class="bi bi-journal-text task-meta-icon"></i> ${escHtml(t.source)}</div>` : ''}
+                                <div class="task-meta-item mt-1">
+                                    <span class="${dateBadgeClass}"><i class="bi bi-calendar-event"></i> ${dateDisplay}</span>
+                                </div>
+                            </div>
+                            <div class="task-actions">
+                                <button class="task-del-btn" onclick="deleteTaskById('${t.id}')" title="プレビュー/削除"><i class="bi bi-trash3"></i></button>
                             </div>
                         </div>
-                        <div class="task-actions">
-                            <button class="task-del-btn" onclick="deleteTaskById('${t.id}')" title="プレビュー/削除"><i class="bi bi-trash3"></i></button>
-                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            }
         }).join('');
+    }
+
+    function setTaskViewMode(mode) {
+        STATE.taskViewMode = mode;
+        document.getElementById('taskViewListBtn').classList.toggle('active', mode === 'list');
+        document.getElementById('taskViewCardBtn').classList.toggle('active', mode === 'card');
+        renderTaskList();
     }
 
     function renderWeeklyTaskPanel() {
@@ -4258,7 +4351,7 @@
         });
 
         if (weekTasks.length === 0) {
-            container.innerHTML = '<div class="st-empty">今週のタスクはありません🎉</div>';
+            container.innerHTML = '<div class="st-empty">今週のタスクはありません。</div>';
             return;
         }
 
