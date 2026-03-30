@@ -75,10 +75,37 @@ function getApiKey_() {
   return getApiKeySafe_();
 }
 
-/** 
- * 指定された指示（プロンプト）とファイル情報を、Gemini APIに送信してAIによる分析を依頼します。 
+/**
+ * 途切れたJSON配列テキストを修復し、最後の完全なオブジェクトまでを救出します。
+ * @param {string} text 途切れたJSONテキスト
+ * @returns {Object[]|null} 修復されたJSON配列、または修復不能の場合null
  */
-function callGeminiApi_(prompt, apiKey, blobs = []) {
+function repairTruncatedJsonArray_(text) {
+  try {
+    const patterns = ['},\n  {', '},\n{', '}, {', '},  {', '},\n    {'];
+    let bestCut = -1;
+    for (const pat of patterns) {
+      const idx = text.lastIndexOf(pat);
+      if (idx > bestCut) bestCut = idx;
+    }
+    if (bestCut !== -1) {
+      const attempt = text.substring(0, bestCut + 1) + "\n]";
+      return JSON.parse(attempt);
+    }
+  } catch (e) {
+    // 修復失敗
+  }
+  return null;
+}
+
+/**
+ * Gemini API への1回の呼び出しを行い、結果と途切れ情報を返します。
+ * @param {string} prompt プロンプト
+ * @param {string} apiKey APIキー
+ * @param {Blob[]} blobs 添付ファイル
+ * @returns {{ data: Object, isTruncated: boolean }}
+ */
+function callGeminiApiRaw_(prompt, apiKey, blobs = []) {
   const modelName = getGeminiModelNameSafe_();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
   const parts = [{ "text": prompt }];
@@ -87,43 +114,37 @@ function callGeminiApi_(prompt, apiKey, blobs = []) {
   });
   const payload = { "contents": [{ "parts": parts }], "generationConfig": { "response_mime_type": "application/json", "maxOutputTokens": 65536 } };
   const options = { 'method': 'post', 'contentType': 'application/json', 'payload': JSON.stringify(payload), 'muteHttpExceptions': true };
-  
+
   const response = UrlFetchApp.fetch(url, options);
   const responseCode = response.getResponseCode();
   const responseBody = response.getContentText();
-  
+
   if (responseCode === 200) {
     const jsonResponse = JSON.parse(responseBody);
+    const finishReason = (jsonResponse.candidates && jsonResponse.candidates[0])
+      ? jsonResponse.candidates[0].finishReason : null;
+    const isTruncated = (finishReason === 'MAX_TOKENS');
+
     if (jsonResponse.candidates && jsonResponse.candidates[0] && jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts) {
       const text = jsonResponse.candidates[0].content.parts[0].text;
       try {
-        return JSON.parse(text);
+        return { data: JSON.parse(text), isTruncated };
       } catch (e) {
-        logError("Gemini APIからのJSONレスポンスのパースに失敗しました。", e);
+        // isTruncated でない場合のみエラーログ（途切れの場合は想定内）
+        if (!isTruncated) {
+          logError("Gemini APIからのJSONレスポンスのパースに失敗しました。", e);
+        }
         logInfo(`パースに失敗したテキスト(最初の1000文字): ${text.substring(0, 1000)} ...`);
 
-        // トークン上限などでJSONが途切れた場合の修復フォールバック
-        // トップレベル配列の最後の完全なオブジェクトまでを救出する
-        try {
-            logInfo("途切れたJSONの修復と救出を試みます...");
-            let attempt = text;
-            // 方法1: トップレベル配列要素の区切り `}, {` or `}\n  ,` の最後の完全なオブジェクト末尾を探す
-            // ネスト内で途切れた場合、最後の完全な "}," の後に "  {" が始まっている箇所を探す
-            const patterns = ['},\n  {', '},\n{', '}, {', '},  {'];
-            let bestCut = -1;
-            for (const pat of patterns) {
-              const idx = attempt.lastIndexOf(pat);
-              if (idx > bestCut) bestCut = idx;
-            }
-            if (bestCut !== -1) {
-                attempt = attempt.substring(0, bestCut + 1) + "\n]";
-                const parsed = JSON.parse(attempt);
-                logInfo(`修復に成功しました！${parsed.length}件のデータを救出。一部の末尾データは破棄されました。`);
-                return parsed;
-            }
-        } catch(e2) {
-            logError("JSONの修復にも失敗しました。", e2);
+        // 途切れたJSONの修復を試みる
+        logInfo("途切れたJSONの修復と救出を試みます...");
+        const repaired = repairTruncatedJsonArray_(text);
+        if (repaired !== null) {
+          logInfo(`修復に成功しました！${repaired.length}件のデータを救出。`);
+          return { data: repaired, isTruncated: true };
         }
+
+        logError("JSONの修復にも失敗しました。", e);
         throw new Error("Gemini APIのレスポンスをJSONとして解析できませんでした。出力が途切れている可能性があります。");
       }
     } else {
@@ -141,6 +162,50 @@ function callGeminiApi_(prompt, apiKey, blobs = []) {
     logError(`Gemini API Error (Code: ${responseCode})`, new Error(responseBody));
     throw new Error(`Gemini APIとの通信に失敗しました。レスポンスコード: ${responseCode}`);
   }
+}
+
+/**
+ * Gemini APIに送信してAIによる分析を依頼します（単発呼び出し・後方互換ラッパー）。
+ */
+function callGeminiApi_(prompt, apiKey, blobs = []) {
+  const { data } = callGeminiApiRaw_(prompt, apiKey, blobs);
+  return data;
+}
+
+/**
+ * 大量データ向けのGemini API呼び出し。出力がトークン上限で途切れた場合、
+ * 継続プロンプトを自動生成して残りのデータを取得します。
+ * @param {string} basePrompt 最初のプロンプト
+ * @param {string} apiKey APIキー
+ * @param {Blob[]} blobs 添付ファイル
+ * @param {function(Object[]): string} buildContinuationPrompt 取得済みデータから継続用プロンプトを生成する関数
+ * @returns {Object[]} 結合されたすべての結果配列
+ */
+function callGeminiApiChunked_(basePrompt, apiKey, blobs, buildContinuationPrompt) {
+  let allResults = [];
+  let prompt = basePrompt;
+  const MAX_ROUNDS = 10;
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const { data, isTruncated } = callGeminiApiRaw_(prompt, apiKey, blobs);
+
+    if (data && Array.isArray(data)) {
+      allResults = allResults.concat(data);
+      logInfo(`API呼び出し ${round + 1}回目: ${data.length}件取得（累計: ${allResults.length}件）`);
+    }
+
+    if (!isTruncated) break;
+
+    if (!data || data.length === 0) {
+      logInfo("出力が途切れましたが、救出できるデータがありませんでした。処理を終了します。");
+      break;
+    }
+
+    logInfo(`出力トークン上限に達したため、継続リクエストを送信します（${round + 1}回目完了、累計${allResults.length}件）`);
+    prompt = buildContinuationPrompt(allResults);
+  }
+
+  return allResults;
 }
 
 /** 
