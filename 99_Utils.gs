@@ -85,7 +85,7 @@ function callGeminiApi_(prompt, apiKey, blobs = []) {
   blobs.forEach(blob => {
     parts.push({ "inline_data": { "mime_type": blob.getContentType(), "data": Utilities.base64Encode(blob.getBytes()) } });
   });
-  const payload = { "contents": [{ "parts": parts }], "generationConfig": { "response_mime_type": "application/json", "maxOutputTokens": 8192 } };
+  const payload = { "contents": [{ "parts": parts }], "generationConfig": { "response_mime_type": "application/json", "maxOutputTokens": 65536 } };
   const options = { 'method': 'post', 'contentType': 'application/json', 'payload': JSON.stringify(payload), 'muteHttpExceptions': true };
   
   const response = UrlFetchApp.fetch(url, options);
@@ -102,18 +102,23 @@ function callGeminiApi_(prompt, apiKey, blobs = []) {
         logError("Gemini APIからのJSONレスポンスのパースに失敗しました。", e);
         logInfo(`パースに失敗したテキスト(最初の1000文字): ${text.substring(0, 1000)} ...`);
 
-        // トークン上限などでJSONが途切れた場合のための超簡易修復フォールバック
-        // （完全なオブジェクト配列であること前提で、最後の要素を削って配列を閉じる）
+        // トークン上限などでJSONが途切れた場合の修復フォールバック
+        // トップレベル配列の最後の完全なオブジェクトまでを救出する
         try {
             logInfo("途切れたJSONの修復と救出を試みます...");
             let attempt = text;
-            // 最後のオブジェクトの区切り `, {` まで削る
-            let lastObjStart = attempt.lastIndexOf(', {');
-            if (lastObjStart === -1) lastObjStart = attempt.lastIndexOf(',\n{');
-            if (lastObjStart !== -1) {
-                attempt = attempt.substring(0, lastObjStart) + "\n]";
+            // 方法1: トップレベル配列要素の区切り `}, {` or `}\n  ,` の最後の完全なオブジェクト末尾を探す
+            // ネスト内で途切れた場合、最後の完全な "}," の後に "  {" が始まっている箇所を探す
+            const patterns = ['},\n  {', '},\n{', '}, {', '},  {'];
+            let bestCut = -1;
+            for (const pat of patterns) {
+              const idx = attempt.lastIndexOf(pat);
+              if (idx > bestCut) bestCut = idx;
+            }
+            if (bestCut !== -1) {
+                attempt = attempt.substring(0, bestCut + 1) + "\n]";
                 const parsed = JSON.parse(attempt);
-                logInfo("修復に成功しました！一部の末尾データは破棄されました。");
+                logInfo(`修復に成功しました！${parsed.length}件のデータを救出。一部の末尾データは破棄されました。`);
                 return parsed;
             }
         } catch(e2) {
