@@ -4049,6 +4049,104 @@
 
     // ===== システム設定 =====
     var isSystemSettingsLoaded = false;
+    var geminiModelsCache = null;
+
+    /**
+     * Gemini APIから利用可能なモデル一覧を取得し、プルダウンに反映する。
+     * @param {boolean} forceReload キャッシュを無視して再取得するか
+     */
+    function loadGeminiModels(forceReload) {
+        if (geminiModelsCache && !forceReload) {
+            populateGeminiModelSelect(geminiModelsCache);
+            return;
+        }
+        var select = document.getElementById('sysGeminiModelName');
+        select.innerHTML = '<option value="">読み込み中...</option>';
+        select.disabled = true;
+        var warningDiv = document.getElementById('geminiModelWarning');
+        warningDiv.style.display = 'none';
+
+        google.script.run
+            .withSuccessHandler(function (result) {
+                select.disabled = false;
+                if (result.success && result.models.length > 0) {
+                    geminiModelsCache = result.models;
+                    populateGeminiModelSelect(result.models);
+                } else {
+                    // API取得失敗時はフォールバック（手入力可能にはしない）
+                    select.innerHTML = '<option value="gemini-2.5-flash">gemini-2.5-flash</option>';
+                    if (result.error) {
+                        warningDiv.textContent = 'モデル一覧の自動取得に失敗しました: ' + result.error;
+                        warningDiv.style.display = 'block';
+                    }
+                    applyCurrentModelSelection();
+                }
+            })
+            .withFailureHandler(function (e) {
+                select.disabled = false;
+                select.innerHTML = '<option value="gemini-2.5-flash">gemini-2.5-flash</option>';
+                var warningDiv = document.getElementById('geminiModelWarning');
+                warningDiv.textContent = 'モデル一覧の取得中にエラーが発生しました: ' + e.message;
+                warningDiv.style.display = 'block';
+                applyCurrentModelSelection();
+            })
+            .getAvailableGeminiModels();
+    }
+
+    /**
+     * モデル一覧をセレクトボックスに反映する。
+     * @param {Array} models モデル配列 [{name, displayName}]
+     */
+    function populateGeminiModelSelect(models) {
+        var select = document.getElementById('sysGeminiModelName');
+        var currentValue = select.dataset.pendingValue || select.value || '';
+        select.innerHTML = '';
+
+        models.forEach(function (m) {
+            var opt = document.createElement('option');
+            opt.value = m.name;
+            opt.textContent = m.name + (m.displayName !== m.name ? ' (' + m.displayName + ')' : '');
+            select.appendChild(opt);
+        });
+
+        applyCurrentModelSelection();
+    }
+
+    /**
+     * 現在保存されているモデル名をセレクトに反映し、利用不可の場合は警告を表示する。
+     */
+    function applyCurrentModelSelection() {
+        var select = document.getElementById('sysGeminiModelName');
+        var savedModel = select.dataset.pendingValue || '';
+        var warningDiv = document.getElementById('geminiModelWarning');
+
+        if (!savedModel) return;
+
+        // 保存されているモデルがリストにあるか確認
+        var found = false;
+        for (var i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === savedModel) {
+                found = true;
+                break;
+            }
+        }
+
+        if (found) {
+            select.value = savedModel;
+            warningDiv.style.display = 'none';
+        } else {
+            // リストにない場合：選択肢の先頭に追加し警告を表示
+            var opt = document.createElement('option');
+            opt.value = savedModel;
+            opt.textContent = savedModel + ' (利用不可)';
+            opt.style.color = '#dc3545';
+            select.insertBefore(opt, select.firstChild);
+            select.value = savedModel;
+            warningDiv.innerHTML = '<strong>⚠ 注意:</strong> 現在設定されているモデル「' + savedModel + '」は利用可能なモデル一覧に含まれていません。モデルが廃止された可能性があります。別のモデルを選択してください。';
+            warningDiv.style.display = 'block';
+        }
+        delete select.dataset.pendingValue;
+    }
 
     function loadSystemSettings() {
         if (isSystemSettingsLoaded) return;
@@ -4059,7 +4157,10 @@
                 document.getElementById('sysPostHour').value = res.postHour || '';
                 document.getElementById('sysPdfFolderId').value = res.pdfFolderId || '';
                 document.getElementById('sysEventPdfFolderId').value = res.eventPdfFolderId || '';
-                document.getElementById('sysGeminiModelName').value = res.geminiModelName || 'gemini-1.5-flash';
+                // Geminiモデル名を保留値として保存し、モデル一覧取得後に反映する
+                var modelSelect = document.getElementById('sysGeminiModelName');
+                modelSelect.dataset.pendingValue = res.geminiModelName || 'gemini-2.5-flash';
+                loadGeminiModels(false);
 
                 // 担当学年の反映
                 var gradeSelect = document.getElementById('sysGradeSelect');
