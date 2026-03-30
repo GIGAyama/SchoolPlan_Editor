@@ -147,10 +147,58 @@ function getCourseNameSafe_() {
 
 /**
  * Gemini APIのモデル名を安全に取得します。
- * @returns {string} モデル名（デフォルト 'gemini-1.5-flash'）
+ * @returns {string} モデル名（デフォルト 'gemini-2.5-flash'）
  */
 function getGeminiModelNameSafe_() {
   const props = PropertiesService.getScriptProperties();
   const modelName = props.getProperty(SP_KEY_GEMINI_MODEL_NAME);
   return modelName || 'gemini-2.5-flash';
+}
+
+/**
+ * [Web API] Gemini APIから利用可能なモデル一覧を取得します。
+ * generateContent をサポートするモデルのみ返します。
+ * @returns {Object} { success: boolean, models: Array<{name: string, displayName: string}>, error?: string }
+ */
+function getAvailableGeminiModels() {
+  try {
+    const apiKey = getSetting(SP_KEY_GEMINI_API_KEY);
+    if (!apiKey) {
+      return { success: false, models: [], error: 'Gemini APIキーが設定されていません。' };
+    }
+
+    const allModels = [];
+    let pageToken = '';
+    do {
+      let url = 'https://generativelanguage.googleapis.com/v1beta/models?key=' + apiKey + '&pageSize=100';
+      if (pageToken) {
+        url += '&pageToken=' + pageToken;
+      }
+      const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      const code = response.getResponseCode();
+      if (code !== 200) {
+        const errBody = JSON.parse(response.getContentText());
+        const errMsg = (errBody.error && errBody.error.message) || 'HTTP ' + code;
+        return { success: false, models: [], error: 'モデル一覧の取得に失敗しました: ' + errMsg };
+      }
+      const data = JSON.parse(response.getContentText());
+      if (data.models) {
+        allModels.push(...data.models);
+      }
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+
+    // generateContent をサポートするモデルだけに絞る
+    const filtered = allModels
+      .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+      .map(m => ({
+        name: m.name.replace('models/', ''),
+        displayName: m.displayName || m.name.replace('models/', '')
+      }));
+
+    return { success: true, models: filtered };
+  } catch (e) {
+    logError('getAvailableGeminiModels', e);
+    return { success: false, models: [], error: e.message };
+  }
 }
