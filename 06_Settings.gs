@@ -36,7 +36,7 @@ function getAppSettings() {
       eventPdfFolderId : getVal(SP_KEY_EVENT_PDF_FOLDER_ID),
       // APIキーは冒頭4文字だけ見せてマスク（セキュリティのため）
       geminiApiKey     : apiKey ? apiKey.substring(0, 4) + '••••••••••••••••••••' : '',
-      geminiModelName  : props.getProperty(SP_KEY_GEMINI_MODEL_NAME) || 'gemini-1.5-flash',
+      geminiModelName  : props.getProperty(SP_KEY_GEMINI_MODEL_NAME) || 'gemini-2.5-flash',
       grade            : props.getProperty(SCRIPT_PROP_GRADE) || '3',
       moduleEnabled    : props.getProperty('moduleEnabled') === 'true'
     };
@@ -59,7 +59,7 @@ function saveAppSettings(settings) {
       [SP_KEY_POST_HOUR]           : settings.postHour         || '',
       [SP_KEY_PDF_FOLDER_ID]       : settings.pdfFolderId      || '',
       [SP_KEY_EVENT_PDF_FOLDER_ID] : settings.eventPdfFolderId || '',
-      [SP_KEY_GEMINI_MODEL_NAME]   : settings.geminiModelName  || 'gemini-1.5-flash',
+      [SP_KEY_GEMINI_MODEL_NAME]   : settings.geminiModelName  || 'gemini-2.5-flash',
     };
 
     // APIキーはマスク文字（「•」）が含まれる場合は既存値を保持、新しい値なら上書き
@@ -152,5 +152,5 @@ function getCourseNameSafe_() {
 function getGeminiModelNameSafe_() {
   const props = PropertiesService.getScriptProperties();
   const modelName = props.getProperty(SP_KEY_GEMINI_MODEL_NAME);
-  return modelName || 'gemini-1.5-flash';
+  return modelName || 'gemini-2.5-flash';
 }
