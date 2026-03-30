@@ -291,12 +291,10 @@ function createUnitMasterFromPdfs_UI() {
     properties.setProperty(SCRIPT_PROP_PDF_TOTAL, fileIds.length);
     
     let masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
-    if (masterSheet) { 
-        masterSheet.clear(); 
-    } else { 
-        masterSheet = ss.insertSheet(SHEET_NAME_UNIT_MASTER); 
+    if (!masterSheet) {
+        masterSheet = ss.insertSheet(SHEET_NAME_UNIT_MASTER);
+        masterSheet.getRange("A1:E1").setValues([["教科", "単元名", "総時間数", "何時間目", "時間ごとの学習活動"]]).setFontWeight("bold");
     }
-    masterSheet.getRange("A1:E1").setValues([["教科", "単元名", "総時間数", "何時間目", "時間ごとの学習活動"]]).setFontWeight("bold");
     ss.toast(`PDF読み込み処理を開始しました。(0/${fileIds.length})`, '処理開始', -1);
     
     ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME).timeBased().after(1000).create();
@@ -409,6 +407,31 @@ ${names}
       logInfo(`PDF「${file.getName()}」から単元情報が見つかりませんでした。`);
       return;
     }
+
+    // --- 教科の重複防止: 同じ教科の既存行を削除してから追記 ---
+    const newSubjects = new Set();
+    extractedUnits.forEach(unit => {
+      if (unit.subject) newSubjects.add(unit.subject);
+    });
+
+    if (newSubjects.size > 0 && masterSheet.getLastRow() > 1) {
+      const lastRow = masterSheet.getLastRow();
+      const numDataRows = lastRow - 1;
+      const existingData = masterSheet.getRange(2, 1, numDataRows, 5).getValues();
+      const rowsToKeep = existingData.filter(row => !newSubjects.has(row[0]));
+
+      masterSheet.getRange(2, 1, numDataRows, 5).clearContent();
+      if (rowsToKeep.length > 0) {
+        masterSheet.getRange(2, 1, rowsToKeep.length, 5).setValues(rowsToKeep);
+      }
+
+      const removedCount = numDataRows - rowsToKeep.length;
+      if (removedCount > 0) {
+        logInfo(`単元マスタ: 教科「${[...newSubjects].join(', ')}」の既存 ${removedCount} 行を削除し、新しいデータで置換します。`);
+      }
+    }
+    // --- End: 教科の重複防止 ---
+
     {
       const allRows = [];
       extractedUnits.forEach(unit => {
@@ -578,12 +601,10 @@ function startUnitMasterProcessingFromWebApp(fileIds) {
 
     const ss = getSs_();
     let masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
-    if (masterSheet) { 
-        masterSheet.clear(); 
-    } else { 
-        masterSheet = ss.insertSheet(SHEET_NAME_UNIT_MASTER); 
+    if (!masterSheet) {
+        masterSheet = ss.insertSheet(SHEET_NAME_UNIT_MASTER);
+        masterSheet.getRange("A1:E1").setValues([["教科", "単元名", "総時間数", "何時間目", "時間ごとの学習活動"]]).setFontWeight("bold");
     }
-    masterSheet.getRange("A1:E1").setValues([["教科", "単元名", "総時間数", "何時間目", "時間ごとの学習活動"]]).setFontWeight("bold");
 
     ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME)
       .timeBased()
@@ -592,7 +613,7 @@ function startUnitMasterProcessingFromWebApp(fileIds) {
 
     return { 
       success: true, 
-      message: `${fileIds.length} 個の指導計画PDFファイルを利用し、単元マスタを再構築するバッチ処理を開始しました。` 
+      message: `${fileIds.length} 個の指導計画PDFファイルを利用し、単元マスタを更新するバッチ処理を開始しました。` 
     };
   } catch(e) {
     logError("startUnitMasterProcessingFromWebApp", e);
