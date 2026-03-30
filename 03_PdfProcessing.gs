@@ -114,6 +114,7 @@ function processNextEventPdf() {
     processEventPdf(task.fileId, year, task.month);
   } catch (e) {
     logError(`行事予定PDFの処理中にエラーが発生しました: ${file.getName()} (${task.month}月)`, e);
+    SpreadsheetApp.getActiveSpreadsheet().toast(`⚠ エラー: ${file.getName()} (${task.month}月) - ${e.message}`, 'PDF処理エラー', 15);
   }
 
   properties.setProperty(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(queue));
@@ -167,6 +168,10 @@ function processEventPdf(fileId, year, month) {
 ]`;
     const extractedEvents = callGeminiApi_(prompt, apiKey, [blob]);
     if (!extractedEvents || !Array.isArray(extractedEvents)) {
+      logError(`PDF「${file.getName()}」の${month}月: Gemini APIから配列形式のレスポンスが得られませんでした。`, new Error(`レスポンス型: ${typeof extractedEvents}`));
+      throw new Error(`PDF「${file.getName()}」の${month}月からデータを抽出できませんでした。APIレスポンスが不正です。`);
+    }
+    if (extractedEvents.length === 0) {
       logInfo(`PDF「${file.getName()}」の${month}月からは、有効な予定が見つかりませんでした。`);
       return "0 件の予定を転記しました。";
     }
@@ -318,6 +323,7 @@ function createUnitMasterFromPdfs() {
     processSinglePdf(file);
   } catch (e) {
     logError(`PDF処理中に致命的なエラーが発生しました: ${file.getName()}`, e);
+    SpreadsheetApp.getActiveSpreadsheet().toast(`⚠ エラー: ${file.getName()} - ${e.message}`, 'PDF処理エラー', 15);
   }
   properties.setProperty(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
   
@@ -371,7 +377,14 @@ function processSinglePdf(file) {
   logInfo(`PDF処理中: ${file.getName()}`);
   try {
     const extractedUnits = callGeminiApi_(prompt, apiKey, [file.getBlob()]);
-    if (extractedUnits && Array.isArray(extractedUnits)) {
+    if (!extractedUnits || !Array.isArray(extractedUnits)) {
+      throw new Error(`PDF「${file.getName()}」からデータを抽出できませんでした。APIレスポンスが不正です（型: ${typeof extractedUnits}）。`);
+    }
+    if (extractedUnits.length === 0) {
+      logInfo(`PDF「${file.getName()}」から単元情報が見つかりませんでした。`);
+      return;
+    }
+    {
       const allRows = [];
       extractedUnits.forEach(unit => {
         if (unit.hourlyActivities && Array.isArray(unit.hourlyActivities)) {
@@ -401,6 +414,7 @@ function processSinglePdf(file) {
     }
   } catch (e) {
     logError(`PDF解析エラー: ${file.getName()}`, e);
+    throw new Error(`${file.getName()}: ${e.message}`);
   }
 }
 

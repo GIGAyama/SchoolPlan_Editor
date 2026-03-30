@@ -100,8 +100,8 @@ function callGeminiApi_(prompt, apiKey, blobs = []) {
         return JSON.parse(text);
       } catch (e) {
         logError("Gemini APIからのJSONレスポンスのパースに失敗しました。", e);
-        logInfo(`パースに失敗したテキスト(最初の1000文字): ${text.substring(0, 1000)} ...`); 
-        
+        logInfo(`パースに失敗したテキスト(最初の1000文字): ${text.substring(0, 1000)} ...`);
+
         // トークン上限などでJSONが途切れた場合のための超簡易修復フォールバック
         // （完全なオブジェクト配列であること前提で、最後の要素を削って配列を閉じる）
         try {
@@ -119,11 +119,18 @@ function callGeminiApi_(prompt, apiKey, blobs = []) {
         } catch(e2) {
             logError("JSONの修復にも失敗しました。", e2);
         }
-        return null; 
+        throw new Error("Gemini APIのレスポンスをJSONとして解析できませんでした。出力が途切れている可能性があります。");
       }
     } else {
-      logError("Gemini APIからのレスポンス形式が不正です。", new Error(responseBody));
-      return null;
+      // candidatesが空の場合はsafety filterでブロックされた可能性
+      let reason = "不明";
+      if (jsonResponse.candidates && jsonResponse.candidates[0] && jsonResponse.candidates[0].finishReason) {
+        reason = jsonResponse.candidates[0].finishReason;
+      } else if (jsonResponse.promptFeedback && jsonResponse.promptFeedback.blockReason) {
+        reason = jsonResponse.promptFeedback.blockReason;
+      }
+      logError(`Gemini APIからのレスポンス形式が不正です。理由: ${reason}`, new Error(responseBody));
+      throw new Error(`Gemini APIから有効なレスポンスが得られませんでした（理由: ${reason}）。PDFの内容を確認してください。`);
     }
   } else {
     logError(`Gemini API Error (Code: ${responseCode})`, new Error(responseBody));
