@@ -166,7 +166,19 @@ function processEventPdf(fileId, year, month) {
   { "date": "YYYY-MM-DD", "content": "（${month}月の予定の内容）", "type": "event" },
   { "date": "YYYY-MM-DD", "content": "（${month}月の予定の内容）", "type": "meeting" }
 ]`;
-    const extractedEvents = callGeminiApi_(prompt, apiKey, [blob]);
+    const buildContinuation = (collected) => {
+      const items = collected.map(e => `${e.date}: ${e.content}`).join(', ');
+      return `${prompt}
+
+【重要な追加指示】
+前回のリクエストで出力がトークン上限に達し、途中で切れてしまいました。
+以下の ${collected.length} 件の予定は既に取得済みです:
+${items}
+
+上記の予定は絶対に出力しないでください。まだ出力されていない残りの予定のみを、同じJSON配列形式で出力してください。`;
+    };
+
+    const extractedEvents = callGeminiApiChunked_(prompt, apiKey, [blob], buildContinuation);
     if (!extractedEvents || !Array.isArray(extractedEvents)) {
       logError(`PDF「${file.getName()}」の${month}月: Gemini APIから配列形式のレスポンスが得られませんでした。`, new Error(`レスポンス型: ${typeof extractedEvents}`));
       throw new Error(`PDF「${file.getName()}」の${month}月からデータを抽出できませんでした。APIレスポンスが不正です。`);
@@ -376,7 +388,20 @@ function processSinglePdf(file) {
 ]`;
   logInfo(`PDF処理中: ${file.getName()}`);
   try {
-    const extractedUnits = callGeminiApi_(prompt, apiKey, [file.getBlob()]);
+    const blob = file.getBlob();
+    const buildContinuation = (collected) => {
+      const names = collected.map(u => `「${u.unitName}」`).join(', ');
+      return `${prompt}
+
+【重要な追加指示】
+前回のリクエストで出力がトークン上限に達し、途中で切れてしまいました。
+以下の ${collected.length} 件の単元は既に取得済みです:
+${names}
+
+上記の単元は絶対に出力しないでください。まだ出力されていない残りの単元のみを、同じJSON配列形式で出力してください。`;
+    };
+
+    const extractedUnits = callGeminiApiChunked_(prompt, apiKey, [blob], buildContinuation);
     if (!extractedUnits || !Array.isArray(extractedUnits)) {
       throw new Error(`PDF「${file.getName()}」からデータを抽出できませんでした。APIレスポンスが不正です（型: ${typeof extractedUnits}）。`);
     }
