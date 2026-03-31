@@ -296,8 +296,20 @@
                         ta.style.height = 'auto';
                         ta.addEventListener('input', function () { autoResizeTextarea(this); });
                         cell.appendChild(ta);
+                        // リンク挿入ボタン
+                        var linkBtn = document.createElement('button');
+                        linkBtn.type = 'button';
+                        linkBtn.className = 'link-insert-btn';
+                        linkBtn.title = 'リンクを挿入';
+                        linkBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">link</span>';
+                        (function(textarea) {
+                            linkBtn.addEventListener('click', function(e) { e.stopPropagation(); openLinkInsertDialog(textarea); });
+                        })(ta);
+                        cell.appendChild(linkBtn);
                     } else {
-                        cell.textContent = val;
+                        var escaped = escHtml(val);
+                        var linked = linkify(escaped.replace(/\n/g, '<br>'));
+                        cell.innerHTML = linked;
                     }
                 }
 
@@ -333,8 +345,8 @@
     function renderPeriodView(p) {
         if (!p.subject) return '';
         var html = '<div class="period-subject">' + escHtml(p.subject) + '</div>';
-        if (p.unit) html += '<div class="period-unit">' + escHtml(p.unit) + '</div>';
-        if (p.content) html += '<div class="period-content">' + escHtml(p.content).replace(/\n/g, '<br>') + '</div>';
+        if (p.unit) html += '<div class="period-unit">' + linkify(escHtml(p.unit)) + '</div>';
+        if (p.content) html += '<div class="period-content">' + linkify(escHtml(p.content).replace(/\n/g, '<br>')) + '</div>';
         return html;
     }
 
@@ -348,9 +360,15 @@
             + '<button type="button" class="unit-picker-btn" onclick="openUnitPicker(' + dayIdx + ',' + pIdx + ')" '
             + 'title="単元マスタから選択" style="flex-shrink:0;padding:1px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;line-height:1;">'
             + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">list_alt</span></button></div>'
+            + '<div style="position:relative;">'
             + '<textarea rows="2" placeholder="学習内容" style="font-size:0.72rem;min-height:36px;height:auto;" '
             + 'data-field="content" data-day="' + dayIdx + '" data-period="' + pIdx + '" '
+            + 'id="content-' + dayIdx + '-' + pIdx + '" '
             + 'oninput="autoResizeTextarea(this)">' + escHtml(p.content) + '</textarea>'
+            + '<button type="button" class="link-insert-btn period-link-btn" title="リンクを挿入" '
+            + 'onclick="event.stopPropagation(); openLinkInsertDialog(document.getElementById(\'content-' + dayIdx + '-' + pIdx + '\'))">'
+            + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">link</span></button>'
+            + '</div>'
             + '<div class="suggest-box" id="suggest-' + dayIdx + '-' + pIdx + '" style="display:none;"></div>';
     }
 
@@ -3848,6 +3866,70 @@
     function escAttr(str) {
         if (!str) return '';
         return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    /**
+     * テキスト中の URL と Markdown 形式リンク [表示テキスト](URL) を
+     * クリック可能な <a> タグに変換する。
+     * escHtml 済みテキストに対して呼ぶこと。
+     */
+    function linkify(escapedHtml) {
+        if (!escapedHtml) return '';
+        // 1) Markdown 形式: [表示テキスト](URL)
+        //    escHtml 後は &quot; は含まないが念のため
+        var md = escapedHtml.replace(
+            /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g,
+            '<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$1<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
+        );
+        // 2) 素の URL（Markdown リンクに変換済みの href="..." 内は除外）
+        md = md.replace(
+            /(^|[^"=])(https?:\/\/[^\s<&]+)/g,
+            '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$2<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
+        );
+        return md;
+    }
+
+    /**
+     * リンク挿入ダイアログを開き、対象 textarea にリンクテキストを挿入する。
+     * target: 挿入先 textarea 要素
+     */
+    function openLinkInsertDialog(target) {
+        Swal.fire({
+            title: 'リンクを挿入',
+            html:
+                '<div style="text-align:left;font-size:0.85rem;margin-bottom:8px;color:var(--text-sub);">Google ドライブや外部サイトの URL を埋め込めます</div>'
+                + '<input id="swal-link-url" class="swal2-input" placeholder="https://..." style="font-size:0.85rem;">'
+                + '<input id="swal-link-text" class="swal2-input" placeholder="表示テキスト（省略可）" style="font-size:0.85rem;">',
+            focusConfirm: false,
+            showCancelButton: true,
+            confirmButtonText: '挿入',
+            cancelButtonText: 'キャンセル',
+            preConfirm: function () {
+                var url = document.getElementById('swal-link-url').value.trim();
+                var text = document.getElementById('swal-link-text').value.trim();
+                if (!url) {
+                    Swal.showValidationMessage('URL を入力してください');
+                    return false;
+                }
+                if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+                return { url: url, text: text };
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed || !result.value) return;
+            var url = result.value.url;
+            var text = result.value.text;
+            var insert = text ? '[' + text + '](' + url + ')' : url;
+            // textarea のカーソル位置に挿入
+            var start = target.selectionStart || 0;
+            var end = target.selectionEnd || 0;
+            var before = target.value.substring(0, start);
+            var after = target.value.substring(end);
+            target.value = before + insert + after;
+            target.focus();
+            target.selectionStart = target.selectionEnd = start + insert.length;
+            // 高さ自動調整
+            autoResizeTextarea(target);
+        });
     }
 
     // ===== トースト (SweetAlert2 Toast) =====
