@@ -371,8 +371,35 @@ function saveTasksBulk(tasks) {
 }
 
 /**
+ * 特定のタスクのフィールドを更新します。
+ * @param {string} taskId
+ * @param {Object} updates { content, resource, dueDate } 更新するフィールド
+ * @returns {boolean}
+ */
+function updateTask(taskId, updates) {
+  try {
+    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = initTaskSheet_(ss);
+    const data = sheet.getDataRange().getValues();
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === taskId) {
+        if (updates.content !== undefined) sheet.getRange(i + 1, 2).setValue(updates.content);
+        if (updates.resource !== undefined) sheet.getRange(i + 1, 3).setValue(updates.resource);
+        if (updates.dueDate !== undefined) sheet.getRange(i + 1, 4).setValue(updates.dueDate);
+        return true;
+      }
+    }
+    return false;
+  } catch (e) {
+    logError('updateTask', e);
+    return false;
+  }
+}
+
+/**
  * 特定のタスクのステータスを更新します。
- * @param {string} taskId 
+ * @param {string} taskId
  * @param {string} newStatus "未着手" または "完了"
  * @returns {boolean}
  */
