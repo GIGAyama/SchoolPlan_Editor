@@ -334,7 +334,7 @@
         if (!p.subject) return '';
         var html = '<div class="period-subject">' + escHtml(p.subject) + '</div>';
         if (p.unit) html += '<div class="period-unit">' + escHtml(p.unit) + '</div>';
-        if (p.content) html += '<div class="period-content">' + escHtml(p.content) + '</div>';
+        if (p.content) html += '<div class="period-content">' + escHtml(p.content).replace(/\n/g, '<br>') + '</div>';
         return html;
     }
 
@@ -1121,7 +1121,7 @@
         html += 'th { text-align: center; font-weight: normal; }';
         html += '.subject { font-weight: bold; font-size: 10px; background-color: #dcedc8; padding: 2px; text-align: left; border-bottom: 1px solid #ccc; margin: -3px -3px 2px -3px; }';
         html += '.unit { font-size: 9px; color: #555; margin-bottom: 2px; }';
-        html += '.content { font-size: 9px; }';
+        html += '.content { font-size: 9px; line-height: 1.4; }';
         html += '.row-header { width: 35px; text-align: center; vertical-align: middle; padding: 2px; }';
         html += '.recess-row td { height: 16px; background-color: #ffe0b2; }';
         html += '.recess-row td:first-child { text-align: center; font-weight: bold; padding: 0; vertical-align: middle;}';
@@ -1170,7 +1170,7 @@
             var content = "";
             if (p.subject) content += '<div class="subject">' + p.subject + '</div>';
             if (p.unit) content += '<div class="unit">' + p.unit + '</div>';
-            if (p.content) content += '<div class="content">' + p.content.replace(/\\n/g, '<br>') + '</div>';
+            if (p.content) content += '<div class="content">' + p.content.replace(/\n/g, '<br>') + '</div>';
             return content;
         };
 
