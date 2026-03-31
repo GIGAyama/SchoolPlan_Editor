@@ -342,8 +342,12 @@
         return '<input type="text" class="period-subject-input" placeholder="教科" value="' + escAttr(p.subject) + '" '
             + 'data-field="subject" data-day="' + dayIdx + '" data-period="' + pIdx + '" '
             + 'oninput="onSubjectInput(this)" onfocus="showSuggest(this)" onblur="hideSuggest(this)">'
+            + '<div style="display:flex;align-items:center;gap:2px;">'
             + '<input type="text" placeholder="単元名" value="' + escAttr(p.unit) + '" '
-            + 'data-field="unit" data-day="' + dayIdx + '" data-period="' + pIdx + '">'
+            + 'data-field="unit" data-day="' + dayIdx + '" data-period="' + pIdx + '" style="flex:1;min-width:0;">'
+            + '<button type="button" class="unit-picker-btn" onclick="openUnitPicker(' + dayIdx + ',' + pIdx + ')" '
+            + 'title="単元マスタから選択" style="flex-shrink:0;padding:1px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;line-height:1;">'
+            + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">list_alt</span></button></div>'
             + '<textarea rows="2" placeholder="学習内容" style="font-size:0.72rem;min-height:36px;height:auto;" '
             + 'data-field="content" data-day="' + dayIdx + '" data-period="' + pIdx + '" '
             + 'oninput="autoResizeTextarea(this)">' + escHtml(p.content) + '</textarea>'
@@ -383,6 +387,104 @@
         if (inp) inp.value = subject;
         var box = document.getElementById('suggest-' + dayIdx + '-' + pIdx);
         if (box) box.style.display = 'none';
+    }
+
+    // ===== 単元マスタピッカー =====
+    function openUnitPicker(dayIdx, pIdx) {
+        // 対象スロットの教科名を取得
+        var subjectEl = document.querySelector('[data-field="subject"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+        var subject = subjectEl ? subjectEl.value.trim() : '';
+        if (!subject) {
+            showToast('warning', '先に教科名を入力してください。');
+            return;
+        }
+
+        // masterMapから該当教科の単元リストを取得
+        var units = (STATE.masterData && STATE.masterData.masterMap) ? STATE.masterData.masterMap[subject] : null;
+        if (!units || units.length === 0) {
+            showToast('warning', '「' + subject + '」の単元マスタデータが見つかりません。');
+            return;
+        }
+
+        // 単元リストHTML生成（オブジェクト形式と旧文字列形式の両方に対応）
+        var unitListHtml = units.map(function (u, i) {
+            var name = typeof u === 'string' ? u : u.unitName;
+            var hours = typeof u === 'string' ? '?' : u.totalHours;
+            return '<div class="unit-picker-item" data-idx="' + i + '" '
+                + 'style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;" '
+                + 'onmouseover="this.style.background=\'var(--bg-hover)\'" onmouseout="this.style.background=\'transparent\'">'
+                + '<strong>' + escHtml(name) + '</strong>'
+                + '<span style="color:var(--text-sub);margin-left:8px;font-size:0.8rem;">（' + hours + '時間）</span>'
+                + '</div>';
+        }).join('');
+
+        Swal.fire({
+            title: '「' + subject + '」の単元を選択',
+            html: '<div style="max-height:300px;overflow-y:auto;text-align:left;border:1px solid var(--border);border-radius:6px;">'
+                + unitListHtml + '</div>',
+            showConfirmButton: false,
+            showCancelButton: true,
+            cancelButtonText: '閉じる',
+            didOpen: function () {
+                var items = Swal.getHtmlContainer().querySelectorAll('.unit-picker-item');
+                items.forEach(function (item) {
+                    item.addEventListener('click', function () {
+                        var idx = parseInt(item.dataset.idx, 10);
+                        var u = units[idx];
+                        var unitName = typeof u === 'string' ? u : u.unitName;
+                        var totalHours = typeof u === 'string' ? 1 : u.totalHours;
+                        Swal.close();
+                        openHourPicker(dayIdx, pIdx, subject, unitName, totalHours);
+                    });
+                });
+            }
+        });
+    }
+
+    function openHourPicker(dayIdx, pIdx, subject, unitName, totalHours) {
+        // 時間目選択用のオプション生成
+        var options = {};
+        for (var h = 1; h <= totalHours; h++) {
+            options[h] = h + '/' + totalHours + ' 時間目';
+        }
+
+        Swal.fire({
+            title: unitName,
+            text: '何時間目を入力しますか？',
+            input: 'select',
+            inputOptions: options,
+            inputValue: '1',
+            showCancelButton: true,
+            confirmButtonText: '入力する',
+            cancelButtonText: 'キャンセル',
+            inputValidator: function (value) {
+                if (!value) return '時間目を選択してください。';
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            var hourNum = parseInt(result.value, 10);
+
+            // 単元名セルに入力
+            var unitEl = document.querySelector('[data-field="unit"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+            if (unitEl) unitEl.value = unitName + ' ' + hourNum + '/' + totalHours;
+
+            // サーバーから学習活動を取得してcontentに入力
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (res.success) {
+                        var contentEl = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+                        if (contentEl) {
+                            contentEl.value = res.activity || '';
+                            autoResizeTextarea(contentEl);
+                        }
+                        showToast('success', unitName + ' ' + hourNum + '/' + totalHours + ' を入力しました。');
+                    }
+                })
+                .withFailureHandler(function (e) {
+                    showToast('error', '学習活動の取得に失敗: ' + e.message);
+                })
+                .getActivityFromMaster(subject, unitName, hourNum);
+        });
     }
 
     // ===== 編集モード制御 =====
