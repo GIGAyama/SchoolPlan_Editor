@@ -53,7 +53,98 @@ function findLastLesson_(dbData, subject, weekStartDate) {
   return { unitName: null, currentHour: 0, totalHours: 0 };
 }
 
-/** 
+/**
+ * 前週の同じ曜日・同じ校時スロットから、そのスロットが使っていた単元情報を取得します。
+ * これにより、同一教科で複数単元を並行して進める運用に対応できます。
+ * @param {Array} dbData データベースの全行データ
+ * @param {string} subject 教科名
+ * @param {number} dayOfWeek 曜日インデックス (0=月, 1=火, ..., 6=日)
+ * @param {number} periodIndex 校時インデックス (0-5)
+ * @param {Date} weekStartDate 対象週の月曜日
+ * @returns {Object|null} {unitName, currentHour, totalHours} or null
+ */
+function findLastLessonForSlot_(dbData, subject, dayOfWeek, periodIndex, weekStartDate) {
+  const dbCols = getDbColumns();
+  const searchEndDate = new Date(weekStartDate);
+  searchEndDate.setDate(searchEndDate.getDate() - 1);
+
+  const fourWeeksAgo = new Date(weekStartDate);
+  fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+
+  // 校時→DB列マッピング
+  const periodKeys = ['PERIOD1', 'PERIOD2', 'PERIOD3', 'PERIOD4', 'PERIOD5', 'PERIOD6'];
+  const unitKeys = ['UNIT1', 'UNIT2', 'UNIT3', 'UNIT4', 'UNIT5', 'UNIT6'];
+  const pColIdx = dbCols[periodKeys[periodIndex]];
+  const uColIdx = dbCols[unitKeys[periodIndex]];
+  if (!pColIdx || !uColIdx) return null;
+
+  for (let i = dbData.length - 1; i >= 1; i--) {
+    const row = dbData[i];
+    const rowDate = row[dbCols.DATE - 1];
+    if (!(rowDate instanceof Date) || rowDate > searchEndDate) continue;
+    if (rowDate < fourWeeksAgo) break;
+
+    // 曜日チェック (JS: 0=日,1=月,...,6=土 → 0=月,...,6=日)
+    const jsDow = rowDate.getDay();
+    const ourDow = jsDow === 0 ? 6 : jsDow - 1;
+    if (ourDow !== dayOfWeek) continue;
+
+    // 同じスロットに同じ教科があるか
+    if (row[pColIdx - 1] === subject) {
+      const unitText = row[uColIdx - 1];
+      if (unitText && typeof unitText === 'string') {
+        const match = unitText.match(/(.+?)\s*(\d+)\/(\d+)/);
+        if (match) {
+          return {
+            unitName: match[1].trim(),
+            currentHour: parseInt(match[2], 10),
+            totalHours: parseInt(match[3], 10)
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 特定の単元の最新進捗をDBから取得します。
+ * @param {Array} dbData データベースの全行データ
+ * @param {string} subject 教科名
+ * @param {string} unitName 単元名
+ * @param {Date} weekStartDate 対象週の月曜日
+ * @returns {Object} {unitName, currentHour, totalHours}
+ */
+function findLatestUnitState_(dbData, subject, unitName, weekStartDate) {
+  const dbCols = getDbColumns();
+  const searchEndDate = new Date(weekStartDate);
+  searchEndDate.setDate(searchEndDate.getDate() - 1);
+
+  for (let i = dbData.length - 1; i >= 1; i--) {
+    const row = dbData[i];
+    const rowDate = row[dbCols.DATE - 1];
+    if (!(rowDate instanceof Date) || rowDate > searchEndDate) continue;
+
+    for (let col = dbCols.PERIOD6 - 1; col >= dbCols.PERIOD1 - 1; col -= 3) {
+      if (row[col] === subject) {
+        const unitText = row[col + 1];
+        if (unitText && typeof unitText === 'string') {
+          const match = unitText.match(/(.+?)\s*(\d+)\/(\d+)/);
+          if (match && match[1].trim() === unitName) {
+            return {
+              unitName: unitName,
+              currentHour: parseInt(match[2], 10),
+              totalHours: parseInt(match[3], 10)
+            };
+          }
+        }
+      }
+    }
+  }
+  return { unitName: unitName, currentHour: 0, totalHours: 0 };
+}
+
+/**
  * 前回の授業情報と単元マスタを基に、次の授業情報を決定します。
  */
 function determineNextLesson_(lastLesson, masterData, subject) {
@@ -121,35 +212,52 @@ function calculateAutoFillForWebApp(mondayStr, days) {
     const masterData = masterSheet.getDataRange().getValues();
 
     const weekStartDate = parseDate_(mondayStr);
-    let weeklyProgress = {}; // 1週間の中での教科ごとの進捗を追跡
+    // 教科+単元名 単位で進捗を追跡（並行単元対応）
+    const unitProgress = {}; // key: `${subject}::${unitName}` -> {unitName, currentHour, totalHours}
 
-    days.forEach((day, colIdx) => {
+    days.forEach((day, dayIdx) => {
       if (!day.periods || !day.date || day.found === false) return;
-      const currentDate = parseDate_(day.date);
 
       day.periods.forEach((p, pIdx) => {
         const subject = p.subject;
-        if (!subject || subject.includes("行事")) return; // 教科が空、または行事の場合はスキップ
+        if (!subject || subject.includes("行事")) return;
 
         try {
-          // 前回までの進捗を取得（同じ週ですでに計算済みならそれを使う）
-          const lastLesson = weeklyProgress[subject] || findLastLesson_(dbData, subject, weekStartDate);
-          
-          // 単元マスタから次の進捗を決定
+          // Step 1: スロット記憶方式 — 前週の同じ曜日・校時から使用単元を特定
+          const slotLesson = findLastLessonForSlot_(dbData, subject, dayIdx, pIdx, weekStartDate);
+
+          let lastLesson;
+          if (slotLesson) {
+            // このスロットに前週の単元がある → その単元の最新進捗を使う
+            const progressKey = `${subject}::${slotLesson.unitName}`;
+            if (unitProgress[progressKey]) {
+              lastLesson = unitProgress[progressKey];
+            } else {
+              lastLesson = findLatestUnitState_(dbData, subject, slotLesson.unitName, weekStartDate);
+            }
+          } else {
+            // スロット履歴なし → 従来方式（教科の最終授業から逐次進行）でフォールバック
+            lastLesson = findLastLesson_(dbData, subject, weekStartDate);
+            // 既に他のスロットが追跡中の単元なら、その進捗を使う
+            const fallbackKey = lastLesson.unitName ? `${subject}::${lastLesson.unitName}` : null;
+            if (fallbackKey && unitProgress[fallbackKey]) {
+              lastLesson = unitProgress[fallbackKey];
+            }
+          }
+
+          // Step 2: 単元マスタから次の時数を決定
           const nextLesson = determineNextLesson_(lastLesson, masterData, subject);
-          
+
           if (nextLesson && nextLesson.unitName) {
-            // 進捗を更新
-            weeklyProgress[subject] = nextLesson;
-            
-            // 単元名と進捗（◯/◯）を構成
+            // 教科+単元名 単位で進捗を更新
+            const progressKey = `${subject}::${nextLesson.unitName}`;
+            unitProgress[progressKey] = nextLesson;
+
             p.unit = `${nextLesson.unitName} ${nextLesson.currentHour}/${nextLesson.totalHours}`;
-            
-            // 活動内容を探す
             p.content = findActivityFromMaster_(masterData, subject, nextLesson.unitName, nextLesson.currentHour);
           }
         } catch (e) {
-          logError(`[AutoFill] ${formatDate(currentDate)} ${pIdx+1}校時 ${subject} の処理エラー`, e);
+          logError(`[AutoFill] ${day.date} ${pIdx+1}校時 ${subject} の処理エラー`, e);
         }
       });
     });
@@ -189,23 +297,27 @@ function batchAutoFillFromWeek(baseMondayStr) {
     const nextMonday = new Date(baseMonday);
     nextMonday.setDate(nextMonday.getDate() + 7);
 
-    // 教科ごとの進捗を追跡（遅延初期化: 初遭遇時にfindLastLesson_で取得）
-    const runningProgress = {};
+    // 教科+単元名 単位で進捗を追跡（並行単元対応）
+    const unitProgress = {}; // key: `${subject}::${unitName}` -> {unitName, currentHour, totalHours}
+    // スロット記憶: 各(曜日, 校時)がどの単元を使っているか
+    const slotUnitMap = {}; // key: `${dayOfWeek}::${periodIndex}` -> unitName
+    // 初期化済み教科の追跡
+    const initializedSubjects = new Set();
 
     // DB列マッピング（6校時分）
     const periodCols = [];
     if (dbCols.PERIOD1 && dbCols.UNIT1 && dbCols.CONTENT1)
-      periodCols.push({ subj: dbCols.PERIOD1, unit: dbCols.UNIT1, content: dbCols.CONTENT1 });
+      periodCols.push({ subj: dbCols.PERIOD1, unit: dbCols.UNIT1, content: dbCols.CONTENT1, idx: 0 });
     if (dbCols.PERIOD2 && dbCols.UNIT2 && dbCols.CONTENT2)
-      periodCols.push({ subj: dbCols.PERIOD2, unit: dbCols.UNIT2, content: dbCols.CONTENT2 });
+      periodCols.push({ subj: dbCols.PERIOD2, unit: dbCols.UNIT2, content: dbCols.CONTENT2, idx: 1 });
     if (dbCols.PERIOD3 && dbCols.UNIT3 && dbCols.CONTENT3)
-      periodCols.push({ subj: dbCols.PERIOD3, unit: dbCols.UNIT3, content: dbCols.CONTENT3 });
+      periodCols.push({ subj: dbCols.PERIOD3, unit: dbCols.UNIT3, content: dbCols.CONTENT3, idx: 2 });
     if (dbCols.PERIOD4 && dbCols.UNIT4 && dbCols.CONTENT4)
-      periodCols.push({ subj: dbCols.PERIOD4, unit: dbCols.UNIT4, content: dbCols.CONTENT4 });
+      periodCols.push({ subj: dbCols.PERIOD4, unit: dbCols.UNIT4, content: dbCols.CONTENT4, idx: 3 });
     if (dbCols.PERIOD5 && dbCols.UNIT5 && dbCols.CONTENT5)
-      periodCols.push({ subj: dbCols.PERIOD5, unit: dbCols.UNIT5, content: dbCols.CONTENT5 });
+      periodCols.push({ subj: dbCols.PERIOD5, unit: dbCols.UNIT5, content: dbCols.CONTENT5, idx: 4 });
     if (dbCols.PERIOD6 && dbCols.UNIT6 && dbCols.CONTENT6)
-      periodCols.push({ subj: dbCols.PERIOD6, unit: dbCols.UNIT6, content: dbCols.CONTENT6 });
+      periodCols.push({ subj: dbCols.PERIOD6, unit: dbCols.UNIT6, content: dbCols.CONTENT6, idx: 5 });
 
     let updatedCells = 0;
     let isModified = false;
@@ -215,26 +327,58 @@ function batchAutoFillFromWeek(baseMondayStr) {
       const row = dbData[i];
       const rowDate = row[dbCols.DATE - 1];
 
-      // 日付でない行、または翌週月曜より前の行はスキップ
       if (!(rowDate instanceof Date) || rowDate < nextMonday) continue;
 
-      // 各コマを処理
+      // 曜日を算出 (0=月, ..., 6=日)
+      const jsDow = rowDate.getDay();
+      const dayOfWeek = jsDow === 0 ? 6 : jsDow - 1;
+
       for (const pc of periodCols) {
         const subject = row[pc.subj - 1];
         if (!subject || typeof subject !== 'string' || subject.includes('行事')) continue;
 
         try {
-          // 教科の前回進捗を取得（初遭遇時のみDB検索）
-          const lastLesson = runningProgress[subject] || findLastLesson_(dbData, subject, nextMonday);
+          const slotKey = `${dayOfWeek}::${pc.idx}`;
 
-          // 次の時数を決定
+          // Step 1: スロット記憶方式でこのスロットの単元を特定
+          let lastLesson;
+          const rememberedUnit = slotUnitMap[slotKey];
+
+          if (rememberedUnit) {
+            // このスロットに記憶された単元がある
+            const progressKey = `${subject}::${rememberedUnit}`;
+            lastLesson = unitProgress[progressKey] || findLatestUnitState_(dbData, subject, rememberedUnit, nextMonday);
+          } else if (!initializedSubjects.has(subject)) {
+            // 初遭遇の教科 — スロットベースの初期化を試みる
+            const slotLesson = findLastLessonForSlot_(dbData, subject, dayOfWeek, pc.idx, nextMonday);
+            if (slotLesson) {
+              const progressKey = `${subject}::${slotLesson.unitName}`;
+              lastLesson = unitProgress[progressKey] || findLatestUnitState_(dbData, subject, slotLesson.unitName, nextMonday);
+            } else {
+              lastLesson = findLastLesson_(dbData, subject, nextMonday);
+              const fallbackKey = lastLesson.unitName ? `${subject}::${lastLesson.unitName}` : null;
+              if (fallbackKey && unitProgress[fallbackKey]) {
+                lastLesson = unitProgress[fallbackKey];
+              }
+            }
+          } else {
+            // 教科は初期化済みだがこのスロットは未設定 — フォールバック
+            lastLesson = findLastLesson_(dbData, subject, nextMonday);
+            const fallbackKey = lastLesson.unitName ? `${subject}::${lastLesson.unitName}` : null;
+            if (fallbackKey && unitProgress[fallbackKey]) {
+              lastLesson = unitProgress[fallbackKey];
+            }
+          }
+
+          initializedSubjects.add(subject);
+
+          // Step 2: 次の時数を決定
           const nextLesson = determineNextLesson_(lastLesson, masterData, subject);
 
           if (nextLesson && nextLesson.unitName) {
             const newUnit = nextLesson.unitName + ' ' + nextLesson.currentHour + '/' + nextLesson.totalHours;
             const newContent = findActivityFromMaster_(masterData, subject, nextLesson.unitName, nextLesson.currentHour);
 
-            // 変更がある場合のみ更新
             if (row[pc.unit - 1] !== newUnit || row[pc.content - 1] !== newContent) {
               row[pc.unit - 1] = newUnit;
               row[pc.content - 1] = newContent;
@@ -242,8 +386,10 @@ function batchAutoFillFromWeek(baseMondayStr) {
               updatedCells++;
             }
 
-            // 進捗を更新
-            runningProgress[subject] = nextLesson;
+            // 進捗とスロット記憶を更新
+            const progressKey = `${subject}::${nextLesson.unitName}`;
+            unitProgress[progressKey] = nextLesson;
+            slotUnitMap[slotKey] = nextLesson.unitName;
           }
         } catch (e) {
           Logger.log('[batchAutoFill] ' + formatDate(rowDate) + ' ' + subject + ': ' + e.message);

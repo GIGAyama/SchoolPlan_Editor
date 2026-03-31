@@ -256,17 +256,38 @@ function getUnitMasterForSuggest() {
     for (const row of data.slice(1)) {
       const subject = row[MASTER_COL_SUBJECT - 1];
       const unit = row[MASTER_COL_UNIT_NAME - 1];
+      const totalHours = row[MASTER_COL_TOTAL_HOURS - 1];
       if (subject && unit) {
-        if (!masterMap[subject]) masterMap[subject] = new Set();
-        masterMap[subject].add(unit);
+        if (!masterMap[subject]) masterMap[subject] = [];
+        // 同一単元が未登録の場合のみ追加
+        if (!masterMap[subject].some(u => u.unitName === unit)) {
+          masterMap[subject].push({ unitName: unit, totalHours: totalHours || 1 });
+        }
       }
     }
-    // Setを配列に変換
-    for (const key in masterMap) masterMap[key] = [...masterMap[key]];
 
     return { success: true, subjects, masterMap };
   } catch (e) {
     logError('getUnitMasterForSuggest', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 指定された教科・単元名・時間目の学習活動を返します。
+ * 手動編集時の単元マスタピッカーで使用されます。
+ */
+function getActivityFromMaster(subject, unitName, hourNum) {
+  try {
+    const ss = getSs_();
+    const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!masterSheet) return { success: false, error: '単元マスタシートが見つかりません。' };
+
+    const masterData = masterSheet.getDataRange().getValues();
+    const activity = findActivityFromMaster_(masterData, subject, unitName, hourNum);
+    return { success: true, activity: activity };
+  } catch (e) {
+    logError('getActivityFromMaster', e);
     return { success: false, error: e.message };
   }
 }
