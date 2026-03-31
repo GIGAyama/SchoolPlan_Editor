@@ -541,6 +541,52 @@
         cursor: pointer;
     }
 
+    /* ===== リンク埋め込み ===== */
+    .cell-link {
+        color: var(--primary);
+        text-decoration: none;
+        word-break: break-all;
+        cursor: pointer;
+        border-bottom: 1px dotted var(--primary);
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .cell-link:hover {
+        color: #0b57d0;
+        border-bottom-style: solid;
+    }
+    .cell-link-icon {
+        font-size: 12px !important;
+        vertical-align: middle;
+        margin-left: 1px;
+        opacity: 0.6;
+    }
+    /* 非校時セルのリンク挿入ボタン */
+    .link-insert-btn {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        padding: 1px 3px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+        cursor: pointer;
+        line-height: 1;
+        opacity: 0.5;
+        transition: opacity 0.15s;
+        z-index: 1;
+    }
+    .link-insert-btn:hover {
+        opacity: 1;
+        background: var(--bg-hover, #f0f0f0);
+    }
+    .grid-cell { position: relative; }
+    /* 校時セル内の学習内容リンクボタン */
+    .period-link-btn {
+        position: absolute;
+        top: 1px;
+        right: 1px;
+    }
+
     /* ===== UX強化: D&D ビジュアルフィードバック ===== */
     .grid-cell.dragging {
         opacity: 0.4;
