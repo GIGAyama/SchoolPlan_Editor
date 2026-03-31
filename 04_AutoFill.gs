@@ -12,7 +12,7 @@ function findActivityFromMaster_(masterData, subject, unitName, hourNum) {
       return row[MASTER_COL_ACTIVITY - 1];
     }
   }
-  if (unitName.includes("のまとめ")) return "単元の内容を振り返り、学習の定着を確認する。";
+  if (unitName.includes("のまとめ")) return "めあて：単元の学習を振り返ろう\n・学習内容の要点を確認する\n・まとめテストやふり返りカードに取り組む";
   return "（単元マスタに該当する活動が見つかりませんでした）";
 }
 
