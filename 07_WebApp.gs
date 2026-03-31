@@ -1253,18 +1253,45 @@ function getTasksFromWebApp() {
 /**
  * [Webアプリ API] 新しいタスク（複数可）を一括保存します
  * @param {Object[]} tasks 保存するタスクの配列
- * @returns {Object} { success: boolean, message: string }
+ * @returns {Object} { success: boolean, message: string, savedTasks: Object[] }
  */
 function saveTasksFromWebApp(tasks) {
   try {
-    const isSuccess = saveTasksBulk(tasks);
+    // ID未設定のタスクにIDを事前付与（フロントに返却するため）
+    var savedTasks = tasks.map(function(t) {
+      return {
+        id: t.id || 'tsk_' + Utilities.getUuid().split('-')[0],
+        content: t.content || '',
+        resource: t.resource || '',
+        dueDate: t.dueDate || '',
+        source: t.source || '',
+        status: t.status || '未着手'
+      };
+    });
+    var isSuccess = saveTasksBulk(savedTasks);
     if (isSuccess) {
-      return { success: true, message: `${tasks.length}件のタスクを保存しました` };
+      return { success: true, message: savedTasks.length + '件のタスクを保存しました', savedTasks: savedTasks };
     } else {
       throw new Error('タスクの保存に失敗しました');
     }
   } catch (e) {
     logError('saveTasksFromWebApp', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] タスクのフィールド（内容・準備物・期日）を更新します
+ * @param {string} taskId
+ * @param {Object} updates { content, resource, dueDate }
+ * @returns {Object} { success: boolean }
+ */
+function updateTaskFromWebApp(taskId, updates) {
+  try {
+    var isSuccess = updateTask(taskId, updates);
+    return { success: isSuccess };
+  } catch (e) {
+    logError('updateTaskFromWebApp', e);
     return { success: false, error: e.message };
   }
 }

@@ -4387,6 +4387,7 @@
                         <span class="task-list-title">${escHtml(t.content)}</span>
                         ${t.resource ? `<span class="task-list-resource"><i class="bi bi-box-seam"></i> ${escHtml(t.resource)}</span>` : ''}
                         <span class="${dateBadgeClass}"><i class="bi bi-calendar-event"></i> ${dateDisplay}</span>
+                        <button class="task-edit-btn" onclick="showEditTaskInput('${t.id}')" title="編集"><i class="bi bi-pencil"></i></button>
                         <button class="task-del-btn" onclick="deleteTaskById('${t.id}')" title="削除"><i class="bi bi-trash3"></i></button>
                     </div>
                 `;
@@ -4407,7 +4408,8 @@
                                 </div>
                             </div>
                             <div class="task-actions">
-                                <button class="task-del-btn" onclick="deleteTaskById('${t.id}')" title="プレビュー/削除"><i class="bi bi-trash3"></i></button>
+                                <button class="task-edit-btn" onclick="showEditTaskInput('${t.id}')" title="編集"><i class="bi bi-pencil"></i></button>
+                                <button class="task-del-btn" onclick="deleteTaskById('${t.id}')" title="削除"><i class="bi bi-trash3"></i></button>
                             </div>
                         </div>
                     </div>
@@ -4563,7 +4565,13 @@
                 .withSuccessHandler(function (res) {
                     if (res.success) {
                         showToast('success', 'タスクを手動追加しました');
-                        loadTasks();
+                        // 差分更新: 返却されたタスクをローカルに追加
+                        if (res.savedTasks) {
+                            allTaskData = allTaskData.concat(res.savedTasks);
+                            STATE.tasks = allTaskData;
+                        }
+                        if (document.getElementById('taskListContainer')) renderTaskList();
+                        if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
                     } else {
                         showToast('error', '追加エラー: ' + res.error);
                     }
@@ -4571,6 +4579,66 @@
                 .withFailureHandler(e => showToast('error', e.message))
                 .saveTasksFromWebApp([formValues]);
         }
+    }
+
+    // ===== タスク編集 =====
+    async function showEditTaskInput(taskId) {
+        var task = allTaskData.find(function(t) { return t.id === taskId; });
+        if (!task) { showToast('error', '対象タスクが見つかりません'); return; }
+
+        const { value: formValues } = await Swal.fire({
+            title: 'タスク編集',
+            html: `
+                <input id="swal-edit1" class="swal2-input" placeholder="タスク内容 (必須)" style="width:80%" value="${escHtmlAttr(task.content)}">
+                <input id="swal-edit2" class="swal2-input" placeholder="準備物・リソース" style="width:80%" value="${escHtmlAttr(task.resource || '')}">
+                <div style="margin-top:10px;text-align:left;width:80%;margin:10px auto;">
+                    <label style="font-size:0.8rem;color:var(--text-sub);">期日:</label>
+                    <input id="swal-edit3" type="date" class="form-control" style="font-family:inherit;" value="${task.dueDate || ''}">
+                </div>
+            `,
+            focusConfirm: false,
+            showCancelButton: true,
+            confirmButtonText: '保存',
+            cancelButtonText: 'キャンセル',
+            preConfirm: () => {
+                var content = document.getElementById('swal-edit1').value;
+                if (!content) { Swal.showValidationMessage('タスク内容は入力必須です'); return false; }
+                return {
+                    content: content,
+                    resource: document.getElementById('swal-edit2').value,
+                    dueDate: document.getElementById('swal-edit3').value
+                };
+            }
+        });
+
+        if (formValues) {
+            // UI即座反映（楽観的更新）
+            task.content = formValues.content;
+            task.resource = formValues.resource;
+            task.dueDate = formValues.dueDate;
+            if (document.getElementById('taskListContainer')) renderTaskList();
+            if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (res.success) {
+                        showToast('success', 'タスクを更新しました');
+                    } else {
+                        showToast('error', '更新エラー: ' + (res.error || '不明'));
+                        loadTasks(); // 失敗時はサーバーから再取得
+                    }
+                })
+                .withFailureHandler(function (e) {
+                    showToast('error', '通信エラー: ' + e.message);
+                    loadTasks();
+                })
+                .updateTaskFromWebApp(taskId, formValues);
+        }
+    }
+
+    /** HTML属性値用エスケープ */
+    function escHtmlAttr(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     // ===== AI抽出とプレビュー操作 =====
@@ -4664,7 +4732,13 @@
                 if (res.success) {
                     showToast('success', res.message);
                     cancelAiTaskPreview(); // プレビュークリア
-                    loadTasks();          // 一覧リロード
+                    // 差分更新: 返却されたタスクをローカルに追加
+                    if (res.savedTasks) {
+                        allTaskData = allTaskData.concat(res.savedTasks);
+                        STATE.tasks = allTaskData;
+                    }
+                    if (document.getElementById('taskListContainer')) renderTaskList();
+                    if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
                 } else {
                     showToast('error', '保存エラー: ' + res.error);
                 }
