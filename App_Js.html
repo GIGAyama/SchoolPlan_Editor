@@ -360,8 +360,9 @@
     }
 
     function renderPeriodView(p) {
-        if (!p.subject) return '';
-        var html = '<div class="period-subject">' + escHtml(p.subject) + '</div>';
+        if (!p.subject && !p.unit && !p.content) return '';
+        var html = '';
+        if (p.subject) html += '<div class="period-subject">' + escHtml(p.subject) + '</div>';
         if (p.unit) html += '<div class="period-unit">' + linkify(escHtml(p.unit)) + '</div>';
         if (p.content) html += '<div class="period-content">' + linkify(escHtml(p.content).replace(/\n/g, '<br>')) + '</div>';
         return html;
