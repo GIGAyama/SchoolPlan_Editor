@@ -51,44 +51,54 @@
         loadTasks(); // タスクをページ読み込み時に初期ロード（デフォルトでリスト表示）
     };
 
+    // ===== ブラウザ閉じ/リロード時の警告 =====
+    window.addEventListener('beforeunload', function (e) {
+        if (hasUnsavedChanges()) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
     // ===== ビュー切り替え =====
     function switchView(viewName) {
-        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('view-' + viewName).classList.add('active');
-        document.querySelector('.nav-btn[data-view="' + viewName + '"]').classList.add('active');
-        STATE.view = viewName;
-        if (viewName === 'newsletter') {
-            NW.init();
-        }
-        if (viewName === 'integration') {
-            checkProcessingStatus();
-        }
-        if (viewName === 'settings' && !timetableLoaded) {
-            loadTimetableEditor();
-        }
-        if (viewName === 'settings' && !vacationDatesLoaded) {
-            loadVacationDates();
-        }
-        if (viewName === 'settings' && !stdHoursLoaded) {
-            loadStandardHours();
-        }
-        if (viewName === 'settings' && !isSystemSettingsLoaded) {
-            loadSystemSettings();
-        }
-        if (viewName === 'hours' && STATE.mondayStr) {
-            loadHoursSummary();
-        }
-        if (viewName === 'task') {
-            if (!taskDataLoaded && !taskLoading) {
-                loadTasks();
-            } else if (taskDataLoaded) {
-                renderTaskList(); // データ読み込み済みの場合は再描画
+        autoSaveAndThen(function () {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('view-' + viewName).classList.add('active');
+            document.querySelector('.nav-btn[data-view="' + viewName + '"]').classList.add('active');
+            STATE.view = viewName;
+            if (viewName === 'newsletter') {
+                NW.init();
             }
-        }
-        if (viewName === 'unitmaster' && !umDataLoaded) {
-            loadUnitMasterData();
-        }
+            if (viewName === 'integration') {
+                checkProcessingStatus();
+            }
+            if (viewName === 'settings' && !timetableLoaded) {
+                loadTimetableEditor();
+            }
+            if (viewName === 'settings' && !vacationDatesLoaded) {
+                loadVacationDates();
+            }
+            if (viewName === 'settings' && !stdHoursLoaded) {
+                loadStandardHours();
+            }
+            if (viewName === 'settings' && !isSystemSettingsLoaded) {
+                loadSystemSettings();
+            }
+            if (viewName === 'hours' && STATE.mondayStr) {
+                loadHoursSummary();
+            }
+            if (viewName === 'task') {
+                if (!taskDataLoaded && !taskLoading) {
+                    loadTasks();
+                } else if (taskDataLoaded) {
+                    renderTaskList(); // データ読み込み済みの場合は再描画
+                }
+            }
+            if (viewName === 'unitmaster' && !umDataLoaded) {
+                loadUnitMasterData();
+            }
+        });
     }
 
     // ===== 単元マスタ読み込み =====
@@ -166,8 +176,15 @@
 
 
     function loadWeeklyPlan() {
+        if (STATE.editMode) {
+            autoSaveAndThen(function () { doLoadWeeklyPlan(); });
+            return;
+        }
+        doLoadWeeklyPlan();
+    }
+
+    function doLoadWeeklyPlan() {
         console.log('[DEBUG] loadWeeklyPlan called, mondayStr:', STATE.mondayStr);
-        if (STATE.editMode) cancelEdit();
         var grid = document.getElementById('weekGrid');
         grid.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>読み込み中...</p></div>';
         document.getElementById('weekLabel').textContent = '読み込み中...';
@@ -572,6 +589,47 @@
             }
             return newDay;
         });
+    }
+
+    // ===== 未保存チェック =====
+    function hasUnsavedChanges() {
+        if (!STATE.editMode || !STATE.weekData) return false;
+        var current = collectCurrentEditData();
+        return JSON.stringify(current) !== JSON.stringify(STATE.weekData.days);
+    }
+
+    // ===== 自動保存してからコールバック実行 =====
+    var _autoSaving = false;
+
+    function autoSaveAndThen(callback) {
+        if (!STATE.editMode || !hasUnsavedChanges()) {
+            if (STATE.editMode) { STATE.editMode = false; updateEditUI(); }
+            callback();
+            return;
+        }
+        if (_autoSaving) return;
+        _autoSaving = true;
+        var days = collectCurrentEditData();
+        if (!days) { _autoSaving = false; callback(); return; }
+        showToast('info', '自動保存中...');
+        google.script.run
+            .withSuccessHandler(function (result) {
+                _autoSaving = false;
+                if (result.success) {
+                    STATE.weekData.days = days;
+                    STATE.editMode = false;
+                    updateEditUI();
+                    showToast('success', '自動保存しました');
+                    callback();
+                } else {
+                    showToast('error', '自動保存失敗: ' + result.error + ' 手動で保存してください。');
+                }
+            })
+            .withFailureHandler(function (e) {
+                _autoSaving = false;
+                showToast('error', '自動保存エラー: ' + e.message + ' 手動で保存してください。');
+            })
+            .saveWeeklyPlanData(STATE.mondayStr, days);
     }
 
     // ===== 保存 =====
