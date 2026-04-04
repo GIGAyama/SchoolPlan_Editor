@@ -1338,10 +1338,10 @@
         html += '.seal-table th, .seal-table td { font-size: 8px; text-align: center; padding: 2px; border: 1px solid #333; }';
         html += '.seal-header { background-color: #dcedc8; }';
 
-        html += '.todo-box { border: 1.5px solid #333; padding: 8px; background-color: #dcedc8; border-radius: 4px; display: flex; flex-direction: column; flex: 0 1 auto; max-height: 38%; overflow: hidden; }';
-        html += '.todo-title { font-weight: bold; margin-bottom: 6px; font-size: 11px; }';
-        html += '.todo-item { border: 1px solid #333; background-color: #fff; margin-bottom: 4px; padding: 4px; font-size: 10px; }';
-        html += '.todo-list-wrap { display: flex; flex-direction: column; overflow: hidden; }';
+        html += '.todo-box { border: 1.5px solid #333; padding: 6px 8px; background-color: #dcedc8; border-radius: 4px; display: flex; flex-direction: column; flex: 0 1 auto; max-height: 45%; overflow: hidden; }';
+        html += '.todo-title { font-weight: bold; margin-bottom: 4px; font-size: 10px; }';
+        html += '.todo-item { border: 1px solid #333; background-color: #fff; margin-bottom: 2px; padding: 2px 3px; font-size: 8px; line-height: 1.3; break-inside: avoid; }';
+        html += '.todo-list-wrap { columns: 2; column-gap: 6px; overflow: hidden; }';
 
         html += '.free-box { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; padding-top: 5px; }';
         html += '.line-row { border-bottom: 1px dashed #ccc; height: 22px; width: 100%; }';
@@ -1572,15 +1572,11 @@
         html += '<div class="todo-list-wrap">';
         var tasks = STATE.tasks || [];
         var activeTasks = tasks.filter(function (t) { return t.status !== '完了'; });
-        // 印刷時は最大8件に制限（30件以上あっても2ページに収める）
-        var maxPrintTasks = 8;
-        var displayCount = Math.min(Math.max(3, activeTasks.length), maxPrintTasks);
+        // 全タスクを表示（2カラムレイアウトで省スペース化）
+        var displayCount = Math.max(3, activeTasks.length);
         for (var i = 0; i < displayCount; i++) {
             var text = (activeTasks[i] && activeTasks[i].content) ? activeTasks[i].content : '&nbsp;';
             html += '<div class="todo-item">' + text + '</div>';
-        }
-        if (activeTasks.length > maxPrintTasks) {
-            html += '<div style="font-size:9px; color:#666; text-align:right; margin-top:2px;">他' + (activeTasks.length - maxPrintTasks) + '件</div>';
         }
         html += '</div>';
         html += '</div>';
@@ -1588,10 +1584,10 @@
         // フリー枠 & 検印枠 コンテナ
         html += '<div style="flex: 1; position: relative;">';
 
-        // フリー枠
+        // フリー枠（タスク数に応じて行数を動的に調整）
+        var freeLines = activeTasks.length > 16 ? 8 : (activeTasks.length > 8 ? 12 : 20);
         html += '<div class="free-box">';
-        // flex-growを利用して、余った高さいっぱいに罫線を引く
-        for (var i = 0; i < 20; i++) {
+        for (var i = 0; i < freeLines; i++) {
             html += '<div class="line-row"></div>';
         }
         html += '</div>';
