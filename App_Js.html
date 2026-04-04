@@ -351,6 +351,11 @@
         if (isEdit) {
             grid.querySelectorAll('textarea').forEach(function (ta) { autoResizeTextarea(ta); });
         }
+
+        // 閲覧モード時: グリッドにフォーカスを当ててキーボードショートカットを有効化
+        if (!isEdit) {
+            grid.focus({ preventScroll: true });
+        }
     }
 
     // UX: textarea の自動リサイズ
@@ -564,6 +569,9 @@
             if (batchAutoFillBtn) batchAutoFillBtn.style.display = 'flex';
             saveBtn.style.display = 'none';
             cancelBtn.style.display = 'none';
+            // 閲覧モード切替時にグリッドへフォーカスを移してキーボードショートカットを有効化
+            var grid = document.getElementById('weekGrid');
+            if (grid) grid.focus({ preventScroll: true });
         }
     }
 
@@ -675,6 +683,9 @@
         // 新しいセルをハイライト
         var cell = document.querySelector('.grid-cell[data-day="' + day + '"][data-row="' + row + '"]');
         if (cell) cell.classList.add('selected');
+        // グリッドにフォーカスを当ててキーボードショートカットを確実に有効化
+        var grid = document.getElementById('weekGrid');
+        if (grid) grid.focus({ preventScroll: true });
     }
 
     function clearSelection() {
