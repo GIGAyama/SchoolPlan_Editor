@@ -1312,7 +1312,7 @@
         html += '@import url("https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap");';
         html += '@page { size: A4 portrait; margin: 10mm; }';
         html += 'body { font-family: "Zen Maru Gothic", sans-serif; font-size: ' + opts.fontSize + 'px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
-        html += '.page { width: 100%; height: 100%; box-sizing: border-box; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; }';
+        html += '.page { width: 100%; height: 277mm; box-sizing: border-box; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; }';
         html += '.page:last-child { page-break-after: auto; }';
         html += 'table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-bottom: 0; }';
         html += 'th, td { border: 1px solid #333; padding: 3px; vertical-align: top; word-wrap: break-word; overflow: hidden; }';
@@ -1550,14 +1550,16 @@
             var summary = STATE.hoursSummaryData || [];
             // アクティブな教科のみ表示（学年設定に応じた教科数）
             var activeSubjects = summary.filter(function (s) { return s && s.subject; });
-            var half = Math.ceil(activeSubjects.length / 2);
+            // データ未取得時は空行で表の構造を維持（左右各5行）
+            var minRows = activeSubjects.length > 0 ? 0 : 5;
+            var half = Math.max(Math.ceil(activeSubjects.length / 2), minRows);
             html += '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">';
 
             // 1列目
             html += '<table class="stats-table" style="width:48%;">';
             html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
             for (var i = 0; i < half; i++) {
-                var s = activeSubjects[i];
+                var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
                 html += '<tr>';
                 html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
                 html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
@@ -1568,10 +1570,11 @@
             html += '</table>';
 
             // 2列目
+            var half2 = activeSubjects.length > 0 ? activeSubjects.length : half * 2;
             html += '<table class="stats-table" style="width:48%;">';
             html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
-            for (var i = half; i < activeSubjects.length; i++) {
-                var s = activeSubjects[i];
+            for (var i = half; i < half2; i++) {
+                var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
                 html += '<tr>';
                 html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
                 html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
