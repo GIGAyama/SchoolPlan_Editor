@@ -3,6 +3,71 @@
  */
 
 // ============================================================
+// ===== 入力バリデーション =====
+// ============================================================
+
+/**
+ * 日付文字列が "yyyy/MM/dd" 形式であることを検証します。
+ * @param {string} dateStr
+ * @returns {boolean}
+ */
+function isValidDateStr_(dateStr) {
+  if (typeof dateStr !== 'string') return false;
+  return /^\d{4}\/\d{1,2}\/\d{1,2}$/.test(dateStr);
+}
+
+/**
+ * 日付文字列が "yyyy-MM-dd" 形式であることを検証します。
+ * @param {string} dateStr
+ * @returns {boolean}
+ */
+function isValidIsoDateStr_(dateStr) {
+  if (typeof dateStr !== 'string') return false;
+  return /^\d{4}-\d{1,2}-\d{1,2}$/.test(dateStr);
+}
+
+/**
+ * API入力パラメータのバリデーション。不正な場合はエラーをスローします。
+ * @param {Object} params 検証するパラメータオブジェクト
+ * @param {Object} rules バリデーションルール { paramName: { type, required, pattern, maxLength } }
+ */
+function validateParams_(params, rules) {
+  for (const [name, rule] of Object.entries(rules)) {
+    const value = params[name];
+
+    if (rule.required && (value === undefined || value === null || value === '')) {
+      throw new Error(`パラメータ「${name}」は必須です。`);
+    }
+
+    if (value === undefined || value === null || value === '') continue;
+
+    if (rule.type && typeof value !== rule.type) {
+      throw new Error(`パラメータ「${name}」の型が不正です。（期待: ${rule.type}、実際: ${typeof value}）`);
+    }
+
+    if (rule.pattern && typeof value === 'string' && !rule.pattern.test(value)) {
+      throw new Error(`パラメータ「${name}」の形式が不正です。`);
+    }
+
+    if (rule.maxLength && typeof value === 'string' && value.length > rule.maxLength) {
+      throw new Error(`パラメータ「${name}」が長すぎます。（上限: ${rule.maxLength}文字）`);
+    }
+
+    if (rule.isArray && !Array.isArray(value)) {
+      throw new Error(`パラメータ「${name}」は配列である必要があります。`);
+    }
+
+    if (rule.min !== undefined && typeof value === 'number' && value < rule.min) {
+      throw new Error(`パラメータ「${name}」は${rule.min}以上である必要があります。`);
+    }
+
+    if (rule.max !== undefined && typeof value === 'number' && value > rule.max) {
+      throw new Error(`パラメータ「${name}」は${rule.max}以下である必要があります。`);
+    }
+  }
+}
+
+// ============================================================
 // ===== 日付処理ヘルパー関数 =====
 // ============================================================
 
@@ -159,8 +224,16 @@ function callGeminiApiRaw_(prompt, apiKey, blobs = []) {
       throw new Error(`Gemini APIから有効なレスポンスが得られませんでした（理由: ${reason}）。PDFの内容を確認してください。`);
     }
   } else {
-    logError(`Gemini API Error (Code: ${responseCode})`, new Error(responseBody));
-    throw new Error(`Gemini APIとの通信に失敗しました。レスポンスコード: ${responseCode}`);
+    const errDetail = (() => {
+      try { return JSON.parse(responseBody).error?.message || responseBody.substring(0, 500); } catch(e) { return responseBody.substring(0, 500); }
+    })();
+    logError(`Gemini API Error (Code: ${responseCode})`, new Error(errDetail));
+    if (responseCode === 429) {
+      throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
+    } else if (responseCode === 401 || responseCode === 403) {
+      throw new Error('AI APIキーが無効または期限切れです。設定画面でAPIキーを確認してください。');
+    }
+    throw new Error(`Gemini APIとの通信に失敗しました。（HTTP ${responseCode}）`);
   }
 }
 
@@ -232,8 +305,10 @@ function logInfo(message) { writeToLog_("INFO", message); }
  * 「ログ」シートにエラー（ERROR）を記録します。 
  */
 function logError(message, error) {
-  const errorMessage = `${message}\nエラー詳細: ${error.message}\nスタックトレース: ${error.stack}`;
-  writeToLog_("ERROR", errorMessage);
+  const detail = error instanceof Error
+    ? `${error.message}\nスタックトレース: ${error.stack || '(なし)'}`
+    : String(error);
+  writeToLog_("ERROR", `${message}\nエラー詳細: ${detail}`);
 }
 
 /** 
@@ -336,15 +411,24 @@ function showProcessingModal(title, message, functionNameGAS) {
 
 /**
  * モーダル内のJavaScriptから呼び出される中継関数。
- * 対象の関数を安全に実行するためのラッパーです。
+ * 対象の関数をホワイトリストで制限し安全に実行します。
  */
 function executeServerFunctionForModal(functionName) {
+  // セキュリティ: 実行可能な関数をホワイトリストで明示的に制限
+  const ALLOWED_MODAL_FUNCTIONS = {
+    'createUnitMasterFromPdfs': createUnitMasterFromPdfs,
+    'processNextEventPdf': processNextEventPdf,
+    'processBulkTransferWithExclusion': processBulkTransferWithExclusion,
+    'postScheduleToClassroom': postScheduleToClassroom,
+    'autoPostToClassroom': autoPostToClassroom,
+  };
+
   try {
-    const fn = this[functionName];
+    const fn = ALLOWED_MODAL_FUNCTIONS[functionName];
     if (typeof fn === 'function') {
-      return fn(); // ここで同期実行される間、モーダルは表示され続ける
+      return fn();
     } else {
-      throw new Error(`関数名「${functionName}」が見つかりません。`);
+      throw new Error(`関数名「${functionName}」は実行が許可されていません。`);
     }
   } catch (e) {
     logError(`executeServerFunctionForModal(${functionName})`, e);

@@ -62,9 +62,9 @@ function listCoursesToSheet() {
  */
 function postScheduleToClassroom() {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     const databaseSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
-    if (!databaseSheet) throw new Error("データベースシートなし");
+    if (!databaseSheet) throw new Error("データベースシートが見つかりません");
 
     const courseName = getCourseNameSafe_();
     const courseId = getCourseIdByName(courseName);
@@ -75,8 +75,9 @@ function postScheduleToClassroom() {
     const daysOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
     const formattedDateString = `${Utilities.formatDate(tomorrow, "JST", "yyyy/MM/dd")}（${daysOfWeek[tomorrow.getDay()]}）`;
 
+    const dbCols = getDbColumns();
     const dbData = databaseSheet.getDataRange().getValues();
-    const foundRowData = dbData.find(row => row[DB_COL_DATE - 1] instanceof Date && isSameDate(row[DB_COL_DATE - 1], tomorrow) && row[DB_COL_PERIOD1 - 1]);
+    const foundRowData = dbData.find(row => row[dbCols.DATE - 1] instanceof Date && isSameDate(row[dbCols.DATE - 1], tomorrow) && row[dbCols.PERIOD1 - 1]);
 
     if (!foundRowData) {
       Logger.log(`明日の予定なし/1校時空欄 スキップ`);
@@ -84,11 +85,14 @@ function postScheduleToClassroom() {
     }
 
     const schedule = {
-      "朝学習": foundRowData[DB_COL_MORNING - 1], "1校時": foundRowData[DB_COL_PERIOD1 - 1], "単元1": foundRowData[DB_COL_UNIT1 - 1],
-      "2校時": foundRowData[DB_COL_PERIOD2 - 1], "単元2": foundRowData[DB_COL_UNIT2 - 1], "3校時": foundRowData[DB_COL_PERIOD3 - 1],
-      "単元3": foundRowData[DB_COL_UNIT3 - 1], "4校時": foundRowData[DB_COL_PERIOD4 - 1], "単元4": foundRowData[DB_COL_UNIT4 - 1],
-      "5校時": foundRowData[DB_COL_PERIOD5 - 1], "単元5": foundRowData[DB_COL_UNIT5 - 1], "6校時": foundRowData[DB_COL_PERIOD6 - 1],
-      "単元6": foundRowData[DB_COL_UNIT6 - 1], "宿題": foundRowData[DB_COL_HOMEWORK - 1], "持ち物": foundRowData[DB_COL_ITEMS - 1]
+      "朝学習": foundRowData[dbCols.MORNING - 1] || '',
+      "1校時": foundRowData[dbCols.PERIOD1 - 1] || '', "単元1": foundRowData[dbCols.UNIT1 - 1] || '',
+      "2校時": foundRowData[dbCols.PERIOD2 - 1] || '', "単元2": foundRowData[dbCols.UNIT2 - 1] || '',
+      "3校時": foundRowData[dbCols.PERIOD3 - 1] || '', "単元3": foundRowData[dbCols.UNIT3 - 1] || '',
+      "4校時": foundRowData[dbCols.PERIOD4 - 1] || '', "単元4": foundRowData[dbCols.UNIT4 - 1] || '',
+      "5校時": foundRowData[dbCols.PERIOD5 - 1] || '', "単元5": foundRowData[dbCols.UNIT5 - 1] || '',
+      "6校時": foundRowData[dbCols.PERIOD6 - 1] || '', "単元6": foundRowData[dbCols.UNIT6 - 1] || '',
+      "宿題": foundRowData[dbCols.HOMEWORK - 1] || '', "持ち物": foundRowData[dbCols.ITEMS - 1] || ''
     };
 
     let postText = `${formattedDateString} の予定\n\n`;
