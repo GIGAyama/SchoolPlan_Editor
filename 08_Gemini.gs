@@ -2,7 +2,14 @@
  * @fileoverview Gemini API連携を利用したタスク（TODO）自動抽出機能
  */
 
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+/**
+ * 設定値に基づいたGemini APIのエンドポイントURLを構築します。
+ * @returns {string} Gemini API URL
+ */
+function getGeminiApiUrl_() {
+  const modelName = getGeminiModelNameSafe_();
+  return `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+}
 
 /**
  * Gemini APIを呼び出してJSON形式のタスク配列を取得する共通ラッパー
@@ -10,10 +17,7 @@ const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/
  * @returns {Object[]} 抽出されたタスクの配列 { task, resource, dueDate, source }
  */
 function callGeminiAPI_(prompt) {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('sp_geminiApiKey');
-  if (!apiKey) {
-    throw new Error('sp_geminiApiKeyが設定されていません。設定画面からGemini APIキーを登録してください。');
-  }
+  const apiKey = getApiKeySafe_();
 
   const payload = {
     contents: [{
@@ -47,13 +51,24 @@ function callGeminiAPI_(prompt) {
     muteHttpExceptions: true
   };
 
-  const response = UrlFetchApp.fetch(`${GEMINI_API_URL}?key=${apiKey}`, options);
-  const json = JSON.parse(response.getContentText());
+  const response = UrlFetchApp.fetch(`${getGeminiApiUrl_()}?key=${apiKey}`, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
 
-  if (response.getResponseCode() !== 200) {
-    logError('Gemini API Error', new Error(response.getContentText()));
-    throw new Error('AIサーバとの通信でエラーが発生しました。');
+  if (responseCode !== 200) {
+    const errDetail = (() => {
+      try { return JSON.parse(responseText).error?.message || responseText; } catch(e) { return responseText; }
+    })();
+    logError(`Gemini API Error (HTTP ${responseCode})`, new Error(errDetail));
+    if (responseCode === 429) {
+      throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
+    } else if (responseCode === 401 || responseCode === 403) {
+      throw new Error('AI APIキーが無効です。設定画面でAPIキーを確認してください。');
+    }
+    throw new Error(`AI APIとの通信に失敗しました。（HTTP ${responseCode}）`);
   }
+
+  const json = JSON.parse(responseText);
 
   if (json.candidates && json.candidates.length > 0) {
     const textObj = json.candidates[0].content.parts[0].text;
@@ -61,7 +76,7 @@ function callGeminiAPI_(prompt) {
       return JSON.parse(textObj);
     } catch (e) {
       logError('Gemini Parse Error', e);
-      throw new Error('AIのJSON出力をパースできませんでした。');
+      throw new Error('AIの出力をJSONとして解析できませんでした。再度お試しください。');
     }
   }
 
@@ -117,6 +132,11 @@ function extractTasksFromSchedule_WebApp(startDateStr, endDateStr) {
       throw new Error('指定期間のスケジュールデータがありません。');
     }
 
+    // セキュリティ: スケジュールテキストの長さを制限（プロンプトインジェクション対策）
+    if (scheduleText.length > 10000) {
+      scheduleText = scheduleText.substring(0, 10000) + '\n...(以降省略)';
+    }
+
     const systemPrompt = `
 あなたは有能な小学校教員のサポートAIです。
 以下の【スケジュール情報】を読み取り、教員が事前に準備・対応すべき【タスク（準備・連絡・調整など）】を洗い出してください。
@@ -153,10 +173,7 @@ ${scheduleText}
  * @returns {string} 生成されたテキスト
  */
 function callGeminiAPIText_(prompt) {
-  const apiKey = PropertiesService.getScriptProperties().getProperty('sp_geminiApiKey');
-  if (!apiKey) {
-    throw new Error('sp_geminiApiKeyが設定されていません。設定画面からGemini APIキーを登録してください。');
-  }
+  const apiKey = getApiKeySafe_();
 
   const payload = {
     contents: [{
@@ -174,13 +191,24 @@ function callGeminiAPIText_(prompt) {
     muteHttpExceptions: true
   };
 
-  const response = UrlFetchApp.fetch(`${GEMINI_API_URL}?key=${apiKey}`, options);
-  const json = JSON.parse(response.getContentText());
+  const response = UrlFetchApp.fetch(`${getGeminiApiUrl_()}?key=${apiKey}`, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
 
-  if (response.getResponseCode() !== 200) {
-    logError('Gemini API Error', new Error(response.getContentText()));
-    throw new Error('AIサーバとの通信でエラーが発生しました。');
+  if (responseCode !== 200) {
+    const errDetail = (() => {
+      try { return JSON.parse(responseText).error?.message || responseText; } catch(e) { return responseText; }
+    })();
+    logError(`Gemini API Text Error (HTTP ${responseCode})`, new Error(errDetail));
+    if (responseCode === 429) {
+      throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
+    } else if (responseCode === 401 || responseCode === 403) {
+      throw new Error('AI APIキーが無効です。設定画面でAPIキーを確認してください。');
+    }
+    throw new Error(`AI APIとの通信に失敗しました。（HTTP ${responseCode}）`);
   }
+
+  const json = JSON.parse(responseText);
 
   if (json.candidates && json.candidates.length > 0) {
     return json.candidates[0].content.parts[0].text || '';
@@ -250,14 +278,17 @@ function extractTasksFromText_WebApp(text) {
       throw new Error('解析するテキストが空です。');
     }
 
+    // セキュリティ: 入力テキストの長さを制限
+    const sanitizedText = text.length > 10000 ? text.substring(0, 10000) + '\n...(以降省略)' : text;
+
     const todayDateStr = Utilities.formatDate(new Date(), 'JST', 'yyyy-MM-dd');
-    
+
     const systemPrompt = `
 あなたは有能な業務アシスタントAIです。（本日の日付: ${todayDateStr}）
 以下の【テキスト情報（会議の議事録や打合せメモなど）】を読み取り、教員（ユーザー）が今後行うべき【アクションリスト・準備タスク】を洗い出してください。
 
 【テキスト情報】
-${text}
+${sanitizedText}
 `;
 
     const extractedTasks = callGeminiAPI_(systemPrompt);

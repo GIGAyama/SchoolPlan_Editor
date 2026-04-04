@@ -52,6 +52,18 @@ function getAppSettings() {
  */
 function saveAppSettings(settings) {
   try {
+    if (!settings || typeof settings !== 'object') {
+      throw new Error('設定データが不正です。');
+    }
+
+    // 投稿時刻のバリデーション
+    if (settings.postHour !== undefined && settings.postHour !== '') {
+      const hour = parseInt(settings.postHour, 10);
+      if (isNaN(hour) || hour < 0 || hour > 23 || !Number.isInteger(hour)) {
+        throw new Error('投稿時刻は0〜23の整数で指定してください。');
+      }
+    }
+
     const props = PropertiesService.getScriptProperties();
 
     const propsToSave = {
@@ -167,6 +179,13 @@ function getAvailableGeminiModels() {
       return { success: false, models: [], error: 'Gemini APIキーが設定されていません。' };
     }
 
+    // パフォーマンス: モデル一覧を1時間キャッシュ
+    const cache = CacheService.getScriptCache();
+    const cachedModels = cache.get('geminiModelList');
+    if (cachedModels) {
+      return { success: true, models: JSON.parse(cachedModels) };
+    }
+
     const allModels = [];
     let pageToken = '';
     do {
@@ -196,6 +215,8 @@ function getAvailableGeminiModels() {
         displayName: m.displayName || m.name.replace('models/', '')
       }));
 
+    // 1時間キャッシュ（CacheServiceの最大6時間だが、1時間で十分）
+    cache.put('geminiModelList', JSON.stringify(filtered), 3600);
     return { success: true, models: filtered };
   } catch (e) {
     logError('getAvailableGeminiModels', e);

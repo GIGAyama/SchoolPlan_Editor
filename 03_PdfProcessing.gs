@@ -82,9 +82,17 @@ function importEventsFromFolder_UI() {
  *  [トリガー] 行事予定PDF処理
  */
 function processNextEventPdf() {
+  // レースコンディション対策: スクリプトロックで排他制御
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    logInfo('行事予定PDF処理: 他のプロセスが実行中のためスキップしました。');
+    return;
+  }
+
+  try {
   const startTime = new Date();
   const properties = PropertiesService.getScriptProperties();
-  
+
   const queueJson = properties.getProperty(SCRIPT_PROP_EVENT_PDF_QUEUE);
   const year = properties.getProperty(SCRIPT_PROP_EVENT_PDF_YEAR);
 
@@ -134,9 +142,12 @@ function processNextEventPdf() {
     logInfo("すべての行事予定PDFの処理が完了しました。");
     resetEventPdfProcessing();
   }
+  } finally {
+    lock.releaseLock();
+  }
 }
 
-/** 
+/**
  * AIが抽出した行事予定をDBに書き込みます
  */
 function processEventPdf(fileId, year, month) {
@@ -305,52 +316,63 @@ function createUnitMasterFromPdfs_UI() {
  *  [トリガー] 指導計画PDFの処理
  */
 function createUnitMasterFromPdfs() {
-  const startTime = new Date();
-  const properties = PropertiesService.getScriptProperties();
-  const queueJson = properties.getProperty(SCRIPT_PROP_PDF_QUEUE);
-
-  if (!queueJson) {
-    logInfo("すべてのPDF処理が完了しました。");
-    SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
-    resetUnitMasterProcessing();
-    return;
-  }
-  const fileIds = JSON.parse(queueJson);
-  if (fileIds.length === 0) {
-    logInfo("キューが空です。すべてのPDF処理が完了しました。");
-    SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
-    resetUnitMasterProcessing();
+  // レースコンディション対策: スクリプトロックで排他制御
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    logInfo('指導計画PDF処理: 他のプロセスが実行中のためスキップしました。');
     return;
   }
 
-  const totalFiles = parseInt(properties.getProperty(SCRIPT_PROP_PDF_TOTAL), 10);
-  const fileId = fileIds.shift();
-  const file = DriveApp.getFileById(fileId);
-  const processedCount = totalFiles - fileIds.length;
-  SpreadsheetApp.getActiveSpreadsheet().toast(`PDF処理中... (${processedCount}/${totalFiles}) \nファイル名: ${file.getName()}`, `処理中`, -1);
-  
   try {
-    processSinglePdf(file);
-  } catch (e) {
-    logError(`PDF処理中に致命的なエラーが発生しました: ${file.getName()}`, e);
-    SpreadsheetApp.getActiveSpreadsheet().toast(`⚠ エラー: ${file.getName()} - ${e.message}`, 'PDF処理エラー', 15);
-  }
-  properties.setProperty(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
-  
-  const executionTime = (new Date() - startTime) / 1000 / 60;
-  deleteTriggers_(TRIGGER_FUNCTION_NAME);
-  
-  if (fileIds.length > 0) {
-    if (executionTime < 5) {
-      ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME).timeBased().after(1000).create();
-    } else {
-      logInfo(`時間切れのため処理を中断・再開します。残り: ${fileIds.length}件`);
-      ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME).timeBased().everyMinutes(5).create();
+    const startTime = new Date();
+    const properties = PropertiesService.getScriptProperties();
+    const queueJson = properties.getProperty(SCRIPT_PROP_PDF_QUEUE);
+
+    if (!queueJson) {
+      logInfo("すべてのPDF処理が完了しました。");
+      SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
+      resetUnitMasterProcessing();
+      return;
     }
-  } else {
-    logInfo("すべてのPDF処理が完了しました。");
-    SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
-    resetUnitMasterProcessing();
+    const fileIds = JSON.parse(queueJson);
+    if (fileIds.length === 0) {
+      logInfo("キューが空です。すべてのPDF処理が完了しました。");
+      SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
+      resetUnitMasterProcessing();
+      return;
+    }
+
+    const totalFiles = parseInt(properties.getProperty(SCRIPT_PROP_PDF_TOTAL), 10);
+    const fileId = fileIds.shift();
+    const file = DriveApp.getFileById(fileId);
+    const processedCount = totalFiles - fileIds.length;
+    SpreadsheetApp.getActiveSpreadsheet().toast(`PDF処理中... (${processedCount}/${totalFiles}) \nファイル名: ${file.getName()}`, `処理中`, -1);
+
+    try {
+      processSinglePdf(file);
+    } catch (e) {
+      logError(`PDF処理中に致命的なエラーが発生しました: ${file.getName()}`, e);
+      SpreadsheetApp.getActiveSpreadsheet().toast(`⚠ エラー: ${file.getName()} - ${e.message}`, 'PDF処理エラー', 15);
+    }
+    properties.setProperty(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
+
+    const executionTime = (new Date() - startTime) / 1000 / 60;
+    deleteTriggers_(TRIGGER_FUNCTION_NAME);
+
+    if (fileIds.length > 0) {
+      if (executionTime < 5) {
+        ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME).timeBased().after(1000).create();
+      } else {
+        logInfo(`時間切れのため処理を中断・再開します。残り: ${fileIds.length}件`);
+        ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME).timeBased().everyMinutes(5).create();
+      }
+    } else {
+      logInfo("すべてのPDF処理が完了しました。");
+      SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
+      resetUnitMasterProcessing();
+    }
+  } finally {
+    lock.releaseLock();
   }
 }
 

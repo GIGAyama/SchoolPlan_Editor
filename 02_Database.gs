@@ -349,16 +349,27 @@ function getTaskData() {
  */
 function saveTasksBulk(tasks) {
   try {
-    if (!tasks || tasks.length === 0) return true;
+    if (!tasks || !Array.isArray(tasks) || tasks.length === 0) return true;
+
+    // バリデーション: 各タスクの内容を検証
+    tasks.forEach((t, i) => {
+      if (!t.content || String(t.content).trim() === '') {
+        throw new Error(`タスク${i + 1}の内容が空です。`);
+      }
+      if (t.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(t.dueDate) && t.dueDate !== '') {
+        throw new Error(`タスク${i + 1}の期限日の形式が不正です。（YYYY-MM-DD形式で入力してください）`);
+      }
+    });
+
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     const sheet = initTaskSheet_(ss);
-    
+
     const newRows = tasks.map(t => [
       t.id || 'tsk_' + Utilities.getUuid().split('-')[0],
-      t.content || '',
-      t.resource || '',
+      String(t.content).substring(0, 5000),
+      String(t.resource || '').substring(0, 2000),
       t.dueDate || '',
-      t.source || '',
+      String(t.source || '').substring(0, 500),
       t.status || '未着手'
     ]);
     
@@ -384,9 +395,12 @@ function updateTask(taskId, updates) {
 
     for (let i = 1; i < data.length; i++) {
       if (data[i][0] === taskId) {
-        if (updates.content !== undefined) sheet.getRange(i + 1, 2).setValue(updates.content);
-        if (updates.resource !== undefined) sheet.getRange(i + 1, 3).setValue(updates.resource);
-        if (updates.dueDate !== undefined) sheet.getRange(i + 1, 4).setValue(updates.dueDate);
+        // パフォーマンス: 変更対象を1回のバッチ書き込みで更新
+        const row = data[i];
+        if (updates.content !== undefined) row[1] = updates.content;
+        if (updates.resource !== undefined) row[2] = updates.resource;
+        if (updates.dueDate !== undefined) row[3] = updates.dueDate;
+        sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
         return true;
       }
     }

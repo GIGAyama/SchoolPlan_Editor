@@ -54,6 +54,9 @@ function include(filename) {
  */
 function getWeeklyPlanData(mondayDateStr) {
   try {
+    validateParams_({ mondayDateStr }, {
+      mondayDateStr: { type: 'string', required: true, pattern: /^\d{4}\/\d{1,2}\/\d{1,2}$/ }
+    });
     const ss = getSs_();
     const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
@@ -110,17 +113,7 @@ function getWeeklyPlanData(mondayDateStr) {
       };
     });
 
-    return { 
-      success: true, days, mondayDateStr, weekNum,
-      _debug: {
-        dbColsDATE: dbCols.DATE,
-        dbColsWEEK: dbCols.WEEK_NUM,
-        dbMapSize: dbMap.size,
-        sampleDates: Array.from(dbMap.keys()).slice(0, 5),
-        searchDate: formatDate(monday),
-        totalRows: dbData.length
-      }
-    };
+    return { success: true, days, mondayDateStr, weekNum };
   } catch (e) {
     logError('getWeeklyPlanData', e);
     return { success: false, error: e.message };
@@ -167,6 +160,10 @@ function getMondayStrByWeekNumber(weekNum) {
  */
 function saveWeeklyPlanData(mondayDateStr, days) {
   try {
+    validateParams_({ mondayDateStr, days }, {
+      mondayDateStr: { type: 'string', required: true, pattern: /^\d{4}\/\d{1,2}\/\d{1,2}$/ },
+      days: { required: true, isArray: true }
+    });
     const ss = getSs_();
     const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
@@ -227,11 +224,14 @@ function saveWeeklyPlanData(mondayDateStr, days) {
       }
     }
 
-    dbSheet.getRange(1, 1, dbData.length, dbData[0].length).setValues(dbData);
+    // パフォーマンス: 実際に更新があった場合のみDB書き込み
+    if (updatedCount > 0) {
+      dbSheet.getRange(1, 1, dbData.length, dbData[0].length).setValues(dbData);
+    }
 
     const msg = notFoundDates.length > 0
       ? `${updatedCount}日分を保存しました（DB未登録日: ${notFoundDates.join(', ')}）`
-      : `${updatedCount}日分を保存しました`;
+      : `${updatedCount}日分を保存��ました`;
 
     return { success: true, message: msg, updatedCount };
   } catch (e) {
@@ -300,6 +300,10 @@ function getActivityFromMaster(subject, unitName, hourNum) {
  */
 function getMonthlyHoursData(year, month) {
   try {
+    validateParams_({ year, month }, {
+      year: { type: 'number', required: true, min: 2000, max: 2100 },
+      month: { type: 'number', required: true, min: 1, max: 12 }
+    });
     const ss = getSs_();
     const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
@@ -362,31 +366,8 @@ function getAnnualHoursData(academicYear) {
       if (rowAcademicYear !== academicYear) continue;
 
       for (const col of periodCols) {
-        const val = (row[col - 1] || '').toString().trim();
-        if (!val) continue;
-
-        // 半角/全角スペースを統一
-        const normalized = val.replace(/　/g, ' ');
-        
-        // 文字列(1文字以上) + スペース(0個以上) + (数値/数値 または 小数)(0個か1個) をすべて抽出
-        // 例: "国語1/3", "理科 1/2", "図工 1.5", "社会"
-        const regex = /([^\s\d\/\.]+)(?:[\s]*(\d+\/\d+|\d+\.\d+))?/g;
-        let match;
-        while ((match = regex.exec(normalized)) !== null) {
-          if (match[1].trim() === '') continue;
-          
-          let subject = match[1].trim();
-          let fraction = 1;
-          
-          if (match[2]) {
-            if (match[2].includes('/')) {
-                const parts = match[2].split('/');
-                fraction = parseFloat(parts[0]) / parseFloat(parts[1]);
-            } else {
-                fraction = parseFloat(match[2]);
-            }
-          }
-
+        const parsed = parseSubjectHours_(row[col - 1]);
+        for (const { subject, fraction } of parsed) {
           if (!hoursData[subject]) hoursData[subject] = {};
           if (!hoursData[subject][month]) hoursData[subject][month] = 0;
           hoursData[subject][month] += fraction;
@@ -409,10 +390,50 @@ function getAnnualHoursData(academicYear) {
  * "yyyy/MM/dd" 形式の文字列をDateオブジェクトに変換します。
  * @param {string} dateStr
  * @returns {Date}
+ * @throws {Error} 形式が不正な場合
  */
 function parseDate_(dateStr) {
+  if (typeof dateStr !== 'string' || !/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(dateStr)) {
+    throw new Error(`日付形式が不正です: "${dateStr}"（yyyy/MM/dd形式を使用してください）`);
+  }
   const parts = dateStr.split('/');
-  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  if (isNaN(d.getTime())) {
+    throw new Error(`無効な日付です: "${dateStr}"`);
+  }
+  return d;
+}
+
+/**
+ * 教科セルの値（例: "国語", "理科 1/2", "図工 1.5"）を解析し、
+ * [{subject, fraction}] の配列を返します。
+ * getAnnualHoursData と getHoursSummary で共通利用されます。
+ * @param {string} cellValue セルの教科名テキスト
+ * @returns {Array<{subject: string, fraction: number}>}
+ */
+function parseSubjectHours_(cellValue) {
+  const results = [];
+  if (!cellValue) return results;
+  const normalized = cellValue.toString().trim().replace(/　/g, ' ');
+  if (!normalized) return results;
+
+  const regex = /([^\s\d\/\.]+)(?:[\s]*(\d+\/\d+|\d+\.\d+))?/g;
+  let match;
+  while ((match = regex.exec(normalized)) !== null) {
+    const subject = match[1].trim();
+    if (!subject) continue;
+    let fraction = 1;
+    if (match[2]) {
+      if (match[2].includes('/')) {
+        const parts = match[2].split('/');
+        fraction = parseFloat(parts[0]) / parseFloat(parts[1]);
+      } else {
+        fraction = parseFloat(match[2]);
+      }
+    }
+    results.push({ subject, fraction });
+  }
+  return results;
 }
 
 /**
@@ -625,6 +646,10 @@ function getOrCreateNwFolder_() {
  */
 function saveNewsletterData(title, mondayStr, jsonString) {
   try {
+    validateParams_({ title, jsonString }, {
+      title: { type: 'string', maxLength: 200 },
+      jsonString: { type: 'string', required: true, maxLength: 2000000 }
+    });
     const ss = getSs_();
     const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
     if (!sheet) throw new Error(`「${SHEET_NAME_NEWSLETTER_DATA}」シートが見つかりません`);
@@ -1096,37 +1121,15 @@ function getHoursSummary(mondayStr) {
       if (!isCumulative) continue;
 
       periodCols.forEach(col => {
-        const val = (dbData[i][col - 1] || '').toString().trim();
-        if (!val) return;
+        const parsed = parseSubjectHours_(dbData[i][col - 1]);
+        for (const { subject, fraction } of parsed) {
+          if (!cumulativeCount[subject]) cumulativeCount[subject] = 0;
+          cumulativeCount[subject] += fraction;
 
-        // 半角/全角スペースを統一
-        const normalized = val.replace(/　/g, ' ');
-        
-        // 文字列(1文字以上) + スペース(0個以上) + (数値/数値 または 小数)(0個か1個) をすべて抽出
-        const regex = /([^\s\d\/\.]+)(?:[\s]*(\d+\/\d+|\d+\.\d+))?/g;
-        let match;
-        while ((match = regex.exec(normalized)) !== null) {
-          if (match[1].trim() === '') continue;
-          
-          let subject = match[1].trim();
-          let fraction = 1;
-          
-          if (match[2]) {
-            if (match[2].includes('/')) {
-                const parts = match[2].split('/');
-                fraction = parseFloat(parts[0]) / parseFloat(parts[1]);
-            } else {
-                fraction = parseFloat(match[2]);
-            }
+          if (isThisWeek) {
+            if (!weeklyCount[subject]) weeklyCount[subject] = 0;
+            weeklyCount[subject] += fraction;
           }
-
-        if (!cumulativeCount[subject]) cumulativeCount[subject] = 0;
-        cumulativeCount[subject] += fraction;
-
-        if (isThisWeek) {
-          if (!weeklyCount[subject]) weeklyCount[subject] = 0;
-          weeklyCount[subject] += fraction;
-        }
         }
       });
 
@@ -1309,6 +1312,9 @@ function saveTasksFromWebApp(tasks) {
  */
 function updateTaskFromWebApp(taskId, updates) {
   try {
+    validateParams_({ taskId }, {
+      taskId: { type: 'string', required: true, maxLength: 100 }
+    });
     var isSuccess = updateTask(taskId, updates);
     return { success: isSuccess };
   } catch (e) {
@@ -1325,6 +1331,10 @@ function updateTaskFromWebApp(taskId, updates) {
  */
 function updateTaskStatusFromWebApp(taskId, newStatus) {
   try {
+    validateParams_({ taskId, newStatus }, {
+      taskId: { type: 'string', required: true, maxLength: 100 },
+      newStatus: { type: 'string', required: true, pattern: /^(未着手|完了)$/ }
+    });
     const isSuccess = updateTaskStatus(taskId, newStatus);
     return { success: isSuccess };
   } catch (e) {
@@ -1340,6 +1350,9 @@ function updateTaskStatusFromWebApp(taskId, newStatus) {
  */
 function deleteTaskFromWebApp(taskId) {
   try {
+    validateParams_({ taskId }, {
+      taskId: { type: 'string', required: true, maxLength: 100 }
+    });
     const isSuccess = deleteTask(taskId);
     return { success: isSuccess };
   } catch (e) {
@@ -1398,6 +1411,9 @@ function getUnitMasterData() {
  */
 function updateUnitMasterRow(rowIndex, data) {
   try {
+    validateParams_({ rowIndex }, {
+      rowIndex: { type: 'number', required: true, min: 2 }
+    });
     const ss = getSs_();
     const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!sheet) throw new Error('単元マスタシートが見つかりません');
@@ -1453,11 +1469,12 @@ function insertUnitMasterRow(afterRowIndex, data) {
  */
 function deleteUnitMasterRow(rowIndex) {
   try {
+    validateParams_({ rowIndex }, {
+      rowIndex: { type: 'number', required: true, min: 2 }
+    });
     const ss = getSs_();
     const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!sheet) throw new Error('単元マスタシートが見つかりません');
-
-    if (rowIndex < 2) throw new Error('ヘッダー行は削除できません');
     sheet.deleteRow(rowIndex);
     return { success: true };
   } catch (e) {
@@ -1473,20 +1490,35 @@ function deleteUnitMasterRow(rowIndex) {
  */
 function batchUpdateUnitMaster(updates) {
   try {
+    validateParams_({ updates }, { updates: { required: true, isArray: true } });
     const ss = getSs_();
     const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!sheet) throw new Error('単元マスタシートが見つかりません');
 
+    if (updates.length === 0) return { success: true, count: 0 };
+
+    // パフォーマンス: シート全体を一括読み込み→メモリ上で更新→一括書き込み
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { success: true, count: 0 };
+    const allData = sheet.getRange(1, 1, lastRow, 5).getValues();
+
     let count = 0;
     for (const u of updates) {
-      sheet.getRange(u.rowIndex, 1, 1, 5).setValues([[
-        u.data.subject || '',
-        u.data.unitName || '',
-        u.data.totalHours || '',
-        u.data.hourNum || '',
-        u.data.activity || ''
-      ]]);
-      count++;
+      if (u.rowIndex >= 2 && u.rowIndex <= lastRow) {
+        const rowIdx = u.rowIndex - 1;
+        allData[rowIdx] = [
+          u.data.subject || '',
+          u.data.unitName || '',
+          u.data.totalHours || '',
+          u.data.hourNum || '',
+          u.data.activity || ''
+        ];
+        count++;
+      }
+    }
+
+    if (count > 0) {
+      sheet.getRange(1, 1, lastRow, 5).setValues(allData);
     }
 
     return { success: true, count: count };
