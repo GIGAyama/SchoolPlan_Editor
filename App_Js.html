@@ -1333,17 +1333,20 @@
         html += '.stats-table th { background-color: #e0e0e0; }';
         html += '.stats-table { width: 100%; border: 1.5px solid #333; }';
 
-        // Separate seal table (absolute positioned)
-        html += '.seal-table { position: absolute; bottom: 0; right: 0; width: 35%; border: 1.5px solid #333; background-color: #fff; z-index: 10; }';
+        // 検印枠（page2-rightの最下部に配置）
+        html += '.seal-table { width: 40%; margin-left: auto; margin-top: auto; border: 1.5px solid #333; background-color: #fff; flex-shrink: 0; }';
         html += '.seal-table th, .seal-table td { font-size: 8px; text-align: center; padding: 2px; border: 1px solid #333; }';
         html += '.seal-header { background-color: #dcedc8; }';
 
         html += '.todo-box { border: 1.5px solid #333; padding: 6px 8px; background-color: #dcedc8; border-radius: 4px; display: flex; flex-direction: column; flex: 0 1 auto; max-height: 45%; overflow: hidden; }';
         html += '.todo-title { font-weight: bold; margin-bottom: 4px; font-size: 10px; }';
-        html += '.todo-item { border: 1px solid #333; background-color: #fff; margin-bottom: 2px; padding: 2px 3px; font-size: 8px; line-height: 1.3; break-inside: avoid; }';
+        html += '.todo-item { border: 1px solid #333; background-color: #fff; margin-bottom: 2px; padding: 2px 3px; font-size: 8px; line-height: 1.3; break-inside: avoid; display: flex; align-items: baseline; gap: 2px; }';
+        html += '.todo-due { margin-left: auto; font-size: 7px; color: #888; white-space: nowrap; flex-shrink: 0; }';
+        html += '.todo-done { color: #4caf50; font-size: 7px; flex-shrink: 0; }';
+        html += '.todo-pending { font-size: 7px; color: #999; flex-shrink: 0; }';
         html += '.todo-list-wrap { columns: 2; column-gap: 6px; overflow: hidden; }';
 
-        html += '.free-box { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; padding-top: 5px; }';
+        html += '.free-box { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; padding-top: 5px; overflow: hidden; border: 1px solid #e0e0e0; border-radius: 4px; }';
         html += '.line-row { border-bottom: 1px dashed #ccc; height: 22px; width: 100%; }';
         html += '</style></head><body>';
 
@@ -1534,13 +1537,16 @@
         // 時数集計表
         if (opts.stats) {
             var summary = STATE.hoursSummaryData || [];
+            // アクティブな教科のみ表示（学年設定に応じた教科数）
+            var activeSubjects = summary.filter(function (s) { return s && s.subject; });
+            var half = Math.ceil(activeSubjects.length / 2);
             html += '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">';
 
-            // 1列目 (0-9)
+            // 1列目
             html += '<table class="stats-table" style="width:48%;">';
             html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
-            for (var i = 0; i < 10; i++) {
-                var s = summary[i] || { subject: " ", weekly: " ", cumulative: " ", percent: " " };
+            for (var i = 0; i < half; i++) {
+                var s = activeSubjects[i];
                 html += '<tr>';
                 html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
                 html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
@@ -1550,11 +1556,11 @@
             }
             html += '</table>';
 
-            // 2列目 (10-18)
+            // 2列目
             html += '<table class="stats-table" style="width:48%;">';
             html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
-            for (var i = 10; i < 19; i++) {
-                var s = summary[i] || { subject: " ", weekly: " ", cumulative: " ", percent: " " };
+            for (var i = half; i < activeSubjects.length; i++) {
+                var s = activeSubjects[i];
                 html += '<tr>';
                 html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
                 html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
@@ -1572,33 +1578,42 @@
         html += '<div class="todo-list-wrap">';
         var tasks = STATE.tasks || [];
         var activeTasks = tasks.filter(function (t) { return t.status !== '完了'; });
+        // 締切日でソート（未設定は後回し）
+        activeTasks.sort(function (a, b) {
+            if (!a.dueDate) return 1;
+            if (!b.dueDate) return -1;
+            return a.dueDate.localeCompare(b.dueDate);
+        });
         // 全タスクを表示（2カラムレイアウトで省スペース化）
         var displayCount = Math.max(3, activeTasks.length);
         for (var i = 0; i < displayCount; i++) {
-            var text = (activeTasks[i] && activeTasks[i].content) ? activeTasks[i].content : '&nbsp;';
-            html += '<div class="todo-item">' + text + '</div>';
+            if (activeTasks[i] && activeTasks[i].content) {
+                var duePart = '';
+                if (activeTasks[i].dueDate) {
+                    var dp = activeTasks[i].dueDate.split('-');
+                    duePart = '<span class="todo-due">' + parseInt(dp[1]) + '/' + parseInt(dp[2]) + '</span>';
+                }
+                var statusMark = activeTasks[i].status === '完了' ? '<span class="todo-done">✔</span>' : '<span class="todo-pending">□</span>';
+                html += '<div class="todo-item">' + statusMark + ' ' + activeTasks[i].content + duePart + '</div>';
+            } else {
+                html += '<div class="todo-item">&nbsp;</div>';
+            }
         }
         html += '</div>';
         html += '</div>';
 
-        // フリー枠 & 検印枠 コンテナ
-        html += '<div style="flex: 1; position: relative;">';
-
-        // フリー枠（タスク数に応じて行数を動的に調整）
-        var freeLines = activeTasks.length > 16 ? 8 : (activeTasks.length > 8 ? 12 : 20);
+        // フリー枠（残りスペースを最大限使用）
         html += '<div class="free-box">';
-        for (var i = 0; i < freeLines; i++) {
+        for (var i = 0; i < 30; i++) {
             html += '<div class="line-row"></div>';
         }
         html += '</div>';
 
-        // 検印枠 (右下固定)
+        // 検印枠（2ページ目最下部に固定）
         html += '<table class="seal-table">';
         html += '<tr><td rowspan="2" class="seal-header" style="width:20px; font-weight:bold; vertical-align:middle; font-size:12px;">検<br><br>印</td><td class="seal-header">校長</td><td class="seal-header">副校長</td><td class="seal-header">担当者</td></tr>';
         html += '<tr><td style="height:50px;"></td><td></td><td></td></tr>';
         html += '</table>';
-
-        html += '</div>'; // end free relative container
 
         html += '</div>'; // end page2-right
         html += '</div>'; // end page2-layout
