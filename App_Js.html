@@ -4718,13 +4718,10 @@
         var endStr = STATE.weekData.days[6].date.replace(/\//g, '-');
 
         var weekTasks = allTaskData.filter(t => {
-            if (t.status === '完了') {
-                return t.dueDate >= startStr && t.dueDate <= endStr;
-            } else {
-                if (!t.dueDate) return true; // 期限未設定は常に表示
-                if (t.dueDate <= endStr) return true; // 当週を含め、過去の未完了は「やるべき」として表示
-                return false; // 来週以降のタスクは隠す
-            }
+            if (t.status === '完了') return false; // 完了済みタスクは非表示
+            if (!t.dueDate) return true; // 期限未設定は常に表示
+            if (t.dueDate <= endStr) return true; // 当週を含め、過去の未完了は「やるべき」として表示
+            return false; // 来週以降のタスクは隠す
         });
 
         weekTasks.sort((a, b) => {
