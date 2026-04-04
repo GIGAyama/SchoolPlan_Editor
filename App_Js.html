@@ -1591,24 +1591,39 @@
         html += '<div class="todo-title">Todoリスト</div>';
         html += '<div class="todo-list-wrap">';
         var tasks = STATE.tasks || [];
-        var activeTasks = tasks.filter(function (t) { return t.status !== '完了'; });
-        // 締切日でソート（未設定は後回し）
-        activeTasks.sort(function (a, b) {
+        // 当該週の次の週末日（日曜日）を算出 → 印刷対象の期日上限
+        var currentSunStr = days[6].date; // "yyyy/MM/dd"
+        var sunParts = currentSunStr.split('/');
+        var nextWeekSun = new Date(+sunParts[0], +sunParts[1] - 1, +sunParts[2]);
+        nextWeekSun.setDate(nextWeekSun.getDate() + 7);
+        var nextWeekEndStr = nextWeekSun.getFullYear() + '-'
+            + String(nextWeekSun.getMonth() + 1).padStart(2, '0') + '-'
+            + String(nextWeekSun.getDate()).padStart(2, '0');
+        // フィルタ: 期日が次週末以前 or 期日未設定（完了・未完了問わず表示）
+        var printTasks = tasks.filter(function (t) {
+            if (!t.dueDate) return true;        // 期日未設定は常に表示
+            return t.dueDate <= nextWeekEndStr;  // 次週末日以前のタスクを表示
+        });
+        // ソート: 未完了→完了の順、同グループ内は期日昇順（未設定は最後）
+        printTasks.sort(function (a, b) {
+            var aComp = (a.status === '完了') ? 1 : 0;
+            var bComp = (b.status === '完了') ? 1 : 0;
+            if (aComp !== bComp) return aComp - bComp;
             if (!a.dueDate) return 1;
             if (!b.dueDate) return -1;
             return a.dueDate.localeCompare(b.dueDate);
         });
-        // 全タスクを表示（2カラムレイアウトで省スペース化）
-        var displayCount = Math.max(3, activeTasks.length);
+        // 表示（2カラムレイアウトで省スペース化、最低3行確保）
+        var displayCount = Math.max(3, printTasks.length);
         for (var i = 0; i < displayCount; i++) {
-            if (activeTasks[i] && activeTasks[i].content) {
+            if (printTasks[i] && printTasks[i].content) {
                 var duePart = '';
-                if (activeTasks[i].dueDate) {
-                    var dp = activeTasks[i].dueDate.split('-');
+                if (printTasks[i].dueDate) {
+                    var dp = printTasks[i].dueDate.split('-');
                     duePart = '<span class="todo-due">' + parseInt(dp[1]) + '/' + parseInt(dp[2]) + '</span>';
                 }
-                var statusMark = activeTasks[i].status === '完了' ? '<span class="todo-done">✔</span>' : '<span class="todo-pending">□</span>';
-                html += '<div class="todo-item">' + statusMark + ' ' + activeTasks[i].content + duePart + '</div>';
+                var statusMark = printTasks[i].status === '完了' ? '<span class="todo-done">✔</span>' : '<span class="todo-pending">□</span>';
+                html += '<div class="todo-item">' + statusMark + ' ' + printTasks[i].content + duePart + '</div>';
             } else {
                 html += '<div class="todo-item">&nbsp;</div>';
             }
