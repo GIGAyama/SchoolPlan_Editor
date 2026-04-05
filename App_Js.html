@@ -1346,6 +1346,7 @@
         html += '.stats-table th, .stats-table td { font-size: 8px; text-align: center; padding: 2px; border: 1px solid #333; }';
         html += '.stats-table th { background-color: #e0e0e0; }';
         html += '.stats-table { width: 100%; border: 1.5px solid #333; }';
+        html += '.fraction-text { font-size: 8px; }';
 
         // 検印枠（page2-rightの最下部に配置）
         html += '.seal-table { width: 40%; margin-left: auto; margin-top: auto; border: 1.5px solid #333; background-color: #fff; flex-shrink: 0; }';
@@ -1565,8 +1566,8 @@
                 var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
                 html += '<tr>';
                 html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
-                html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
-                html += '<td>' + (s.cumulative !== undefined && s.cumulative !== "" ? s.cumulative : "&nbsp;") + '</td>';
+                html += '<td>' + formatFraction(s.weekly) + '</td>';
+                html += '<td>' + formatFraction(s.cumulative) + '</td>';
                 html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
                 html += '</tr>';
             }
@@ -1580,8 +1581,8 @@
                 var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
                 html += '<tr>';
                 html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
-                html += '<td>' + (s.weekly !== undefined && s.weekly !== "" ? s.weekly : "&nbsp;") + '</td>';
-                html += '<td>' + (s.cumulative !== undefined && s.cumulative !== "" ? s.cumulative : "&nbsp;") + '</td>';
+                html += '<td>' + formatFraction(s.weekly) + '</td>';
+                html += '<td>' + formatFraction(s.cumulative) + '</td>';
                 html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
                 html += '</tr>';
             }
@@ -1602,9 +1603,14 @@
         var nextWeekEndStr = nextWeekSun.getFullYear() + '-'
             + String(nextWeekSun.getMonth() + 1).padStart(2, '0') + '-'
             + String(nextWeekSun.getDate()).padStart(2, '0');
-        // フィルタ: 期日が次週末以前 or 期日未設定（完了・未完了問わず表示）
+        // 表示中の週の月曜日を YYYY-MM-DD 形式で取得
+        var monParts = days[0].date.split('/');
+        var mondayIsoStr = monParts[0] + '-' + String(parseInt(monParts[1])).padStart(2, '0') + '-' + String(parseInt(monParts[2])).padStart(2, '0');
+        // フィルタ: 完了タスクは表示中週の月曜日より前の期日なら非表示、それ以外は次週末以前を表示
         var printTasks = tasks.filter(function (t) {
             if (!t.dueDate) return true;        // 期日未設定は常に表示
+            // 完了タスクは、期日が表示中週の月曜日より前なら非表示
+            if (t.status === '完了' && t.dueDate < mondayIsoStr) return false;
             return t.dueDate <= nextWeekEndStr;  // 次週末日以前のタスクを表示
         });
         // ソート: 未完了→完了の順、同グループ内は期日昇順（未設定は最後）
