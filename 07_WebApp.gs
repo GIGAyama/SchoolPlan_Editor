@@ -348,6 +348,9 @@ function getAnnualHoursData(academicYear) {
     const dbCols = getDbColumns();
     const dbData = dbSheet.getDataRange().getValues();
 
+    // モジュール学習設定
+    const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
+
     // hoursData: { "国語": { "4": 15.333, "5": 20, ... }, "算数": ... }
     const hoursData = {};
 
@@ -356,13 +359,13 @@ function getAnnualHoursData(academicYear) {
     for (const row of dbData.slice(1)) {
       const date = row[dbCols.DATE - 1];
       if (!(date instanceof Date)) continue;
-      
+
       const year = date.getFullYear();
       const month = date.getMonth() + 1;
-      
+
       let rowAcademicYear = year;
       if (month <= 3) rowAcademicYear -= 1;
-      
+
       if (rowAcademicYear !== academicYear) continue;
 
       for (const col of periodCols) {
@@ -371,6 +374,20 @@ function getAnnualHoursData(academicYear) {
           if (!hoursData[subject]) hoursData[subject] = {};
           if (!hoursData[subject][month]) hoursData[subject][month] = 0;
           hoursData[subject][month] += fraction;
+        }
+      }
+
+      // モジュール学習: 朝学習に教科名が入っていれば 1/3 時間を加算
+      if (moduleEnabled && dbCols.MORNING) {
+        const morningVal = (row[dbCols.MORNING - 1] || '').toString().trim();
+        if (morningVal) {
+          const morningSubject = morningVal.replace(/　/g, ' ').split(/[\s]/)[0].trim();
+          if (morningSubject && !/^\d/.test(morningSubject)) {
+            const moduleFraction = 1 / 3;
+            if (!hoursData[morningSubject]) hoursData[morningSubject] = {};
+            if (!hoursData[morningSubject][month]) hoursData[morningSubject][month] = 0;
+            hoursData[morningSubject][month] += moduleFraction;
+          }
         }
       }
     }
