@@ -85,8 +85,11 @@
             if (viewName === 'settings' && !isSystemSettingsLoaded) {
                 loadSystemSettings();
             }
-            if (viewName === 'hours' && STATE.mondayStr) {
-                loadHoursSummary();
+            if (viewName === 'hours') {
+                loadAnnualHoursView();
+                if (STATE.mondayStr) {
+                    loadHoursSummary();
+                }
             }
             if (viewName === 'task') {
                 if (!taskDataLoaded && !taskLoading) {
