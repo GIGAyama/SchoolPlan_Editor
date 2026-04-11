@@ -255,6 +255,9 @@
                     <button class="nw-palette-btn" onclick="NW.addBlock('image')">
                         <span class="material-symbols-outlined">image</span> 画像
                     </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('columns')">
+                        <span class="material-symbols-outlined">view_column</span> 段組み
+                    </button>
                     <button class="nw-palette-btn" onclick="NW.addBlock('gallery')">
                         <span class="material-symbols-outlined">auto_awesome_mosaic</span> ギャラリー
                     </button>
@@ -274,7 +277,10 @@
                     <div class="nw-palette-label">AI機能</div>
                     <button class="nw-palette-btn" onclick="NW.generateAIText()"
                         style="border-color:var(--primary);color:var(--primary);">
-                        <span class="material-symbols-outlined">auto_awesome</span> AI生成
+                        <span class="material-symbols-outlined">auto_awesome</span> AI記事生成
+                    </button>
+                    <button class="nw-palette-btn nw-palette-btn-ai-full" onclick="NW.generateFullNewsletter()">
+                        <span class="material-symbols-outlined">magic_button</span> AI一括生成
                     </button>
                 </div>
 

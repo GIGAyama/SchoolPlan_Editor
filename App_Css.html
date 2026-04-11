@@ -1525,18 +1525,291 @@
         color: white;
     }
 
+    /* --- Image caption --- */
+    .nw-image-caption {
+        font-size: 0.78rem;
+        color: var(--text-sub);
+        text-align: center;
+        padding: 4px 8px;
+        outline: none;
+        min-height: 1.2em;
+        margin-top: 4px;
+    }
+
+    .nw-image-caption:empty::before {
+        content: attr(data-placeholder);
+        color: var(--text-hint);
+        pointer-events: none;
+    }
+
+    /* --- Columns block --- */
+    .nw-columns-grid {
+        display: grid;
+        gap: 12px;
+        min-height: 80px;
+    }
+
+    .nw-col-cell {
+        border: 1px dashed var(--border);
+        border-radius: 4px;
+        padding: 8px;
+        min-height: 60px;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .nw-col-cell:hover {
+        border-color: var(--primary);
+        border-style: dashed;
+    }
+
+    .nw-col-img {
+        width: 100%;
+        display: block;
+        border-radius: 4px;
+    }
+
+    .nw-col-img-remove {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        background: rgba(0, 0, 0, 0.5);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 22px;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 14px;
+        opacity: 0;
+        transition: opacity 0.15s;
+    }
+
+    .nw-col-cell:hover .nw-col-img-remove {
+        opacity: 1;
+    }
+
+    .nw-col-img-placeholder {
+        border: 1px dashed var(--border);
+        border-radius: 4px;
+        padding: 12px;
+        text-align: center;
+        color: var(--text-hint);
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .nw-col-img-placeholder:hover {
+        border-color: var(--primary);
+        color: var(--primary);
+        background: var(--primary-light);
+    }
+
+    .nw-col-text {
+        outline: none;
+        line-height: 1.6;
+        font-size: 0.85rem;
+        min-height: 1.5em;
+        flex: 1;
+    }
+
+    .nw-col-text:empty::before {
+        content: attr(data-placeholder);
+        color: var(--text-hint);
+        pointer-events: none;
+    }
+
+    /* --- Insert button between blocks --- */
+    .nw-insert-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 12px;
+        position: relative;
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+
+    .nw-insert-row:hover {
+        opacity: 1;
+    }
+
+    .nw-insert-row::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        height: 1px;
+        background: var(--primary);
+        opacity: 0.3;
+    }
+
+    .nw-insert-btn {
+        position: relative;
+        z-index: 2;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        border: 1.5px solid var(--primary);
+        background: white;
+        color: var(--primary);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        transition: all 0.15s;
+    }
+
+    .nw-insert-btn:hover {
+        background: var(--primary);
+        color: white;
+        transform: scale(1.15);
+    }
+
+    .nw-insert-btn .material-symbols-outlined {
+        font-size: 16px;
+    }
+
+    /* --- Insert menu grid --- */
+    .nw-insert-menu-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        padding: 4px;
+    }
+
+    .nw-insert-menu-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        padding: 10px 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface-2);
+        font-size: 0.72rem;
+        cursor: pointer;
+        transition: all 0.15s;
+        font-family: inherit;
+        color: var(--text-main);
+    }
+
+    .nw-insert-menu-item:hover {
+        background: var(--primary-light);
+        border-color: var(--primary);
+        color: var(--primary);
+    }
+
+    .nw-insert-menu-item .material-symbols-outlined {
+        font-size: 20px;
+    }
+
+    .nw-insert-popup {
+        padding: 12px !important;
+    }
+
+    /* --- Quick-start buttons on empty state --- */
+    .nw-quickstart {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        max-width: 420px;
+        margin: 0 auto;
+    }
+
+    .nw-quickstart-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        padding: 16px 12px;
+        border: 1.5px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: inherit;
+        color: var(--text-main);
+    }
+
+    .nw-quickstart-btn:hover {
+        border-color: var(--primary);
+        background: var(--primary-light);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
+    }
+
+    .nw-quickstart-btn .material-symbols-outlined {
+        font-size: 28px;
+        color: var(--primary);
+    }
+
+    .nw-quickstart-btn span:nth-child(2) {
+        font-weight: 600;
+        font-size: 0.85rem;
+    }
+
+    .nw-quickstart-btn small {
+        font-size: 0.7rem;
+        color: var(--text-sub);
+    }
+
+    .nw-quickstart-ai {
+        border-color: var(--primary);
+        background: linear-gradient(135deg, #e8f0fe 0%, #f3e8fd 100%);
+    }
+
+    .nw-quickstart-ai:hover {
+        background: linear-gradient(135deg, #c5cae9 0%, #e1bee7 100%);
+    }
+
+    /* --- AI rewrite button in toolbar --- */
+    .nw-ai-btn {
+        color: var(--primary) !important;
+    }
+
+    .nw-ai-btn:hover {
+        background: var(--primary-light) !important;
+    }
+
+    /* --- AI full generate palette button --- */
+    .nw-palette-btn-ai-full {
+        background: linear-gradient(135deg, #e8f0fe 0%, #f3e8fd 100%);
+        border-color: var(--primary);
+        color: var(--primary);
+        font-weight: 600;
+    }
+
+    .nw-palette-btn-ai-full:hover {
+        background: linear-gradient(135deg, #c5cae9 0%, #e1bee7 100%);
+        border-color: var(--primary);
+        color: var(--primary);
+    }
+
     /* --- Print styles for newsletter --- */
     @media print {
 
         .nw-block-handle,
         .nw-block-actions,
-        .nw-schedule-options {
+        .nw-schedule-options,
+        .nw-insert-row {
             display: none !important;
         }
 
         .nw-block {
             border: none !important;
             padding-left: 0 !important;
+        }
+
+        .nw-col-cell {
+            border-style: none !important;
         }
     }
 
