@@ -3879,7 +3879,11 @@
                 .withSuccessHandler(function (res) {
                     if (!res.success) { showToast('error', 'リライト失敗: ' + res.error); return; }
                     NW.pushHistory();
-                    block.content = res.text.replace(/\n/g, '<br>');
+                    var newContent = res.text.replace(/\n/g, '<br>');
+                    // Update DOM element first so NW.saveEditable() inside NW.render() picks up new content
+                    var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
+                    if (el) el.innerHTML = newContent;
+                    block.content = newContent;
                     NW.render();
                     showToast('success', 'テキストをリライトしました');
                 })
