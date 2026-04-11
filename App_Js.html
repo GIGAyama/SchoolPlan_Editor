@@ -2806,11 +2806,25 @@
 
     /**
      * 学年が1年の場合、教科名をひらがなに変換します。
+     * 分数付き複数教科（例: "国語1/3　音楽2/3"）は分数を除去し
+     * 各教科をひらがなに変換して"／"で結合します（例: "こくご／おんがく"）。
      * マップにない教科名はそのまま返します。
      */
     function subjectToHiragana(name) {
         if (STATE.grade !== 1 || !name) return name;
-        return SUBJECT_HIRAGANA_MAP[name] || name;
+        // 直接マッチする場合はそのまま返す
+        if (SUBJECT_HIRAGANA_MAP[name]) return SUBJECT_HIRAGANA_MAP[name];
+        // 分数付き複数教科の解析（例: "国語1/3　音楽2/3"）
+        var normalized = name.toString().trim().replace(/　/g, ' ');
+        var regex = /([^\s\d\/\.]+)(?:\s*(?:\d+\/\d+|\d+\.\d+))?/g;
+        var match;
+        var subjects = [];
+        while ((match = regex.exec(normalized)) !== null) {
+            var subj = match[1].trim();
+            if (subj) subjects.push(SUBJECT_HIRAGANA_MAP[subj] || subj);
+        }
+        if (subjects.length > 0) return subjects.join('／');
+        return name;
     }
 
     // ---- Schedule table rendering (transposed: days=columns, periods=rows) ----
