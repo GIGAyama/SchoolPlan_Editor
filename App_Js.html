@@ -20,7 +20,8 @@
         redoStack: [],            // Redo履歴
         dragSource: null,         // D&Dソース {day, period}
         helpModalOpen: false,     // ショートカットヘルプ表示中
-        taskViewMode: 'list'      // タスク表示モード: 'list' or 'card'
+        taskViewMode: 'list',     // タスク表示モード: 'list' or 'card'
+        grade: 3                  // 担当学年（デフォルト3）
     };
 
     // UX: 行定義（セルナビゲーション用）
@@ -1849,6 +1850,7 @@
                 if (settings) {
                     var el = document.getElementById('settingCourseNameDisp');
                     if (el) el.textContent = settings.courseName || '未設定';
+                    STATE.grade = parseInt(settings.grade, 10) || 3;
                 }
             })
             .getAppSettings();
@@ -2539,6 +2541,31 @@
         return div;
     };
 
+    // ---- 1年生用: 教科名ひらがな変換マップ ----
+    var SUBJECT_HIRAGANA_MAP = {
+        '国語': 'こくご',
+        '算数': 'さんすう',
+        '生活': 'せいかつ',
+        '音楽': 'おんがく',
+        '図画工作': 'ずがこうさく',
+        '体育': 'たいいく',
+        '道徳': 'どうとく',
+        '学活': 'がっかつ',
+        '図工': 'ずこう',
+        '図書': 'としょ',
+        '書写': 'しょしゃ',
+        '行事': 'ぎょうじ'
+    };
+
+    /**
+     * 学年が1年の場合、教科名をひらがなに変換します。
+     * マップにない教科名はそのまま返します。
+     */
+    function subjectToHiragana(name) {
+        if (STATE.grade !== 1 || !name) return name;
+        return SUBJECT_HIRAGANA_MAP[name] || name;
+    }
+
     // ---- Schedule table rendering (transposed: days=columns, periods=rows) ----
     NW.renderScheduleHTML = function (block) {
         var data = block.weekData || NW.scheduleData;
@@ -2553,7 +2580,7 @@
         // Helper: render cell content based on displayMode
         function cellContent(per) {
             if (!per || !per.subject) return '';
-            var c = escHtml(per.subject);
+            var c = escHtml(subjectToHiragana(per.subject));
             if (opts.displayMode === 'subjectUnit' && per.unit) {
                 c += '<br><span class="nw-sched-sub">' + escHtml(per.unit) + '</span>';
             } else if (opts.displayMode === 'full') {
@@ -4477,6 +4504,7 @@
                         google.script.run
                             .withSuccessHandler(function (r) {
                                 if (r.success) {
+                                    STATE.grade = parseInt(newGrade, 10) || 3;
                                     showToast('success', r.message);
                                     // 標準時数エディタの内容も再描画する
                                     stdHoursData = r.data;
