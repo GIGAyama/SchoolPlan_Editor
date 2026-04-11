@@ -2026,6 +2026,10 @@
                 block.float = data.float || 'none';
                 block.wrapText = data.wrapText || '';
                 block.wrapAlign = data.wrapAlign || 'left';
+                block.wrapFontSize = data.wrapFontSize || 12;
+                block.wrapFontFamily = data.wrapFontFamily || '';
+                block.wrapBold = !!data.wrapBold;
+                block.wrapColor = data.wrapColor || '';
                 block.caption = data.caption || '';
                 break;
             case 'gallery':
@@ -2034,12 +2038,14 @@
                 break;
             case 'schedule':
                 block.weekData = data.weekData || null;
+                block.cellOverrides = data.cellOverrides || {};
                 block.options = {
                     showRecess: true,
                     showAfterSchool: true,
                     showHomework: true,
                     showItems: true,
                     showSaturday: false,
+                    hiddenPeriods: [],
                     displayMode: 'subject'
                 };
                 if (data.options) {
@@ -2436,12 +2442,26 @@
                 imgFmt += '<option value="' + w + '"' + (w === block.width ? ' selected' : '') + '>' + w + '%</option>';
             });
             imgFmt += '</select></div>';
-            // Text alignment buttons for wrap text (only when float is active)
+            // Text formatting toolbar for wrap text (only when float is active)
             if (block.float !== 'none') {
                 imgFmt += '<div class="nw-fmt-toolbar">'
+                    + '<select onchange="NW.setWrapFontFamily(\'' + block.id + '\',this.value)" title="フォント">';
+                imgFmt += '<option value=""' + (!block.wrapFontFamily ? ' selected' : '') + '>標準</option>';
+                NW_FONTS.forEach(function (f) {
+                    imgFmt += '<option value="' + f.value + '"' + (block.wrapFontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
+                });
+                imgFmt += '</select>'
+                    + '<select onchange="NW.setWrapFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
+                [9, 10, 11, 12, 14, 16, 18, 20, 24].forEach(function (s) {
+                    imgFmt += '<option value="' + s + '"' + (s === (block.wrapFontSize || 12) ? ' selected' : '') + '>' + s + '</option>';
+                });
+                imgFmt += '</select>'
+                    + '<button title="太字" onclick="NW.toggleWrapBold(\'' + block.id + '\')" class="' + (block.wrapBold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
                     + '<button title="左揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'left\')" class="' + (block.wrapAlign === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
                     + '<button title="中央" onclick="NW.setWrapAlign(\'' + block.id + '\',\'center\')" class="' + (block.wrapAlign === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
                     + '<button title="右揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'right\')" class="' + (block.wrapAlign === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+                    + '<div class="nw-act-sep"></div>'
+                    + '<button title="文字色" onclick="NW.pickColor(\'' + block.id + '\',\'wrapColor\')" style="position:relative;"><span class="material-symbols-outlined">format_color_text</span><span class="nw-color-dot" style="background:' + (block.wrapColor || '#202124') + ';"></span></button>'
                     + '</div>';
             }
             imgFmt += '<div class="nw-act-sep"></div>';
@@ -2581,6 +2601,10 @@
                         textSide.className = 'nw-float-text-side';
                         textSide.contentEditable = 'true';
                         textSide.style.textAlign = block.wrapAlign || 'left';
+                        textSide.style.fontSize = (block.wrapFontSize || 12) + 'px';
+                        if (block.wrapFontFamily) textSide.style.fontFamily = block.wrapFontFamily;
+                        if (block.wrapBold) textSide.style.fontWeight = '700';
+                        if (block.wrapColor) textSide.style.color = block.wrapColor;
                         textSide.innerHTML = block.wrapText;
                         textSide.addEventListener('blur', function () { block.wrapText = textSide.innerHTML; });
                         floatDiv.appendChild(imgSide);
@@ -2820,51 +2844,90 @@
         });
         html += '</tr></thead><tbody>';
 
+        var overrides = block.cellOverrides || {};
+        // Helper: get cell content with override support
+        function getCellVal(key, original) {
+            return overrides.hasOwnProperty(key) ? overrides[key] : original;
+        }
+
         // Event row
         html += '<tr><td class="nw-sched-label">行事</td>';
-        days.forEach(function (day) {
-            var ev = day.event ? '<span class="nw-sched-event">' + escHtml(day.event) + '</span>' : '';
-            html += '<td>' + ev + '</td>';
+        days.forEach(function (day, di) {
+            var val = getCellVal('event_' + di, day.event || '');
+            var ev = val ? '<span class="nw-sched-event">' + escHtml(val) + '</span>' : '';
+            html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'event\',' + di + ')">' + ev + '</td>';
         });
         html += '</tr>';
 
-        // Period rows (1-6)
+        // Period rows (1-6), skip hidden
+        var hiddenP = opts.hiddenPeriods || [];
         for (var p = 0; p < 6; p++) {
+            if (hiddenP.indexOf(p + 1) >= 0) continue;
             html += '<tr><td class="nw-sched-label">' + (p + 1) + '校時</td>';
-            days.forEach(function (day) {
-                html += '<td>' + cellContent(day.periods[p]) + '</td>';
-            });
+            (function (pp) {
+                days.forEach(function (day, di) {
+                    var per = day.periods[pp];
+                    var key = 'period_' + pp + '_' + di;
+                    if (overrides.hasOwnProperty(key)) {
+                        html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">' + escHtml(overrides[key]) + '</td>';
+                    } else {
+                        html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">' + cellContent(per) + '</td>';
+                    }
+                });
+            })(p);
             html += '</tr>';
         }
 
         // Optional rows
         if (opts.showRecess) {
             html += '<tr><td class="nw-sched-label">中休み</td>';
-            days.forEach(function (day) { html += '<td class="nw-sched-small">' + escHtml(day.recess1 || '') + '</td>'; });
+            days.forEach(function (day, di) {
+                var val = getCellVal('recess1_' + di, day.recess1 || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'recess1\',' + di + ')">' + escHtml(val) + '</td>';
+            });
             html += '</tr><tr><td class="nw-sched-label">昼休み</td>';
-            days.forEach(function (day) { html += '<td class="nw-sched-small">' + escHtml(day.recess2 || '') + '</td>'; });
+            days.forEach(function (day, di) {
+                var val = getCellVal('recess2_' + di, day.recess2 || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'recess2\',' + di + ')">' + escHtml(val) + '</td>';
+            });
             html += '</tr>';
         }
         if (opts.showAfterSchool) {
             html += '<tr><td class="nw-sched-label">放課後</td>';
-            days.forEach(function (day) { html += '<td class="nw-sched-small">' + escHtml(day.afterschool || '') + '</td>'; });
+            days.forEach(function (day, di) {
+                var val = getCellVal('afterschool_' + di, day.afterschool || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'afterschool\',' + di + ')">' + escHtml(val) + '</td>';
+            });
             html += '</tr>';
         }
         if (opts.showHomework) {
             html += '<tr><td class="nw-sched-label">宿題</td>';
-            days.forEach(function (day) { html += '<td class="nw-sched-small">' + escHtml(day.homework || '') + '</td>'; });
+            days.forEach(function (day, di) {
+                var val = getCellVal('homework_' + di, day.homework || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'homework\',' + di + ')">' + escHtml(val) + '</td>';
+            });
             html += '</tr>';
         }
         if (opts.showItems) {
             html += '<tr><td class="nw-sched-label">持ち物</td>';
-            days.forEach(function (day) { html += '<td class="nw-sched-small">' + escHtml(day.items || '') + '</td>'; });
+            days.forEach(function (day, di) {
+                var val = getCellVal('items_' + di, day.items || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'items\',' + di + ')">' + escHtml(val) + '</td>';
+            });
             html += '</tr>';
         }
 
         html += '</tbody></table>';
 
         // Options panel
-        html += '<div class="nw-schedule-options">'
+        html += '<div class="nw-schedule-options">';
+        // Period visibility
+        html += '<span style="font-size:0.72rem;font-weight:600;color:var(--text-sub);">校時:</span>';
+        for (var pi = 1; pi <= 6; pi++) {
+            var checked = hiddenP.indexOf(pi) < 0;
+            html += '<label><input type="checkbox"' + (checked ? ' checked' : '') + ' onchange="NW.toggleSchedPeriod(\'' + bid + '\',' + pi + ',this.checked)"> ' + pi + '</label>';
+        }
+        html += '<span style="color:var(--border);">|</span>'
             + '<label><input type="checkbox"' + (opts.showRecess ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showRecess\',this.checked)"> 休み時間</label>'
             + '<label><input type="checkbox"' + (opts.showAfterSchool ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showAfterSchool\',this.checked)"> 放課後</label>'
             + '<label><input type="checkbox"' + (opts.showHomework ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showHomework\',this.checked)"> 宿題</label>'
@@ -2943,6 +3006,30 @@
         }
     };
 
+    NW.setWrapFontSize = function (id, size) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        block.wrapFontSize = parseInt(size, 10);
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-float-text-side');
+        if (el) el.style.fontSize = block.wrapFontSize + 'px';
+    };
+
+    NW.setWrapFontFamily = function (id, family) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        block.wrapFontFamily = family;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-float-text-side');
+        if (el) el.style.fontFamily = family || 'inherit';
+    };
+
+    NW.toggleWrapBold = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        NW.saveEditable();
+        block.wrapBold = !block.wrapBold;
+        NW.render();
+    };
+
     NW.setImageWidth = function (id, w) {
         var block = NW.blocks.find(function (b) { return b.id === id; });
         if (!block || block.type !== 'image') return;
@@ -2967,6 +3054,124 @@
         block.options.displayMode = mode;
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
         if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    NW.toggleSchedPeriod = function (id, period, show) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        var hp = block.options.hiddenPeriods || [];
+        if (show) {
+            hp = hp.filter(function (p) { return p !== period; });
+        } else {
+            if (hp.indexOf(period) < 0) hp.push(period);
+        }
+        block.options.hiddenPeriods = hp;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    NW.editSchedCell = function (id, rowType, dayIdx, periodIdx) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        var data = block.weekData || NW.scheduleData;
+        if (!data || !data.days) return;
+        var day = data.days[dayIdx];
+        if (!day) return;
+        var overrides = block.cellOverrides || {};
+
+        if (rowType === 'period') {
+            // Period cell: subject, unit, content fields
+            var per = (day.periods && day.periods[periodIdx]) || {};
+            var overKey = 'period_' + periodIdx + '_' + dayIdx;
+            var hasOverride = overrides.hasOwnProperty(overKey);
+            Swal.fire({
+                title: day.dayLabel + ' ' + (periodIdx + 1) + '校時',
+                html: '<div style="text-align:left;">'
+                    + '<label style="font-size:0.85rem;font-weight:600;">教科</label>'
+                    + '<input id="swalSchedSubj" class="swal2-input" value="' + escHtml(per.subject || '') + '" style="margin-top:4px;">'
+                    + '<label style="font-size:0.85rem;font-weight:600;margin-top:8px;display:block;">単元</label>'
+                    + '<input id="swalSchedUnit" class="swal2-input" value="' + escHtml(per.unit || '') + '" style="margin-top:4px;">'
+                    + '<label style="font-size:0.85rem;font-weight:600;margin-top:8px;display:block;">内容</label>'
+                    + '<input id="swalSchedCont" class="swal2-input" value="' + escHtml(per.content || '') + '" style="margin-top:4px;">'
+                    + (hasOverride ? '<label style="font-size:0.8rem;color:var(--text-hint);margin-top:8px;display:block;"><input type="checkbox" id="swalSchedFreeText" checked> 自由テキストで上書き</label>'
+                        + '<input id="swalSchedOverride" class="swal2-input" value="' + escHtml(overrides[overKey] || '') + '" style="margin-top:4px;">'
+                        : '<label style="font-size:0.8rem;color:var(--text-hint);margin-top:8px;display:block;"><input type="checkbox" id="swalSchedFreeText"> 自由テキストで上書き</label>'
+                        + '<input id="swalSchedOverride" class="swal2-input" value="" style="margin-top:4px;display:none;">')
+                    + '</div>',
+                showCancelButton: true,
+                confirmButtonText: '保存',
+                cancelButtonText: 'キャンセル',
+                didOpen: function () {
+                    var cb = document.getElementById('swalSchedFreeText');
+                    var ov = document.getElementById('swalSchedOverride');
+                    var subj = document.getElementById('swalSchedSubj');
+                    var unit = document.getElementById('swalSchedUnit');
+                    var cont = document.getElementById('swalSchedCont');
+                    function toggleMode() {
+                        if (cb.checked) {
+                            ov.style.display = ''; subj.disabled = true; unit.disabled = true; cont.disabled = true;
+                            subj.style.opacity = '0.5'; unit.style.opacity = '0.5'; cont.style.opacity = '0.5';
+                        } else {
+                            ov.style.display = 'none'; subj.disabled = false; unit.disabled = false; cont.disabled = false;
+                            subj.style.opacity = '1'; unit.style.opacity = '1'; cont.style.opacity = '1';
+                        }
+                    }
+                    cb.addEventListener('change', toggleMode);
+                    toggleMode();
+                },
+                preConfirm: function () {
+                    return {
+                        freeText: document.getElementById('swalSchedFreeText').checked,
+                        override: document.getElementById('swalSchedOverride').value,
+                        subject: document.getElementById('swalSchedSubj').value,
+                        unit: document.getElementById('swalSchedUnit').value,
+                        content: document.getElementById('swalSchedCont').value
+                    };
+                }
+            }).then(function (result) {
+                if (!result.isConfirmed) return;
+                NW.pushHistory();
+                var v = result.value;
+                if (v.freeText) {
+                    block.cellOverrides[overKey] = v.override;
+                } else {
+                    delete block.cellOverrides[overKey];
+                    if (!day.periods) day.periods = [];
+                    if (!day.periods[periodIdx]) day.periods[periodIdx] = {};
+                    day.periods[periodIdx].subject = v.subject;
+                    day.periods[periodIdx].unit = v.unit;
+                    day.periods[periodIdx].content = v.content;
+                }
+                var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+                if (el) el.innerHTML = NW.renderScheduleHTML(block);
+            });
+        } else {
+            // Simple text cell (event, recess1, recess2, afterschool, homework, items)
+            var labels = { event: '行事', recess1: '中休み', recess2: '昼休み', afterschool: '放課後', homework: '宿題', items: '持ち物' };
+            var overKey = rowType + '_' + dayIdx;
+            var origVal = day[rowType] || '';
+            var curVal = overrides.hasOwnProperty(overKey) ? overrides[overKey] : origVal;
+            Swal.fire({
+                title: day.dayLabel + ' - ' + (labels[rowType] || rowType),
+                input: 'text',
+                inputValue: curVal,
+                showCancelButton: true,
+                confirmButtonText: '保存',
+                cancelButtonText: 'キャンセル',
+                inputPlaceholder: labels[rowType] + 'を入力...'
+            }).then(function (result) {
+                if (!result.isConfirmed) return;
+                NW.pushHistory();
+                var newVal = result.value;
+                if (newVal === origVal) {
+                    delete block.cellOverrides[overKey];
+                } else {
+                    block.cellOverrides[overKey] = newVal;
+                }
+                var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+                if (el) el.innerHTML = NW.renderScheduleHTML(block);
+            });
+        }
     };
 
     // ---- Image upload (FileReader → base64) ----
@@ -3080,7 +3285,7 @@
     NW.pickColor = function (id, prop) {
         var block = NW.blocks.find(function (b) { return b.id === id; });
         if (!block) return;
-        var isText = (prop === 'color');
+        var isText = (prop === 'color' || prop === 'wrapColor');
         var currentVal = block[prop] || '';
         var html = '<div class="nw-color-grid">';
         html += '<button class="nw-color-swatch nw-color-none' + (!currentVal ? ' nw-color-selected' : '') + '" data-val="" title="' + (isText ? 'デフォルト' : 'なし') + '">' + (isText ? 'A' : '&times;') + '</button>';
@@ -3983,6 +4188,7 @@
         });
         clone.querySelectorAll('[style*="cursor"]').forEach(function (el) { el.style.cursor = 'default'; });
         clone.querySelectorAll('[contenteditable]').forEach(function (el) { el.removeAttribute('contenteditable'); });
+        clone.querySelectorAll('[onclick]').forEach(function (el) { el.removeAttribute('onclick'); });
         return '<!DOCTYPE html><html><head>'
             + '<meta charset="utf-8">'
             + '<style>' + NW._PRINT_CSS + '</style>'
@@ -4049,7 +4255,12 @@
                     if (block.float !== 'none' && block.wrapText) {
                         // 回り込み → table化
                         var imgCell = '<td style="width:' + imgW + 'px;vertical-align:top;padding:4px;"><img src="' + block.src + '" width="' + imgW + '"></td>';
-                        var txtCell = '<td style="vertical-align:top;padding:4px;font-size:12px;line-height:1.7;">' + (block.wrapText || '') + '</td>';
+                        var wts = 'vertical-align:top;padding:4px;font-size:' + (block.wrapFontSize || 12) + 'px;line-height:1.7;';
+                        if (block.wrapFontFamily) wts += 'font-family:' + block.wrapFontFamily + ';';
+                        if (block.wrapBold) wts += 'font-weight:bold;';
+                        if (block.wrapColor) wts += 'color:' + block.wrapColor + ';';
+                        if (block.wrapAlign) wts += 'text-align:' + block.wrapAlign + ';';
+                        var txtCell = '<td style="' + wts + '">' + (block.wrapText || '') + '</td>';
                         body += wrapOpen + '<table style="width:100%;border:none;"><tr>'
                             + (block.float === 'right' ? txtCell + imgCell : imgCell + txtCell)
                             + '</tr></table>' + wrapClose;
@@ -4099,7 +4310,12 @@
                     body += '</tr></table>' + wrapClose;
                     break;
                 case 'schedule':
-                    body += wrapOpen + NW.renderScheduleHTML(block) + wrapClose;
+                    var schedHtml = NW.renderScheduleHTML(block);
+                    // Remove options panel and onclick for export
+                    schedHtml = schedHtml.replace(/<div class="nw-schedule-options">[\s\S]*$/, '');
+                    schedHtml = schedHtml.replace(/ onclick="[^"]*"/g, '');
+                    schedHtml = schedHtml.replace(/ class="nw-sched-cell"/g, '');
+                    body += wrapOpen + schedHtml + wrapClose;
                     break;
                 case 'qrcode':
                     if (block.url) {
