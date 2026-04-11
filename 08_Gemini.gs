@@ -224,8 +224,12 @@ function callGeminiAPIText_(prompt) {
  * @param {string} extraInstructions 追加指示
  * @returns {Object} { success: boolean, text: string }
  */
-function generateNewsletterAI(mondayDateStr, genType, extraInstructions) {
+function generateNewsletterAI(mondayDateStr, genType, extraInstructions, options) {
   try {
+    options = options || {};
+    const tone = options.tone || 'warm';
+    const length = options.length || 'medium';
+
     // 週案データを取得してコンテキストに使う
     let scheduleContext = '';
     try {
@@ -243,16 +247,33 @@ function generateNewsletterAI(mondayDateStr, genType, extraInstructions) {
       }
     } catch(ignore) {}
 
+    const toneDesc = {
+      warm: '温かみのある、親しみやすい文体',
+      formal: '丁寧で格式のある文体',
+      casual: 'カジュアルで気軽な口調',
+      energetic: '元気で明るい、活発な文体'
+    };
+
+    const lengthDesc = {
+      short: '2〜3文の簡潔な文章',
+      medium: '3〜5文の標準的な長さの文章',
+      long: '5〜8文のしっかりした文章'
+    };
+
     const typePrompts = {
-      intro: 'クラスの学級通信に掲載する「今週のあいさつ文・はじめの文」を書いてください。季節感や子どもたちの成長に触れた温かい文章で、3〜5文程度にしてください。',
-      event: '今週の行事やイベントを紹介する文章を書いてください。保護者が読んで楽しめるよう、子どもたちの様子や準備のことにも触れてください。3〜5文程度。',
-      study: '今週の学習内容や授業の様子を保護者に伝える文章を書いてください。子どもたちが頑張っていることや成長したことを具体的に触れてください。3〜5文程度。',
+      intro: '学級通信の冒頭に掲載する「今週のあいさつ文・はじめの文」を書いてください。季節感や子どもたちの成長に触れてください。',
+      event: '今週の行事やイベントを紹介する文章を書いてください。保護者が読んで楽しめるよう、子どもたちの様子や準備のことにも触れてください。',
+      study: '今週の学習内容や授業の様子を保護者に伝える文章を書いてください。子どもたちが頑張っていることや成長したことを具体的に触れてください。',
       notice: '保護者へのお知らせ・連絡事項を書いてください。丁寧だが簡潔な表現で、重要な点が伝わるようにしてください。',
+      closing: '学級通信の最後に載せる「結びの文」を書いてください。来週への期待や保護者への感謝を込めてください。',
+      safety: '安全に関するお知らせや注意喚起を書いてください。季節に応じた安全指導の内容を含めてください。',
+      praise: '子どもたちの頑張りや良い行動を紹介する「キラキラコーナー」の文章を書いてください。具体的なエピソードを交えて褒めてください。',
       free: '学級通信に掲載する文章を書いてください。'
     };
 
     const prompt = `あなたは小学校の担任教員です。保護者向けの学級通信の本文を日本語で作成してください。
-文章のみを出力し、タイトルや装飾は不要です。自然で温かみのある文体で書いてください。
+文章のみを出力し、タイトルや装飾、箇条書きは不要です。${toneDesc[tone] || toneDesc.warm}で書いてください。
+${lengthDesc[length] || lengthDesc.medium}にしてください。
 
 ${typePrompts[genType] || typePrompts.free}
 ${scheduleContext}
@@ -263,6 +284,115 @@ ${extraInstructions ? '\n【追加の指示】\n' + extraInstructions : ''}`;
 
   } catch (e) {
     logError('generateNewsletterAI', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 学級通信全体をAIで一括生成する
+ * @param {string} mondayDateStr "YYYY/MM/DD" 形式の月曜日
+ * @param {string} extraInstructions 追加指示
+ * @param {Object} options { tone: string }
+ * @returns {Object} { success: boolean, sections: Array }
+ */
+function generateFullNewsletterAI(mondayDateStr, extraInstructions, options) {
+  try {
+    options = options || {};
+    const tone = options.tone || 'warm';
+
+    let scheduleContext = '';
+    try {
+      const data = getNewsletterData(mondayDateStr);
+      if (data.success && data.days) {
+        scheduleContext = '\n【今週のスケジュール】\n';
+        data.days.forEach(day => {
+          scheduleContext += `${day.dayLabel}(${day.date}): `;
+          if (day.event) scheduleContext += `行事:${day.event} `;
+          day.periods.forEach((p, i) => {
+            if (p && p.subject) scheduleContext += `${i+1}時間目:${p.subject} `;
+          });
+          scheduleContext += '\n';
+        });
+      }
+    } catch(ignore) {}
+
+    const toneDesc = {
+      warm: '温かみのある、親しみやすい文体',
+      formal: '丁寧で格式のある文体',
+      casual: 'カジュアルで気軽な口調',
+      energetic: '元気で明るい、活発な文体'
+    };
+
+    const prompt = `あなたは小学校の担任教員です。保護者向けの学級通信に掲載する文章を複数セクションに分けて作成してください。
+${toneDesc[tone] || toneDesc.warm}で書いてください。
+
+以下の形式のJSON配列で出力してください。各セクションは type と text を持ちます:
+[
+  { "type": "heading", "text": "学級通信のタイトル（学級通信 〇〇号 など）" },
+  { "type": "intro", "text": "今週のあいさつ文（季節感や子どもたちの様子に触れた2〜3文）" },
+  { "type": "study", "text": "今週の学習の様子（3〜4文）" },
+  { "type": "notice", "text": "保護者へのお知らせ（2〜3文）" },
+  { "type": "closing", "text": "結びの文（1〜2文）" }
+]
+
+行事がある場合は study の前に { "type": "event", "text": "行事紹介文" } を追加してください。
+JSON配列のみを出力し、それ以外は何も出力しないでください。
+${scheduleContext}
+${extraInstructions ? '\n【追加の指示】\n' + extraInstructions : ''}`;
+
+    const text = callGeminiAPIText_(prompt);
+
+    // JSONパース
+    let sections;
+    try {
+      // Markdown コードブロックを除去
+      const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      sections = JSON.parse(cleaned);
+    } catch (pe) {
+      logError('generateFullNewsletterAI parse', pe);
+      return { success: false, error: 'AI出力のJSON解析に失敗しました。再度お試しください。' };
+    }
+
+    if (!Array.isArray(sections) || sections.length === 0) {
+      return { success: false, error: 'AIが有効なセクションを生成できませんでした。' };
+    }
+
+    return { success: true, sections: sections };
+
+  } catch (e) {
+    logError('generateFullNewsletterAI', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 既存テキストをAIでリライトする
+ * @param {string} originalText 元のテキスト
+ * @param {string} instruction リライト指示（例: "もっと丁寧に", "短くして"）
+ * @returns {Object} { success: boolean, text: string }
+ */
+function rewriteNewsletterText(originalText, instruction) {
+  try {
+    if (!originalText || originalText.trim() === '') {
+      throw new Error('リライトするテキストが空です。');
+    }
+
+    const sanitized = originalText.length > 5000 ? originalText.substring(0, 5000) : originalText;
+
+    const prompt = `あなたは小学校の担任教員です。以下の学級通信の文章をリライトしてください。
+リライト後の文章のみを出力し、タイトルや装飾は不要です。
+
+【元の文章】
+${sanitized}
+
+【リライトの指示】
+${instruction || 'より自然で読みやすい文章にしてください。'}`;
+
+    const text = callGeminiAPIText_(prompt);
+    return { success: true, text: text };
+
+  } catch (e) {
+    logError('rewriteNewsletterText', e);
     return { success: false, error: e.message };
   }
 }
