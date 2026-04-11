@@ -1733,7 +1733,7 @@
     function renderAnnualHoursTable(hoursData) {
         var content = document.getElementById('hoursContent');
 
-        var defaultSubjects = ['国語', '図書', '書写', '社会', '算数', '理科', '生活', '音楽', '図画工作', '家庭', '体育', '外国語', '道徳', '外国語活動', '総合', '学活', '行事'];
+        var defaultSubjects = ['国語', '社会', '算数', '理科', '生活', '音楽', '図画工作', '家庭', '体育', '外国語', '道徳', '外国語活動', '総合', '特活', '行事'];
         var foundSubjects = Object.keys(hoursData);
         var customSubjects = foundSubjects.filter(function (s) { return defaultSubjects.indexOf(s) === -1 && s.trim() !== ''; });
         var allSubjects = defaultSubjects.concat(customSubjects);
