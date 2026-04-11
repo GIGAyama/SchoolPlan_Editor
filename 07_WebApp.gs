@@ -375,6 +375,9 @@ function getAnnualHoursData(academicYear) {
       }
     }
 
+    // 表示用の教科名集約: 学活→特活、図書・書写→国語に合算
+    aggregateHoursData_(hoursData);
+
     return { success: true, academicYear, hoursData };
   } catch (e) {
     logError('getAnnualHoursData', e);
@@ -434,6 +437,58 @@ function parseSubjectHours_(cellValue) {
     results.push({ subject, fraction });
   }
   return results;
+}
+
+/**
+ * 月別時数データ（hoursData）の教科名を集約します。
+ * - 「学活」→「特活」にリネーム（入力名→表示名）
+ * - 「図書」「書写」→「国語」に合算
+ * @param {Object} hoursData { "教科名": { month: hours, ... }, ... }
+ */
+function aggregateHoursData_(hoursData) {
+  // 学活 → 特活
+  if (hoursData['学活']) {
+    if (!hoursData['特活']) hoursData['特活'] = {};
+    for (const m in hoursData['学活']) {
+      if (!hoursData['特活'][m]) hoursData['特活'][m] = 0;
+      hoursData['特活'][m] += hoursData['学活'][m];
+    }
+    delete hoursData['学活'];
+  }
+  // 図書・書写 → 国語
+  for (const sub of ['図書', '書写']) {
+    if (hoursData[sub]) {
+      if (!hoursData['国語']) hoursData['国語'] = {};
+      for (const m in hoursData[sub]) {
+        if (!hoursData['国語'][m]) hoursData['国語'][m] = 0;
+        hoursData['国語'][m] += hoursData[sub][m];
+      }
+      delete hoursData[sub];
+    }
+  }
+}
+
+/**
+ * 単純カウントオブジェクトの教科名を集約します。
+ * - 「学活」→「特活」にリネーム
+ * - 「図書」「書写」→「国語」に合算
+ * @param {Object} counts { "教科名": number, ... }
+ */
+function aggregateSubjectCounts_(counts) {
+  // 学活 → 特活
+  if (counts['学活']) {
+    if (!counts['特活']) counts['特活'] = 0;
+    counts['特活'] += counts['学活'];
+    delete counts['学活'];
+  }
+  // 図書・書写 → 国語
+  for (const sub of ['図書', '書写']) {
+    if (counts[sub]) {
+      if (!counts['国語']) counts['国語'] = 0;
+      counts['国語'] += counts[sub];
+      delete counts[sub];
+    }
+  }
 }
 
 /**
@@ -1150,6 +1205,10 @@ function getHoursSummary(mondayStr) {
         }
       }
     }
+
+    // 表示用の教科名集約: 学活→特活、図書・書写→国語に合算
+    aggregateSubjectCounts_(weeklyCount);
+    aggregateSubjectCounts_(cumulativeCount);
 
     // 標準時数を取得
     const stdResult = getStandardHours();
