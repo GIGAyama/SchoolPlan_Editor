@@ -4873,7 +4873,9 @@
             .withSuccessHandler(function (res) {
                 if (res.success) {
                     showToast('success', '' + res.message);
-                    loadWeeklyPlan(); // 転記後、週案を再読み込み
+                    STATE.editMode = false;
+                    updateEditUI();
+                    doLoadWeeklyPlan(); // 転記後、週案を再読み込み（自動保存をスキップ）
                 } else {
                     showToast('error', 'エラー: ' + res.error);
                 }
