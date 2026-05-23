@@ -1417,7 +1417,7 @@
         // 中休み
         if (opts.recess1) {
             html += '<tr class="recess-row"><td class="row-header">中休</td>';
-            for (var i = 0; i < 5; i++) { html += '<td></td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess1) ? days[i].recess1.replace(/\\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -1434,7 +1434,7 @@
         // 昼休み
         if (opts.recess2) {
             html += '<tr class="recess-row"><td class="row-header">昼休</td>';
-            for (var i = 0; i < 5; i++) { html += '<td></td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess2) ? days[i].recess2.replace(/\\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -1507,7 +1507,7 @@
         html += '</tr>';
 
         // 中休み
-        if (opts.recess1) { html += '<tr class="recess-row"><td class="row-header">中休</td><td></td><td></td></tr>'; }
+        if (opts.recess1) { html += '<tr class="recess-row"><td class="row-header">中休</td><td>' + renderWeekendContent("recess1", 5) + '</td><td>' + renderWeekendContent("recess1", 6) + '</td></tr>'; }
 
         // 3校時
         html += '<tr><td class="row-header">3校時</td>';
@@ -1522,7 +1522,7 @@
         html += '</tr>';
 
         // 昼休み
-        if (opts.recess2) { html += '<tr class="recess-row"><td class="row-header">昼休</td><td></td><td></td></tr>'; }
+        if (opts.recess2) { html += '<tr class="recess-row"><td class="row-header">昼休</td><td>' + renderWeekendContent("recess2", 5) + '</td><td>' + renderWeekendContent("recess2", 6) + '</td></tr>'; }
 
         // 5校時
         html += '<tr><td class="row-header">5校時</td>';
