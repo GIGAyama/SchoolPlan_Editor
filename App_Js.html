@@ -1301,9 +1301,17 @@
         if (!printFrame) {
             printFrame = document.createElement('iframe');
             printFrame.id = 'printFrame';
-            printFrame.style.display = 'none';
             document.body.appendChild(printFrame);
         }
+        // display:none だと要素がレイアウトを持たず高さ測定(scrollHeight)が0になり自動縮小が効かない。
+        // オフスクリーンに配置してレイアウトを保ちつつ画面外に隠す。横幅は印刷可能領域(A4縦, 左右10mm余白)に合わせる。
+        printFrame.style.display = 'block';
+        printFrame.style.position = 'fixed';
+        printFrame.style.left = '-9999px';
+        printFrame.style.top = '0';
+        printFrame.style.width = '190mm';
+        printFrame.style.height = '600mm';
+        printFrame.style.border = '0';
 
         var doc = printFrame.contentWindow.document;
         doc.open();
@@ -1323,9 +1331,10 @@
         html += 'table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-bottom: 0; }';
         html += 'th, td { border: 1px solid #333; padding: 3px; vertical-align: top; word-wrap: break-word; overflow: hidden; }';
         html += 'th { text-align: center; font-weight: normal; }';
-        html += '.subject { font-weight: bold; font-size: 10px; background-color: #dcedc8; padding: 2px; text-align: left; border-bottom: 1px solid #ccc; margin: -3px -3px 2px -3px; }';
-        html += '.unit { font-size: 9px; color: #555; margin-bottom: 2px; }';
-        html += '.content { font-size: 9px; line-height: 1.4; }';
+        // フォントサイズはスライダー(body font-size)に追従するよう em 指定にする（固定px だとスライダーが効かない）
+        html += '.subject { font-weight: bold; font-size: 1em; background-color: #dcedc8; padding: 2px; text-align: left; border-bottom: 1px solid #ccc; margin: -3px -3px 2px -3px; }';
+        html += '.unit { font-size: 0.9em; color: #555; margin-bottom: 2px; }';
+        html += '.content { font-size: 0.9em; line-height: 1.4; }';
         html += '.row-header { width: 35px; text-align: center; vertical-align: middle; padding: 2px; }';
         html += '.recess-row td { height: 16px; background-color: #ffe0b2; }';
         html += '.recess-row td:first-child { text-align: center; font-weight: bold; padding: 0; vertical-align: middle;}';
