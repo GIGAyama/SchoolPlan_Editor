@@ -443,6 +443,7 @@ function parseSubjectHours_(cellValue) {
  * 月別時数データ（hoursData）の教科名を集約します。
  * - 「学活」→「特活」にリネーム（入力名→表示名）
  * - 「図書」「書写」→「国語」に合算
+ * - 「中体育」「外体育」→「体育」に合算
  * @param {Object} hoursData { "教科名": { month: hours, ... }, ... }
  */
 function aggregateHoursData_(hoursData) {
@@ -466,12 +467,24 @@ function aggregateHoursData_(hoursData) {
       delete hoursData[sub];
     }
   }
+  // 中体育・外体育 → 体育
+  for (const sub of ['中体育', '外体育']) {
+    if (hoursData[sub]) {
+      if (!hoursData['体育']) hoursData['体育'] = {};
+      for (const m in hoursData[sub]) {
+        if (!hoursData['体育'][m]) hoursData['体育'][m] = 0;
+        hoursData['体育'][m] += hoursData[sub][m];
+      }
+      delete hoursData[sub];
+    }
+  }
 }
 
 /**
  * 単純カウントオブジェクトの教科名を集約します。
  * - 「学活」→「特活」にリネーム
  * - 「図書」「書写」→「国語」に合算
+ * - 「中体育」「外体育」→「体育」に合算
  * @param {Object} counts { "教科名": number, ... }
  */
 function aggregateSubjectCounts_(counts) {
@@ -486,6 +499,14 @@ function aggregateSubjectCounts_(counts) {
     if (counts[sub]) {
       if (!counts['国語']) counts['国語'] = 0;
       counts['国語'] += counts[sub];
+      delete counts[sub];
+    }
+  }
+  // 中体育・外体育 → 体育
+  for (const sub of ['中体育', '外体育']) {
+    if (counts[sub]) {
+      if (!counts['体育']) counts['体育'] = 0;
+      counts['体育'] += counts[sub];
       delete counts[sub];
     }
   }
