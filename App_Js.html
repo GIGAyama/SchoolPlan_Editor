@@ -1318,6 +1318,8 @@
         html += 'body { font-family: "Zen Maru Gothic", sans-serif; font-size: ' + opts.fontSize + 'px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
         html += '.page { width: 100%; height: 277mm; box-sizing: border-box; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; }';
         html += '.page:last-child { page-break-after: auto; }';
+        // 内容がページ高さを超える場合に比例縮小して全行を収めるためのラッパー
+        html += '.page-fit { width: 100%; height: 100%; transform-origin: top left; }';
         html += 'table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-bottom: 0; }';
         html += 'th, td { border: 1px solid #333; padding: 3px; vertical-align: top; word-wrap: break-word; overflow: hidden; }';
         html += 'th { text-align: center; font-weight: normal; }';
@@ -1663,14 +1665,55 @@
         doc.write(html);
         doc.close();
 
-        setTimeout(function () {
+        // 各ページの内容をラッパーで包み、ページ高さを超える場合のみ比例縮小して全行を印刷領域に収める
+        var fitPagesToPrintArea = function () {
+            var fdoc = printFrame.contentWindow.document;
+            var pages = fdoc.querySelectorAll('.page');
+            for (var pi = 0; pi < pages.length; pi++) {
+                var page = pages[pi];
+                if (!page.querySelector('.page-fit')) {
+                    var inner = fdoc.createElement('div');
+                    inner.className = 'page-fit';
+                    while (page.firstChild) { inner.appendChild(page.firstChild); }
+                    page.appendChild(inner);
+                }
+                var fit = page.querySelector('.page-fit');
+                // 一旦リセットしてから自然な高さを測定
+                fit.style.transform = '';
+                fit.style.width = '100%';
+                var avail = page.clientHeight;
+                var natural = fit.scrollHeight;
+                if (avail > 0 && natural > avail + 2) {
+                    var scale = avail / natural;
+                    // 縮小で横幅が縮まないよう先に横幅を広げてから比例縮小（横はページ幅いっぱいを維持）
+                    fit.style.width = (100 / scale) + '%';
+                    fit.style.transform = 'scale(' + scale + ')';
+                }
+            }
+        };
+
+        var printed = false;
+        var doPrint = function () {
+            if (printed) return;
+            printed = true;
+            try { fitPagesToPrintArea(); } catch (e) { /* 測定失敗時はそのまま印刷 */ }
             if (btn) {
                 btn.disabled = false;
                 btn.innerHTML = '<span class="material-symbols-outlined fs-6">print</span> 印刷';
             }
             printFrame.contentWindow.focus();
             printFrame.contentWindow.print();
-        }, 500);
+        };
+
+        // フォント読み込み完了後に測定（高さがフォントに依存するため）
+        var fdocReady = printFrame.contentWindow.document;
+        if (fdocReady.fonts && fdocReady.fonts.ready && typeof fdocReady.fonts.ready.then === 'function') {
+            fdocReady.fonts.ready.then(function () { setTimeout(doPrint, 150); });
+            // フォント待ちが解決しない環境向けのフォールバック
+            setTimeout(doPrint, 1500);
+        } else {
+            setTimeout(doPrint, 500);
+        }
     }
 
     // ===== 年間時数ビュー =====
