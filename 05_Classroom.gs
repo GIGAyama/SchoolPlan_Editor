@@ -57,8 +57,10 @@ function listCoursesToSheet() {
   }
 }
 
-/** 
- * データベースから翌日の予定を読み取り、Google Classroomにお知らせとして投稿します。 
+/**
+ * データベースから次の登校日の予定を読み取り、Google Classroomにお知らせとして投稿します。
+ * 本日が登校日のときのみ実行し、休みを挟む場合は休み直前の登校日に休み明けの予定を投稿します
+ * （例：金曜日に翌週月曜日の予定を投稿）。
  */
 function postScheduleToClassroom() {
   try {
@@ -70,19 +72,46 @@ function postScheduleToClassroom() {
     const courseId = getCourseIdByName(courseName);
     if (!courseId) throw new Error(`クラス「${courseName}」見つからず`);
 
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const daysOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
-    const formattedDateString = `${Utilities.formatDate(tomorrow, "JST", "yyyy/MM/dd")}（${daysOfWeek[tomorrow.getDay()]}）`;
-
     const dbCols = getDbColumns();
     const dbData = databaseSheet.getDataRange().getValues();
-    const foundRowData = dbData.find(row => row[dbCols.DATE - 1] instanceof Date && isSameDate(row[dbCols.DATE - 1], tomorrow) && row[dbCols.PERIOD1 - 1]);
 
-    if (!foundRowData) {
-      Logger.log(`明日の予定なし/1校時空欄 スキップ`);
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+
+    // 本日が登校日（1校時に予定あり）かを判定する。
+    // 休み中は投稿しない。休みに入る前の最終登校日に、休み明けの予定を投稿済みのため、
+    // ここで投稿すると同じ予定が重複して投稿されてしまう。
+    const isTodaySchoolDay = dbData.some(row =>
+      row[dbCols.DATE - 1] instanceof Date && isSameDate(row[dbCols.DATE - 1], today) && row[dbCols.PERIOD1 - 1]);
+
+    if (!isTodaySchoolDay) {
+      Logger.log(`本日は登校日ではないためスキップ`);
       return;
     }
+
+    // 本日より後で、1校時に予定が入っている最も近い登校日を探す。
+    // これにより休みを挟む場合でも、休み直前の登校日に次の登校日分が投稿される
+    // （例：金曜日に翌週月曜日の予定を投稿）。
+    let foundRowData = null;
+    let foundDateStart = null;
+    dbData.forEach(row => {
+      const cellDate = row[dbCols.DATE - 1];
+      if (!(cellDate instanceof Date) || !row[dbCols.PERIOD1 - 1]) return;
+      const cellStart = new Date(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate()).getTime();
+      if (cellStart > todayStart && (foundDateStart === null || cellStart < foundDateStart)) {
+        foundDateStart = cellStart;
+        foundRowData = row;
+      }
+    });
+
+    if (!foundRowData) {
+      Logger.log(`次の登校日の予定が見つからずスキップ`);
+      return;
+    }
+
+    const targetDate = foundRowData[dbCols.DATE - 1];
+    const daysOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
+    const formattedDateString = `${Utilities.formatDate(targetDate, "JST", "yyyy/MM/dd")}（${daysOfWeek[targetDate.getDay()]}）`;
 
     const schedule = {
       "朝学習": foundRowData[dbCols.MORNING - 1] || '',
