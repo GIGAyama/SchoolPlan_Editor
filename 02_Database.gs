@@ -272,19 +272,47 @@ function clearDatabaseDataWithConfirmation() {
 
   if (response == ui.Button.YES) {
     try {
-      const lastRow = dbSheet.getLastRow();
-      if (lastRow < 2) {
-        Browser.msgBox(`「${SHEET_NAME_DATABASE}」にクリア対象のデータがありません。`, Browser.Buttons.OK);
-        return;
-      }
-      const rangeToClear = dbSheet.getRange(2, dbCols.TIME, lastRow - 1, dbCols.AFTERSCHOOL - dbCols.TIME + 1);
-      rangeToClear.clearContent();
-      Browser.msgBox(`データベースの入力内容をクリアしました。`, Browser.Buttons.OK);
-      logInfo(`データベースクリア完了: ${rangeToClear.getA1Notation()}`);
+      const r = clearDatabaseData_core_();
+      Browser.msgBox(r.message, Browser.Buttons.OK);
     } catch (e) {
       logError("clearDatabaseDataWithConfirmation", e);
       Browser.msgBox(`クリアエラー: ${e.message}`, Browser.Buttons.OK);
     }
+  }
+}
+
+/**
+ * データベースシートの入力内容（時程〜放課後の列、2行目以降）をクリアするコアロジック。
+ * UI非依存。
+ * @returns {{cleared: boolean, message: string}}
+ */
+function clearDatabaseData_core_() {
+  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+  if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
+
+  const dbCols = getDbColumns();
+  const lastRow = dbSheet.getLastRow();
+  if (lastRow < 2) {
+    return { cleared: false, message: `「${SHEET_NAME_DATABASE}」にクリア対象のデータがありません。` };
+  }
+  const rangeToClear = dbSheet.getRange(2, dbCols.TIME, lastRow - 1, dbCols.AFTERSCHOOL - dbCols.TIME + 1);
+  rangeToClear.clearContent();
+  logInfo(`データベースクリア完了: ${rangeToClear.getA1Notation()}`);
+  return { cleared: true, message: 'データベースの入力内容をクリアしました。' };
+}
+
+/**
+ * [Webアプリ API] データベースの入力内容をクリアします（確認はフロント側で実施・結果を返す）。
+ * @returns {{success: boolean, message: string}}
+ */
+function clearDatabaseDataFromWeb() {
+  try {
+    const r = clearDatabaseData_core_();
+    return { success: true, message: r.message };
+  } catch (e) {
+    logError("clearDatabaseDataFromWeb", e);
+    return { success: false, message: `クリアエラー: ${e.message}` };
   }
 }
 

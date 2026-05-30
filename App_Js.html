@@ -6050,4 +6050,140 @@
             .deleteUnitMasterRow(rowIndex);
     }
 
+    // =========================================================
+    // ===== メンテナンス・ツール / Classroom手動投稿        =====
+    // ===== （旧スプレッドシートメニュー機能のWebボタン化） =====
+    // =========================================================
+
+    /** google.script.run を Promise 化して呼び出す薄いラッパー。 */
+    function _callServerAsync(method) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return new Promise(function (resolve, reject) {
+            var runner = google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(reject);
+            runner[method].apply(runner, args);
+        });
+    }
+
+    /** メンテナンスセクションのステータス行を更新する。 */
+    function _setMaintMsg(message, isError) {
+        var el = document.getElementById('maintenanceToast');
+        if (el) {
+            el.textContent = message || '';
+            el.style.color = isError ? 'var(--danger)' : 'var(--text-sub)';
+        }
+    }
+
+    /**
+     * ツール系ボタンの共通実行ヘルパー。
+     * 確認ダイアログ → ボタンのローディング表示 → サーバ呼び出し → トースト/ステータス更新。
+     */
+    function _runToolAction(btn, opts) {
+        function exec() {
+            var orig = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> ' + (opts.busyLabel || '実行中...');
+            }
+            function restore() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }
+            _callServerAsync.apply(null, [opts.method].concat(opts.args || []))
+                .then(function (res) {
+                    restore();
+                    var ok = !res || res.success !== false;
+                    var msg = (res && res.message) ? res.message : (ok ? '完了しました。' : '処理に失敗しました。');
+                    if (opts.toMaint) _setMaintMsg(msg, !ok);
+                    showToast(ok ? 'success' : 'error', msg);
+                    if (ok && typeof opts.onDone === 'function') opts.onDone(res);
+                })
+                .catch(function (e) {
+                    restore();
+                    var msg = '通信エラー: ' + (e && e.message ? e.message : e);
+                    if (opts.toMaint) _setMaintMsg(msg, true);
+                    showToast('error', msg);
+                });
+        }
+        if (opts.confirmText) {
+            Swal.fire({
+                title: opts.confirmTitle || '確認',
+                text: opts.confirmText,
+                icon: opts.danger ? 'warning' : 'question',
+                showCancelButton: true,
+                confirmButtonText: opts.confirmButton || '実行する',
+                cancelButtonText: 'キャンセル',
+                confirmButtonColor: opts.danger ? '#ea4335' : '#1a73e8',
+                reverseButtons: true
+            }).then(function (r) { if (r.isConfirmed) exec(); });
+        } else {
+            exec();
+        }
+    }
+
+    function postScheduleToClassroomWeb(btn) {
+        _runToolAction(btn, {
+            method: 'postScheduleToClassroomFromWeb',
+            busyLabel: '投稿中...',
+            confirmTitle: '明日の予定を投稿',
+            confirmText: '次の登校日の予定をGoogle Classroomへ投稿します。よろしいですか？',
+            confirmButton: '投稿する'
+        });
+    }
+
+    function autoPostNewsletterSheetWeb(btn) {
+        _runToolAction(btn, {
+            method: 'autoPostToClassroomFromWeb',
+            busyLabel: '投稿中...',
+            confirmTitle: '学級通信シートを投稿',
+            confirmText: '「学級通信」シートをPDF化してGoogle Classroomへ投稿します。よろしいですか？',
+            confirmButton: '投稿する'
+        });
+    }
+
+    function protectSheetsWeb(btn) {
+        _runToolAction(btn, {
+            method: 'protectSheetsFromWeb',
+            busyLabel: '保護中...',
+            toMaint: true,
+            confirmTitle: 'シート保護の実行',
+            confirmText: '「データベース」「単元マスタ」「ログ」「学級通信」シートを保護します。実行しますか？',
+            confirmButton: '保護する'
+        });
+    }
+
+    function clearDbCacheWeb(btn) {
+        _runToolAction(btn, {
+            method: 'clearDbColumnsCacheFromWeb',
+            busyLabel: 'クリア中...',
+            toMaint: true
+        });
+    }
+
+    function resetPdfProcessingWeb(btn) {
+        _runToolAction(btn, {
+            method: 'resetAllPdfProcessingFromWeb',
+            busyLabel: '停止中...',
+            toMaint: true,
+            confirmTitle: 'PDF読込処理の強制停止',
+            confirmText: '実行中のすべてのPDF読み込み処理（指導計画・行事予定）を停止し、待機状態を解除します。よろしいですか？',
+            confirmButton: '停止する'
+        });
+    }
+
+    function clearDatabaseWeb(btn) {
+        _runToolAction(btn, {
+            method: 'clearDatabaseDataFromWeb',
+            busyLabel: 'クリア中...',
+            toMaint: true,
+            danger: true,
+            confirmTitle: 'データベースのクリア',
+            confirmText: '「データベース」シートの入力内容（時程〜放課後）をすべてクリアします。この操作は元に戻せません。よろしいですか？',
+            confirmButton: 'クリアする',
+            onDone: function () {
+                if (typeof loadWeeklyPlan === 'function' && STATE && STATE.mondayStr) {
+                    try { loadWeeklyPlan(STATE.mondayStr); } catch (e) { }
+                }
+            }
+        });
+    }
+
 </script>
