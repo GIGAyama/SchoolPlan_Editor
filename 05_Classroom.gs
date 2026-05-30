@@ -113,27 +113,23 @@ function postScheduleToClassroom() {
     const daysOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
     const formattedDateString = `${Utilities.formatDate(targetDate, "JST", "yyyy/MM/dd")}（${daysOfWeek[targetDate.getDay()]}）`;
 
-    const schedule = {
-      "朝学習": foundRowData[dbCols.MORNING - 1] || '',
-      "1校時": foundRowData[dbCols.PERIOD1 - 1] || '', "単元1": foundRowData[dbCols.UNIT1 - 1] || '',
-      "2校時": foundRowData[dbCols.PERIOD2 - 1] || '', "単元2": foundRowData[dbCols.UNIT2 - 1] || '',
-      "3校時": foundRowData[dbCols.PERIOD3 - 1] || '', "単元3": foundRowData[dbCols.UNIT3 - 1] || '',
-      "4校時": foundRowData[dbCols.PERIOD4 - 1] || '', "単元4": foundRowData[dbCols.UNIT4 - 1] || '',
-      "5校時": foundRowData[dbCols.PERIOD5 - 1] || '', "単元5": foundRowData[dbCols.UNIT5 - 1] || '',
-      "6校時": foundRowData[dbCols.PERIOD6 - 1] || '', "単元6": foundRowData[dbCols.UNIT6 - 1] || '',
-      "宿題": foundRowData[dbCols.HOMEWORK - 1] || '', "持ち物": foundRowData[dbCols.ITEMS - 1] || ''
-    };
+    const cell = (key) => (foundRowData[dbCols[key] - 1] || '').toString();
 
     let postText = `${formattedDateString} の予定\n\n`;
-    if (schedule["朝学習"]) postText += `朝学習：${schedule["朝学習"]}\n`;
-    if (schedule["1校時"]) postText += `１時間目：${schedule["1校時"]} 「${schedule["単元1"] || ''}」\n`;
-    if (schedule["2校時"]) postText += `２時間目：${schedule["2校時"]} 「${schedule["単元2"] || ''}」\n`;
-    if (schedule["3校時"]) postText += `３時間目：${schedule["3校時"]} 「${schedule["単元3"] || ''}」\n`;
-    if (schedule["4校時"]) postText += `４時間目：${schedule["4校時"]} 「${schedule["単元4"] || ''}」\n`;
-    if (schedule["5校時"]) postText += `５時間目：${schedule["5校時"]} 「${schedule["単元5"] || ''}」\n`;
-    if (schedule["6校時"]) postText += `６時間目：${schedule["6校時"]} 「${schedule["単元6"] || ''}」\n`;
-    if (schedule["宿題"]) postText += `\n課題：\n${schedule["宿題"]}\n`;
-    if (schedule["持ち物"]) postText += `\n持ち物：\n${schedule["持ち物"]}\n`;
+    const morning = cell('MORNING');
+    if (morning) postText += `朝学習：${morning}\n`;
+
+    // 1〜6校時（全角の時限ラベルで出力）
+    const periodLabels = ['１', '２', '３', '４', '５', '６'];
+    for (let n = 1; n <= 6; n++) {
+      const subject = cell('PERIOD' + n);
+      if (subject) postText += `${periodLabels[n - 1]}時間目：${subject} 「${cell('UNIT' + n)}」\n`;
+    }
+
+    const homework = cell('HOMEWORK');
+    if (homework) postText += `\n課題：\n${homework}\n`;
+    const items = cell('ITEMS');
+    if (items) postText += `\n持ち物：\n${items}\n`;
 
     Classroom.Courses.Announcements.create({ text: postText.trim() }, courseId);
     logInfo(`クラス「${courseName}」へ予定投稿完了`);
