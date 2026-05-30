@@ -2,8 +2,24 @@
  * @fileoverview 単元マスタを利用した週案の自動入力・進捗管理機能
  */
 
-/** 
- * 「単元マスタ」の中から、指定された教科・単元名・時間に対応する学習活動を探し出します。 
+/**
+ * 単元セルのテキスト（例: "物語の世界 2/5"）から単元名と進捗（現在時数/総時数）を解析します。
+ * @param {*} unitText 単元セルの値
+ * @returns {{unitName: string, currentHour: number, totalHours: number}|null} 解析できなければ null
+ */
+function parseUnitProgress_(unitText) {
+  if (!unitText || typeof unitText !== 'string') return null;
+  const match = unitText.match(/(.+?)\s*(\d+)\/(\d+)/);
+  if (!match) return null;
+  return {
+    unitName: match[1].trim(),
+    currentHour: parseInt(match[2], 10),
+    totalHours: parseInt(match[3], 10)
+  };
+}
+
+/**
+ * 「単元マスタ」の中から、指定された教科・単元名・時間に対応する学習活動を探し出します。
  */
 function findActivityFromMaster_(masterData, subject, unitName, hourNum) {
   for (let i = 1; i < masterData.length; i++) {
@@ -33,17 +49,8 @@ function findLastLesson_(dbData, subject, weekStartDate) {
       // 6校時から1校時に向かって逆順に教科を検索
       for (let col = dbCols.PERIOD6 - 1; col >= dbCols.PERIOD1 - 1; col -= 3) {
         if (row[col] === subject) {
-          const unitText = row[col + 1]; // 単元名のセル
-          if (unitText && typeof unitText === 'string') {
-            const match = unitText.match(/(.+?)\s*(\d+)\/(\d+)/);
-            if (match) {
-              return {
-                unitName: match[1].trim(),
-                currentHour: parseInt(match[2], 10),
-                totalHours: parseInt(match[3], 10)
-              };
-            }
-          }
+          const parsed = parseUnitProgress_(row[col + 1]); // 単元名のセル
+          if (parsed) return parsed;
         }
       }
     }
@@ -91,17 +98,8 @@ function findLastLessonForSlot_(dbData, subject, dayOfWeek, periodIndex, weekSta
 
     // 同じスロットに同じ教科があるか
     if (row[pColIdx - 1] === subject) {
-      const unitText = row[uColIdx - 1];
-      if (unitText && typeof unitText === 'string') {
-        const match = unitText.match(/(.+?)\s*(\d+)\/(\d+)/);
-        if (match) {
-          return {
-            unitName: match[1].trim(),
-            currentHour: parseInt(match[2], 10),
-            totalHours: parseInt(match[3], 10)
-          };
-        }
-      }
+      const parsed = parseUnitProgress_(row[uColIdx - 1]);
+      if (parsed) return parsed;
     }
   }
   return null;
@@ -127,16 +125,9 @@ function findLatestUnitState_(dbData, subject, unitName, weekStartDate) {
 
     for (let col = dbCols.PERIOD6 - 1; col >= dbCols.PERIOD1 - 1; col -= 3) {
       if (row[col] === subject) {
-        const unitText = row[col + 1];
-        if (unitText && typeof unitText === 'string') {
-          const match = unitText.match(/(.+?)\s*(\d+)\/(\d+)/);
-          if (match && match[1].trim() === unitName) {
-            return {
-              unitName: unitName,
-              currentHour: parseInt(match[2], 10),
-              totalHours: parseInt(match[3], 10)
-            };
-          }
+        const parsed = parseUnitProgress_(row[col + 1]);
+        if (parsed && parsed.unitName === unitName) {
+          return { unitName: unitName, currentHour: parsed.currentHour, totalHours: parsed.totalHours };
         }
       }
     }
