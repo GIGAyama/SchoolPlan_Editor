@@ -1,5 +1,45 @@
 # コード最適化 進捗・引き継ぎメモ
 
+## 【最新セッション】全機能のWebボタン化 + UI洗練（要GAS/ブラウザ検証）
+
+### 完了（push済み）
+**Phase 1: 旧スプレッドシートメニュー専用機能のWebボタン化**
+- 各メニュー関数のコアロジックを `*_core_`（UI非依存・結果オブジェクトを返す）に抽出し、
+  Web用ラッパー `*FromWeb` を追加。**既存メニュー経路は維持（挙動不変）**。
+  - `postScheduleToClassroomFromWeb`（明日の予定投稿） / `autoPostToClassroomFromWeb`（学級通信投稿）
+  - `listCoursesFromWeb`（クラス一覧） / `clearDatabaseDataFromWeb`（DBクリア）
+  - `resetAllPdfProcessingFromWeb`（PDF処理停止） / `protectSheetsFromWeb`（シート保護）
+  - `clearDbColumnsCacheFromWeb`（キャッシュクリア）
+- `createAndSavePDF` を `getSs_()` 経由に修正（Webコンテキストで `getActiveSpreadsheet()` が
+  null を返し autoPost が壊れる問題を予防）。
+- App.html: 設定画面に「Classroom手動投稿」2ボタン＋「メンテナンス・ツール」4ボタンを追加。
+- App_Js.html: `_callServerAsync`（google.script.run の Promise化）/ `_runToolAction`
+  （確認ダイアログ＋ローディング＋トースト共通化）と各ハンドラを追加。
+- 全 .gs / App_Js.html を node --check 済み。
+
+**Phase 2: CSS デザイントークン拡充・洗練（追加のみ）**
+- `:root` にスペーシング(`--sp-*`)/タイポ(`--fs-*`)/補助色/モーション/フォーカスの
+  トークンを追加（**既存トークンの値は不変**）。
+- **実バグ修正**: `--bg-card` 未定義（575行 `.link-insert-btn` が参照）→ `:root` に
+  `--bg-card:#ffffff` 追加で解消。
+- 死蔵コメント126行（重複「ボタン」コメント）を1行に集約。
+- 仕上げ層を `</style>` 直前に追加: `:focus-visible` フォーカスリング / カスタム
+  スクロールバー / smooth scroll / `prefers-reduced-motion` 配慮。いずれも既存の
+  見た目を壊さない純粋な追加。ブレースバランス0・`<style>`1組を検証済み。
+
+### ★ユーザーに依頼したい検証（GAS/ブラウザ環境）
+1. 設定画面の新ボタン6種が正しく動作するか（特に明日の予定投稿/学級通信投稿/DBクリア）。
+2. 新トークン追加後も既存画面の見た目が不変か（特に `.link-insert-btn` の背景が白に
+   なって問題ないか）。
+3. フォーカスリング/スクロールバーの見た目。
+
+### 未着手（要視覚検証のため本環境では非実施）
+- 残り約110箇所のハードコード色のトークン化（1文字で見た目が変わるため要ブラウザ）。
+- 巨大関数の分割（`printWeeklyPlanExec` 等）、`subjectToHiragana` の外部化。
+- タブ切替トランジション、スケルトンローディング等の体験向上。
+
+---
+
 ## 目的
 GAS + スプレッドシートDB + Vanilla JS SPA の「週案エディタ」を、**現在の機能を一切変えずに**最適化する。
 重視点: 保守性・可読性 / 堅牢性・エラー耐性。範囲: フロント含む全面。
