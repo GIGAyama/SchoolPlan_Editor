@@ -6,7 +6,7 @@
  * 指定週の月～金に固定時間割をデータベースに転記します（上書き）。
  */
 function transferWeeklyTimetable(targetDate) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
   const shData = ss.getSheetByName(SHEET_NAME_DATABASE);
   if (!shData) throw new Error("データベースシートが見つかりません");
 
@@ -100,7 +100,7 @@ function processBulkTransferWithExclusion(dates) {
 
     validExclusionPeriods.forEach(p => Logger.log(`有効な除外期間: ${p.name} ${formatDate(p.start)} ～ ${formatDate(p.end)}`));
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     const shData = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!shData) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません`);
     
@@ -202,7 +202,7 @@ function processBulkTransferWithExclusion(dates) {
  */
 function getDefaultExclusionDates() {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     const databaseSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!databaseSheet) throw new Error("データベースシートが見つかりません");
     

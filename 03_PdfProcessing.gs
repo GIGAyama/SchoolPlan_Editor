@@ -192,9 +192,9 @@ ${items}
       return "0 件の予定を転記しました。";
     }
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
-    
+
     // パフォーマンス改善：DBシートを配列として取得
     const dbCols = getDbColumns();
     const dbData = dbSheet.getDataRange().getValues();
@@ -366,7 +366,8 @@ function createUnitMasterFromPdfs() {
  * 1つの指導計画PDFファイルを処理して「単元マスタ」に追記します
  */
 function processSinglePdf(file) {
-  const masterSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME_UNIT_MASTER);
+  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
   const apiKey = getApiKey_();
   const grade = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_GRADE) || '';
   const gradeContext = grade ? `対象学年は${grade}です。` : '';

@@ -33,6 +33,19 @@
   修復。**サブエージェントやgrepの結果は必ずRead/diffで実体確認すること**（前任の警告通り）。
 - 検証済み: 元ファイル(51b52d5)比で削除・変更行=0（純粋追加）、brace=0、`<style>`1組。
 
+**Phase 1.5: Web文脈で壊れる `getActiveSpreadsheet()` 直呼びの一掃**
+- Web公開関数なのに生 `getActiveSpreadsheet()` を使い、Web経由でnull落ちする
+  **潜在バグを修正**（`getSs_()` フォールバックに統一）:
+  - `getDefaultExclusionDates`（コメントに「HTML側から呼出」と明記されたWeb API）
+  - `processBulkTransferWithExclusion` / `transferWeeklyTimetable`（年間一括転記の経路）
+  - `writeToLog_`（**重要**: logInfo/logError の実体。Web経由ではログ書込が常に
+    失敗しconsole.errorに退避していた → これで正しくログシートに残る）
+  - `processEventPdf` / `processSinglePdf`（堅牢性のため統一・トリガー文脈では挙動不変）
+- 残す生呼出はメニュー専用関数(`onOpen`/`TodaysRow`/`clearDatabaseDataWithConfirmation`
+  /`createUnitMasterFromPdfs_UI`)・`getSs_()`定義本体・`doGet`のID記録のみ（いずれも
+  SS文脈が確定しており生で正しい）。toast表示はトリガー専用装飾のため変更せず。
+- 全 .gs を node --check 済み。
+
 ### ★ユーザーに依頼したい検証（GAS/ブラウザ環境）
 1. 設定画面の新ボタン6種が正しく動作するか（特に明日の予定投稿/学級通信投稿/DBクリア）。
 2. 新トークン追加後も既存画面の見た目が不変か（特に `.link-insert-btn` の背景が白に
