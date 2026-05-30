@@ -2858,6 +2858,72 @@
         background-clip: content-box;
     }
 
+    /* ===================================================================== */
+    /* ===== 主要画面の磨き込み（追加レイヤー・既存ルールは不変）        ===== */
+    /* ===================================================================== */
+
+    /* ビュー切替時の上品なフェード＆スライドイン */
+    @keyframes spnViewIn {
+        from {
+            opacity: 0;
+            transform: translateY(6px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .view.active {
+        animation: spnViewIn 0.28s var(--ease, ease) both;
+    }
+
+    /* カード系コンテナのホバー昇格（質感の統一） */
+    .integration-section {
+        box-shadow: var(--shadow-sm);
+        transition: box-shadow var(--dur, 0.2s) var(--ease, ease),
+            border-color var(--dur, 0.2s) var(--ease, ease),
+            transform var(--dur, 0.2s) var(--ease, ease);
+    }
+
+    .integration-section:hover {
+        box-shadow: var(--shadow-md);
+        border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    }
+
+    /* 見出しバーにブランドのアクセントを添える */
+    .section-header-bar h2 {
+        letter-spacing: 0.2px;
+    }
+
+    /* ナビボタンのアイコンの微動（押下フィードバックを上品に） */
+    .nav-btn {
+        transition: background var(--dur, 0.2s) var(--ease, ease),
+            color var(--dur, 0.2s) var(--ease, ease),
+            transform var(--dur-fast, 0.12s) var(--ease, ease);
+    }
+
+    .nav-btn:active {
+        transform: scale(0.96);
+    }
+
+    /* 単元マスタ等のテーブル行をなめらかに */
+    .um-table tbody tr {
+        transition: background var(--dur-fast, 0.12s) var(--ease, ease);
+    }
+
+    /* プライマリボタンの洗練されたホバー（影で浮かせる） */
+    .btn-primary {
+        transition: background var(--dur, 0.2s) var(--ease, ease),
+            box-shadow var(--dur, 0.2s) var(--ease, ease),
+            transform var(--dur-fast, 0.12s) var(--ease, ease);
+    }
+
+    .btn-primary:hover {
+        box-shadow: var(--shadow-hover);
+    }
+
     /* モーション低減を希望するユーザーへの配慮 */
     @media (prefers-reduced-motion: reduce) {
 
