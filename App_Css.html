@@ -404,6 +404,12 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        transition: width 0.25s ease;
+    }
+
+    /* 収納状態: 細い縦バーのみ表示 */
+    .weekly-task-sidebar.collapsed {
+        width: 40px;
     }
 
     .weekly-task-sidebar-header {
@@ -415,6 +421,52 @@
         display: flex;
         align-items: center;
         gap: 8px;
+    }
+
+    .weekly-task-toggle-btn {
+        flex-shrink: 0;
+        padding: 0 2px;
+        font-size: 1.1rem;
+        color: var(--text-muted, var(--text-hint));
+    }
+
+    /* 収納時はヘッダーを細く、トグルボタンのみ中央表示 */
+    .weekly-task-sidebar.collapsed .weekly-task-sidebar-header {
+        padding: 10px 0;
+        justify-content: center;
+    }
+
+    .weekly-task-sidebar.collapsed .weekly-task-sidebar-title,
+    .weekly-task-sidebar.collapsed .weekly-task-sidebar-spacer,
+    .weekly-task-sidebar.collapsed .weekly-task-add-btn,
+    .weekly-task-sidebar.collapsed .weekly-task-sidebar-content {
+        display: none;
+    }
+
+    /* 収納時の縦書きラベル */
+    .weekly-task-collapsed-label {
+        display: none;
+    }
+
+    .weekly-task-sidebar.collapsed .weekly-task-collapsed-label {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        writing-mode: vertical-rl;
+        padding: 12px 0;
+        font-weight: 700;
+        font-size: 0.8rem;
+        letter-spacing: 2px;
+        color: var(--text-muted, var(--text-hint));
+        cursor: pointer;
+        background: var(--surface-2);
+        user-select: none;
+    }
+
+    .weekly-task-sidebar.collapsed .weekly-task-collapsed-label:hover {
+        color: var(--primary);
     }
 
     .weekly-task-sidebar-content {
@@ -2748,6 +2800,24 @@
             max-height: 200px;
             border-left: none !important;
             border-top: 1px solid var(--border);
+        }
+
+        /* モバイル収納時はヘッダーバー(タイトル付き)のみ表示。縦書きラベルは使わない */
+        .weekly-task-sidebar.collapsed {
+            max-height: none;
+        }
+
+        .weekly-task-sidebar.collapsed .weekly-task-sidebar-header {
+            justify-content: flex-start;
+            padding: 10px 16px;
+        }
+
+        .weekly-task-sidebar.collapsed .weekly-task-sidebar-title {
+            display: flex;
+        }
+
+        .weekly-task-sidebar.collapsed .weekly-task-collapsed-label {
+            display: none;
         }
 
         /* グリッド最小幅 */

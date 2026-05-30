@@ -67,7 +67,34 @@
         loadAnnualHoursView();
         loadSettingsView();
         loadTasks(); // タスクをページ読み込み時に初期ロード（デフォルトでリスト表示）
+        restoreTaskSidebarState(); // 週案タスクサイドバーの開閉状態を復元（デフォルトは収納）
     };
+
+    // ===== 週案タスクサイドバーの展開・収納 =====
+    function toggleTaskSidebar() {
+        var sidebar = document.getElementById('weeklyTaskSidebar');
+        if (!sidebar) return;
+        var collapsed = sidebar.classList.toggle('collapsed');
+        updateTaskSidebarToggleIcon(collapsed);
+        try { localStorage.setItem('weeklyTaskSidebarCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+    }
+
+    function updateTaskSidebarToggleIcon(collapsed) {
+        var icon = document.getElementById('taskSidebarToggleIcon');
+        // 右側のサイドバーなので、収納時は「開く(左向き)」、展開時は「閉じる(右向き)」を表示
+        if (icon) icon.textContent = collapsed ? 'chevron_left' : 'chevron_right';
+    }
+
+    function restoreTaskSidebarState() {
+        var sidebar = document.getElementById('weeklyTaskSidebar');
+        if (!sidebar) return;
+        var stored = null;
+        try { stored = localStorage.getItem('weeklyTaskSidebarCollapsed'); } catch (e) {}
+        // 未設定（初回）の場合は収納をデフォルトとする
+        var collapsed = (stored === null) ? true : (stored === '1');
+        sidebar.classList.toggle('collapsed', collapsed);
+        updateTaskSidebarToggleIcon(collapsed);
+    }
 
     // ===== ブラウザ閉じ/リロード時の警告 =====
     window.addEventListener('beforeunload', function (e) {

@@ -148,14 +148,23 @@
                     </div>
                 </div>
 
-                <!-- 今週のタスクサイドバー -->
-                <div class="weekly-task-sidebar">
+                <!-- 今週のタスクサイドバー（展開・収納可能） -->
+                <div id="weeklyTaskSidebar" class="weekly-task-sidebar collapsed">
                     <div class="weekly-task-sidebar-header">
-                        <span class="d-flex align-items-center gap-1"><span
+                        <button class="btn-icon weekly-task-toggle-btn" onclick="toggleTaskSidebar()"
+                            title="タスクパネルを開閉">
+                            <span class="material-symbols-outlined"
+                                id="taskSidebarToggleIcon">chevron_left</span>
+                        </button>
+                        <span class="weekly-task-sidebar-title d-flex align-items-center gap-1"><span
                                 class="material-symbols-outlined fs-6">task_alt</span> 今週のタスク</span>
-                        <div style="flex:1"></div>
-                        <button class="btn-icon" onclick="showManualTaskInput()"
+                        <div class="weekly-task-sidebar-spacer" style="flex:1"></div>
+                        <button class="btn-icon weekly-task-add-btn" onclick="showManualTaskInput()"
                             style="font-size:1.1rem; padding:0 4px; color:var(--primary);" title="タスクを追加">+</button>
+                    </div>
+                    <!-- 収納時に表示する縦書きラベル（クリックで展開） -->
+                    <div class="weekly-task-collapsed-label" onclick="toggleTaskSidebar()" title="タスクパネルを開く">
+                        <span class="material-symbols-outlined fs-6">task_alt</span> 今週のタスク
                     </div>
                     <div id="sidebarTaskList" class="weekly-task-sidebar-content">
                         <!-- JSで動的にタスクを描画 -->
