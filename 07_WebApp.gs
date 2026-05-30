@@ -913,7 +913,17 @@ function protectSheets() {
     return;
   }
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const results = protectSheets_core_();
+  ui.alert('完了', results.join('\n'), ui.ButtonSet.OK);
+  logInfo('シート保護完了:\n' + results.join('\n'));
+}
+
+/**
+ * 主要シートを保護するコアロジック。UI非依存。処理結果メッセージの配列を返します。
+ * @returns {string[]}
+ */
+function protectSheets_core_() {
+  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
   const results = [];
 
   const sheetsToProtect = [
@@ -945,8 +955,36 @@ function protectSheets() {
     }
   });
 
-  ui.alert('完了', results.join('\n'), ui.ButtonSet.OK);
-  logInfo('シート保護完了:\n' + results.join('\n'));
+  return results;
+}
+
+/**
+ * [Webアプリ API] 主要シートを保護します（確認はフロント側で実施・結果を返す）。
+ * @returns {{success: boolean, message: string}}
+ */
+function protectSheetsFromWeb() {
+  try {
+    const results = protectSheets_core_();
+    logInfo('シート保護完了(Web):\n' + results.join('\n'));
+    return { success: true, message: results.join('\n') };
+  } catch (e) {
+    logError("protectSheetsFromWeb", e);
+    return { success: false, message: `シート保護エラー: ${e.message}` };
+  }
+}
+
+/**
+ * [Webアプリ API] データベース列構成等のキャッシュをクリアします（結果を返す）。
+ * @returns {{success: boolean, message: string}}
+ */
+function clearDbColumnsCacheFromWeb() {
+  try {
+    clearDbColumnsCache();
+    return { success: true, message: 'DB列等のキャッシュをクリアしました。' };
+  } catch (e) {
+    logError("clearDbColumnsCacheFromWeb", e);
+    return { success: false, message: `キャッシュクリアエラー: ${e.message}` };
+  }
 }
 
 // ===================================================

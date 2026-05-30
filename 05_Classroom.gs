@@ -64,6 +64,32 @@ function listCoursesToSheet() {
  */
 function postScheduleToClassroom() {
   try {
+    postScheduleToClassroom_core_();
+  } catch (error) {
+    logError("postScheduleToClassroom", error);
+  }
+}
+
+/**
+ * [Webアプリ API] 「明日（次の登校日）の予定」をClassroomへ投稿します。
+ * メニュー版（postScheduleToClassroom）と同一ロジックを用い、UIに依存せず結果を返します。
+ * @returns {{success: boolean, posted: boolean, message: string}}
+ */
+function postScheduleToClassroomFromWeb() {
+  try {
+    return postScheduleToClassroom_core_();
+  } catch (error) {
+    logError("postScheduleToClassroomFromWeb", error);
+    return { success: false, posted: false, message: error.message };
+  }
+}
+
+/**
+ * 次の登校日の予定をClassroomへ投稿するコアロジック。
+ * UI非依存。スキップ時/投稿時を表す結果オブジェクトを返し、異常時は例外を送出します。
+ * @returns {{success: boolean, posted: boolean, message: string}}
+ */
+function postScheduleToClassroom_core_() {
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     const databaseSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!databaseSheet) throw new Error("データベースシートが見つかりません");
@@ -86,7 +112,7 @@ function postScheduleToClassroom() {
 
     if (!isTodaySchoolDay) {
       Logger.log(`本日は登校日ではないためスキップ`);
-      return;
+      return { success: true, posted: false, message: '本日は登校日ではないため投稿をスキップしました。' };
     }
 
     // 本日より後で、1校時に予定が入っている最も近い登校日を探す。
@@ -106,7 +132,7 @@ function postScheduleToClassroom() {
 
     if (!foundRowData) {
       Logger.log(`次の登校日の予定が見つからずスキップ`);
-      return;
+      return { success: true, posted: false, message: '次の登校日の予定が見つからないため投稿をスキップしました。' };
     }
 
     const targetDate = foundRowData[dbCols.DATE - 1];
@@ -133,9 +159,7 @@ function postScheduleToClassroom() {
 
     Classroom.Courses.Announcements.create({ text: postText.trim() }, courseId);
     logInfo(`クラス「${courseName}」へ予定投稿完了`);
-  } catch (error) {
-    logError("postScheduleToClassroom", error);
-  }
+    return { success: true, posted: true, message: `クラス「${courseName}」へ ${formattedDateString} の予定を投稿しました。` };
 }
 
 /** 
@@ -172,14 +196,67 @@ function getCourseIdByName(courseName) {
  */
 function autoPostToClassroom() {
   try {
+    autoPostToClassroom_core_();
+  } catch (error) {
+    logError("autoPostToClassroom", error);
+  }
+}
+
+/**
+ * [Webアプリ API] 「学級通信」シートをPDF化しClassroomへ投稿します（UI非依存・結果を返す）。
+ * @returns {{success: boolean, message: string}}
+ */
+function autoPostToClassroomFromWeb() {
+  try {
+    const r = autoPostToClassroom_core_();
+    return { success: true, message: r.message };
+  } catch (error) {
+    logError("autoPostToClassroomFromWeb", error);
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * 「学級通信」シートをPDF化してClassroomへ投稿するコアロジック。
+ * @returns {{message: string}}
+ */
+function autoPostToClassroom_core_() {
     // 設定はスクリプトプロパティ経由で取得
     const classroomName = getCourseNameSafe_();
     const pdfFile = createAndSavePDF(SHEET_NAME_NEWSLETTER);
     if (!pdfFile) throw new Error("PDF作成/保存失敗");
     postToClassroomStream(classroomName, pdfFile);
     logInfo(`「${SHEET_NAME_NEWSLETTER}」PDFをクラス「${classroomName}」に投稿完了`);
-  } catch (error) {
-    logError("autoPostToClassroom", error);
+    return { message: `「${SHEET_NAME_NEWSLETTER}」のPDFをクラス「${classroomName}」へ投稿しました。` };
+}
+
+/**
+ * [Webアプリ API] 連携可能なClassroomクラスの一覧を取得します（UI非依存・結果を返す）。
+ * メニュー版 listCoursesToSheet のWeb対応版。
+ * @returns {{success: boolean, message: string, courses: string[]}}
+ */
+function listCoursesFromWeb() {
+  try {
+    let courses = [];
+    let pageToken = null;
+    do {
+      const response = Classroom.Courses.list({ pageSize: 100, courseStates: ['ACTIVE'], pageToken: pageToken });
+      if (response.courses) {
+        courses = courses.concat(response.courses);
+      }
+      pageToken = response.nextPageToken;
+    } while (pageToken);
+
+    const names = courses.map(c => c.name);
+    logInfo('クラス一覧(Web): ' + names.join(', '));
+    return {
+      success: true,
+      courses: names,
+      message: names.length ? `${names.length}件のクラスを取得しました。` : '有効なクラスが見つかりませんでした。'
+    };
+  } catch (e) {
+    logError("listCoursesFromWeb", e);
+    return { success: false, courses: [], message: `クラス一覧取得エラー: ${e.message}` };
   }
 }
 
@@ -188,7 +265,7 @@ function autoPostToClassroom() {
  */
 function createAndSavePDF(sheetName) {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(sheetName);
     if (!sheet) throw new Error(`シート「${sheetName}」見つからず`);
     const formattedDate = Utilities.formatDate(new Date(), "JST", "yyyyMMdd");

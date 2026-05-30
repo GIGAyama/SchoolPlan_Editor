@@ -19,6 +19,87 @@
         --shadow: 0 1px 3px rgba(60, 64, 67, .15), 0 1px 2px rgba(60, 64, 67, .1);
         --shadow-md: 0 4px 12px rgba(60, 64, 67, .15);
         --header-h: 60px;
+
+        /* --- 拡張トークン（既存値は維持し追加のみ） --- */
+        --primary-hover: #1b66c8;
+        --secondary-dark: #137746;
+        --danger-light: #fce8e6;
+        --warning-light: #fef7e0;
+        --success-light: #e6f4ea;
+        --bg-card: #ffffff;
+        --surface-hover: #f1f3f4;
+        --overlay: rgba(32, 33, 36, 0.5);
+
+        --sp-1: 4px;
+        --sp-2: 8px;
+        --sp-3: 12px;
+        --sp-4: 16px;
+        --sp-5: 20px;
+        --sp-6: 24px;
+        --sp-8: 32px;
+
+        --radius-lg: 16px;
+        --radius-pill: 999px;
+
+        --shadow-sm: 0 1px 2px rgba(60, 64, 67, .1);
+        --shadow-lg: 0 8px 24px rgba(60, 64, 67, .18), 0 2px 6px rgba(60, 64, 67, .08);
+        --shadow-hover: 0 4px 16px rgba(26, 115, 232, .18);
+
+        --fs-xs: 0.72rem;
+        --fs-sm: 0.82rem;
+        --fs-md: 0.9rem;
+        --fs-lg: 1rem;
+        --fs-xl: 1.25rem;
+        --fs-2xl: 1.6rem;
+
+        --ease: cubic-bezier(0.4, 0, 0.2, 1);
+        --dur-fast: 0.12s;
+        --dur: 0.2s;
+
+        --focus-ring: 0 0 0 3px rgba(26, 115, 232, 0.35);
+    }
+
+    /* ===== ダークモード（自動 + 手動 data-theme 上書き対応） ===== */
+    @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+            --primary-light: #1f2a3d;
+            --surface: #1e1f22;
+            --surface-2: #16171a;
+            --surface-3: #26282c;
+            --border: #3c4043;
+            --text-main: #e3e3e6;
+            --text-sub: #b0b3b8;
+            --text-hint: #80868b;
+            --bg-card: #1e1f22;
+            --surface-hover: #2a2c30;
+            --overlay: rgba(0, 0, 0, 0.6);
+            --danger-light: #3a1e1c;
+            --warning-light: #3a3320;
+            --success-light: #1b2e22;
+            --shadow: 0 1px 3px rgba(0, 0, 0, .5), 0 1px 2px rgba(0, 0, 0, .4);
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, .5);
+            --shadow-lg: 0 8px 24px rgba(0, 0, 0, .6), 0 2px 6px rgba(0, 0, 0, .4);
+        }
+    }
+
+    :root[data-theme="dark"] {
+        --primary-light: #1f2a3d;
+        --surface: #1e1f22;
+        --surface-2: #16171a;
+        --surface-3: #26282c;
+        --border: #3c4043;
+        --text-main: #e3e3e6;
+        --text-sub: #b0b3b8;
+        --text-hint: #80868b;
+        --bg-card: #1e1f22;
+        --surface-hover: #2a2c30;
+        --overlay: rgba(0, 0, 0, 0.6);
+        --danger-light: #3a1e1c;
+        --warning-light: #3a3320;
+        --success-light: #1b2e22;
+        --shadow: 0 1px 3px rgba(0, 0, 0, .5), 0 1px 2px rgba(0, 0, 0, .4);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, .5);
+        --shadow-lg: 0 8px 24px rgba(0, 0, 0, .6), 0 2px 6px rgba(0, 0, 0, .4);
     }
 
     body {
@@ -2706,6 +2787,153 @@
         footer.giga-footer {
             font-size: 0.7rem;
             padding: 6px 0;
+        }
+    }
+
+    /* ===================================================================== */
+    /* ===== 仕上げ・洗練レイヤー（追加のみ・既存ルールは不変）          ===== */
+    /* ===================================================================== */
+
+    html {
+        scroll-behavior: smooth;
+    }
+
+    /* キーボード操作時のみ表示されるアクセシブルなフォーカスリング
+       （マウス操作の見た目には影響しない） */
+    a:focus-visible,
+    button:focus-visible,
+    .btn:focus-visible,
+    .nav-btn:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    [tabindex]:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
+        border-radius: var(--radius-sm);
+    }
+
+    /* ボタンの上品なマイクロインタラクション（押下時の沈み込み） */
+    .btn:active {
+        transform: translateY(1px);
+    }
+
+    /* テーマ切替トグル（ヘッダー右端の丸ボタン） */
+    .nav-btn.theme-toggle {
+        width: 36px;
+        padding: 0;
+        justify-content: center;
+        border-radius: 50%;
+        margin-left: 4px;
+    }
+
+    .nav-btn.theme-toggle .material-symbols-outlined {
+        font-size: 1.15rem;
+    }
+
+    /* 洗練されたカスタムスクロールバー */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--text-hint) transparent;
+    }
+
+    ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: rgba(154, 160, 166, 0.55);
+        border-radius: var(--radius-pill);
+        border: 2px solid transparent;
+        background-clip: content-box;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(95, 99, 104, 0.7);
+        background-clip: content-box;
+    }
+
+    /* ===================================================================== */
+    /* ===== 主要画面の磨き込み（追加レイヤー・既存ルールは不変）        ===== */
+    /* ===================================================================== */
+
+    /* ビュー切替時の上品なフェード＆スライドイン */
+    @keyframes spnViewIn {
+        from {
+            opacity: 0;
+            transform: translateY(6px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .view.active {
+        animation: spnViewIn 0.28s var(--ease, ease) both;
+    }
+
+    /* カード系コンテナのホバー昇格（質感の統一） */
+    .integration-section {
+        box-shadow: var(--shadow-sm);
+        transition: box-shadow var(--dur, 0.2s) var(--ease, ease),
+            border-color var(--dur, 0.2s) var(--ease, ease),
+            transform var(--dur, 0.2s) var(--ease, ease);
+    }
+
+    .integration-section:hover {
+        box-shadow: var(--shadow-md);
+        border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    }
+
+    /* 見出しバーにブランドのアクセントを添える */
+    .section-header-bar h2 {
+        letter-spacing: 0.2px;
+    }
+
+    /* ナビボタンのアイコンの微動（押下フィードバックを上品に） */
+    .nav-btn {
+        transition: background var(--dur, 0.2s) var(--ease, ease),
+            color var(--dur, 0.2s) var(--ease, ease),
+            transform var(--dur-fast, 0.12s) var(--ease, ease);
+    }
+
+    .nav-btn:active {
+        transform: scale(0.96);
+    }
+
+    /* 単元マスタ等のテーブル行をなめらかに */
+    .um-table tbody tr {
+        transition: background var(--dur-fast, 0.12s) var(--ease, ease);
+    }
+
+    /* プライマリボタンの洗練されたホバー（影で浮かせる） */
+    .btn-primary {
+        transition: background var(--dur, 0.2s) var(--ease, ease),
+            box-shadow var(--dur, 0.2s) var(--ease, ease),
+            transform var(--dur-fast, 0.12s) var(--ease, ease);
+    }
+
+    .btn-primary:hover {
+        box-shadow: var(--shadow-hover);
+    }
+
+    /* モーション低減を希望するユーザーへの配慮 */
+    @media (prefers-reduced-motion: reduce) {
+
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.001ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.001ms !important;
+            scroll-behavior: auto !important;
         }
     }
 </style>

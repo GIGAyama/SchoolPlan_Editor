@@ -62,6 +62,11 @@
                 <button class="nav-btn" data-view="settings" onclick="switchView('settings')">
                     <span class="material-symbols-outlined">settings</span> 設定
                 </button>
+                <button class="nav-btn theme-toggle" id="themeToggleBtn" type="button"
+                        title="表示テーマを切り替え（自動／ライト／ダーク）" aria-label="表示テーマを切り替え"
+                        onclick="cycleTheme()">
+                    <span class="material-symbols-outlined" id="themeToggleIcon">brightness_auto</span>
+                </button>
             </nav>
         </header>
 
@@ -381,6 +386,10 @@
                                         style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
                                 </div>
                             </div>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:14px;">
+                                <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="postScheduleToClassroomWeb(this)"><span class="material-symbols-outlined fs-6">send</span> 明日の予定を投稿</button>
+                                <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="autoPostNewsletterSheetWeb(this)"><span class="material-symbols-outlined fs-6">picture_as_pdf</span> 学級通信シートを投稿</button>
+                            </div>
                         </div>
 
                         <!-- フォルダ設定 -->
@@ -604,6 +613,28 @@
                                     class="material-symbols-outlined fs-6"
                                     style="vertical-align:text-bottom;">save</span> 保存</button>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- メンテナンス・ツール -->
+            <div style="padding: 0 20px 20px;">
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">build</span></span>
+                        <span class="integration-title">メンテナンス・ツール</span>
+                    </div>
+                    <div class="integration-body">
+                        <p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:12px">
+                            これまでスプレッドシートのメニューからのみ実行できた管理操作を、すべてこの画面から実行できます。一部の操作は元に戻せないため、実行前に確認が表示されます。
+                        </p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;">
+                            <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="protectSheetsWeb(this)"><span class="material-symbols-outlined fs-6">lock</span> シート保護を実行</button>
+                            <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="clearDbCacheWeb(this)"><span class="material-symbols-outlined fs-6">cached</span> DB列等のキャッシュをクリア</button>
+                            <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="resetPdfProcessingWeb(this)"><span class="material-symbols-outlined fs-6">stop_circle</span> PDF読込処理を強制停止</button>
+                            <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="clearDatabaseWeb(this)" style="color:var(--danger);border-color:var(--danger);"><span class="material-symbols-outlined fs-6">delete_sweep</span> データベースの入力内容をクリア</button>
+                        </div>
+                        <div id="maintenanceToast" style="margin-top:10px;font-size:0.8rem;color:var(--text-sub);"></div>
                     </div>
                 </div>
             </div>

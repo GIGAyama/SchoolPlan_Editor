@@ -530,6 +530,22 @@ function resetEventPdfProcessing() {
   logInfo("行事予定PDF処理のキューとトリガーをリセットしました。");
 }
 
+/**
+ * [Webアプリ API] 実行中のすべてのPDF読み込み処理（指導計画・行事予定）を停止します。
+ * 確認はフロント側で実施。UI非依存で結果を返します。
+ * @returns {{success: boolean, message: string}}
+ */
+function resetAllPdfProcessingFromWeb() {
+  try {
+    resetUnitMasterProcessing();
+    resetEventPdfProcessing();
+    return { success: true, message: 'すべてのPDF読み込み処理を停止しました。' };
+  } catch (e) {
+    logError("resetAllPdfProcessingFromWeb", e);
+    return { success: false, message: `停止処理エラー: ${e.message}` };
+  }
+}
+
 // ===================================================
 // ===== Webアプリ用データ連携 API (Phase 4 Step 2) =====
 // ===================================================
