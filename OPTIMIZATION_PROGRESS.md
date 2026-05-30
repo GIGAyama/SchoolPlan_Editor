@@ -46,11 +46,22 @@ PDF読込(メニュー&Web) / 単元自動入力
 - 視覚検証不能のため、CSSは「証明可能に無害」と確信できる変更のみ。変数化・!important削減・
   色/フォント統合はユーザーがテスト可能な環境で行うべき（1文字で見た目が変わる）。
 
+## Phase 5 着手済み（push済み）
+5. `(次コミット)` **散在グローバルの STATE 集約 第1弾**（App_Js.html）。
+   遅延ロード制御フラグ／キャッシュ 8個を `STATE` のフィールドへ移動し、全参照を
+   `STATE.X` に置換: `timetableLoaded` `vacationDatesLoaded` `stdHoursLoaded`
+   `umDataLoaded` `isSystemSettingsLoaded` `geminiModelsCache` `taskDataLoaded` `taskLoading`。
+   - 手順: ①`var`宣言削除 → ②全参照を `STATE.X` に一括置換（8識別子は互いに非部分文字列、
+     他HTMLからの参照なしを確認）→ ③STATE定義に8フィールド追加（置換後に追加し二重前置を回避）。
+   - 検証: 裸の参照はSTATE定義8行のみ／残存`var`宣言ゼロ／`node --check` OK（6068行）。
+   - **等価性**: 各読み書きが同名 `STATE.X` になり初期値も一致。STATEは先頭`const`で全関数から
+     到達可能、使用は全て onload 以降のため初期化順も問題なし＝入出力等価。
+
 ## 残作業（未着手）
-### Phase 5: フロント App_Js.html（6069行、最大・最重要、要GAS検証）
+### Phase 5 続き: フロント App_Js.html（6069行、要GAS検証）
 分析結果の要点（信頼度中。Read/grepで再確認推奨）:
-- 散在グローバル変数を `STATE` へ統合: `stdHoursLoaded/stdHoursData`, `geminiModelsCache`,
-  `taskDataLoaded/taskLoading`, `umDataLoaded/umAllRows/umEditingRowIndex` 等
+- **散在グローバルの STATE 集約 第2弾（未着手）**: データ配列系 `stdHoursData`,
+  `umAllRows/umEditingRowIndex` 等（フラグより参照が多く要慎重）
 - `google.script.run` 呼び出し約57箇所 → `_serverCall(fn, handlers)` ラッパー化
 - ボタン無効化/再有効化の重複 → `_withButtonState(btn, asyncFn)`
 - 巨大関数の分割: `printWeeklyPlanExec()`(約434行), `renderWeekGrid()`
