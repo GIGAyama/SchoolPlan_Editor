@@ -304,20 +304,14 @@ function batchAutoFillFromWeek(baseMondayStr) {
     // 初期化済み教科の追跡
     const initializedSubjects = new Set();
 
-    // DB列マッピング（6校時分）
+    // DB列マッピング（6校時分）。校時/単元/学習内容の3列が揃っているものだけを対象にする。
     const periodCols = [];
-    if (dbCols.PERIOD1 && dbCols.UNIT1 && dbCols.CONTENT1)
-      periodCols.push({ subj: dbCols.PERIOD1, unit: dbCols.UNIT1, content: dbCols.CONTENT1, idx: 0 });
-    if (dbCols.PERIOD2 && dbCols.UNIT2 && dbCols.CONTENT2)
-      periodCols.push({ subj: dbCols.PERIOD2, unit: dbCols.UNIT2, content: dbCols.CONTENT2, idx: 1 });
-    if (dbCols.PERIOD3 && dbCols.UNIT3 && dbCols.CONTENT3)
-      periodCols.push({ subj: dbCols.PERIOD3, unit: dbCols.UNIT3, content: dbCols.CONTENT3, idx: 2 });
-    if (dbCols.PERIOD4 && dbCols.UNIT4 && dbCols.CONTENT4)
-      periodCols.push({ subj: dbCols.PERIOD4, unit: dbCols.UNIT4, content: dbCols.CONTENT4, idx: 3 });
-    if (dbCols.PERIOD5 && dbCols.UNIT5 && dbCols.CONTENT5)
-      periodCols.push({ subj: dbCols.PERIOD5, unit: dbCols.UNIT5, content: dbCols.CONTENT5, idx: 4 });
-    if (dbCols.PERIOD6 && dbCols.UNIT6 && dbCols.CONTENT6)
-      periodCols.push({ subj: dbCols.PERIOD6, unit: dbCols.UNIT6, content: dbCols.CONTENT6, idx: 5 });
+    for (let n = 1; n <= 6; n++) {
+      const subj = dbCols['PERIOD' + n], unit = dbCols['UNIT' + n], content = dbCols['CONTENT' + n];
+      if (subj && unit && content) {
+        periodCols.push({ subj: subj, unit: unit, content: content, idx: n - 1 });
+      }
+    }
 
     let updatedCells = 0;
     let isModified = false;

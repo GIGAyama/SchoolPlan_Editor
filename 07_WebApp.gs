@@ -96,14 +96,13 @@ function getWeeklyPlanData(mondayDateStr) {
         dayLabel: DAY_LABELS[i],
         event: row ? (row[dbCols.EVENT - 1] || '') : '',
         morning: row ? (row[dbCols.MORNING - 1] || '') : '',
-        periods: row ? [
-          { subject: row[dbCols.PERIOD1 - 1] || '', unit: row[dbCols.UNIT1 - 1] || '', content: row[dbCols.CONTENT1 - 1] || '' },
-          { subject: row[dbCols.PERIOD2 - 1] || '', unit: row[dbCols.UNIT2 - 1] || '', content: row[dbCols.CONTENT2 - 1] || '' },
-          { subject: row[dbCols.PERIOD3 - 1] || '', unit: row[dbCols.UNIT3 - 1] || '', content: row[dbCols.CONTENT3 - 1] || '' },
-          { subject: row[dbCols.PERIOD4 - 1] || '', unit: row[dbCols.UNIT4 - 1] || '', content: row[dbCols.CONTENT4 - 1] || '' },
-          { subject: row[dbCols.PERIOD5 - 1] || '', unit: row[dbCols.UNIT5 - 1] || '', content: row[dbCols.CONTENT5 - 1] || '' },
-          { subject: row[dbCols.PERIOD6 - 1] || '', unit: row[dbCols.UNIT6 - 1] || '', content: row[dbCols.CONTENT6 - 1] || '' },
-        ] : Array(6).fill({ subject: '', unit: '', content: '' }),
+        periods: row
+          ? [1, 2, 3, 4, 5, 6].map(n => ({
+              subject: row[dbCols['PERIOD' + n] - 1] || '',
+              unit: row[dbCols['UNIT' + n] - 1] || '',
+              content: row[dbCols['CONTENT' + n] - 1] || ''
+            }))
+          : [1, 2, 3, 4, 5, 6].map(() => ({ subject: '', unit: '', content: '' })),
         recess1: row ? (row[dbCols.RECESS1 - 1] || '') : '',
         recess2: row ? (row[dbCols.RECESS2 - 1] || '') : '',
         afterschool: row ? (row[dbCols.AFTERSCHOOL - 1] || '') : '',
