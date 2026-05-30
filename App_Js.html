@@ -30,7 +30,15 @@
         isSystemSettingsLoaded: false, // システム設定 読込済み
         geminiModelsCache: null,       // Geminiモデル一覧キャッシュ
         taskDataLoaded: false,         // タスク初期ロード済み
-        taskLoading: false             // タスク二重呼び出し防止フラグ
+        taskLoading: false,            // タスク二重呼び出し防止フラグ
+        // 各ビューの作業データ／編集状態（旧・散在グローバルを集約）
+        pickerApiLoaded: false,        // Google Picker API 読込済み
+        currentPickerType: null,       // 現在開いている Picker の種別
+        stdHoursData: [],              // 教科別標準時数の作業データ
+        allTaskData: [],               // タスク一覧の作業データ
+        aiPreviewTasks: [],            // AI抽出タスクのプレビュー
+        umAllRows: [],                 // 単元マスタ 全行データ
+        umEditingRowIndex: null        // 単元マスタ 編集中の行（シート行番号）
     };
 
     // UX: 行定義（セルナビゲーション用）
@@ -4567,19 +4575,17 @@
     }
 
     // ===== データ連携 (Google Picker 追加機能) =====
-    var pickerApiLoaded = false;
-    var currentPickerType = null;
 
     function openGooglePicker(type) {
-        currentPickerType = type;
+        STATE.currentPickerType = type;
         showToast('info', 'Google Driveに接続中...');
         google.script.run
             .withSuccessHandler(function (res) {
                 if (res.success && res.token) {
-                    if (!pickerApiLoaded) {
+                    if (!STATE.pickerApiLoaded) {
                         gapi.load('picker', {
                             callback: function () {
-                                pickerApiLoaded = true;
+                                STATE.pickerApiLoaded = true;
                                 createPicker(res.token);
                             }
                         });
@@ -4606,7 +4612,7 @@
             .setOAuthToken(oauthToken)
             .setCallback(pickerCallback)
             .setOrigin('https://script.google.com')
-            .setTitle(currentPickerType === 'unit' ? '指導計画PDFを選択' : '行事予定PDFを選択')
+            .setTitle(STATE.currentPickerType === 'unit' ? '指導計画PDFを選択' : '行事予定PDFを選択')
             .build();
 
         picker.setVisible(true);
@@ -4615,7 +4621,7 @@
     async function pickerCallback(data) {
         if (data.action === google.picker.Action.PICKED) {
             var fileIds = data.docs.map(function (doc) { return doc.id; });
-            var type = currentPickerType;
+            var type = STATE.currentPickerType;
 
             if (fileIds.length === 0) return;
             var swalResult = await Swal.fire({
@@ -5005,13 +5011,12 @@
     }
 
     // ===== 教科別標準時数エディタ =====
-    var stdHoursData = [];
 
     function loadStandardHours() {
         google.script.run
             .withSuccessHandler(function (res) {
                 if (res.success) {
-                    stdHoursData = res.data;
+                    STATE.stdHoursData = res.data;
                     renderStdHoursEditor(res.data);
                     STATE.stdHoursLoaded = true;
                 } else {
@@ -5051,7 +5056,7 @@
             .withSuccessHandler(function (res) {
                 if (res.success) {
                     showToast('success', '' + res.message);
-                    stdHoursData = data;
+                    STATE.stdHoursData = data;
                 } else {
                     showToast('error', 'エラー: ' + res.error);
                 }
@@ -5232,7 +5237,7 @@
                                     STATE.grade = parseInt(newGrade, 10) || 3;
                                     showToast('success', r.message);
                                     // 標準時数エディタの内容も再描画する
-                                    stdHoursData = r.data;
+                                    STATE.stdHoursData = r.data;
                                     renderStdHoursEditor(r.data);
                                 } else {
                                     showToast('error', 'エラー: ' + r.error);
@@ -5370,7 +5375,6 @@
     }
 
     // ===== タスクロードと描画 =====
-    let allTaskData = [];
 
     function loadTasks() {
         if (STATE.taskLoading) return; // 二重呼び出し防止
@@ -5382,8 +5386,8 @@
             .withSuccessHandler(function (res) {
                 STATE.taskLoading = false;
                 if (res.success) {
-                    allTaskData = res.tasks || [];
-                    STATE.tasks = allTaskData;
+                    STATE.allTaskData = res.tasks || [];
+                    STATE.tasks = STATE.allTaskData;
                     STATE.taskDataLoaded = true;
                     if (document.getElementById('taskListContainer')) renderTaskList();
                     if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
@@ -5404,9 +5408,9 @@
         var container = document.getElementById('taskListContainer');
         var showCompleted = document.getElementById('chkShowCompletedTasks').checked;
 
-        var filtered = allTaskData;
+        var filtered = STATE.allTaskData;
         if (!showCompleted) {
-            filtered = allTaskData.filter(t => t.status !== '完了');
+            filtered = STATE.allTaskData.filter(t => t.status !== '完了');
         }
 
         // 期日でソート（未設定は後回し）
@@ -5492,7 +5496,7 @@
         var startStr = STATE.weekData.days[0].date.replace(/\//g, '-');
         var endStr = STATE.weekData.days[6].date.replace(/\//g, '-');
 
-        var weekTasks = allTaskData.filter(t => {
+        var weekTasks = STATE.allTaskData.filter(t => {
             if (t.status === '完了') return false; // 完了済みタスクは非表示
             if (!t.dueDate) return true; // 期限未設定は常に表示
             if (t.dueDate <= endStr) return true; // 当週を含め、過去の未完了は「やるべき」として表示
@@ -5536,7 +5540,7 @@
     function toggleTaskStatus(taskId, isCompleted) {
         var newStatus = isCompleted ? '完了' : '未着手';
         // UI即座反映
-        var targetTask = allTaskData.find(t => t.id === taskId);
+        var targetTask = STATE.allTaskData.find(t => t.id === taskId);
         if (targetTask) targetTask.status = newStatus;
         if (document.getElementById('taskListContainer')) renderTaskList();
         if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
@@ -5565,7 +5569,7 @@
         if (!result.isConfirmed) return;
 
         // UI即座反映（一時削除）
-        allTaskData = allTaskData.filter(t => t.id !== taskId);
+        STATE.allTaskData = STATE.allTaskData.filter(t => t.id !== taskId);
         if (document.getElementById('taskListContainer')) renderTaskList();
         if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
 
@@ -5619,8 +5623,8 @@
                         showToast('success', 'タスクを手動追加しました');
                         // 差分更新: 返却されたタスクをローカルに追加
                         if (res.savedTasks) {
-                            allTaskData = allTaskData.concat(res.savedTasks);
-                            STATE.tasks = allTaskData;
+                            STATE.allTaskData = STATE.allTaskData.concat(res.savedTasks);
+                            STATE.tasks = STATE.allTaskData;
                         }
                         if (document.getElementById('taskListContainer')) renderTaskList();
                         if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
@@ -5635,7 +5639,7 @@
 
     // ===== タスク編集 =====
     async function showEditTaskInput(taskId) {
-        var task = allTaskData.find(function(t) { return t.id === taskId; });
+        var task = STATE.allTaskData.find(function(t) { return t.id === taskId; });
         if (!task) { showToast('error', '対象タスクが見つかりません'); return; }
 
         const { value: formValues } = await Swal.fire({
@@ -5694,7 +5698,6 @@
     }
 
     // ===== AI抽出とプレビュー操作 =====
-    let aiPreviewTasks = [];
 
     function runAiTaskExtraction(mode) {
         var statusMsg = 'AI抽出を実行中...（数秒〜十数秒かかります）';
@@ -5729,7 +5732,7 @@
 
     function handleAiExtractionResult(res) {
         if (res.success) {
-            aiPreviewTasks = res.tasks || [];
+            STATE.aiPreviewTasks = res.tasks || [];
             showToast('success', 'AIタスク抽出が完了しました！');
             renderAiTaskPreview();
         } else {
@@ -5745,12 +5748,12 @@
         document.getElementById('aiTaskPreviewArea').style.display = 'block';
         var listEl = document.getElementById('aiTaskPreviewList');
 
-        if (aiPreviewTasks.length === 0) {
+        if (STATE.aiPreviewTasks.length === 0) {
             listEl.innerHTML = '<div style="color:var(--text-hint);">抽出されたタスクはありません。</div>';
             return;
         }
 
-        listEl.innerHTML = aiPreviewTasks.map((t, idx) => `
+        listEl.innerHTML = STATE.aiPreviewTasks.map((t, idx) => `
             <div style="background:var(--surface); border:1px solid #1a73e8; border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.85rem;">
                 <div style="font-weight:bold; color:var(--text-main); margin-bottom:4px;"><span class="material-symbols-outlined fs-6">task_alt</span> ${escHtml(t.task)}</div>
                 <div style="color:var(--text-sub); display:flex; gap:10px;">
@@ -5764,14 +5767,14 @@
 
     function cancelAiTaskPreview() {
         document.getElementById('aiTaskPreviewArea').style.display = 'none';
-        aiPreviewTasks = [];
+        STATE.aiPreviewTasks = [];
     }
 
     function confirmAiTaskSave() {
-        if (!aiPreviewTasks || aiPreviewTasks.length === 0) return;
+        if (!STATE.aiPreviewTasks || STATE.aiPreviewTasks.length === 0) return;
 
         // 保存用フォーマットに変換
-        var saveTasks = aiPreviewTasks.map(t => ({
+        var saveTasks = STATE.aiPreviewTasks.map(t => ({
             content: t.task,
             resource: t.resource,
             dueDate: t.dueDate,
@@ -5786,8 +5789,8 @@
                     cancelAiTaskPreview(); // プレビュークリア
                     // 差分更新: 返却されたタスクをローカルに追加
                     if (res.savedTasks) {
-                        allTaskData = allTaskData.concat(res.savedTasks);
-                        STATE.tasks = allTaskData;
+                        STATE.allTaskData = STATE.allTaskData.concat(res.savedTasks);
+                        STATE.tasks = STATE.allTaskData;
                     }
                     if (document.getElementById('taskListContainer')) renderTaskList();
                     if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
@@ -5803,8 +5806,7 @@
     // ===== 単元マスタ管理ロジック =====
     // ===================================================
 
-    var umAllRows = [];       // サーバーから取得した全行データ
-    var umEditingRowIndex = null; // 現在編集中の行（シート行番号）
+    // 単元マスタ: 全行データと編集中行は STATE.STATE.umAllRows / STATE.STATE.umEditingRowIndex に集約
 
     function loadUnitMasterData() {
         var tbody = document.getElementById('umTableBody');
@@ -5813,7 +5815,7 @@
         google.script.run
             .withSuccessHandler(function (res) {
                 if (res.success) {
-                    umAllRows = res.rows || [];
+                    STATE.umAllRows = res.rows || [];
                     STATE.umDataLoaded = true;
                     // 教科フィルタのプルダウンを更新
                     var sel = document.getElementById('umFilterSubject');
@@ -5840,7 +5842,7 @@
     function getFilteredUmRows() {
         var subjectFilter = document.getElementById('umFilterSubject').value;
         var unitFilter = (document.getElementById('umFilterUnit').value || '').trim().toLowerCase();
-        return umAllRows.filter(function (r) {
+        return STATE.umAllRows.filter(function (r) {
             if (subjectFilter && r.subject !== subjectFilter) return false;
             if (unitFilter && (r.unitName || '').toLowerCase().indexOf(unitFilter) === -1) return false;
             return true;
@@ -5851,7 +5853,7 @@
         var filtered = getFilteredUmRows();
         var tbody = document.getElementById('umTableBody');
         var countEl = document.getElementById('umRowCount');
-        countEl.textContent = filtered.length + ' / ' + umAllRows.length + ' 件';
+        countEl.textContent = filtered.length + ' / ' + STATE.umAllRows.length + ' 件';
 
         if (filtered.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:40px; color:var(--text-hint);">該当するデータがありません</td></tr>';
@@ -5866,7 +5868,7 @@
             var key = r.subject + '||' + r.unitName;
             var isFirst = (key !== prevKey);
             prevKey = key;
-            var isEditing = (umEditingRowIndex === r.rowIndex);
+            var isEditing = (STATE.umEditingRowIndex === r.rowIndex);
             var trClass = (isFirst ? ' um-unit-first' : '') + (isEditing ? ' um-editing' : '');
 
             if (isEditing) {
@@ -5899,7 +5901,7 @@
 
     // --- 編集 ---
     function startUmEdit(rowIndex) {
-        umEditingRowIndex = rowIndex;
+        STATE.umEditingRowIndex = rowIndex;
         renderUnitMasterTable();
         // 最初の入力欄にフォーカス
         setTimeout(function () {
@@ -5909,7 +5911,7 @@
     }
 
     function cancelUmEdit() {
-        umEditingRowIndex = null;
+        STATE.umEditingRowIndex = null;
         renderUnitMasterTable();
     }
 
@@ -5925,7 +5927,7 @@
         if (!data.subject) { showToast('error', '教科名を入力してください'); return; }
 
         // UIを即座に反映
-        var localRow = umAllRows.find(function (r) { return r.rowIndex === rowIndex; });
+        var localRow = STATE.umAllRows.find(function (r) { return r.rowIndex === rowIndex; });
         if (localRow) {
             localRow.subject = data.subject;
             localRow.unitName = data.unitName;
@@ -5933,7 +5935,7 @@
             localRow.hourNum = data.hourNum;
             localRow.activity = data.activity;
         }
-        umEditingRowIndex = null;
+        STATE.umEditingRowIndex = null;
         renderUnitMasterTable();
 
         google.script.run
@@ -5989,7 +5991,7 @@
 
         showToast('info', '行を追加中...');
         // 最後の行の後に追加
-        var lastRow = umAllRows.length > 0 ? umAllRows[umAllRows.length - 1].rowIndex : 1;
+        var lastRow = STATE.umAllRows.length > 0 ? STATE.umAllRows[STATE.umAllRows.length - 1].rowIndex : 1;
         google.script.run
             .withSuccessHandler(function (res) {
                 if (res.success) {
@@ -6008,7 +6010,7 @@
     // --- 行挿入（特定行の後）---
     function insertUmRowAfter(afterRowIndex) {
         // 前の行のデータをコピーして挿入（教科名と単元名を引き継ぐ）
-        var srcRow = umAllRows.find(function (r) { return r.rowIndex === afterRowIndex; });
+        var srcRow = STATE.umAllRows.find(function (r) { return r.rowIndex === afterRowIndex; });
         var newData = {
             subject: srcRow ? srcRow.subject : '',
             unitName: srcRow ? srcRow.unitName : '',
@@ -6035,7 +6037,7 @@
 
     // --- 行削除 ---
     async function deleteUmRow(rowIndex) {
-        var targetRow = umAllRows.find(function (r) { return r.rowIndex === rowIndex; });
+        var targetRow = STATE.umAllRows.find(function (r) { return r.rowIndex === rowIndex; });
         var msg = targetRow
             ? (targetRow.subject + ' / ' + targetRow.unitName + ' (' + targetRow.hourNum + '時間目)')
             : '行 ' + rowIndex;

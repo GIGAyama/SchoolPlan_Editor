@@ -57,11 +57,25 @@ PDF読込(メニュー&Web) / 単元自動入力
    - **等価性**: 各読み書きが同名 `STATE.X` になり初期値も一致。STATEは先頭`const`で全関数から
      到達可能、使用は全て onload 以降のため初期化順も問題なし＝入出力等価。
 
+6. `(次コミット)` **散在グローバルの STATE 集約 第2弾**（App_Js.html）。
+   作業データ／編集状態 7個を `STATE` へ移動・全参照を `STATE.X` 化:
+   `pickerApiLoaded` `currentPickerType` `stdHoursData` `allTaskData`
+   `aiPreviewTasks` `umAllRows` `umEditingRowIndex`。
+   - 第1弾と同手順（宣言削除→一括置換→STATE定義追加）。7識別子は互いに非部分文字列、
+     他HTML参照なしを確認。検証: 裸の参照はSTATE定義7行のみ／残存宣言ゼロ／`node --check` OK。
+   - 注意点: `STATE.tasks = allTaskData`（同一配列の別名同期）は前置後も保たれ等価。
+     ※`allTaskData` と `STATE.tasks` は重複気味だが、統合は挙動分析を要するため今回は前置のみで温存。
+
 ## 残作業（未着手）
 ### Phase 5 続き: フロント App_Js.html（6069行、要GAS検証）
-分析結果の要点（信頼度中。Read/grepで再確認推奨）:
-- **散在グローバルの STATE 集約 第2弾（未着手）**: データ配列系 `stdHoursData`,
-  `umAllRows/umEditingRowIndex` 等（フラグより参照が多く要慎重）
+- これでモジュールレベルの可変グローバルは概ね STATE に集約済み
+  （残る `^    var/let` は設定定数 `NW_*`/`SUBJECT_HIRAGANA_MAP`/`DAY_NAMES`、
+   ライブラリ singleton `SwalToast`、モジュール `NW` のみ＝集約不要）。
+- 次の候補（いずれも要GAS検証・要慎重）:
+  - `google.script.run` 約57箇所 → `_serverCall(fn,{success,failure})` ラッパー化
+  - ボタン無効化/再有効化の重複 → `_withButtonState(btn, asyncFn)`
+  - 巨大関数の分割: `printWeeklyPlanExec()`(約434行), `renderWeekGrid()`
+  - `allTaskData`/`STATE.tasks` の重複解消（挙動確認後）
 - `google.script.run` 呼び出し約57箇所 → `_serverCall(fn, handlers)` ラッパー化
 - ボタン無効化/再有効化の重複 → `_withButtonState(btn, asyncFn)`
 - 巨大関数の分割: `printWeeklyPlanExec()`(約434行), `renderWeekGrid()`
