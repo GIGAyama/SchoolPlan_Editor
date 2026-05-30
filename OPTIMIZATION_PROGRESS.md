@@ -66,16 +66,28 @@ PDF読込(メニュー&Web) / 単元自動入力
    - 注意点: `STATE.tasks = allTaskData`（同一配列の別名同期）は前置後も保たれ等価。
      ※`allTaskData` と `STATE.tasks` は重複気味だが、統合は挙動分析を要するため今回は前置のみで温存。
 
+7. `(次コミット)` **共通失敗ハンドラ `_onCommError` の抽出**（App_Js.html）。
+   本体が完全に `showToast('error', '通信エラー: ' + e.message);` の1文のみの
+   `withFailureHandler` を20箇所、共通関数に置換（1行版8＋複数行版12）。
+   - **`_serverCall` 全ラッパー化は中止**: 呼出57箇所はハンドラが多行インライン＋入れ子＋
+     メソッド名が末尾にあり、テスト不能環境での全構造反転はリスク過大と判断（ユーザー合意済み）。
+     代わりに「構造を反転させない」失敗ハンドラ重複抽出のみ実施。
+   - 安全性: 完全一致 replace_all のため、固有処理付き（ボタン再有効化/`console.error`/
+     `resolve(false)`/`loadTasks()`等）の12箇所は自動的に非一致で温存。インライン→
+     スコープ捕捉のない同一本体の名前付き関数＝完全等価。`node --check` OK。
+
 ## 残作業（未着手）
 ### Phase 5 続き: フロント App_Js.html（6069行、要GAS検証）
-- これでモジュールレベルの可変グローバルは概ね STATE に集約済み
+- モジュールレベルの可変グローバルは STATE に集約済み
   （残る `^    var/let` は設定定数 `NW_*`/`SUBJECT_HIRAGANA_MAP`/`DAY_NAMES`、
    ライブラリ singleton `SwalToast`、モジュール `NW` のみ＝集約不要）。
-- 次の候補（いずれも要GAS検証・要慎重）:
-  - `google.script.run` 約57箇所 → `_serverCall(fn,{success,failure})` ラッパー化
-  - ボタン無効化/再有効化の重複 → `_withButtonState(btn, asyncFn)`
+- 失敗ハンドラの定型（通信エラー）は `_onCommError` に集約済み。
+- 次の候補（いずれも要GAS検証・要慎重。構造反転を伴う変換は避ける方針）:
+  - ボタン無効化/再有効化の重複 → `_withButtonState(btn, asyncFn)`（要・各ボタンの文言保持）
   - 巨大関数の分割: `printWeeklyPlanExec()`(約434行), `renderWeekGrid()`
   - `allTaskData`/`STATE.tasks` の重複解消（挙動確認後）
+  - `_onCommError` 以外の準定型失敗ハンドラ（'エラー: '/'通信エラー'+復旧処理付き）の整理は
+    挙動が絡むため要慎重
 - `google.script.run` 呼び出し約57箇所 → `_serverCall(fn, handlers)` ラッパー化
 - ボタン無効化/再有効化の重複 → `_withButtonState(btn, asyncFn)`
 - 巨大関数の分割: `printWeeklyPlanExec()`(約434行), `renderWeekGrid()`

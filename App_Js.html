@@ -3844,7 +3844,7 @@
                     NW.addBlock('text', null, { content: res.text.replace(/\n/g, '<br>'), fontSize: 12 });
                     showToast('success', 'AI文章を追加しました');
                 })
-                .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+                .withFailureHandler(_onCommError)
                 .generateNewsletterAI(mondayStr, result.value.type, result.value.extra,
                     { tone: result.value.tone, length: result.value.length });
         });
@@ -3900,7 +3900,7 @@
                     NW.pushHistory();
                     showToast('success', '学級通信を生成しました');
                 })
-                .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+                .withFailureHandler(_onCommError)
                 .generateFullNewsletterAI(mondayStr, extra, { tone: tone });
         });
     };
@@ -3956,7 +3956,7 @@
                     NW.render();
                     showToast('success', 'テキストをリライトしました');
                 })
-                .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+                .withFailureHandler(_onCommError)
                 .rewriteNewsletterText(plainText, result.value);
         });
     };
@@ -4074,7 +4074,7 @@
                     if (res.success) showToast('success', res.message);
                     else showToast('error', '保存失敗: ' + res.error);
                 })
-                .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+                .withFailureHandler(_onCommError)
                 .saveNewsletterData(result.value || defaultTitle, NW.mondayStr || '', jsonStr);
         });
     };
@@ -4108,7 +4108,7 @@
                     showCloseButton: true
                 });
             })
-            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .withFailureHandler(_onCommError)
             .getNewsletterSaveList();
     };
 
@@ -4146,7 +4146,7 @@
                 if (!res.data) { showToast('error', '読込失敗: データが空です'); return; }
                 NW._applyLoadedData(res.data);
             })
-            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .withFailureHandler(_onCommError)
             .loadNewsletterData(fileId);
     };
 
@@ -4171,7 +4171,7 @@
                         showToast('error', '削除失敗: ' + res.error);
                     }
                 })
-                .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+                .withFailureHandler(_onCommError)
                 .deleteNewsletterData(rowIndex, fileId);
         });
     };
@@ -4202,9 +4202,7 @@
                     NW.render();
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .getNewsletterData(mondayStr);
     };
 
@@ -4464,7 +4462,7 @@
                     if (res.success) showToast('success', res.message);
                     else showToast('error', '投稿失敗: ' + res.error);
                 })
-                .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+                .withFailureHandler(_onCommError)
                 .postNewsletterToClassroomFromWeb(result.value || '学級通信をお届けします。', htmlContent);
         });
     };
@@ -4596,9 +4594,7 @@
                     showToast('error', '認証情報の取得に失敗しました: ' + (res.error || ''));
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .getPickerAuthInfo();
     }
 
@@ -4834,6 +4830,11 @@
         });
     }
 
+    // google.script.run の共通失敗ハンドラ（「通信エラー」をトースト表示するだけの定型用）
+    function _onCommError(e) {
+        showToast('error', '通信エラー: ' + e.message);
+    }
+
     // ===== 固定時間割エディタ =====
     var DAY_NAMES = ['月', '火', '水', '木', '金'];
 
@@ -4847,9 +4848,7 @@
                     showToast('error', 'エラー: ' + (res.error || ''));
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .getTimetableForEditor();
     }
 
@@ -4913,9 +4912,7 @@
                     showToast('error', 'エラー: ' + res.error);
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .saveTimetableFromEditor(data);
     }
 
@@ -4946,9 +4943,7 @@
                     showToast('error', 'エラー: ' + res.error);
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .applyTimetableToWeek(STATE.mondayStr);
     }
 
@@ -5023,9 +5018,7 @@
                     showToast('error', 'エラー: ' + (res.error || ''));
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .getStandardHours();
     }
 
@@ -5061,9 +5054,7 @@
                     showToast('error', 'エラー: ' + res.error);
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .saveStandardHours(data);
     }
 
@@ -5079,9 +5070,7 @@
                     showToast('error', '時数集計エラー: ' + (res.error || ''));
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .getHoursSummary(STATE.mondayStr);
     }
 
@@ -5243,9 +5232,7 @@
                                     showToast('error', 'エラー: ' + r.error);
                                 }
                             })
-                            .withFailureHandler(function (e) {
-                                showToast('error', '通信エラー: ' + e.message);
-                            })
+                            .withFailureHandler(_onCommError)
                             .saveGrade(newGrade);
                     };
                 }
@@ -6001,9 +5988,7 @@
                     showToast('error', '追加エラー: ' + res.error);
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .insertUnitMasterRow(lastRow, result.value);
     }
 
@@ -6029,9 +6014,7 @@
                     showToast('error', '挿入エラー: ' + res.error);
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .insertUnitMasterRow(afterRowIndex, newData);
     }
 
@@ -6063,9 +6046,7 @@
                     showToast('error', '削除エラー: ' + res.error);
                 }
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-            })
+            .withFailureHandler(_onCommError)
             .deleteUnitMasterRow(rowIndex);
     }
 
