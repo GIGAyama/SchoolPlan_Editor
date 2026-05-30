@@ -62,6 +62,11 @@
                 <button class="nav-btn" data-view="settings" onclick="switchView('settings')">
                     <span class="material-symbols-outlined">settings</span> 設定
                 </button>
+                <button class="nav-btn theme-toggle" id="themeToggleBtn" type="button"
+                        title="表示テーマを切り替え（自動／ライト／ダーク）" aria-label="表示テーマを切り替え"
+                        onclick="cycleTheme()">
+                    <span class="material-symbols-outlined" id="themeToggleIcon">brightness_auto</span>
+                </button>
             </nav>
         </header>
 

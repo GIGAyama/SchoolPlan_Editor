@@ -6051,6 +6051,51 @@
     }
 
     // =========================================================
+    // ===== 表示テーマ（自動 / ライト / ダーク）            =====
+    // =========================================================
+
+    var THEME_ORDER = ['auto', 'light', 'dark'];
+    var THEME_META = {
+        auto: { icon: 'brightness_auto', label: '自動（端末設定に追従）' },
+        light: { icon: 'light_mode', label: 'ライト' },
+        dark: { icon: 'dark_mode', label: 'ダーク' }
+    };
+
+    function applyTheme(theme) {
+        var root = document.documentElement;
+        if (theme === 'auto') {
+            root.removeAttribute('data-theme');
+        } else {
+            root.setAttribute('data-theme', theme);
+        }
+        var icon = document.getElementById('themeToggleIcon');
+        var btn = document.getElementById('themeToggleBtn');
+        var meta = THEME_META[theme] || THEME_META.auto;
+        if (icon) icon.textContent = meta.icon;
+        if (btn) btn.title = '表示テーマ: ' + meta.label + '（クリックで切替）';
+    }
+
+    function getSavedTheme() {
+        try {
+            var t = localStorage.getItem('spn_theme');
+            return THEME_ORDER.indexOf(t) >= 0 ? t : 'auto';
+        } catch (e) { return 'auto'; }
+    }
+
+    function cycleTheme() {
+        var cur = getSavedTheme();
+        var next = THEME_ORDER[(THEME_ORDER.indexOf(cur) + 1) % THEME_ORDER.length];
+        try { localStorage.setItem('spn_theme', next); } catch (e) { }
+        applyTheme(next);
+        if (typeof showToast === 'function') {
+            showToast('info', '表示テーマ: ' + THEME_META[next].label);
+        }
+    }
+
+    // 起動時に保存済みテーマを適用（FOUC低減のため即時実行）
+    applyTheme(getSavedTheme());
+
+    // =========================================================
     // ===== メンテナンス・ツール / Classroom手動投稿        =====
     // ===== （旧スプレッドシートメニュー機能のWebボタン化） =====
     // =========================================================
