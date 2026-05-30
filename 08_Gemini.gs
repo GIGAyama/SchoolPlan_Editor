@@ -12,13 +12,48 @@ function getGeminiApiUrl_() {
 }
 
 /**
+ * Gemini API へ generateContent リクエストを送信し、レスポンスJSONを返す共通ヘルパー。
+ * HTTPエラー（429/401/403等）のハンドリングを一元化します。
+ * @param {Object} payload リクエストボディ
+ * @param {string} logLabel エラーログ用のラベル
+ * @returns {Object} パース済みのレスポンスJSON
+ */
+function callGeminiEndpoint_(payload, logLabel) {
+  const apiKey = getApiKeySafe_();
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(`${getGeminiApiUrl_()}?key=${apiKey}`, options);
+  const responseCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  if (responseCode !== 200) {
+    const errDetail = (() => {
+      try { return JSON.parse(responseText).error?.message || responseText; } catch(e) { return responseText; }
+    })();
+    logError(`${logLabel} (HTTP ${responseCode})`, new Error(errDetail));
+    if (responseCode === 429) {
+      throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
+    } else if (responseCode === 401 || responseCode === 403) {
+      throw new Error('AI APIキーが無効です。設定画面でAPIキーを確認してください。');
+    }
+    throw new Error(`AI APIとの通信に失敗しました。（HTTP ${responseCode}）`);
+  }
+
+  return JSON.parse(responseText);
+}
+
+/**
  * Gemini APIを呼び出してJSON形式のタスク配列を取得する共通ラッパー
- * @param {string} prompt 
+ * @param {string} prompt
  * @returns {Object[]} 抽出されたタスクの配列 { task, resource, dueDate, source }
  */
 function callGeminiAPI_(prompt) {
-  const apiKey = getApiKeySafe_();
-
   const payload = {
     contents: [{
       parts: [{ text: prompt }]
@@ -44,31 +79,7 @@ function callGeminiAPI_(prompt) {
     }
   };
 
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-
-  const response = UrlFetchApp.fetch(`${getGeminiApiUrl_()}?key=${apiKey}`, options);
-  const responseCode = response.getResponseCode();
-  const responseText = response.getContentText();
-
-  if (responseCode !== 200) {
-    const errDetail = (() => {
-      try { return JSON.parse(responseText).error?.message || responseText; } catch(e) { return responseText; }
-    })();
-    logError(`Gemini API Error (HTTP ${responseCode})`, new Error(errDetail));
-    if (responseCode === 429) {
-      throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
-    } else if (responseCode === 401 || responseCode === 403) {
-      throw new Error('AI APIキーが無効です。設定画面でAPIキーを確認してください。');
-    }
-    throw new Error(`AI APIとの通信に失敗しました。（HTTP ${responseCode}）`);
-  }
-
-  const json = JSON.parse(responseText);
+  const json = callGeminiEndpoint_(payload, 'Gemini API Error');
 
   if (json.candidates && json.candidates.length > 0) {
     const textObj = json.candidates[0].content.parts[0].text;
@@ -173,8 +184,6 @@ ${scheduleText}
  * @returns {string} 生成されたテキスト
  */
 function callGeminiAPIText_(prompt) {
-  const apiKey = getApiKeySafe_();
-
   const payload = {
     contents: [{
       parts: [{ text: prompt }]
@@ -184,31 +193,7 @@ function callGeminiAPIText_(prompt) {
     }
   };
 
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-
-  const response = UrlFetchApp.fetch(`${getGeminiApiUrl_()}?key=${apiKey}`, options);
-  const responseCode = response.getResponseCode();
-  const responseText = response.getContentText();
-
-  if (responseCode !== 200) {
-    const errDetail = (() => {
-      try { return JSON.parse(responseText).error?.message || responseText; } catch(e) { return responseText; }
-    })();
-    logError(`Gemini API Text Error (HTTP ${responseCode})`, new Error(errDetail));
-    if (responseCode === 429) {
-      throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
-    } else if (responseCode === 401 || responseCode === 403) {
-      throw new Error('AI APIキーが無効です。設定画面でAPIキーを確認してください。');
-    }
-    throw new Error(`AI APIとの通信に失敗しました。（HTTP ${responseCode}）`);
-  }
-
-  const json = JSON.parse(responseText);
+  const json = callGeminiEndpoint_(payload, 'Gemini API Text Error');
 
   if (json.candidates && json.candidates.length > 0) {
     return json.candidates[0].content.parts[0].text || '';

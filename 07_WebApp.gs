@@ -134,7 +134,7 @@ function getMondayStrByWeekNumber(weekNum) {
 
     const dbCols = getDbColumns();
     const dbData = dbSheet.getDataRange().getValues();
-    const headers = dbData.shift();
+    dbData.shift(); // ヘッダー行を除外
 
     for (const row of dbData) {
       if (row[dbCols.WEEK_NUM - 1] == weekNum) {
@@ -440,76 +440,55 @@ function parseSubjectHours_(cellValue) {
 }
 
 /**
- * 月別時数データ（hoursData）の教科名を集約します。
- * - 「学活」→「特活」にリネーム（入力名→表示名）
- * - 「図書」「書写」→「国語」に合算
- * - 「中体育」「外体育」→「体育」に合算
- * @param {Object} hoursData { "教科名": { month: hours, ... }, ... }
+ * 教科名の集約ルール（入力名 → 表示／合算先）。
+ * - 学活 → 特活（リネーム）
+ * - 図書・書写 → 国語（合算）
+ * - 中体育・外体育 → 体育（合算）
  */
-function aggregateHoursData_(hoursData) {
-  // 学活 → 特活
-  if (hoursData['学活']) {
-    if (!hoursData['特活']) hoursData['特活'] = {};
-    for (const m in hoursData['学活']) {
-      if (!hoursData['特活'][m]) hoursData['特活'][m] = 0;
-      hoursData['特活'][m] += hoursData['学活'][m];
-    }
-    delete hoursData['学活'];
-  }
-  // 図書・書写 → 国語
-  for (const sub of ['図書', '書写']) {
-    if (hoursData[sub]) {
-      if (!hoursData['国語']) hoursData['国語'] = {};
-      for (const m in hoursData[sub]) {
-        if (!hoursData['国語'][m]) hoursData['国語'][m] = 0;
-        hoursData['国語'][m] += hoursData[sub][m];
+const SUBJECT_AGGREGATION_RULES_ = [
+  { from: '学活', to: '特活' },
+  { from: '図書', to: '国語' },
+  { from: '書写', to: '国語' },
+  { from: '中体育', to: '体育' },
+  { from: '外体育', to: '体育' }
+];
+
+/**
+ * 教科別データの教科名を SUBJECT_AGGREGATION_RULES_ に従って集約します。
+ * @param {Object} data 教科名をキーとするオブジェクト
+ * @param {boolean} nested true なら値が { month: hours } のネスト構造、
+ *   false なら値が数値（単純カウント）として扱います。
+ */
+function aggregateSubjects_(data, nested) {
+  SUBJECT_AGGREGATION_RULES_.forEach(function(rule) {
+    const from = rule.from, to = rule.to;
+    if (!data[from]) return;
+    if (nested) {
+      if (!data[to]) data[to] = {};
+      for (const m in data[from]) {
+        data[to][m] = (data[to][m] || 0) + data[from][m];
       }
-      delete hoursData[sub];
+    } else {
+      data[to] = (data[to] || 0) + data[from];
     }
-  }
-  // 中体育・外体育 → 体育
-  for (const sub of ['中体育', '外体育']) {
-    if (hoursData[sub]) {
-      if (!hoursData['体育']) hoursData['体育'] = {};
-      for (const m in hoursData[sub]) {
-        if (!hoursData['体育'][m]) hoursData['体育'][m] = 0;
-        hoursData['体育'][m] += hoursData[sub][m];
-      }
-      delete hoursData[sub];
-    }
-  }
+    delete data[from];
+  });
 }
 
 /**
- * 単純カウントオブジェクトの教科名を集約します。
- * - 「学活」→「特活」にリネーム
- * - 「図書」「書写」→「国語」に合算
- * - 「中体育」「外体育」→「体育」に合算
- * @param {Object} counts { "教科名": number, ... }
+ * 月別時数データ（{ 教科名: { month: hours, ... }, ... }）の教科名を集約します。
+ * @param {Object} hoursData
+ */
+function aggregateHoursData_(hoursData) {
+  aggregateSubjects_(hoursData, true);
+}
+
+/**
+ * 単純カウントオブジェクト（{ 教科名: number, ... }）の教科名を集約します。
+ * @param {Object} counts
  */
 function aggregateSubjectCounts_(counts) {
-  // 学活 → 特活
-  if (counts['学活']) {
-    if (!counts['特活']) counts['特活'] = 0;
-    counts['特活'] += counts['学活'];
-    delete counts['学活'];
-  }
-  // 図書・書写 → 国語
-  for (const sub of ['図書', '書写']) {
-    if (counts[sub]) {
-      if (!counts['国語']) counts['国語'] = 0;
-      counts['国語'] += counts[sub];
-      delete counts[sub];
-    }
-  }
-  // 中体育・外体育 → 体育
-  for (const sub of ['中体育', '外体育']) {
-    if (counts[sub]) {
-      if (!counts['体育']) counts['体育'] = 0;
-      counts['体育'] += counts[sub];
-      delete counts[sub];
-    }
-  }
+  aggregateSubjects_(counts, false);
 }
 
 /**
