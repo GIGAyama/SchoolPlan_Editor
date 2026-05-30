@@ -2404,6 +2404,155 @@
         }
     };
 
+    /**
+     * ブロック種別ごとの「書式設定ツールバー」HTML文字列を生成する純粋関数群。
+     * いずれも block を読むだけで副作用なし。該当しない場合は空文字を返す。
+     * （NW.renderBlock から機械的に抽出。出力は抽出前と完全一致することをNodeで検証済み）
+     */
+    NW.buildTextToolbar_ = function (block) {
+        if (block.type !== 'heading' && block.type !== 'text') return '';
+        var fmt = '<div class="nw-fmt-toolbar">'
+            + '<select onchange="NW.setFontFamily(\'' + block.id + '\',this.value)" title="フォント">';
+        fmt += '<option value=""' + (!block.fontFamily ? ' selected' : '') + '>標準</option>';
+        NW_FONTS.forEach(function (f) {
+            fmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
+        });
+        fmt += '</select>'
+            + '<select onchange="NW.setFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
+        [9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72].forEach(function (s) {
+            fmt += '<option value="' + s + '"' + (s === block.fontSize ? ' selected' : '') + '>' + s + '</option>';
+        });
+        fmt += '</select>'
+            + '<button title="太字" onclick="NW.toggleBold(\'' + block.id + '\')" class="' + (block.bold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
+            + '<button title="左揃え" onclick="NW.setAlign(\'' + block.id + '\',\'left\')" class="' + (block.align === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
+            + '<button title="中央" onclick="NW.setAlign(\'' + block.id + '\',\'center\')" class="' + (block.align === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
+            + '<button title="右揃え" onclick="NW.setAlign(\'' + block.id + '\',\'right\')" class="' + (block.align === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button title="文字色" onclick="NW.pickColor(\'' + block.id + '\',\'color\')" style="position:relative;"><span class="material-symbols-outlined">format_color_text</span><span class="nw-color-dot" style="background:' + (block.color || '#202124') + ';"></span></button>'
+            + '<button title="背景色" onclick="NW.pickColor(\'' + block.id + '\',\'bgColor\')" style="position:relative;"><span class="material-symbols-outlined">format_color_fill</span><span class="nw-color-dot" style="background:' + (block.bgColor || 'transparent') + ';border:1px solid #ccc;"></span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button title="AIでリライト" onclick="NW.aiRewriteBlock(\'' + block.id + '\')" class="nw-ai-btn"><span class="material-symbols-outlined">auto_awesome</span></button>'
+            + '</div><div class="nw-act-sep"></div>';
+        return fmt;
+    };
+
+    NW.buildWordartToolbar_ = function (block) {
+        if (block.type !== 'wordart') return '';
+        var bid = block.id;
+        var waFmt = '<div class="nw-fmt-toolbar">'
+            + '<select onchange="NW.waSet(\'' + bid + '\',\'fontFamily\',this.value)" title="フォント">';
+        waFmt += '<option value=""' + (!block.fontFamily ? ' selected' : '') + '>標準</option>';
+        NW_FONTS.forEach(function (f) {
+            waFmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + '>' + f.label + '</option>';
+        });
+        waFmt += '</select>'
+            + '<select onchange="NW.waSet(\'' + bid + '\',\'fontSize\',this.value)" title="サイズ">';
+        [28, 32, 36, 40, 48, 56, 64, 72, 96].forEach(function (s) {
+            waFmt += '<option value="' + s + '"' + (s === (block.fontSize || 48) ? ' selected' : '') + '>' + s + '</option>';
+        });
+        waFmt += '</select>'
+            + '<button title="左揃え" onclick="NW.waSet(\'' + bid + '\',\'align\',\'left\')" class="' + (block.align === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
+            + '<button title="中央" onclick="NW.waSet(\'' + bid + '\',\'align\',\'center\')" class="' + (block.align === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
+            + '<button title="右揃え" onclick="NW.waSet(\'' + bid + '\',\'align\',\'right\')" class="' + (block.align === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button title="グラデーション" onclick="NW.waToggle(\'' + bid + '\',\'waGradient\')" class="nw-wa-fx-btn' + (block.waGradient ? ' nw-active' : '') + '"><span class="material-symbols-outlined">gradient</span></button>'
+            + '<button title="アウトライン" onclick="NW.waToggle(\'' + bid + '\',\'waStroke\')" class="nw-wa-fx-btn' + (block.waStroke ? ' nw-active' : '') + '"><span class="material-symbols-outlined">border_color</span></button>'
+            + '<button title="影" onclick="NW.waToggle(\'' + bid + '\',\'waShadow\')" class="nw-wa-fx-btn' + (block.waShadow ? ' nw-active' : '') + '"><span class="material-symbols-outlined">blur_on</span></button>'
+            + '<button title="3D立体" onclick="NW.waToggle(\'' + bid + '\',\'wa3d\')" class="nw-wa-fx-btn' + (block.wa3d ? ' nw-active' : '') + '"><span class="material-symbols-outlined">view_in_ar</span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button onclick="NW.openWordArtSettings(\'' + bid + '\')" title="スタイル詳細設定"><span class="material-symbols-outlined">tune</span></button>'
+            + '<button onclick="NW.editWordArt(\'' + bid + '\')" title="テキスト編集"><span class="material-symbols-outlined">edit</span></button>'
+            + '</div><div class="nw-act-sep"></div>';
+        return waFmt;
+    };
+
+    NW.buildColumnsToolbar_ = function (block) {
+        if (block.type !== 'columns') return '';
+        var colFmt = '<div class="nw-fmt-toolbar">'
+            + '<select onchange="NW.setColumnsCount(\'' + block.id + '\',this.value)" title="列数">';
+        [2, 3].forEach(function (c) {
+            colFmt += '<option value="' + c + '"' + (c === block.columns ? ' selected' : '') + '>' + c + '列</option>';
+        });
+        colFmt += '</select>'
+            + '<select onchange="NW.setColRatio(\'' + block.id + '\',this.value)" title="比率">';
+        var ratioOpts = [
+            { v: 'equal', l: '均等' },
+            { v: '1:2', l: '1:2' },
+            { v: '2:1', l: '2:1' },
+            { v: '1:3', l: '1:3' },
+            { v: '3:1', l: '3:1' }
+        ];
+        ratioOpts.forEach(function (r) {
+            colFmt += '<option value="' + r.v + '"' + (block.colRatio === r.v ? ' selected' : '') + '>' + r.l + '</option>';
+        });
+        colFmt += '</select></div><div class="nw-act-sep"></div>';
+        return colFmt;
+    };
+
+    NW.buildGalleryToolbar_ = function (block) {
+        if (block.type !== 'gallery') return '';
+        var galFmt = '<div class="nw-fmt-toolbar"><select onchange="NW.setGalleryColumns(\'' + block.id + '\',this.value)" title="列数">';
+        [2, 3, 4].forEach(function (c) {
+            galFmt += '<option value="' + c + '"' + (c === block.columns ? ' selected' : '') + '>' + c + '列</option>';
+        });
+        galFmt += '</select></div><div class="nw-act-sep"></div>';
+        return galFmt;
+    };
+
+    NW.buildImageToolbar_ = function (block) {
+        if (!(block.type === 'image' && block.src)) return '';
+        var imgFmt = '<div class="nw-fmt-toolbar">'
+            + '<button title="回り込みなし" onclick="NW.setFloat(\'' + block.id + '\',\'none\')" class="' + (block.float === 'none' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">crop_free</span></button>'
+            + '<button title="左に画像" onclick="NW.setFloat(\'' + block.id + '\',\'left\')" class="' + (block.float === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_image_left</span></button>'
+            + '<button title="右に画像" onclick="NW.setFloat(\'' + block.id + '\',\'right\')" class="' + (block.float === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_image_right</span></button>'
+            + '<select onchange="NW.setImageWidth(\'' + block.id + '\',this.value)" title="画像幅">';
+        [25, 30, 40, 50, 60, 75, 100].forEach(function (w) {
+            imgFmt += '<option value="' + w + '"' + (w === block.width ? ' selected' : '') + '>' + w + '%</option>';
+        });
+        imgFmt += '</select></div>';
+        // Text formatting toolbar for wrap text (only when float is active)
+        if (block.float !== 'none') {
+            imgFmt += '<div class="nw-fmt-toolbar">'
+                + '<select onchange="NW.setWrapFontFamily(\'' + block.id + '\',this.value)" title="フォント">';
+            imgFmt += '<option value=""' + (!block.wrapFontFamily ? ' selected' : '') + '>標準</option>';
+            NW_FONTS.forEach(function (f) {
+                imgFmt += '<option value="' + f.value + '"' + (block.wrapFontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
+            });
+            imgFmt += '</select>'
+                + '<select onchange="NW.setWrapFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
+            [9, 10, 11, 12, 14, 16, 18, 20, 24].forEach(function (s) {
+                imgFmt += '<option value="' + s + '"' + (s === (block.wrapFontSize || 12) ? ' selected' : '') + '>' + s + '</option>';
+            });
+            imgFmt += '</select>'
+                + '<button title="太字" onclick="NW.toggleWrapBold(\'' + block.id + '\')" class="' + (block.wrapBold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
+                + '<button title="左揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'left\')" class="' + (block.wrapAlign === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
+                + '<button title="中央" onclick="NW.setWrapAlign(\'' + block.id + '\',\'center\')" class="' + (block.wrapAlign === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
+                + '<button title="右揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'right\')" class="' + (block.wrapAlign === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+                + '<div class="nw-act-sep"></div>'
+                + '<button title="文字色" onclick="NW.pickColor(\'' + block.id + '\',\'wrapColor\')" style="position:relative;"><span class="material-symbols-outlined">format_color_text</span><span class="nw-color-dot" style="background:' + (block.wrapColor || '#202124') + ';"></span></button>'
+                + '</div>';
+        }
+        imgFmt += '<div class="nw-act-sep"></div>';
+        return imgFmt;
+    };
+
+    NW.buildQrcodeToolbar_ = function (block) {
+        if (!(block.type === 'qrcode' && block.url)) return '';
+        return '<div class="nw-fmt-toolbar">'
+            + '<button title="QRコード編集" onclick="NW.editQrCode(\'' + block.id + '\')"><span class="material-symbols-outlined">edit</span></button>'
+            + '</div><div class="nw-act-sep"></div>';
+    };
+
+    /** ブロック種別に応じた書式ツールバーHTMLをまとめて返す（該当1種のみ非空）。 */
+    NW.buildBlockToolbar_ = function (block) {
+        return NW.buildTextToolbar_(block)
+            + NW.buildWordartToolbar_(block)
+            + NW.buildColumnsToolbar_(block)
+            + NW.buildGalleryToolbar_(block)
+            + NW.buildImageToolbar_(block)
+            + NW.buildQrcodeToolbar_(block);
+    };
+
     NW.renderBlock = function (block) {
         var wrapper = document.createElement('div');
         wrapper.className = 'nw-block';
@@ -2420,140 +2569,9 @@
         var actions = document.createElement('div');
         actions.className = 'nw-block-actions';
 
-        // Format toolbar for text/heading blocks
-        if (block.type === 'heading' || block.type === 'text') {
-            var fmt = '<div class="nw-fmt-toolbar">'
-                + '<select onchange="NW.setFontFamily(\'' + block.id + '\',this.value)" title="フォント">';
-            fmt += '<option value=""' + (!block.fontFamily ? ' selected' : '') + '>標準</option>';
-            NW_FONTS.forEach(function (f) {
-                fmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
-            });
-            fmt += '</select>'
-                + '<select onchange="NW.setFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
-            [9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72].forEach(function (s) {
-                fmt += '<option value="' + s + '"' + (s === block.fontSize ? ' selected' : '') + '>' + s + '</option>';
-            });
-            fmt += '</select>'
-                + '<button title="太字" onclick="NW.toggleBold(\'' + block.id + '\')" class="' + (block.bold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
-                + '<button title="左揃え" onclick="NW.setAlign(\'' + block.id + '\',\'left\')" class="' + (block.align === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
-                + '<button title="中央" onclick="NW.setAlign(\'' + block.id + '\',\'center\')" class="' + (block.align === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
-                + '<button title="右揃え" onclick="NW.setAlign(\'' + block.id + '\',\'right\')" class="' + (block.align === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
-                + '<div class="nw-act-sep"></div>'
-                + '<button title="文字色" onclick="NW.pickColor(\'' + block.id + '\',\'color\')" style="position:relative;"><span class="material-symbols-outlined">format_color_text</span><span class="nw-color-dot" style="background:' + (block.color || '#202124') + ';"></span></button>'
-                + '<button title="背景色" onclick="NW.pickColor(\'' + block.id + '\',\'bgColor\')" style="position:relative;"><span class="material-symbols-outlined">format_color_fill</span><span class="nw-color-dot" style="background:' + (block.bgColor || 'transparent') + ';border:1px solid #ccc;"></span></button>'
-                + '<div class="nw-act-sep"></div>'
-                + '<button title="AIでリライト" onclick="NW.aiRewriteBlock(\'' + block.id + '\')" class="nw-ai-btn"><span class="material-symbols-outlined">auto_awesome</span></button>'
-                + '</div><div class="nw-act-sep"></div>';
-            actions.insertAdjacentHTML('beforeend', fmt);
-        }
-
-        // WordArt toolbar: font/size/align + effect toggles + settings
-        if (block.type === 'wordart') {
-            var bid = block.id;
-            var waFmt = '<div class="nw-fmt-toolbar">'
-                + '<select onchange="NW.waSet(\'' + bid + '\',\'fontFamily\',this.value)" title="フォント">';
-            waFmt += '<option value=""' + (!block.fontFamily ? ' selected' : '') + '>標準</option>';
-            NW_FONTS.forEach(function (f) {
-                waFmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + '>' + f.label + '</option>';
-            });
-            waFmt += '</select>'
-                + '<select onchange="NW.waSet(\'' + bid + '\',\'fontSize\',this.value)" title="サイズ">';
-            [28, 32, 36, 40, 48, 56, 64, 72, 96].forEach(function (s) {
-                waFmt += '<option value="' + s + '"' + (s === (block.fontSize || 48) ? ' selected' : '') + '>' + s + '</option>';
-            });
-            waFmt += '</select>'
-                + '<button title="左揃え" onclick="NW.waSet(\'' + bid + '\',\'align\',\'left\')" class="' + (block.align === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
-                + '<button title="中央" onclick="NW.waSet(\'' + bid + '\',\'align\',\'center\')" class="' + (block.align === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
-                + '<button title="右揃え" onclick="NW.waSet(\'' + bid + '\',\'align\',\'right\')" class="' + (block.align === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
-                + '<div class="nw-act-sep"></div>'
-                + '<button title="グラデーション" onclick="NW.waToggle(\'' + bid + '\',\'waGradient\')" class="nw-wa-fx-btn' + (block.waGradient ? ' nw-active' : '') + '"><span class="material-symbols-outlined">gradient</span></button>'
-                + '<button title="アウトライン" onclick="NW.waToggle(\'' + bid + '\',\'waStroke\')" class="nw-wa-fx-btn' + (block.waStroke ? ' nw-active' : '') + '"><span class="material-symbols-outlined">border_color</span></button>'
-                + '<button title="影" onclick="NW.waToggle(\'' + bid + '\',\'waShadow\')" class="nw-wa-fx-btn' + (block.waShadow ? ' nw-active' : '') + '"><span class="material-symbols-outlined">blur_on</span></button>'
-                + '<button title="3D立体" onclick="NW.waToggle(\'' + bid + '\',\'wa3d\')" class="nw-wa-fx-btn' + (block.wa3d ? ' nw-active' : '') + '"><span class="material-symbols-outlined">view_in_ar</span></button>'
-                + '<div class="nw-act-sep"></div>'
-                + '<button onclick="NW.openWordArtSettings(\'' + bid + '\')" title="スタイル詳細設定"><span class="material-symbols-outlined">tune</span></button>'
-                + '<button onclick="NW.editWordArt(\'' + bid + '\')" title="テキスト編集"><span class="material-symbols-outlined">edit</span></button>'
-                + '</div><div class="nw-act-sep"></div>';
-            actions.insertAdjacentHTML('beforeend', waFmt);
-        }
-
-        // Columns toolbar: column count & ratio
-        if (block.type === 'columns') {
-            var colFmt = '<div class="nw-fmt-toolbar">'
-                + '<select onchange="NW.setColumnsCount(\'' + block.id + '\',this.value)" title="列数">';
-            [2, 3].forEach(function (c) {
-                colFmt += '<option value="' + c + '"' + (c === block.columns ? ' selected' : '') + '>' + c + '列</option>';
-            });
-            colFmt += '</select>'
-                + '<select onchange="NW.setColRatio(\'' + block.id + '\',this.value)" title="比率">';
-            var ratioOpts = [
-                { v: 'equal', l: '均等' },
-                { v: '1:2', l: '1:2' },
-                { v: '2:1', l: '2:1' },
-                { v: '1:3', l: '1:3' },
-                { v: '3:1', l: '3:1' }
-            ];
-            ratioOpts.forEach(function (r) {
-                colFmt += '<option value="' + r.v + '"' + (block.colRatio === r.v ? ' selected' : '') + '>' + r.l + '</option>';
-            });
-            colFmt += '</select></div><div class="nw-act-sep"></div>';
-            actions.insertAdjacentHTML('beforeend', colFmt);
-        }
-
-        // Gallery toolbar: column count
-        if (block.type === 'gallery') {
-            var galFmt = '<div class="nw-fmt-toolbar"><select onchange="NW.setGalleryColumns(\'' + block.id + '\',this.value)" title="列数">';
-            [2, 3, 4].forEach(function (c) {
-                galFmt += '<option value="' + c + '"' + (c === block.columns ? ' selected' : '') + '>' + c + '列</option>';
-            });
-            galFmt += '</select></div><div class="nw-act-sep"></div>';
-            actions.insertAdjacentHTML('beforeend', galFmt);
-        }
-
-        // Float toolbar for image blocks with src
-        if (block.type === 'image' && block.src) {
-            var imgFmt = '<div class="nw-fmt-toolbar">'
-                + '<button title="回り込みなし" onclick="NW.setFloat(\'' + block.id + '\',\'none\')" class="' + (block.float === 'none' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">crop_free</span></button>'
-                + '<button title="左に画像" onclick="NW.setFloat(\'' + block.id + '\',\'left\')" class="' + (block.float === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_image_left</span></button>'
-                + '<button title="右に画像" onclick="NW.setFloat(\'' + block.id + '\',\'right\')" class="' + (block.float === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_image_right</span></button>'
-                + '<select onchange="NW.setImageWidth(\'' + block.id + '\',this.value)" title="画像幅">';
-            [25, 30, 40, 50, 60, 75, 100].forEach(function (w) {
-                imgFmt += '<option value="' + w + '"' + (w === block.width ? ' selected' : '') + '>' + w + '%</option>';
-            });
-            imgFmt += '</select></div>';
-            // Text formatting toolbar for wrap text (only when float is active)
-            if (block.float !== 'none') {
-                imgFmt += '<div class="nw-fmt-toolbar">'
-                    + '<select onchange="NW.setWrapFontFamily(\'' + block.id + '\',this.value)" title="フォント">';
-                imgFmt += '<option value=""' + (!block.wrapFontFamily ? ' selected' : '') + '>標準</option>';
-                NW_FONTS.forEach(function (f) {
-                    imgFmt += '<option value="' + f.value + '"' + (block.wrapFontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
-                });
-                imgFmt += '</select>'
-                    + '<select onchange="NW.setWrapFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
-                [9, 10, 11, 12, 14, 16, 18, 20, 24].forEach(function (s) {
-                    imgFmt += '<option value="' + s + '"' + (s === (block.wrapFontSize || 12) ? ' selected' : '') + '>' + s + '</option>';
-                });
-                imgFmt += '</select>'
-                    + '<button title="太字" onclick="NW.toggleWrapBold(\'' + block.id + '\')" class="' + (block.wrapBold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
-                    + '<button title="左揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'left\')" class="' + (block.wrapAlign === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
-                    + '<button title="中央" onclick="NW.setWrapAlign(\'' + block.id + '\',\'center\')" class="' + (block.wrapAlign === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
-                    + '<button title="右揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'right\')" class="' + (block.wrapAlign === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
-                    + '<div class="nw-act-sep"></div>'
-                    + '<button title="文字色" onclick="NW.pickColor(\'' + block.id + '\',\'wrapColor\')" style="position:relative;"><span class="material-symbols-outlined">format_color_text</span><span class="nw-color-dot" style="background:' + (block.wrapColor || '#202124') + ';"></span></button>'
-                    + '</div>';
-            }
-            imgFmt += '<div class="nw-act-sep"></div>';
-            actions.insertAdjacentHTML('beforeend', imgFmt);
-        }
-
-        // QR code toolbar: edit button
-        if (block.type === 'qrcode' && block.url) {
-            var qrFmt = '<div class="nw-fmt-toolbar">'
-                + '<button title="QRコード編集" onclick="NW.editQrCode(\'' + block.id + '\')"><span class="material-symbols-outlined">edit</span></button>'
-                + '</div><div class="nw-act-sep"></div>';
-            actions.insertAdjacentHTML('beforeend', qrFmt);
-        }
+        // ブロック種別ごとの書式ツールバー（純粋関数で生成・該当種別のみ非空）
+        var toolbarHtml = NW.buildBlockToolbar_(block);
+        if (toolbarHtml) actions.insertAdjacentHTML('beforeend', toolbarHtml);
 
         // Common action buttons: decoration, up, down, duplicate, delete
         actions.insertAdjacentHTML('beforeend',
