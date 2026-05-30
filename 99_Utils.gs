@@ -281,8 +281,27 @@ function callGeminiApiChunked_(basePrompt, apiKey, blobs, buildContinuationPromp
   return allResults;
 }
 
-/** 
- * 指定された名前のトリガーをすべて削除するヘルパー関数です。 
+/**
+ * キュー型バックグラウンド処理（PDF読込など）のトリガーを再スケジュールします。
+ * 既存トリガーを削除した上で、この実行の経過時間が5分未満なら即時(after 1秒)、
+ * 5分以上経過していれば5分間隔に切り替え、実行時間制限による中断からの再開を図ります。
+ * @param {string} triggerName 対象のトリガー関数名
+ * @param {Date} startTime この実行の開始時刻
+ * @param {string} [resumeLogMessage] 5分超過時に出力するログメッセージ
+ */
+function rescheduleQueueTrigger_(triggerName, startTime, resumeLogMessage) {
+  deleteTriggers_(triggerName);
+  const elapsedMinutes = (new Date() - startTime) / 1000 / 60;
+  if (elapsedMinutes < 5) {
+    ScriptApp.newTrigger(triggerName).timeBased().after(1000).create();
+  } else {
+    if (resumeLogMessage) logInfo(resumeLogMessage);
+    ScriptApp.newTrigger(triggerName).timeBased().everyMinutes(5).create();
+  }
+}
+
+/**
+ * 指定された名前のトリガーをすべて削除するヘルパー関数です。
  */
 function deleteTriggers_(functionName) {
   ScriptApp.getProjectTriggers().forEach(trigger => {

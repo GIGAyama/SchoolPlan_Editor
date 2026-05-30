@@ -68,7 +68,7 @@ function importEventsFromFolder_UI() {
     properties.setProperty(SCRIPT_PROP_EVENT_PDF_TOTAL, processingQueue.length);
     properties.setProperty(SCRIPT_PROP_EVENT_PDF_YEAR, fiscalYear.toString());
 
-    ss.toast(`行事予定PDFの読み込みを開始しました。(0/${processingQueue.length})`, '処理開始', -1);
+    SpreadsheetApp.getActiveSpreadsheet().toast(`行事予定PDFの読み込みを開始しました。(0/${processingQueue.length})`, '処理開始', -1);
     
     ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME_EVENT).timeBased().after(1000).create();
 
@@ -127,16 +127,9 @@ function processNextEventPdf() {
 
   properties.setProperty(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(queue));
 
-  const executionTime = (new Date() - startTime) / 1000;
-  deleteTriggers_(TRIGGER_FUNCTION_NAME_EVENT);
-
   if (queue.length > 0) {
-    if (executionTime < 300) { 
-      ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME_EVENT).timeBased().after(1000).create();
-    } else {
-      logInfo(`時間切れのため行事予定PDFの処理を中断・再開します。残り: ${queue.length} タスク`);
-      ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME_EVENT).timeBased().everyMinutes(5).create();
-    }
+    rescheduleQueueTrigger_(TRIGGER_FUNCTION_NAME_EVENT, startTime,
+      `時間切れのため行事予定PDFの処理を中断・再開します。残り: ${queue.length} タスク`);
   } else {
     SpreadsheetApp.getActiveSpreadsheet().toast("行事予定PDFの読み込みがすべて完了しました。", "処理完了", 10);
     logInfo("すべての行事予定PDFの処理が完了しました。");
@@ -356,16 +349,9 @@ function createUnitMasterFromPdfs() {
     }
     properties.setProperty(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
 
-    const executionTime = (new Date() - startTime) / 1000 / 60;
-    deleteTriggers_(TRIGGER_FUNCTION_NAME);
-
     if (fileIds.length > 0) {
-      if (executionTime < 5) {
-        ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME).timeBased().after(1000).create();
-      } else {
-        logInfo(`時間切れのため処理を中断・再開します。残り: ${fileIds.length}件`);
-        ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME).timeBased().everyMinutes(5).create();
-      }
+      rescheduleQueueTrigger_(TRIGGER_FUNCTION_NAME, startTime,
+        `時間切れのため処理を中断・再開します。残り: ${fileIds.length}件`);
     } else {
       logInfo("すべてのPDF処理が完了しました。");
       SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
