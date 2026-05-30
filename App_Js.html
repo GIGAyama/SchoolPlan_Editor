@@ -1307,37 +1307,12 @@
         });
     }
 
-    function printWeeklyPlanExec(opts) {
-        var btn = document.getElementById('printBtn');
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 準備中...';
-        }
-
-        var printFrame = document.getElementById('printFrame');
-        if (!printFrame) {
-            printFrame = document.createElement('iframe');
-            printFrame.id = 'printFrame';
-            document.body.appendChild(printFrame);
-        }
-        // display:none だと要素がレイアウトを持たず高さ測定(scrollHeight)が0になり自動縮小が効かない。
-        // オフスクリーンに配置してレイアウトを保ちつつ画面外に隠す。横幅は印刷可能領域(A4縦, 左右10mm余白)に合わせる。
-        printFrame.style.display = 'block';
-        printFrame.style.position = 'fixed';
-        printFrame.style.left = '-9999px';
-        printFrame.style.top = '0';
-        printFrame.style.width = '190mm';
-        printFrame.style.height = '600mm';
-        printFrame.style.border = '0';
-
-        var doc = printFrame.contentWindow.document;
-        doc.open();
-
-        var weekNum = STATE.weekData.weekNum !== undefined && STATE.weekData.weekNum !== null ? STATE.weekData.weekNum : '?';
-        var days = STATE.weekData.days || [];
-
-        var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>週案_第' + weekNum + '週</title>';
-        html += '<style>';
+    /**
+     * 週案印刷用の <style> 内CSS文字列を生成する純粋関数。
+     * 副作用なし。opts.fontSize のみを参照する（printWeeklyPlanExec から抽出）。
+     */
+    function buildPrintStyles_(opts) {
+        var html = '<style>';
         html += '@import url("https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap");';
         html += '@page { size: A4 portrait; margin: 10mm; }';
         html += 'body { font-family: "Zen Maru Gothic", sans-serif; font-size: ' + opts.fontSize + 'px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
@@ -1392,7 +1367,42 @@
 
         html += '.free-box { flex: 1; display: block; padding-top: 5px; overflow: hidden; border: 1px solid #e0e0e0; border-radius: 4px; min-height: 0; }';
         html += '.line-row { border-bottom: 1px dashed #ccc; height: 6mm; width: 100%; }';
-        html += '</style></head><body>';
+        html += '</style>';
+        return html;
+    }
+
+    function printWeeklyPlanExec(opts) {
+        var btn = document.getElementById('printBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 準備中...';
+        }
+
+        var printFrame = document.getElementById('printFrame');
+        if (!printFrame) {
+            printFrame = document.createElement('iframe');
+            printFrame.id = 'printFrame';
+            document.body.appendChild(printFrame);
+        }
+        // display:none だと要素がレイアウトを持たず高さ測定(scrollHeight)が0になり自動縮小が効かない。
+        // オフスクリーンに配置してレイアウトを保ちつつ画面外に隠す。横幅は印刷可能領域(A4縦, 左右10mm余白)に合わせる。
+        printFrame.style.display = 'block';
+        printFrame.style.position = 'fixed';
+        printFrame.style.left = '-9999px';
+        printFrame.style.top = '0';
+        printFrame.style.width = '190mm';
+        printFrame.style.height = '600mm';
+        printFrame.style.border = '0';
+
+        var doc = printFrame.contentWindow.document;
+        doc.open();
+
+        var weekNum = STATE.weekData.weekNum !== undefined && STATE.weekData.weekNum !== null ? STATE.weekData.weekNum : '?';
+        var days = STATE.weekData.days || [];
+
+        var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>週案_第' + weekNum + '週</title>';
+        html += buildPrintStyles_(opts);
+        html += '</head><body>';
 
         var renderDateHeader = function (d) {
             if (!d) return "";
