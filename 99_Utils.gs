@@ -335,7 +335,7 @@ function logError(message, error) {
  */
 function writeToLog_(level, message) {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     let logSheet = ss.getSheetByName(SHEET_NAME_LOG);
     if (!logSheet) {
       logSheet = ss.insertSheet(SHEET_NAME_LOG, ss.getSheets().length);
