@@ -104,13 +104,17 @@ function postScheduleToClassroom_core_() {
     const today = new Date();
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
 
-    // 本日が登校日（1校時に予定あり）かを判定する。
+    // 本日が登校日（1校時に予定あり）かを判定する。本日の行データも保持し、後段の「今日の様子」生成に用いる。
     // 休み中は投稿しない。休みに入る前の最終登校日に、休み明けの予定を投稿済みのため、
     // ここで投稿すると同じ予定が重複して投稿されてしまう。
-    const isTodaySchoolDay = dbData.some(row =>
-      row[dbCols.DATE - 1] instanceof Date && isSameDate(row[dbCols.DATE - 1], today) && row[dbCols.PERIOD1 - 1]);
+    let todayRowData = null;
+    dbData.forEach(row => {
+      if (row[dbCols.DATE - 1] instanceof Date && isSameDate(row[dbCols.DATE - 1], today) && row[dbCols.PERIOD1 - 1]) {
+        todayRowData = row;
+      }
+    });
 
-    if (!isTodaySchoolDay) {
+    if (!todayRowData) {
       Logger.log(`本日は登校日ではないためスキップ`);
       return { success: true, posted: false, message: '本日は登校日ではないため投稿をスキップしました。' };
     }
@@ -157,13 +161,64 @@ function postScheduleToClassroom_core_() {
     const items = cell('ITEMS');
     if (items) postText += `\n持ち物：\n${items}\n`;
 
+    // 担当学年が1年生の場合は、予定部分の漢字をすべてひらがなに自動変換する（子どもが自分で読めるように）。
+    // Gemini未設定・変換失敗時は convertTextToHiragana_ が元の文章を返すため、投稿処理は継続する。
+    const grade = parseInt(PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_GRADE), 10);
+    if (grade === 1 && typeof convertTextToHiragana_ === 'function') {
+      postText = convertTextToHiragana_(postText);
+    }
+
+    // 「今日の様子」を本日（＝投稿する日）の学習予定からGeminiで自動生成し、保護者向けに追記する。
+    // 漢字変換後に追記するため、このセクションは全学年で通常の漢字表記のまま（保護者が読む想定）。
+    // Gemini未設定・生成失敗時はこのセクションを省略し、予定の投稿は継続する。
+    try {
+      const todayLessonContext = buildLessonContext_(todayRowData, dbCols);
+      if (todayLessonContext && typeof generateTodaySituationText_ === 'function') {
+        const todayLabel = `${Utilities.formatDate(today, "JST", "yyyy/MM/dd")}（${daysOfWeek[today.getDay()]}）`;
+        const situation = generateTodaySituationText_(todayLabel, todayLessonContext);
+        if (situation) postText += `\n【今日の様子】\n${situation}\n`;
+      }
+    } catch (situationErr) {
+      logError("postScheduleToClassroom_core_ (今日の様子)", situationErr);
+    }
+
     Classroom.Courses.Announcements.create({ text: postText.trim() }, courseId);
     logInfo(`クラス「${courseName}」へ予定投稿完了`);
     return { success: true, posted: true, message: `クラス「${courseName}」へ ${formattedDateString} の予定を投稿しました。` };
 }
 
-/** 
- * 指定されたクラス名から、Google ClassroomのコースIDを探し出します。 
+/**
+ * 1日分の行データから、AIに渡す授業内容のコンテキスト文字列を組み立てます。
+ * 行事・朝学習・1〜6校時（教科・単元・学習内容）をまとめたテキストを返します。
+ * @param {Array} rowData データベースの1行分の配列
+ * @param {Object} dbCols getDbColumns() の列マップ（1始まり）
+ * @returns {string} 授業内容のコンテキスト（空の場合は空文字）
+ */
+function buildLessonContext_(rowData, dbCols) {
+  if (!rowData) return '';
+  const cell = (key) => (dbCols[key] ? (rowData[dbCols[key] - 1] || '').toString().trim() : '');
+
+  let ctx = '';
+  const event = cell('EVENT');
+  if (event) ctx += `行事: ${event}\n`;
+  const morning = cell('MORNING');
+  if (morning) ctx += `朝学習: ${morning}\n`;
+
+  for (let n = 1; n <= 6; n++) {
+    const subject = cell('PERIOD' + n);
+    if (!subject) continue;
+    const unit = cell('UNIT' + n);
+    const content = cell('CONTENT' + n);
+    let line = `${n}時間目: ${subject}`;
+    if (unit) line += ` 「${unit}」`;
+    if (content) line += ` ${content}`;
+    ctx += line + '\n';
+  }
+  return ctx.trim();
+}
+
+/**
+ * 指定されたクラス名から、Google ClassroomのコースIDを探し出します。
  */
 function getCourseIdByName(courseName) {
   try {
