@@ -383,6 +383,71 @@ ${instruction || 'より自然で読みやすい文章にしてください。'}
 }
 
 /**
+ * [内部] 与えられた文章中の漢字をすべてひらがなに変換します（小学1年生が自分で読めるように）。
+ * Gemini を利用。APIキー未設定や変換失敗時は、投稿を止めないよう元の文章をそのまま返します。
+ * カタカナ・数字・記号・絵文字・改行・「」などの構造は保持し、漢字のみを読み仮名に置き換えます。
+ * @param {string} text 変換対象の文章
+ * @returns {string} ひらがな変換後の文章（失敗時は元の文章）
+ */
+function convertTextToHiragana_(text) {
+  try {
+    if (!text || !text.trim()) return text;
+
+    const prompt = `次の文章を、小学1年生が一人で読めるように、漢字の部分だけをすべてひらがなに変換してください。
+
+【ルール】
+- 漢字は、その文脈に合った正しい読み方のひらがなに置き換えてください。
+- カタカナ・数字・アルファベット・記号・絵文字・改行・「」（かぎかっこ）・／などはそのまま残してください。
+- 語順や内容、レイアウトは一切変えないでください。
+- 変換後の文章だけを出力し、説明・注釈・前置きは一切付けないでください。
+
+【文章】
+${text}`;
+
+    const converted = callGeminiAPIText_(prompt);
+    return (converted && converted.trim()) ? converted.trim() : text;
+  } catch (e) {
+    logError('convertTextToHiragana_', e);
+    return text; // 失敗時は元の文章を返し、投稿処理を継続させる
+  }
+}
+
+/**
+ * [内部] 本日（投稿する日）の学習予定をもとに、保護者向けの「今日の様子」文章を生成します。
+ * Gemini を利用。APIキー未設定や生成失敗時は空文字を返し、呼び出し側でセクションを省略できるようにします。
+ * @param {string} dateLabel 例 "2026/05/27（火）"
+ * @param {string} lessonContext 本日の授業内容のテキスト（buildLessonContext_ の戻り値）
+ * @returns {string} 生成された文章（失敗時は空文字）
+ */
+function generateTodaySituationText_(dateLabel, lessonContext) {
+  try {
+    if (!lessonContext || !lessonContext.trim()) return '';
+
+    // セキュリティ: 入力長を制限（プロンプトインジェクション・過大入力対策）
+    const sanitized = lessonContext.length > 3000 ? lessonContext.substring(0, 3000) : lessonContext;
+
+    const prompt = `あなたは小学校の担任教員です。
+本日（${dateLabel}）に行った授業の予定をもとに、保護者向けに「今日の様子」を伝える短い文章を作成してください。
+
+【条件】
+- 授業が実際に行われたという前提で、子どもたちが頑張っていた様子や学びの様子を、温かく具体的に書いてください。
+- 3〜4文程度の自然な日本語の文章にしてください。
+- 箇条書き・見出し・絵文字は使わず、文章のみを出力してください。
+- 保護者が読んで安心でき、子どもの学校での様子が想像できるようにしてください。
+- 予定にない出来事を断定的に作り込みすぎないよう、自然な範囲で書いてください。
+
+【本日の授業予定】
+${sanitized}`;
+
+    const text = callGeminiAPIText_(prompt);
+    return (text || '').trim();
+  } catch (e) {
+    logError('generateTodaySituationText_', e);
+    return ''; // 失敗時は空文字を返し、予定の投稿は継続させる
+  }
+}
+
+/**
  * [Webアプリ API] フリーテキスト（議事録等）からタスクを抽出
  * @param {string} text 議事録などのテキスト
  * @returns {Object} { success: boolean, tasks: Object[] }
