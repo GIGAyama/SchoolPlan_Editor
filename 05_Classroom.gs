@@ -73,11 +73,12 @@ function postScheduleToClassroom() {
 /**
  * [Webアプリ API] 「明日（次の登校日）の予定」をClassroomへ投稿します。
  * メニュー版（postScheduleToClassroom）と同一ロジックを用い、UIに依存せず結果を返します。
+ * アプリのボタンからの手動投稿のため、本日が登校日でなくても（土日・休み中でも）投稿できます。
  * @returns {{success: boolean, posted: boolean, message: string}}
  */
 function postScheduleToClassroomFromWeb() {
   try {
-    return postScheduleToClassroom_core_();
+    return postScheduleToClassroom_core_({ manual: true });
   } catch (error) {
     logError("postScheduleToClassroomFromWeb", error);
     return { success: false, posted: false, message: error.message };
@@ -87,9 +88,12 @@ function postScheduleToClassroomFromWeb() {
 /**
  * 次の登校日の予定をClassroomへ投稿するコアロジック。
  * UI非依存。スキップ時/投稿時を表す結果オブジェクトを返し、異常時は例外を送出します。
+ * @param {{manual?: boolean}} [options] manual=true のとき手動投稿として扱い、本日が登校日でなくても投稿する。
+ *   自動投稿（既定）では、休み中の重複投稿を防ぐため本日が登校日のときのみ投稿する。
  * @returns {{success: boolean, posted: boolean, message: string}}
  */
-function postScheduleToClassroom_core_() {
+function postScheduleToClassroom_core_(options) {
+    const isManual = !!(options && options.manual);
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     const databaseSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!databaseSheet) throw new Error("データベースシートが見つかりません");
@@ -105,8 +109,6 @@ function postScheduleToClassroom_core_() {
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
 
     // 本日が登校日（1校時に予定あり）かを判定する。本日の行データも保持し、後段の「今日の様子」生成に用いる。
-    // 休み中は投稿しない。休みに入る前の最終登校日に、休み明けの予定を投稿済みのため、
-    // ここで投稿すると同じ予定が重複して投稿されてしまう。
     let todayRowData = null;
     dbData.forEach(row => {
       if (row[dbCols.DATE - 1] instanceof Date && isSameDate(row[dbCols.DATE - 1], today) && row[dbCols.PERIOD1 - 1]) {
@@ -114,8 +116,11 @@ function postScheduleToClassroom_core_() {
       }
     });
 
-    if (!todayRowData) {
-      Logger.log(`本日は登校日ではないためスキップ`);
+    // 自動投稿では、休み中は投稿しない。休みに入る前の最終登校日に休み明けの予定を投稿済みのため、
+    // ここで投稿すると同じ予定が重複して投稿されてしまう。
+    // 一方、アプリのボタンからの手動投稿（isManual）は、土日・休み中でも投稿できるようこの判定をスキップする。
+    if (!isManual && !todayRowData) {
+      Logger.log(`本日は登校日ではないため自動投稿をスキップ`);
       return { success: true, posted: false, message: '本日は登校日ではないため投稿をスキップしました。' };
     }
 
