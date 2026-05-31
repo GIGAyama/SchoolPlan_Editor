@@ -32,7 +32,7 @@ function doGet(e) {
     .setTitle('週案エディタ')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
-    .setFaviconUrl('https://drive.google.com/uc?id=1xr9GxBO6n_vsSrH7xrRtk-WAwr8zM-1n&.png');
+    .setFaviconUrl('https://drive.google.com/uc?id=1zNSkBUKrzxX4TDeDpcXZ-jKtDtv0c4Yn&.png');
 }
 
 /**
