@@ -155,6 +155,7 @@
             .withSuccessHandler(function (data) {
                 if (data.success) STATE.masterData = data;
             })
+            .withFailureHandler(_onCommError)
             .getUnitMasterForSuggest();
     }
 
@@ -1794,6 +1795,10 @@
                 if (!data.success) { content.innerHTML = '<div class="hours-empty">取得失敗: ' + data.error + '</div>'; return; }
                 renderAnnualHoursTable(data.hoursData);
             })
+            .withFailureHandler(function (e) {
+                // 失敗時にローディング表示が残らないよう、内容領域にエラーを表示する
+                content.innerHTML = '<div class="hours-empty">通信エラー: ' + (e && e.message ? e.message : '取得に失敗しました') + '</div>';
+            })
             .getAnnualHoursData(STATE.hoursYear);
     }
 
@@ -1959,6 +1964,7 @@
                     STATE.grade = parseInt(settings.grade, 10) || 3;
                 }
             })
+            .withFailureHandler(_onCommError)
             .getAppSettings();
     }
 
@@ -4756,6 +4762,12 @@
                 if (res.unitStatus.isRunning || res.eventStatus.isRunning) {
                     setTimeout(checkProcessingStatus, 3000);
                 }
+            })
+            .withFailureHandler(function (e) {
+                // 一時的な通信エラーでポーリングが止まり「処理中...」のまま固まらないよう、
+                // トーストは出さず（連発防止）少し待って再試行する。タブを離れると先頭ガードで停止する。
+                console.error('PDF処理状況の取得に失敗（ポーリング継続）:', e && e.message);
+                setTimeout(checkProcessingStatus, 5000);
             })
             .getPdfProcessingStatusForWebApp();
     }
