@@ -164,6 +164,42 @@ function repairTruncatedJsonArray_(text) {
 }
 
 /**
+ * 指定週（7日分）の保存対象セル値からリビジョン（MD5ハッシュ）を計算します。
+ * getWeeklyPlanData と saveWeeklyPlanData が同一ロジックで算出し、楽観ロックの基準に用います。
+ * クライアントは値を解釈せずトークンとして往復させるため、表示整形の差異に影響されません。
+ * @param {Array[]} dbData データベースシートの全行データ（getValuesの結果）
+ * @param {Object} dbCols getDbColumns() の列マップ（1始まり）
+ * @param {string[]} weekDateStrs "yyyy/MM/dd" 形式の7日分の日付文字列
+ * @returns {string} リビジョン（16進ハッシュ）
+ */
+function computeWeekRevision_(dbData, dbCols, weekDateStrs) {
+  const FIELDS = ['EVENT', 'MORNING', 'PERIOD1', 'UNIT1', 'CONTENT1', 'PERIOD2', 'UNIT2', 'CONTENT2', 'RECESS1',
+    'PERIOD3', 'UNIT3', 'CONTENT3', 'PERIOD4', 'UNIT4', 'CONTENT4', 'RECESS2', 'PERIOD5', 'UNIT5', 'CONTENT5',
+    'PERIOD6', 'UNIT6', 'CONTENT6', 'AFTERSCHOOL', 'HOMEWORK', 'ITEMS'];
+  const rowByDate = new Map();
+  for (const row of dbData) {
+    if (row[dbCols.DATE - 1] instanceof Date) {
+      rowByDate.set(formatDate(row[dbCols.DATE - 1]), row);
+    }
+  }
+  const parts = [];
+  for (const ds of weekDateStrs) {
+    const row = rowByDate.get(ds);
+    parts.push(ds);
+    for (const f of FIELDS) {
+      const col = dbCols[f];
+      const v = (col && row) ? row[col - 1] : '';
+      parts.push(v == null ? '' : String(v));
+    }
+  }
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, parts.join(''), Utilities.Charset.UTF_8);
+  return digest.map(b => {
+    const h = (b < 0 ? b + 256 : b).toString(16);
+    return h.length === 1 ? '0' + h : h;
+  }).join('');
+}
+
+/**
  * Gemini API への1回の呼び出しを行い、結果と途切れ情報を返します。
  * @param {string} prompt プロンプト
  * @param {string} apiKey APIキー

@@ -112,7 +112,11 @@ function getWeeklyPlanData(mondayDateStr) {
       };
     });
 
-    return { success: true, days, mondayDateStr, weekNum };
+    // 楽観ロック用リビジョン（この週の現在のDB内容のハッシュ）。保存時に競合検知に用いる。
+    const weekDateStrs = weekDates.map(d => formatDate(d));
+    const revision = computeWeekRevision_(dbData, dbCols, weekDateStrs);
+
+    return { success: true, days, mondayDateStr, weekNum, revision };
   } catch (e) {
     logError('getWeeklyPlanData', e);
     return { success: false, error: e.message };
@@ -155,9 +159,17 @@ function getMondayStrByWeekNumber(weekNum) {
  * Webアプリから受け取った週案データをDBに一括保存します。
  * @param {string} mondayDateStr "yyyy/MM/dd" 形式の月曜日の日付
  * @param {Object[]} days 保存するデータの配列（getWeeklyPlanDataと同じ形式）
- * @returns {Object} { success: boolean, message: string }
+ * @param {string} [baseRevision] 読み込み時に受け取ったリビジョン。指定時は楽観ロックで競合を検知する。
+ * @returns {Object} { success: boolean, message?: string, revision?: string, conflict?: boolean, error?: string }
  */
-function saveWeeklyPlanData(mondayDateStr, days) {
+function saveWeeklyPlanData(mondayDateStr, days, baseRevision) {
+  // 同時保存による全シート書き戻しの競合（他の週の変更の消失等）を防ぐため直列化する
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (lockErr) {
+    return { success: false, error: '他の保存処理が進行中です。少し待ってから再度お試しください。' };
+  }
   try {
     validateParams_({ mondayDateStr, days }, {
       mondayDateStr: { type: 'string', required: true, pattern: /^\d{4}\/\d{1,2}\/\d{1,2}$/ },
@@ -169,6 +181,27 @@ function saveWeeklyPlanData(mondayDateStr, days) {
 
     const dbCols = getDbColumns();
     const dbData = dbSheet.getDataRange().getValues();
+
+    // 該当週の7日分の日付文字列（リビジョン算出・後段の戻り値に使用）
+    const monday = parseDate_(mondayDateStr);
+    const weekDateStrs = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      return formatDate(d);
+    });
+
+    // 楽観ロック: クライアントが読み込んだ後に他の端末やAI処理で更新されていないか確認する。
+    // baseRevision 未指定（旧クライアント）の場合は従来通り無条件保存する（後方互換）。
+    if (baseRevision) {
+      const currentRevision = computeWeekRevision_(dbData, dbCols, weekDateStrs);
+      if (currentRevision !== baseRevision) {
+        return {
+          success: false,
+          conflict: true,
+          error: 'この週は他の端末またはAI処理によって更新されています。最新を読み込み直してから保存してください。'
+        };
+      }
+    }
 
     // DB全行をMapに変換 (key: "yyyy/MM/dd", value: array index)
     const dbDateIndexMap = new Map();
@@ -230,12 +263,16 @@ function saveWeeklyPlanData(mondayDateStr, days) {
 
     const msg = notFoundDates.length > 0
       ? `${updatedCount}日分を保存しました（DB未登録日: ${notFoundDates.join(', ')}）`
-      : `${updatedCount}日分を保存��ました`;
+      : `${updatedCount}日分を保存しました`;
 
-    return { success: true, message: msg, updatedCount };
+    // 書き込み後の新リビジョンを返し、クライアントが次回保存の基準を更新できるようにする
+    const newRevision = computeWeekRevision_(dbData, dbCols, weekDateStrs);
+    return { success: true, message: msg, updatedCount, revision: newRevision };
   } catch (e) {
     logError('saveWeeklyPlanData', e);
     return { success: false, error: e.message };
+  } finally {
+    lock.releaseLock();
   }
 }
 

@@ -675,10 +675,14 @@
                 _autoSaving = false;
                 if (result.success) {
                     STATE.weekData.days = days;
+                    STATE.weekData.revision = result.revision;
                     STATE.editMode = false;
                     updateEditUI();
                     showToast('success', '自動保存しました');
                     callback();
+                } else if (result.conflict) {
+                    // 競合時はナビゲーションを中断し、編集内容を保持する（callbackを呼ばない）
+                    handleSaveConflict();
                 } else {
                     showToast('error', '自動保存失敗: ' + result.error + ' 手動で保存してください。');
                 }
@@ -687,7 +691,7 @@
                 _autoSaving = false;
                 showToast('error', '自動保存エラー: ' + e.message + ' 手動で保存してください。');
             })
-            .saveWeeklyPlanData(STATE.mondayStr, days);
+            .saveWeeklyPlanData(STATE.mondayStr, days, STATE.weekData.revision);
     }
 
     // ===== 保存 =====
@@ -705,8 +709,11 @@
                 document.getElementById('saveBtn').innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 if (result.success) {
                     STATE.weekData.days = days;
+                    STATE.weekData.revision = result.revision;
                     cancelEdit();
                     showToast('success', '' + result.message);
+                } else if (result.conflict) {
+                    handleSaveConflict();
                 } else {
                     showToast('error', '保存失敗: ' + result.error);
                 }
@@ -716,7 +723,32 @@
                 document.getElementById('saveBtn').innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 showToast('error', '通信エラー: ' + e.message);
             })
-            .saveWeeklyPlanData(STATE.mondayStr, days);
+            .saveWeeklyPlanData(STATE.mondayStr, days, STATE.weekData.revision);
+    }
+
+    // ===== 保存競合（楽観ロック）時の処理 =====
+    // 他の端末やAI処理でこの週が更新されていた場合に、上書きを防いで再読み込みを促す。
+    function handleSaveConflict() {
+        _autoSaving = false;
+        if (typeof Swal === 'undefined') {
+            showToast('error', 'この週は他で更新されています。最新を読み込み直してください。');
+            return;
+        }
+        Swal.fire({
+            icon: 'warning',
+            title: '保存の競合',
+            text: 'この週は他の端末またはAI処理によって更新されました。最新の内容を読み込み直してください（現在の編集内容は破棄されます）。',
+            showCancelButton: true,
+            confirmButtonText: '最新を読み込む',
+            cancelButtonText: '編集を続ける',
+            confirmButtonColor: '#ea4335'
+        }).then(function (r) {
+            if (r.isConfirmed) {
+                STATE.editMode = false;
+                updateEditUI();
+                doLoadWeeklyPlan();
+            }
+        });
     }
 
     // ================================================================
@@ -1229,9 +1261,13 @@
                     .withSuccessHandler(function (result) {
                         if (result.success) {
                             STATE.weekData.days = days;
+                            STATE.weekData.revision = result.revision;
                             cancelEdit();
                             showToast('success', result.message);
                             resolve(true);
+                        } else if (result.conflict) {
+                            handleSaveConflict();
+                            resolve(false);
                         } else {
                             showToast('error', '保存失敗: ' + result.error);
                             resolve(false);
@@ -1241,7 +1277,7 @@
                         showToast('error', '通信エラー: ' + e.message);
                         resolve(false);
                     })
-                    .saveWeeklyPlanData(STATE.mondayStr, days);
+                    .saveWeeklyPlanData(STATE.mondayStr, days, STATE.weekData.revision);
             });
             if (!saved) return;
         }
