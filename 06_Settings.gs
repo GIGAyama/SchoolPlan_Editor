@@ -34,8 +34,13 @@ function getAppSettings() {
       postHour         : getVal(SP_KEY_POST_HOUR),
       pdfFolderId      : getVal(SP_KEY_PDF_FOLDER_ID),
       eventPdfFolderId : getVal(SP_KEY_EVENT_PDF_FOLDER_ID),
-      // APIキーは冒頭4文字だけ見せてマスク（セキュリティのため）
-      geminiApiKey     : apiKey ? apiKey.substring(0, 4) + '••••••••••••••••••••' : '',
+      // APIキーは先頭2文字＋末尾2文字のみ表示し中央をマスク（肩越しの覗き見対策）。
+      // マスク文字「•」を含むため、保存時に既存キーが保持される（saveAppSettings 参照）。
+      geminiApiKey     : apiKey
+        ? (apiKey.length > 8
+            ? apiKey.slice(0, 2) + '••••••••••••••••' + apiKey.slice(-2)
+            : '••••••••')
+        : '',
       geminiModelName  : props.getProperty(SP_KEY_GEMINI_MODEL_NAME) || 'gemini-2.5-flash',
       grade            : props.getProperty(SCRIPT_PROP_GRADE) || '3',
       moduleEnabled    : props.getProperty('moduleEnabled') === 'true'

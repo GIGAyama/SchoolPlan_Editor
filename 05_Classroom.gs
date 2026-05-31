@@ -85,6 +85,46 @@ function postScheduleToClassroomFromWeb() {
   }
 }
 
+// 予定投稿の重複防止用ログ（スクリプトプロパティ）と保持期間
+const SP_KEY_POSTED_SCHEDULE_LOG = 'sp_postedScheduleLog';
+const POSTED_SCHEDULE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14日
+
+/**
+ * 指定の識別子が保持期間内に投稿済みかを判定します。
+ * 判定に失敗した場合は false を返し、投稿を妨げません（フェイルオープン）。
+ * @param {string} fingerprint コースID＋対象日の識別子
+ * @returns {boolean}
+ */
+function hasRecentlyPostedSchedule_(fingerprint) {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(SP_KEY_POSTED_SCHEDULE_LOG);
+    if (!raw) return false;
+    const log = JSON.parse(raw);
+    const ts = log[fingerprint];
+    return !!ts && (Date.now() - ts) < POSTED_SCHEDULE_TTL_MS;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * 投稿済みの識別子を記録し、保持期間を過ぎた古いエントリを掃除します。
+ * @param {string} fingerprint コースID＋対象日の識別子
+ */
+function recordPostedSchedule_(fingerprint) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    let log = {};
+    try { log = JSON.parse(props.getProperty(SP_KEY_POSTED_SCHEDULE_LOG) || '{}'); } catch (e) {}
+    const now = Date.now();
+    log[fingerprint] = now;
+    Object.keys(log).forEach(k => { if (now - log[k] >= POSTED_SCHEDULE_TTL_MS) delete log[k]; });
+    props.setProperty(SP_KEY_POSTED_SCHEDULE_LOG, JSON.stringify(log));
+  } catch (e) {
+    logError('recordPostedSchedule_', e);
+  }
+}
+
 /**
  * 次の登校日の予定をClassroomへ投稿するコアロジック。
  * UI非依存。スキップ時/投稿時を表す結果オブジェクトを返し、異常時は例外を送出します。
@@ -187,7 +227,17 @@ function postScheduleToClassroom_core_(options) {
       logError("postScheduleToClassroom_core_ (今日の様子)", situationErr);
     }
 
+    // 重複投稿の防止: 「コースID＋対象日」を識別子にする。本文には毎回変動する
+    // AI生成「今日の様子」が含まれるため、安定した対象日で判定する。
+    // 自動投稿で同一対象日が投稿済みならスキップ。手動投稿（教員の明示操作）は常に投稿する。
+    const fingerprint = `${courseId}|${Utilities.formatDate(targetDate, "JST", "yyyyMMdd")}`;
+    if (!isManual && hasRecentlyPostedSchedule_(fingerprint)) {
+      Logger.log(`同一対象日の予定が投稿済みのため重複投稿をスキップ: ${formattedDateString}`);
+      return { success: true, posted: false, message: `${formattedDateString} の予定は既に投稿済みのためスキップしました。` };
+    }
+
     Classroom.Courses.Announcements.create({ text: postText.trim() }, courseId);
+    recordPostedSchedule_(fingerprint);
     logInfo(`クラス「${courseName}」へ予定投稿完了`);
     return { success: true, posted: true, message: `クラス「${courseName}」へ ${formattedDateString} の予定を投稿しました。` };
 }
