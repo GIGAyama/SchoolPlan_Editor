@@ -180,9 +180,28 @@ function callGeminiApiRaw_(prompt, apiKey, blobs = []) {
   const payload = { "contents": [{ "parts": parts }], "generationConfig": { "response_mime_type": "application/json", "maxOutputTokens": 65536 } };
   const options = { 'method': 'post', 'contentType': 'application/json', 'payload': JSON.stringify(payload), 'muteHttpExceptions': true };
 
-  const response = UrlFetchApp.fetch(url, options);
-  const responseCode = response.getResponseCode();
-  const responseBody = response.getContentText();
+  // 429（レート制限）・5xx（サーバ一時障害）に対し指数バックオフで再試行する。
+  // PDF解析はトリガー実行のため、失敗が無音で進行を止めやすく再試行の効果が大きい。
+  const MAX_ATTEMPTS = 4;      // 初回 + 最大3回
+  const BASE_DELAY_MS = 1000;  // 1秒→2秒→4秒
+  let response, responseCode, responseBody;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    response = UrlFetchApp.fetch(url, options);
+    responseCode = response.getResponseCode();
+    responseBody = response.getContentText();
+    if (responseCode === 200) break;
+
+    const isRetryable = (responseCode === 429 || responseCode >= 500);
+    if (!isRetryable || attempt === MAX_ATTEMPTS - 1) break;
+
+    const headers = response.getHeaders() || {};
+    const retryAfter = parseInt(headers['Retry-After'] || headers['retry-after'], 10);
+    const waitMs = (!isNaN(retryAfter) && retryAfter > 0)
+      ? Math.min(retryAfter * 1000, 16000)
+      : BASE_DELAY_MS * Math.pow(2, attempt);
+    logInfo(`Gemini API(PDF): HTTP ${responseCode} のため ${waitMs}ms 後に再試行します（${attempt + 1}/${MAX_ATTEMPTS - 1}）`);
+    Utilities.sleep(waitMs);
+  }
 
   if (responseCode === 200) {
     const jsonResponse = JSON.parse(responseBody);
