@@ -596,6 +596,7 @@
         var autoFillBtn = document.getElementById('autoFillBtn');
         var timetableBtn = document.getElementById('timetableApplyBtn');
         var batchAutoFillBtn = document.getElementById('batchAutoFillBtn');
+        var shiftLessonBtn = document.getElementById('shiftLessonBtn');
         var saveBtn = document.getElementById('saveBtn');
         var cancelBtn = document.getElementById('cancelBtn');
         if (STATE.editMode) {
@@ -606,6 +607,7 @@
             if (timetableBtn) timetableBtn.style.display = 'flex';
             if (autoFillBtn) autoFillBtn.style.display = 'flex';
             if (batchAutoFillBtn) batchAutoFillBtn.style.display = 'flex';
+            if (shiftLessonBtn) shiftLessonBtn.style.display = 'flex';
             saveBtn.style.display = 'flex';
             cancelBtn.style.display = '';
         } else {
@@ -616,6 +618,7 @@
             if (timetableBtn) timetableBtn.style.display = 'none';
             if (autoFillBtn) autoFillBtn.style.display = 'none';
             if (batchAutoFillBtn) batchAutoFillBtn.style.display = 'flex';
+            if (shiftLessonBtn) shiftLessonBtn.style.display = 'none';
             saveBtn.style.display = 'none';
             cancelBtn.style.display = 'none';
             // 閲覧モード切替時にグリッドへフォーカスを移してキーボードショートカットを有効化
@@ -1319,6 +1322,174 @@
                 showToast('error', '通信エラー: ' + e.message);
             })
             .batchAutoFillFromWeek(STATE.mondayStr);
+    }
+
+    // ===== 教科単位で単元・学習内容を前後にずらす =====
+
+    // モーダル用: 候補となる教科名を収集（単元マスタ + 表示中の週）
+    function collectShiftSubjects() {
+        var set = {};
+        try {
+            if (STATE.masterData && Array.isArray(STATE.masterData.subjects)) {
+                STATE.masterData.subjects.forEach(function (s) { if (s) set[String(s)] = true; });
+            }
+        } catch (e) {}
+        try {
+            ((STATE.weekData && STATE.weekData.days) || []).forEach(function (day) {
+                (day.periods || []).forEach(function (p) {
+                    if (p && p.subject && String(p.subject).trim() && String(p.subject).indexOf('行事') === -1) {
+                        set[String(p.subject).trim()] = true;
+                    }
+                });
+            });
+        } catch (e) {}
+        return Object.keys(set).sort();
+    }
+
+    // "yyyy/MM/dd" 形式の文字列を <input type="date"> 用の "yyyy-MM-dd" に変換
+    function toDateInputValue(dateStrSlash) {
+        if (!dateStrSlash) return '';
+        return String(dateStrSlash).replace(/\//g, '-');
+    }
+
+    function showShiftLessonModal() {
+        if (!STATE.editMode) {
+            showToast('warning', '「単元をずらす」は編集モードでのみ使用できます。');
+            return;
+        }
+
+        var subjects = collectShiftSubjects();
+        var datalistOpts = subjects.map(function (s) {
+            return '<option value="' + String(s).replace(/"/g, '&quot;') + '">';
+        }).join('');
+
+        // 既定の期間: 表示中の週の月曜〜金曜
+        var startDefault = toDateInputValue(STATE.mondayStr);
+        var endDefault = startDefault;
+        try {
+            var md = new Date(STATE.mondayStr);
+            if (!isNaN(md.getTime())) {
+                var fri = new Date(md);
+                fri.setDate(fri.getDate() + 4);
+                var y = fri.getFullYear(), m = ('0' + (fri.getMonth() + 1)).slice(-2), d = ('0' + fri.getDate()).slice(-2);
+                endDefault = y + '-' + m + '-' + d;
+            }
+        } catch (e) {}
+
+        Swal.fire({
+            title: '単元をずらす',
+            width: 480,
+            html:
+                '<div style="text-align:left;font-size:0.9rem;line-height:1.6;">' +
+                '<p style="margin:0 0 10px;">指定した<strong>教科</strong>の、指定した<strong>期間内</strong>のコマだけを対象に、' +
+                '入力済みの単元名・学習内容をまとめて前後にずらします。<br>他の教科や単元マスタには影響しません。</p>' +
+                '<label style="display:block;margin:8px 0 2px;font-weight:600;">教科</label>' +
+                '<input id="shiftSubject" list="shiftSubjectList" class="swal2-input" style="margin:0;width:100%;" placeholder="例: 国語">' +
+                '<datalist id="shiftSubjectList">' + datalistOpts + '</datalist>' +
+                '<label style="display:block;margin:10px 0 2px;font-weight:600;">期間（開始日〜終了日）</label>' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                '<input id="shiftStart" type="date" class="swal2-input" style="margin:0;flex:1;" value="' + startDefault + '">' +
+                '<span>〜</span>' +
+                '<input id="shiftEnd" type="date" class="swal2-input" style="margin:0;flex:1;" value="' + endDefault + '">' +
+                '</div>' +
+                '<label style="display:block;margin:10px 0 2px;font-weight:600;">ずらす向き</label>' +
+                '<select id="shiftDirection" class="swal2-select" style="margin:0;width:100%;">' +
+                '<option value="back">後ろにずらす（授業が遅れたとき）</option>' +
+                '<option value="forward">前にずらす（授業が早く進んだとき）</option>' +
+                '</select>' +
+                '<label style="display:block;margin:10px 0 2px;font-weight:600;">ずらすコマ数</label>' +
+                '<input id="shiftCount" type="number" min="1" step="1" value="1" class="swal2-input" style="margin:0;width:100%;">' +
+                '<p style="margin:10px 0 0;font-size:0.8rem;color:var(--text-sub);">※ 進捗番号（例: 2/5）は振り直さず、入力された値ごと移動します。' +
+                '期間の端からあふれたコマは切り捨てられます。</p>' +
+                '</div>',
+            showCancelButton: true,
+            confirmButtonText: '実行する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8',
+            focusConfirm: false,
+            preConfirm: function () {
+                var subject = (document.getElementById('shiftSubject').value || '').trim();
+                var start = document.getElementById('shiftStart').value;
+                var end = document.getElementById('shiftEnd').value;
+                var direction = document.getElementById('shiftDirection').value;
+                var count = parseInt(document.getElementById('shiftCount').value, 10);
+                if (!subject) { Swal.showValidationMessage('教科を入力してください。'); return false; }
+                if (!start || !end) { Swal.showValidationMessage('開始日と終了日を指定してください。'); return false; }
+                if (start > end) { Swal.showValidationMessage('開始日が終了日より後になっています。'); return false; }
+                if (!count || count < 1) count = 1;
+                return { subject: subject, start: start, end: end, direction: direction, count: count };
+            }
+        }).then(function (res) {
+            if (res.isConfirmed && res.value) {
+                runShiftLessons(res.value);
+            }
+        });
+    }
+
+    async function runShiftLessons(params) {
+        // 編集モード中はDBを直接書き換えるため、先に保存を促す（runBatchAutoFill と同じ流儀）
+        if (STATE.editMode) {
+            var saveFirst = await Swal.fire({
+                title: '編集中の内容があります',
+                text: 'ずらす前に、現在の週を保存しますか？（DBを直接書き換えるため保存を推奨します）',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '保存して実行',
+                cancelButtonText: 'キャンセル'
+            });
+            if (!saveFirst.isConfirmed) return;
+
+            var saved = await new Promise(function (resolve) {
+                var days = collectCurrentEditData();
+                if (!days) { resolve(false); return; }
+                google.script.run
+                    .withSuccessHandler(function (result) {
+                        if (result.success) {
+                            STATE.weekData.days = days;
+                            STATE.weekData.revision = result.revision;
+                            cancelEdit();
+                            showToast('success', result.message);
+                            resolve(true);
+                        } else if (result.conflict) {
+                            handleSaveConflict();
+                            resolve(false);
+                        } else {
+                            showToast('error', '保存失敗: ' + result.error);
+                            resolve(false);
+                        }
+                    })
+                    .withFailureHandler(function (e) {
+                        showToast('error', '通信エラー: ' + e.message);
+                        resolve(false);
+                    })
+                    .saveWeeklyPlanData(STATE.mondayStr, days, STATE.weekData.revision);
+            });
+            if (!saved) return;
+        }
+
+        var btn = document.getElementById('shiftLessonBtn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...'; }
+        showToast('info', '単元をずらしています...');
+
+        google.script.run
+            .withSuccessHandler(function (result) {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">move_down</span> 単元をずらす'; }
+                if (result && result.success) {
+                    if (result.discarded > 0) {
+                        Swal.fire({ icon: 'warning', title: '完了（注意あり）', text: result.message });
+                    } else {
+                        showToast('success', result.message);
+                    }
+                    loadWeeklyPlan(); // 現在の週をリロード
+                } else {
+                    showToast('error', 'ずらし処理エラー: ' + (result ? result.error : '不明なエラー'));
+                }
+            })
+            .withFailureHandler(function (e) {
+                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">move_down</span> 単元をずらす'; }
+                showToast('error', '通信エラー: ' + (e && e.message ? e.message : e));
+            })
+            .shiftSubjectLessons(params.subject, params.start, params.end, params.direction, params.count);
     }
 
     // ===== 週案印刷 (HTMLベース) =====

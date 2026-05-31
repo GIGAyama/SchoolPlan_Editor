@@ -397,3 +397,147 @@ function batchAutoFillFromWeek(baseMondayStr) {
     return { success: false, error: e.message };
   }
 }
+
+// ===================================================
+// ===== 教科単位の単元シフト（前後ずらし） =====
+// ===================================================
+
+/**
+ * [Webアプリ API] 指定した「教科」の、指定した「期間（開始日〜終了日）」内のコマだけを対象に、
+ * 入力済みの「単元名」「学習内容」をまとめて前後にずらします。
+ *
+ * 単元マスタには依存せず、すでに入力されている値（文字列）をそのまま移動します。
+ * これにより「授業が予定通り進まず、その教科の予定を1時間ずつ後ろにずらしたい」といった
+ * 局所的な調整を、他教科に影響を与えずに一括で行えます。
+ *
+ * - 対象セルは「期間内」かつ「校時の教科名が subject と一致」するコマのみ。
+ * - 値（単元名/学習内容）はペアで移動し、進捗番号（例: 2/5）は振り直さずそのまま移動します。
+ * - 期間の端からあふれたコマ（移動先が期間外になる分）は切り捨てられ、件数を警告として返します。
+ *
+ * @param {string} subject 対象教科名（例: "国語"）
+ * @param {string} startDateStr 開始日 "yyyy/MM/dd" または "yyyy-MM-dd"
+ * @param {string} endDateStr 終了日 "yyyy/MM/dd" または "yyyy-MM-dd"
+ * @param {string} direction 'back' = 後ろ（遅らせる） / 'forward' = 前（前倒し）
+ * @param {number} count ずらすコマ数（省略時1）
+ * @returns {Object} { success, message, shifted, discarded, direction }
+ */
+function shiftSubjectLessons(subject, startDateStr, endDateStr, direction, count) {
+  const lock = LockService.getScriptLock();
+  try {
+    if (!subject || typeof subject !== 'string' || !subject.trim()) {
+      throw new Error('教科名が指定されていません。');
+    }
+    subject = subject.trim();
+
+    const dir = (direction === 'forward') ? 'forward' : 'back';
+    let shiftCount = parseInt(count, 10);
+    if (!shiftCount || shiftCount < 1) shiftCount = 1;
+
+    const startDate = parseDate_(startDateStr);
+    const endDate = parseDate_(endDateStr);
+    if (!(startDate instanceof Date) || isNaN(startDate.getTime())) throw new Error('開始日の形式が不正です。');
+    if (!(endDate instanceof Date) || isNaN(endDate.getTime())) throw new Error('終了日の形式が不正です。');
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
+    if (startDate.getTime() > endDate.getTime()) throw new Error('開始日が終了日より後になっています。');
+
+    if (!lock.tryLock(15000)) {
+      throw new Error('他の処理が実行中のため、しばらくしてから再度お試しください。');
+    }
+
+    const ss = getSs_();
+    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    if (!dbSheet) throw new Error('必要なシートが見つかりません。');
+
+    const dbData = dbSheet.getDataRange().getValues();
+    const dbCols = getDbColumns();
+
+    // 校時/単元/学習内容の3列が揃っているものだけを対象にする
+    const periodCols = [];
+    for (let n = 1; n <= 6; n++) {
+      const subj = dbCols['PERIOD' + n], unit = dbCols['UNIT' + n], content = dbCols['CONTENT' + n];
+      if (subj && unit && content) {
+        periodCols.push({ subj: subj - 1, unit: unit - 1, content: content - 1 });
+      }
+    }
+
+    // 対象セルを時系列順（行＝日付昇順 → 校時昇順）に収集
+    const refs = [];
+    for (let i = 1; i < dbData.length; i++) {
+      const row = dbData[i];
+      const rowDate = row[dbCols.DATE - 1];
+      if (!(rowDate instanceof Date)) continue;
+      const t = rowDate.getTime();
+      if (t < startDate.getTime() || t > endDate.getTime()) continue;
+
+      for (const pc of periodCols) {
+        if (row[pc.subj] === subject) {
+          refs.push({
+            rowIdx: i,
+            uIdx: pc.unit,
+            cIdx: pc.content,
+            unit: row[pc.unit],
+            content: row[pc.content]
+          });
+        }
+      }
+    }
+
+    const n = refs.length;
+    if (n === 0) {
+      return { success: true, shifted: 0, discarded: 0, direction: dir,
+               message: `指定期間内に「${subject}」のコマが見つかりませんでした。` };
+    }
+
+    const oldVals = refs.map(r => ({ unit: r.unit, content: r.content }));
+    const blank = { unit: '', content: '' };
+    const isFilled = v => (v && ((String(v.unit || '').trim() !== '') || (String(v.content || '').trim() !== '')));
+
+    const newVals = new Array(n);
+    let discarded = 0;
+    if (dir === 'back') {
+      // 後ろ（遅らせる）: 各コマを後方へ。先頭側が空く。末尾からあふれた分を切り捨て。
+      for (let i = 0; i < n; i++) {
+        newVals[i] = (i - shiftCount >= 0) ? oldVals[i - shiftCount] : blank;
+      }
+      for (let i = Math.max(0, n - shiftCount); i < n; i++) {
+        if (isFilled(oldVals[i])) discarded++;
+      }
+    } else {
+      // 前（前倒し）: 各コマを前方へ。末尾側が空く。先頭からあふれた分を切り捨て。
+      for (let i = 0; i < n; i++) {
+        newVals[i] = (i + shiftCount < n) ? oldVals[i + shiftCount] : blank;
+      }
+      for (let i = 0; i < Math.min(n, shiftCount); i++) {
+        if (isFilled(oldVals[i])) discarded++;
+      }
+    }
+
+    // DBへ反映
+    let changed = false;
+    for (let i = 0; i < n; i++) {
+      const r = refs[i];
+      const nv = newVals[i];
+      if (dbData[r.rowIdx][r.uIdx] !== nv.unit) { dbData[r.rowIdx][r.uIdx] = nv.unit; changed = true; }
+      if (dbData[r.rowIdx][r.cIdx] !== nv.content) { dbData[r.rowIdx][r.cIdx] = nv.content; changed = true; }
+    }
+
+    if (changed) {
+      dbSheet.getRange(1, 1, dbData.length, dbData[0].length).setValues(dbData);
+      SpreadsheetApp.flush();
+    }
+
+    const dirLabel = (dir === 'back') ? '後ろ' : '前';
+    let message = `「${subject}」の${n}コマを${shiftCount}コマ分${dirLabel}にずらしました。`;
+    if (discarded > 0) {
+      message += `（期間の端からあふれた${discarded}コマ分の入力は切り捨てられました）`;
+    }
+
+    return { success: true, shifted: n, discarded: discarded, direction: dir, message: message };
+  } catch (e) {
+    logError('shiftSubjectLessons', e);
+    return { success: false, error: e.message };
+  } finally {
+    try { lock.releaseLock(); } catch (ignore) {}
+  }
+}
