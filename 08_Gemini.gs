@@ -28,24 +28,50 @@ function callGeminiEndpoint_(payload, logLabel) {
     muteHttpExceptions: true
   };
 
-  const response = UrlFetchApp.fetch(`${getGeminiApiUrl_()}?key=${apiKey}`, options);
-  const responseCode = response.getResponseCode();
-  const responseText = response.getContentText();
+  const url = `${getGeminiApiUrl_()}?key=${apiKey}`;
+  const MAX_ATTEMPTS = 4;      // 初回 + 最大3回の再試行
+  const BASE_DELAY_MS = 1000;  // 指数バックオフの基準（1秒→2秒→4秒）
 
-  if (responseCode !== 200) {
-    const errDetail = (() => {
+  let lastCode = 0;
+  let lastDetail = '';
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+
+    if (responseCode === 200) {
+      return JSON.parse(responseText);
+    }
+
+    lastCode = responseCode;
+    lastDetail = (() => {
       try { return JSON.parse(responseText).error?.message || responseText; } catch(e) { return responseText; }
     })();
-    logError(`${logLabel} (HTTP ${responseCode})`, new Error(errDetail));
-    if (responseCode === 429) {
-      throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
-    } else if (responseCode === 401 || responseCode === 403) {
-      throw new Error('AI APIキーが無効です。設定画面でAPIキーを確認してください。');
+
+    // 429（レート制限）と 5xx（サーバ側一時障害）のみ再試行対象。
+    // 401/403/400 等のクライアント起因エラーは再試行しても無駄なので即終了する。
+    const isRetryable = (responseCode === 429 || responseCode >= 500);
+    if (!isRetryable || attempt === MAX_ATTEMPTS - 1) {
+      break;
     }
-    throw new Error(`AI APIとの通信に失敗しました。（HTTP ${responseCode}）`);
+
+    // 指数バックオフ。Retry-After ヘッダがあればそれを尊重する（上限16秒）。
+    const headers = response.getHeaders() || {};
+    const retryAfter = parseInt(headers['Retry-After'] || headers['retry-after'], 10);
+    const waitMs = (!isNaN(retryAfter) && retryAfter > 0)
+      ? Math.min(retryAfter * 1000, 16000)
+      : BASE_DELAY_MS * Math.pow(2, attempt);
+    logInfo(`${logLabel}: HTTP ${responseCode} のため ${waitMs}ms 後に再試行します（${attempt + 1}/${MAX_ATTEMPTS - 1}）`);
+    Utilities.sleep(waitMs);
   }
 
-  return JSON.parse(responseText);
+  logError(`${logLabel} (HTTP ${lastCode})`, new Error(lastDetail));
+  if (lastCode === 429) {
+    throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
+  } else if (lastCode === 401 || lastCode === 403) {
+    throw new Error('AI APIキーが無効です。設定画面でAPIキーを確認してください。');
+  }
+  throw new Error(`AI APIとの通信に失敗しました。（HTTP ${lastCode}）`);
 }
 
 /**
@@ -86,6 +112,12 @@ function callGeminiAPI_(prompt) {
     try {
       return JSON.parse(textObj);
     } catch (e) {
+      // 出力が途切れている場合に備え、最後の完全なオブジェクトまでを救出する
+      const repaired = repairTruncatedJsonArray_(textObj);
+      if (repaired !== null) {
+        logInfo(`Gemini出力が途切れていたため修復しました（${repaired.length}件を救出）。`);
+        return repaired;
+      }
       logError('Gemini Parse Error', e);
       throw new Error('AIの出力をJSONとして解析できませんでした。再度お試しください。');
     }
