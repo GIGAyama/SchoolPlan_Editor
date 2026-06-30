@@ -146,12 +146,19 @@ function postScheduleToClassroom_core_(options) {
     const dbData = databaseSheet.getDataRange().getValues();
 
     const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const daysOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
+    // 日付の比較・判定はすべて日本時間（JST）で行う。スプレッドシートやスクリプトの
+    // タイムゾーン設定に依存せず、「次の日付」「今日の日付」が日本時間でずれないようにする。
+    const jstDateKey_ = (d) => (d instanceof Date) ? Utilities.formatDate(d, "JST", "yyyyMMdd") : '';
+    const jstDow_ = (d) => parseInt(Utilities.formatDate(d, "JST", "u"), 10) % 7; // u:1=月..7=日 → %7で日=0
+    const jstLabel_ = (d) => `${Utilities.formatDate(d, "JST", "yyyy/MM/dd")}（${daysOfWeek[jstDow_(d)]}）`;
+    const todayKey = jstDateKey_(today);
 
-    // 本日が登校日（1校時に予定あり）かを判定する。本日の行データも保持し、後段の「今日の様子」生成に用いる。
+    // 本日（日本時間）が登校日（1校時に予定あり）かを判定する。本日の行データも保持し、
+    // 「きょうのかだい」「今日の様子」の生成に用いる。
     let todayRowData = null;
     dbData.forEach(row => {
-      if (row[dbCols.DATE - 1] instanceof Date && isSameDate(row[dbCols.DATE - 1], today) && row[dbCols.PERIOD1 - 1]) {
+      if (row[dbCols.DATE - 1] instanceof Date && jstDateKey_(row[dbCols.DATE - 1]) === todayKey && row[dbCols.PERIOD1 - 1]) {
         todayRowData = row;
       }
     });
@@ -164,17 +171,17 @@ function postScheduleToClassroom_core_(options) {
       return { success: true, posted: false, message: '本日は登校日ではないため投稿をスキップしました。' };
     }
 
-    // 本日より後で、1校時に予定が入っている最も近い登校日を探す。
+    // 本日（日本時間）より後で、1校時に予定が入っている最も近い登校日を探す。
     // これにより休みを挟む場合でも、休み直前の登校日に次の登校日分が投稿される
     // （例：金曜日に翌週月曜日の予定を投稿）。
     let foundRowData = null;
-    let foundDateStart = null;
+    let foundKey = null;
     dbData.forEach(row => {
       const cellDate = row[dbCols.DATE - 1];
       if (!(cellDate instanceof Date) || !row[dbCols.PERIOD1 - 1]) return;
-      const cellStart = new Date(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate()).getTime();
-      if (cellStart > todayStart && (foundDateStart === null || cellStart < foundDateStart)) {
-        foundDateStart = cellStart;
+      const key = jstDateKey_(cellDate); // yyyyMMdd は文字列比較で日付の前後比較が成立する
+      if (key > todayKey && (foundKey === null || key < foundKey)) {
+        foundKey = key;
         foundRowData = row;
       }
     });
@@ -185,26 +192,40 @@ function postScheduleToClassroom_core_(options) {
     }
 
     const targetDate = foundRowData[dbCols.DATE - 1];
-    const daysOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
-    const formattedDateString = `${Utilities.formatDate(targetDate, "JST", "yyyy/MM/dd")}（${daysOfWeek[targetDate.getDay()]}）`;
+    const formattedDateString = jstLabel_(targetDate);
 
-    const cell = (key) => (foundRowData[dbCols[key] - 1] || '').toString();
+    // 次の登校日（あした）の行から値を取得するヘルパー。
+    const nextCell = (key) => (dbCols[key] ? (foundRowData[dbCols[key] - 1] || '').toString().trim() : '');
+    // 本日（きょう）の行から値を取得するヘルパー。本日の行が無い場合は空文字。
+    const todayCell = (key) => (dbCols[key] && todayRowData ? (todayRowData[dbCols[key] - 1] || '').toString().trim() : '');
 
-    let postText = `${formattedDateString} の予定\n\n`;
-    const morning = cell('MORNING');
+    // 「あしたのよてい📅」: 次の登校日の行事・朝学習・1〜6校時の教科名と単元名
+    let postText = `あしたのよてい📅（${formattedDateString}）\n\n`;
+    const event = nextCell('EVENT');
+    if (event) postText += `行事：${event}\n`;
+    const morning = nextCell('MORNING');
     if (morning) postText += `朝学習：${morning}\n`;
-
-    // 1〜6校時（全角の時限ラベルで出力）
     const periodLabels = ['１', '２', '３', '４', '５', '６'];
     for (let n = 1; n <= 6; n++) {
-      const subject = cell('PERIOD' + n);
-      if (subject) postText += `${periodLabels[n - 1]}時間目：${subject} 「${cell('UNIT' + n)}」\n`;
+      const subject = nextCell('PERIOD' + n);
+      if (!subject) continue;
+      const unit = nextCell('UNIT' + n);
+      postText += `${periodLabels[n - 1]}時間目：${subject}` + (unit ? `「${unit}」` : '') + `\n`;
     }
 
-    const homework = cell('HOMEWORK');
-    if (homework) postText += `\n課題：\n${homework}\n`;
-    const items = cell('ITEMS');
-    if (items) postText += `\n持ち物：\n${items}\n`;
+    // 「きょうのかだい🏚️」: 本日の行の課題をリストアップ
+    const homeworkItems = listifyCellText_(todayCell('HOMEWORK'));
+    if (homeworkItems.length) {
+      postText += `\nきょうのかだい🏚️\n`;
+      homeworkItems.forEach(h => { postText += `・${h}\n`; });
+    }
+
+    // 「もちもの✏️」: 次の登校日（あした）の行の持ち物をリストアップ
+    const itemList = listifyCellText_(nextCell('ITEMS'));
+    if (itemList.length) {
+      postText += `\nもちもの✏️\n`;
+      itemList.forEach(it => { postText += `・${it}\n`; });
+    }
 
     // 担当学年が1年生の場合は、予定部分の漢字をすべてひらがなに自動変換する（子どもが自分で読めるように）。
     // Gemini未設定・変換失敗時は convertTextToHiragana_ が元の文章を返すため、投稿処理は継続する。
@@ -213,13 +234,13 @@ function postScheduleToClassroom_core_(options) {
       postText = convertTextToHiragana_(postText);
     }
 
-    // 「今日の様子」を本日（＝投稿する日）の学習予定からGeminiで自動生成し、保護者向けに追記する。
+    // 「今日の様子」を本日（日本時間）の学習予定からGeminiで自動生成し、保護者向けに追記する。
     // 漢字変換後に追記するため、このセクションは全学年で通常の漢字表記のまま（保護者が読む想定）。
     // Gemini未設定・生成失敗時はこのセクションを省略し、予定の投稿は継続する。
     try {
       const todayLessonContext = buildLessonContext_(todayRowData, dbCols);
       if (todayLessonContext && typeof generateTodaySituationText_ === 'function') {
-        const todayLabel = `${Utilities.formatDate(today, "JST", "yyyy/MM/dd")}（${daysOfWeek[today.getDay()]}）`;
+        const todayLabel = jstLabel_(today);
         const situation = generateTodaySituationText_(todayLabel, todayLessonContext);
         if (situation) postText += `\n【今日の様子】\n${situation}\n`;
       }
@@ -240,6 +261,23 @@ function postScheduleToClassroom_core_(options) {
     recordPostedSchedule_(fingerprint);
     logInfo(`クラス「${courseName}」へ予定投稿完了`);
     return { success: true, posted: true, message: `クラス「${courseName}」へ ${formattedDateString} の予定を投稿しました。` };
+}
+
+/**
+ * セル内のテキストを、リスト表示用の項目配列に分割します。
+ * まず改行で分割し、1項目に収まる場合は読点（、，）やカンマ（,）でも分割します。
+ * 空要素は取り除きます。
+ * @param {*} value セルの値
+ * @returns {string[]} 項目の配列（空のときは空配列）
+ */
+function listifyCellText_(value) {
+  const raw = (value == null ? '' : value).toString().trim();
+  if (!raw) return [];
+  let parts = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (parts.length <= 1) {
+    parts = raw.split(/[、，,]/).map(s => s.trim()).filter(Boolean);
+  }
+  return parts;
 }
 
 /**
