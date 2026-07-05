@@ -206,16 +206,16 @@ function getDefaultExclusionDates() {
     const databaseSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!databaseSheet) throw new Error("データベースシートが見つかりません");
     
-    // 年度を現在の日付から算出（4月始まり）
+    // 年度を現在の日付から算出（4月始まり）。冬休み・春休みも年度基準で算出する
+    //（1〜3月にアクセスした場合、暦年基準だと1年未来の日付になってしまうため）
     const now = new Date();
-    const summerYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-    
-    const currentYear = new Date().getFullYear();
-    const summerStart = new Date(summerYear, 6, 21);
-    const summerEnd = new Date(summerYear, 7, 31);
-    const winterStart = new Date(currentYear, 11, 26);
-    const winterEnd = new Date(currentYear + 1, 0, 7);
-    const springStart = new Date(currentYear + 1, 2, 26);
+    const fiscalYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+
+    const summerStart = new Date(fiscalYear, 6, 21);
+    const summerEnd = new Date(fiscalYear, 7, 31);
+    const winterStart = new Date(fiscalYear, 11, 26);
+    const winterEnd = new Date(fiscalYear + 1, 0, 7);
+    const springStart = new Date(fiscalYear + 1, 2, 26);
     
     let springEnd = new Date(springStart);
     
