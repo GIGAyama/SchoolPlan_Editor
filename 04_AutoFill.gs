@@ -46,10 +46,13 @@ function findLastLesson_(dbData, subject, weekStartDate) {
     const rowDate = row[dbCols.DATE - 1];
 
     if (rowDate instanceof Date && rowDate <= searchEndDate) {
-      // 6校時から1校時に向かって逆順に教科を検索
-      for (let col = dbCols.PERIOD6 - 1; col >= dbCols.PERIOD1 - 1; col -= 3) {
-        if (row[col] === subject) {
-          const parsed = parseUnitProgress_(row[col + 1]); // 単元名のセル
+      // 6校時から1校時に向かって逆順に教科を検索（単元名は列マップから取得し、列順に依存しない）
+      for (let n = 6; n >= 1; n--) {
+        const pCol = dbCols['PERIOD' + n];
+        const uCol = dbCols['UNIT' + n];
+        if (!pCol || !uCol) continue;
+        if (row[pCol - 1] === subject) {
+          const parsed = parseUnitProgress_(row[uCol - 1]); // 単元名のセル
           if (parsed) return parsed;
         }
       }
@@ -123,9 +126,12 @@ function findLatestUnitState_(dbData, subject, unitName, weekStartDate) {
     const rowDate = row[dbCols.DATE - 1];
     if (!(rowDate instanceof Date) || rowDate > searchEndDate) continue;
 
-    for (let col = dbCols.PERIOD6 - 1; col >= dbCols.PERIOD1 - 1; col -= 3) {
-      if (row[col] === subject) {
-        const parsed = parseUnitProgress_(row[col + 1]);
+    for (let n = 6; n >= 1; n--) {
+      const pCol = dbCols['PERIOD' + n];
+      const uCol = dbCols['UNIT' + n];
+      if (!pCol || !uCol) continue;
+      if (row[pCol - 1] === subject) {
+        const parsed = parseUnitProgress_(row[uCol - 1]);
         if (parsed && parsed.unitName === unitName) {
           return { unitName: unitName, currentHour: parsed.currentHour, totalHours: parsed.totalHours };
         }

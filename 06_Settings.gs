@@ -89,12 +89,16 @@ function saveAppSettings(settings) {
     // モジュール学習設定
     props.setProperty('moduleEnabled', settings.moduleEnabled ? 'true' : 'false');
 
-    // 自動投稿トリガーを時刻設定に基づいて更新（時刻が指定されている場合のみ）
+    // 自動投稿トリガーを時刻設定に基づいて更新
     const postHour = parseInt(settings.postHour, 10);
     if (!isNaN(postHour) && postHour >= 0 && postHour <= 23) {
       deleteTriggers_('postScheduleToClassroom');
       ScriptApp.newTrigger('postScheduleToClassroom').timeBased().everyDays(1).atHour(postHour).create();
       logInfo(`自動投稿トリガーを設定: 毎日${postHour}時`);
+    } else if (settings.postHour === '') {
+      // 時刻を空にして保存した場合は自動投稿を停止する（従来は古いトリガーが残り続けていた）
+      deleteTriggers_('postScheduleToClassroom');
+      logInfo('自動投稿時刻が未設定のため、自動投稿トリガーを解除しました');
     }
 
     logInfo('Webアプリから設定を保存しました。');

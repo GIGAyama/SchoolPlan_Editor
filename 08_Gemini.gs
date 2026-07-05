@@ -157,15 +157,17 @@ function extractTasksFromSchedule_WebApp(startDateStr, endDateStr) {
         if (row[cols.EVENT - 1]) scheduleText += `- 行事: ${row[cols.EVENT - 1]}\n`;
         if (cols.MORNING && row[cols.MORNING - 1]) scheduleText += `- 朝学習: ${row[cols.MORNING - 1]}\n`;
         
-        // 1〜6校時
-        const periods = [cols.PERIOD1, cols.PERIOD2, cols.PERIOD3, cols.PERIOD4, cols.PERIOD5, cols.PERIOD6];
-        periods.forEach((pCol, idx) => {
+        // 1〜6校時（学習内容は列マップから取得し、シートの列順に依存しない）
+        for (let n = 1; n <= 6; n++) {
+          const pCol = cols['PERIOD' + n];
+          const cCol = cols['CONTENT' + n];
+          if (!pCol || !cCol) continue;
           const subject = row[pCol - 1];
-          const content = row[pCol - 1 + 2]; // 2つ右が学習内容
+          const content = row[cCol - 1];
           if (subject && content) {
-            scheduleText += `- ${idx + 1}校時 [${subject}] 内容: ${content}\n`;
+            scheduleText += `- ${n}校時 [${subject}] 内容: ${content}\n`;
           }
-        });
+        }
 
         if (cols.AFTERSCHOOL && row[cols.AFTERSCHOOL - 1]) scheduleText += `- 放課後: ${row[cols.AFTERSCHOOL - 1]}\n`;
       }

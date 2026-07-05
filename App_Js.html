@@ -1031,15 +1031,16 @@
             return;
         }
 
-        // Ctrl+Z: Undo
-        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        // Ctrl+Z: Undo（入力欄フォーカス中はブラウザ標準のテキストUndoを優先し、
+        // 未保存の入力がグリッド再描画で失われるのを防ぐ）
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && !isInput) {
             e.preventDefault();
             undo();
             return;
         }
 
         // Ctrl+Shift+Z / Ctrl+Y: Redo
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'Z' || e.key === 'y')) {
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'Z' || e.key === 'y') && !isInput) {
             e.preventDefault();
             redo();
             return;
@@ -1223,7 +1224,7 @@
 
         google.script.run
             .withSuccessHandler(function (result) {
-                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力'; }
+                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">smart_toy</span> 単元自動入力'; }
                 if (result.success) {
                     STATE.weekData.days = result.days;
                     // 編集状態のまま画面を再描画（AIの結果を反映）
@@ -1234,7 +1235,7 @@
                 }
             })
             .withFailureHandler(function (e) {
-                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">smart_toy</span> AI自動入力'; }
+                if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">smart_toy</span> 単元自動入力'; }
                 showToast('error', '通信エラー: ' + e.message);
             })
             .calculateAutoFillForWebApp(STATE.mondayStr, currentDays);
@@ -1666,14 +1667,14 @@
         // 行事
         if (opts.event) {
             html += '<tr><td class="row-header">時程<br>行事</td>';
-            for (var i = 0; i < 5; i++) { html += '<td class="event-cell">' + ((days[i] && days[i].event) ? days[i].event.replace(/\\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td class="event-cell">' + ((days[i] && days[i].event) ? days[i].event.replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
         // 朝学習
         if (opts.morning) {
             html += '<tr><td class="row-header">朝学習</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? days[i].morning.replace(/\\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? days[i].morning.replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -1690,7 +1691,7 @@
         // 中休み
         if (opts.recess1) {
             html += '<tr class="recess-row"><td class="row-header">中休</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess1) ? days[i].recess1.replace(/\\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess1) ? days[i].recess1.replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -1707,7 +1708,7 @@
         // 昼休み
         if (opts.recess2) {
             html += '<tr class="recess-row"><td class="row-header">昼休</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess2) ? days[i].recess2.replace(/\\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess2) ? days[i].recess2.replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -1724,7 +1725,7 @@
         // 放課後
         if (opts.afterschool) {
             html += '<tr><td class="row-header">放課後</td>';
-            for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? days[i].afterschool.replace(/\\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? days[i].afterschool.replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -1748,7 +1749,7 @@
             if (p_idx !== undefined) {
                 return d.periods ? renderPeriod(d.periods[p_idx]) : '';
             }
-            return d[key] ? d[key].replace(/\\n/g, '<br>') : '';
+            return d[key] ? d[key].replace(/\n/g, '<br>') : '';
         };
 
         // 行事
@@ -2173,32 +2174,6 @@
             })
             .withFailureHandler(_onCommError)
             .getAppSettings();
-    }
-
-    // ===== PDF出力 =====
-    function downloadWeekPdf() {
-        if (!STATE.mondayStr) { showToast('error', '週のデータを読み込んでください'); return; }
-        var btn = document.getElementById('pdfBtn');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 生成中...';
-        showToast('info', 'PDFを生成しています...');
-        google.script.run
-            .withSuccessHandler(function (result) {
-                btn.disabled = false;
-                btn.innerHTML = '<span class="material-symbols-outlined fs-6">description</span> PDF出力';
-                if (result.success) {
-                    showToast('success', 'PDF生成完了！');
-                    window.open(result.viewUrl, '_blank');
-                } else {
-                    showToast('error', 'PDF生成失敗: ' + result.error);
-                }
-            })
-            .withFailureHandler(function (e) {
-                btn.disabled = false;
-                btn.innerHTML = '<span class="material-symbols-outlined fs-6">description</span> PDF出力';
-                showToast('error', '通信エラー: ' + e.message);
-            })
-            .generateWeeklyPlanPdf(STATE.mondayStr);
     }
 
     // ===== 学級通信ブロックエディタ (NW module) =====
@@ -4992,15 +4967,20 @@
         if (!result.isConfirmed) return;
 
         showToast('info', '処理を停止中...');
+        // resetAllPdfProcessing_UI はメニュー専用（SpreadsheetApp.getUi() 依存）のため、Web用APIを呼ぶ
         google.script.run
-            .withSuccessHandler(function () {
+            .withSuccessHandler(function (res) {
+                if (res && res.success === false) {
+                    showToast('error', 'エラー: ' + res.message);
+                    return;
+                }
                 showToast('success', 'すべての処理キューを強制リセットしました。');
                 checkProcessingStatus();
             })
             .withFailureHandler(function (e) {
                 showToast('error', 'エラー: ' + e.message);
             })
-            .resetAllPdfProcessing_UI();
+            .resetAllPdfProcessingFromWeb();
     }
 
     // ===== ユーティリティ =====
@@ -5686,7 +5666,9 @@
             return;
         }
 
-        var todayStr = formatDateLocal(new Date());
+        // dueDate は "yyyy-MM-dd" 形式のため、比較用の今日の日付も同じ区切り文字に揃える
+        //（"yyyy/MM/dd" と比較すると '-' < '/' のため同年内の未来の期日まで期限切れ扱いになる）
+        var todayStr = formatDateLocal(new Date()).replace(/\//g, '-');
 
         // コンテナのクラスを表示モードに応じて切替
         container.className = STATE.taskViewMode === 'list' ? 'task-list-view' : 'task-grid';
@@ -5696,7 +5678,7 @@
             var compClass = isComp ? ' completed' : '';
             var isUrgent = !isComp && t.dueDate && (t.dueDate <= todayStr);
             var dateBadgeClass = isUrgent ? 'task-date-badge urgent' : 'task-date-badge';
-            var dateDisplay = t.dueDate ? t.dueDate.replace('2026-', '').replace('-', '/') : '期日未設定';
+            var dateDisplay = t.dueDate ? t.dueDate.replace(/^\d{4}-/, '').replace('-', '/') : '期日未設定';
             var checkedStr = isComp ? 'checked' : '';
 
             if (STATE.taskViewMode === 'list') {
@@ -5779,7 +5761,7 @@
             var isComp = (t.status === '完了');
             var compClass = isComp ? ' completed' : '';
             var checkedStr = isComp ? 'checked' : '';
-            var dateDisplay = t.dueDate ? t.dueDate.replace('2026-', '').replace('-', '/') : '未設定';
+            var dateDisplay = t.dueDate ? t.dueDate.replace(/^\d{4}-/, '').replace('-', '/') : '未設定';
 
             return `
                 <div class="sidebar-task-card${compClass}">

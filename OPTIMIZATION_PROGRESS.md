@@ -1,6 +1,35 @@
 # コード最適化 進捗・引き継ぎメモ
 
-## 【最新セッション】全機能のWebボタン化 + UI洗練（要GAS/ブラウザ検証）
+## 【最新セッション】全体レビューによるバグ修正 8件（branch: claude/app-review-optimize-t9mci1）
+
+全 .gs / .html を通読し、実バグのみを修正（機能追加・見た目変更なし）。全ファイル node --check 済み。
+
+1. **[FE] PDF読み込みタブ「強制リセット」ボタンが機能しない** — Webから `resetAllPdfProcessing_UI()`
+   （`SpreadsheetApp.getUi()` 依存のメニュー専用関数）を呼んでいた → `resetAllPdfProcessingFromWeb()` に変更。
+2. **[BE] 長期休業デフォルト日付の年ズレ**（02_Database.gs `getDefaultExclusionDates`）— 冬休み・春休みが
+   暦年基準だったため、1〜3月にアクセスすると1年未来の日付になっていた → 年度（4月始まり）基準に統一。
+3. **[FE] 週案印刷で改行が消える**（`printWeeklyPlanExec`）— 行事/朝学習/中休み/昼休み/放課後/週末セルが
+   `/\\n/g`（リテラル「\n」）を置換していて実際の改行が `<br>` にならなかった → `/\n/g` に修正（7箇所）。
+4. **[FE] タスク期日表示の「2026-」ハードコード** — 2026年以外の期日が「2025/07-10」のように崩れた →
+   `/^\d{4}-/` で年を除去（一覧・サイドバーの2箇所）。
+5. **[FE] タスクの期限切れ誤判定**（`renderTaskList`）— `dueDate`("yyyy-MM-dd") と今日("yyyy/MM/dd") の
+   区切り文字違いで同年内の未来の期日まで urgent 表示 → 比較前に形式を統一。
+6. **[BE] AIタスク抽出の列決め打ち**（08_Gemini.gs）— 学習内容を「教科列の2つ右」と仮定 →
+   `getDbColumns()` の CONTENTn を参照。04_AutoFill.gs の `findLastLesson_`/`findLatestUnitState_` の
+   「3列刻み・隣が単元」決め打ちも同様に PERIODn/UNITn 参照へ（標準レイアウトでは挙動不変）。
+7. **[BE] 自動投稿時刻を空にしてもトリガーが残る**（06_Settings.gs `saveAppSettings`）— 空文字で保存
+   された場合に `postScheduleToClassroom` トリガーを削除するよう修正。
+8. **[FE] テキスト入力中の Ctrl+Z 横取り** — 入力欄フォーカス中はアプリのグリッドUndoを発動させず
+   ブラウザ標準のテキストUndoに委ねる（未保存入力がグリッド再描画で消えるのを防止）。
+   ほか、存在しないサーバー関数 `generateWeeklyPlanPdf` を呼ぶ到達不能コード `downloadWeekPdf` を削除、
+   「単元自動入力」ボタンのラベル復元不一致（AI自動入力になっていた）を修正。
+
+### 要GAS/ブラウザ検証
+- 強制リセットボタン / 印刷の改行 / タスク期日バッジ / 設定保存（投稿時刻を空にする）/ 単元自動入力。
+
+---
+
+## 【前セッション】全機能のWebボタン化 + UI洗練（要GAS/ブラウザ検証）
 
 ### 完了（push済み）
 **Phase 1: 旧スプレッドシートメニュー専用機能のWebボタン化**
