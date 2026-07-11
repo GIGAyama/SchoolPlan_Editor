@@ -2,7 +2,77 @@
  * @fileoverview 固定時間割一括転記・長期休業排除処理など、データベースシート関連処理
  */
 
-/** 
+/**
+ * [シンプルトリガー] データベースシートの教科セル（1〜6校時）を直接編集した際の検証。
+ * 「教科名+分数」形式（例: 国語1/3行事2/3）の分数合計が1になっていない入力を検知し、
+ * セルを赤色表示+メモで警告します。正しい入力に修正されると表示を元に戻します。
+ * ※ シンプルトリガーは認可済みサービスに触れられないため、getDbColumns() ではなく
+ *    ヘッダー行を直接読み取って校時列を特定します。
+ */
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== SHEET_NAME_DATABASE) return;
+
+    const editStartRow = e.range.getRow();
+    const editStartCol = e.range.getColumn();
+    const numRows = e.range.getNumRows();
+    const numCols = e.range.getNumColumns();
+    // ヘッダー行のみの編集は対象外
+    if (editStartRow + numRows - 1 < 2) return;
+
+    // ヘッダー行から校時列（1〜6校時）を特定
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const periodColSet = {};
+    headers.forEach((h, idx) => {
+      if (/^[1-6]校時$/.test(String(h).trim())) periodColSet[idx + 1] = true;
+    });
+
+    // 編集範囲と校時列の交差を調べる
+    const targetCols = [];
+    for (let c = editStartCol; c < editStartCol + numCols; c++) {
+      if (periodColSet[c]) targetCols.push(c);
+    }
+    if (targetCols.length === 0) return;
+
+    // データ行のみ対象（行全体・列全体の編集でも実データ範囲に収める）
+    const firstDataRow = Math.max(editStartRow, 2);
+    const lastEditRow = Math.min(editStartRow + numRows - 1, sheet.getLastRow());
+    if (lastEditRow < firstDataRow) return;
+    const rowCount = lastEditRow - firstDataRow + 1;
+
+    const values = e.range.getValues();
+    const invalidMessages = [];
+    // 列ごとに背景色・メモを一括適用してAPI呼び出し回数を抑える
+    for (const c of targetCols) {
+      const backgrounds = [];
+      const notes = [];
+      for (let rowNum = firstDataRow; rowNum <= lastEditRow; rowNum++) {
+        const value = values[rowNum - editStartRow][c - editStartCol];
+        const check = validateSubjectCellValue_(value);
+        if (check.valid) {
+          backgrounds.push([null]);
+          notes.push(['']);
+        } else {
+          backgrounds.push(['#f4cccc']);
+          notes.push(['⚠ ' + check.message]);
+          invalidMessages.push('R' + rowNum + ': 「' + value + '」 ' + check.message);
+        }
+      }
+      sheet.getRange(firstDataRow, c, rowCount, 1).setBackgrounds(backgrounds).setNotes(notes);
+    }
+
+    if (invalidMessages.length > 0) {
+      e.source.toast(invalidMessages.slice(0, 3).join('\n'), '教科セルの入力エラー（分数の合計は必ず1）', 10);
+    }
+  } catch (err) {
+    // シンプルトリガー内の例外は編集操作を妨げないよう握りつぶす
+    Logger.log('onEdit validation error: ' + err.message);
+  }
+}
+
+/**
  * 指定週の月～金に固定時間割をデータベースに転記します（上書き）。
  */
 function transferWeeklyTimetable(targetDate) {
