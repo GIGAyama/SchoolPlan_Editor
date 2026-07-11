@@ -175,6 +175,16 @@ function saveWeeklyPlanData(mondayDateStr, days, baseRevision) {
       mondayDateStr: { type: 'string', required: true, pattern: /^\d{4}\/\d{1,2}\/\d{1,2}$/ },
       days: { required: true, isArray: true }
     });
+
+    // 教科セルの検証: 「教科名+分数」形式は分数の合計が必ず1でなければならない
+    const subjectErrors = validateDaysSubjects_(days);
+    if (subjectErrors.length > 0) {
+      return {
+        success: false,
+        error: '教科名の入力に誤りがあるため保存できません。\n' + subjectErrors.join('\n')
+      };
+    }
+
     const ss = getSs_();
     const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
@@ -348,7 +358,7 @@ function getMonthlyHoursData(year, month) {
     const dbData = dbSheet.getDataRange().getValues();
 
     const hoursBySubject = {};
-    const periodCols = [dbCols.PERIOD1, dbCols.PERIOD2, dbCols.PERIOD3, dbCols.PERIOD4, dbCols.PERIOD5, dbCols.PERIOD6];
+    const periodCols = [dbCols.PERIOD1, dbCols.PERIOD2, dbCols.PERIOD3, dbCols.PERIOD4, dbCols.PERIOD5, dbCols.PERIOD6].filter(c => c);
 
     for (const row of dbData.slice(1)) {
       const date = row[dbCols.DATE - 1];
@@ -356,12 +366,16 @@ function getMonthlyHoursData(year, month) {
       if (date.getFullYear() !== year || date.getMonth() + 1 !== month) continue;
 
       for (const col of periodCols) {
-        const subject = row[col - 1];
-        if (subject && typeof subject === 'string' && subject.trim()) {
-          hoursBySubject[subject] = (hoursBySubject[subject] || 0) + 1;
+        // 「国語1/3行事2/3」のような分数付き入力も他の集計APIと同様に分解して加算する
+        const parsed = parseSubjectHours_(row[col - 1]);
+        for (const { subject, fraction } of parsed) {
+          hoursBySubject[subject] = (hoursBySubject[subject] || 0) + fraction;
         }
       }
     }
+
+    // 他の集計APIと同じ教科名集約（学活→特活、図書・書写→国語 等）を適用
+    aggregateSubjectCounts_(hoursBySubject);
 
     return { success: true, year, month, hoursBySubject };
   } catch (e) {
@@ -444,35 +458,136 @@ function parseDate_(dateStr) {
 }
 
 /**
- * 教科セルの値（例: "国語", "理科 1/2", "図工 1.5"）を解析し、
+ * 教科セルの値を解析し、教科ごとの分数を正確な有理数（分子/分母）として返します。
+ * 対応形式:
+ *  - 単一教科: "国語"（分数なし = 1時間）
+ *  - 教科名+分数: "国語1/3行事2/3", "理科 1/2 図工 1/2"
+ *  - 教科名+小数: "国語0.5社会0.5"（内部では 5/10 のような分数として扱う）
+ * @param {*} cellValue セルの教科名テキスト
+ * @returns {{entries: Array<{subject: string, fraction: number, num: number, den: number, explicit: boolean}>, unparsedText: string}}
+ *   entries: 解析結果（explicit は分数が明示されていたか）
+ *   unparsedText: 解析できなかった非空白文字（例: "国語 2" の "2"）。不正入力の検知に使用。
+ */
+function parseSubjectCell_(cellValue) {
+  const result = { entries: [], unparsedText: '' };
+  if (cellValue === null || cellValue === undefined) return result;
+  const normalized = cellValue.toString().trim().replace(/　/g, ' ');
+  if (!normalized) return result;
+
+  const regex = /([^\s\d\/\.]+)(?:[\s]*(\d+\/\d+|\d+\.\d+))?/g;
+  let match;
+  let lastIndex = 0;
+  let unparsed = '';
+  while ((match = regex.exec(normalized)) !== null) {
+    if (match.index > lastIndex) unparsed += normalized.slice(lastIndex, match.index);
+    lastIndex = regex.lastIndex;
+
+    const subject = match[1].trim();
+    if (!subject) continue;
+    let num = 1, den = 1, explicit = false;
+    if (match[2]) {
+      explicit = true;
+      if (match[2].includes('/')) {
+        const parts = match[2].split('/');
+        num = parseInt(parts[0], 10);
+        den = parseInt(parts[1], 10);
+      } else {
+        // 小数を正確な分数に変換（例: "0.5" → 5/10）
+        const decParts = match[2].split('.');
+        den = Math.pow(10, decParts[1].length);
+        num = parseInt(decParts[0], 10) * den + parseInt(decParts[1], 10);
+      }
+    }
+    result.entries.push({ subject, fraction: den === 0 ? NaN : num / den, num, den, explicit });
+  }
+  if (lastIndex < normalized.length) unparsed += normalized.slice(lastIndex);
+  result.unparsedText = unparsed.replace(/\s/g, '');
+  return result;
+}
+
+/**
+ * 教科セルの値（例: "国語", "国語1/3行事2/3"）を解析し、
  * [{subject, fraction}] の配列を返します。
  * getAnnualHoursData と getHoursSummary で共通利用されます。
+ * 分母0などの不正な分数は集計を汚染しないよう除外します。
  * @param {string} cellValue セルの教科名テキスト
  * @returns {Array<{subject: string, fraction: number}>}
  */
 function parseSubjectHours_(cellValue) {
-  const results = [];
-  if (!cellValue) return results;
-  const normalized = cellValue.toString().trim().replace(/　/g, ' ');
-  if (!normalized) return results;
+  return parseSubjectCell_(cellValue).entries
+    .filter(e => isFinite(e.fraction))
+    .map(e => ({ subject: e.subject, fraction: e.fraction }));
+}
 
-  const regex = /([^\s\d\/\.]+)(?:[\s]*(\d+\/\d+|\d+\.\d+))?/g;
-  let match;
-  while ((match = regex.exec(normalized)) !== null) {
-    const subject = match[1].trim();
-    if (!subject) continue;
-    let fraction = 1;
-    if (match[2]) {
-      if (match[2].includes('/')) {
-        const parts = match[2].split('/');
-        fraction = parseFloat(parts[0]) / parseFloat(parts[1]);
-      } else {
-        fraction = parseFloat(match[2]);
-      }
-    }
-    results.push({ subject, fraction });
+/**
+ * 分数を約分して "n/d" 形式（整数なら整数）の文字列にします。
+ */
+function formatRational_(num, den) {
+  const gcd = function (a, b) { return b === 0 ? a : gcd(b, a % b); };
+  const g = gcd(Math.abs(num), Math.abs(den)) || 1;
+  num /= g; den /= g;
+  return den === 1 ? String(num) : num + '/' + den;
+}
+
+/**
+ * 教科セルの入力値を検証します。
+ * ルール:
+ *  - 空欄 → 有効
+ *  - 単一の教科名のみ（分数なし） → 有効
+ *  - 「教科名+分数」形式 → 全ての教科に分数が付いており、かつ分数の合計が正確に1であること
+ * 分数の合計判定は浮動小数点誤差を避けるため有理数演算で行います。
+ * @param {*} cellValue セルの教科名テキスト
+ * @returns {{valid: boolean, message?: string}}
+ */
+function validateSubjectCellValue_(cellValue) {
+  const parsed = parseSubjectCell_(cellValue);
+  const entries = parsed.entries;
+  if (parsed.unparsedText) {
+    return { valid: false, message: '解釈できない文字「' + parsed.unparsedText + '」が含まれています。「国語」または「国語1/3行事2/3」の形式で入力してください。' };
   }
-  return results;
+  if (entries.length === 0) return { valid: true };
+  // 単一教科名のみ（分数なし）は1時間として有効
+  if (entries.length === 1 && !entries[0].explicit) return { valid: true };
+
+  // ここからは「教科名+分数」形式: 全教科に分数が必要
+  const noFraction = entries.filter(e => !e.explicit).map(e => e.subject);
+  if (noFraction.length > 0) {
+    return { valid: false, message: '「' + noFraction.join('」「') + '」に分数がありません。複数教科を入力する場合は各教科に分数を付けてください（例: 国語1/3行事2/3）。' };
+  }
+  if (entries.some(e => e.den === 0)) {
+    return { valid: false, message: '分母が0の分数は入力できません。' };
+  }
+  // 有理数で正確に合計し、合計が1かどうかを判定
+  let num = 0, den = 1;
+  for (const e of entries) {
+    num = num * e.den + e.num * den;
+    den = den * e.den;
+  }
+  if (num !== den) {
+    return { valid: false, message: '分数の合計が1になっていません（合計: ' + formatRational_(num, den) + '）。セル内の分数の合計は必ず1にしてください。' };
+  }
+  return { valid: true };
+}
+
+/**
+ * 週案データ（days配列）の全教科セルを検証し、エラーメッセージの配列を返します。
+ * @param {Array} days saveWeeklyPlanData に渡される週データ
+ * @returns {string[]} エラーメッセージ（問題なければ空配列）
+ */
+function validateDaysSubjects_(days) {
+  const errors = [];
+  for (const day of days) {
+    if (!day || !Array.isArray(day.periods)) continue;
+    day.periods.forEach((p, idx) => {
+      const value = p && p.subject;
+      if (!value) return;
+      const check = validateSubjectCellValue_(value);
+      if (!check.valid) {
+        errors.push((day.date || '') + ' ' + (idx + 1) + '校時「' + value + '」: ' + check.message);
+      }
+    });
+  }
+  return errors;
 }
 
 /**
@@ -902,6 +1017,24 @@ function saveTimetableFromEditor(timetableData) {
     if (!timetableData || !Array.isArray(timetableData) || timetableData.length !== 5) {
       throw new Error('無効な時間割データです。');
     }
+
+    // 教科セルの検証: 転記によってデータベースの教科セルに入るため、ここでも分数合計=1を強制する
+    const DAY_LABELS = ['月', '火', '水', '木', '金'];
+    const errors = [];
+    timetableData.forEach((dayData, d) => {
+      const periods = (dayData && Array.isArray(dayData.periods)) ? dayData.periods : [];
+      periods.forEach((value, p) => {
+        if (!value) return;
+        const check = validateSubjectCellValue_(value);
+        if (!check.valid) {
+          errors.push((DAY_LABELS[d] || d) + '曜 ' + (p + 1) + '校時「' + value + '」: ' + check.message);
+        }
+      });
+    });
+    if (errors.length > 0) {
+      throw new Error('教科名の入力に誤りがあるため保存できません。\n' + errors.join('\n'));
+    }
+
     PropertiesService.getScriptProperties().setProperty(SP_KEY_TIMETABLE, JSON.stringify(timetableData));
 
     return { success: true, message: '固定時間割を保存しました。' };
@@ -1265,9 +1398,11 @@ function getHoursSummary(mondayStr) {
       // モジュール学習: 朝学習に教科名が入っていれば 1/3 時間を加算
       if (moduleEnabled && dbCols.MORNING) {
         const morningVal = (dbData[i][dbCols.MORNING - 1] || '').toString().trim();
-        if (morningVal) {
-          const morningSubject = morningVal.replace(/　/g, ' ').split(/[\s]/)[0].trim();
-          if (morningSubject && !/^\d/.test(morningSubject)) {
+        if (morningVal && !/^\d/.test(morningVal)) {
+          // 分数付き入力（例: "国語1/3行事2/3"）でも先頭の教科名だけを正しく取り出す
+          const morningEntries = parseSubjectCell_(morningVal).entries;
+          const morningSubject = morningEntries.length > 0 ? morningEntries[0].subject : '';
+          if (morningSubject) {
             const moduleFraction = 1 / 3;
             if (!cumulativeCount[morningSubject]) cumulativeCount[morningSubject] = 0;
             cumulativeCount[morningSubject] += moduleFraction;

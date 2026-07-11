@@ -399,6 +399,8 @@
         // 編集モード時: 全textareaの高さを内容に合わせる
         if (isEdit) {
             grid.querySelectorAll('textarea').forEach(function (ta) { autoResizeTextarea(ta); });
+            // 既存の教科セル値も検証して不正なら赤枠表示する
+            grid.querySelectorAll('[data-field="subject"]').forEach(function (inp) { updateSubjectInputValidity(inp); });
         }
 
         // 閲覧モード時: グリッドにフォーカスを当ててキーボードショートカットを有効化
@@ -444,8 +446,111 @@
             + '<div class="suggest-box" id="suggest-' + dayIdx + '-' + pIdx + '" style="display:none;"></div>';
     }
 
+    // ===== 教科セル入力の検証（サーバー側 validateSubjectCellValue_ と同一ロジック） =====
+    /**
+     * 教科セルの値を解析します。"国語" や "国語1/3行事2/3" に対応。
+     * 返り値: { entries: [{subject, num, den, explicit}], unparsedText: string }
+     */
+    function parseSubjectCellEntries(value) {
+        var result = { entries: [], unparsedText: '' };
+        if (value === null || value === undefined) return result;
+        var normalized = value.toString().trim().replace(/　/g, ' ');
+        if (!normalized) return result;
+        var regex = /([^\s\d\/\.]+)(?:[\s]*(\d+\/\d+|\d+\.\d+))?/g;
+        var match, lastIndex = 0, unparsed = '';
+        while ((match = regex.exec(normalized)) !== null) {
+            if (match.index > lastIndex) unparsed += normalized.slice(lastIndex, match.index);
+            lastIndex = regex.lastIndex;
+            var subject = match[1].trim();
+            if (!subject) continue;
+            var num = 1, den = 1, explicit = false;
+            if (match[2]) {
+                explicit = true;
+                if (match[2].indexOf('/') >= 0) {
+                    var parts = match[2].split('/');
+                    num = parseInt(parts[0], 10);
+                    den = parseInt(parts[1], 10);
+                } else {
+                    var decParts = match[2].split('.');
+                    den = Math.pow(10, decParts[1].length);
+                    num = parseInt(decParts[0], 10) * den + parseInt(decParts[1], 10);
+                }
+            }
+            result.entries.push({ subject: subject, num: num, den: den, explicit: explicit });
+        }
+        if (lastIndex < normalized.length) unparsed += normalized.slice(lastIndex);
+        result.unparsedText = unparsed.replace(/\s/g, '');
+        return result;
+    }
+
+    /**
+     * 教科セルの入力値を検証します。
+     * 「単一教科名」または「教科名+分数（合計が正確に1）」のみ有効。
+     * 返り値: { valid: boolean, message?: string }
+     */
+    function validateSubjectCellValue(value) {
+        var parsed = parseSubjectCellEntries(value);
+        var entries = parsed.entries;
+        if (parsed.unparsedText) {
+            return { valid: false, message: '解釈できない文字「' + parsed.unparsedText + '」が含まれています。「国語」または「国語1/3行事2/3」の形式で入力してください。' };
+        }
+        if (entries.length === 0) return { valid: true };
+        if (entries.length === 1 && !entries[0].explicit) return { valid: true };
+        var noFraction = entries.filter(function (en) { return !en.explicit; }).map(function (en) { return en.subject; });
+        if (noFraction.length > 0) {
+            return { valid: false, message: '「' + noFraction.join('」「') + '」に分数がありません。複数教科を入力する場合は各教科に分数を付けてください（例: 国語1/3行事2/3）。' };
+        }
+        for (var i = 0; i < entries.length; i++) {
+            if (entries[i].den === 0) return { valid: false, message: '分母が0の分数は入力できません。' };
+        }
+        // 有理数で正確に合計し、合計が1かどうかを判定（浮動小数点誤差を回避）
+        var num = 0, den = 1;
+        entries.forEach(function (en) {
+            num = num * en.den + en.num * den;
+            den = den * en.den;
+        });
+        if (num !== den) {
+            var gcd = function (a, b) { return b === 0 ? a : gcd(b, a % b); };
+            var g = gcd(Math.abs(num), Math.abs(den)) || 1;
+            var sumStr = (den / g === 1) ? String(num / g) : (num / g) + '/' + (den / g);
+            return { valid: false, message: '分数の合計が1になっていません（合計: ' + sumStr + '）。セル内の分数の合計は必ず1にしてください。' };
+        }
+        return { valid: true };
+    }
+
+    /** 入力欄の検証状態（赤枠+ツールチップ）を更新します。 */
+    function updateSubjectInputValidity(input) {
+        var check = validateSubjectCellValue(input.value);
+        if (check.valid) {
+            input.classList.remove('subject-input-invalid');
+            input.removeAttribute('title');
+        } else {
+            input.classList.add('subject-input-invalid');
+            input.title = check.message;
+        }
+        return check;
+    }
+
+    /** 週データ全体の教科セルを検証し、エラーメッセージ配列を返します。 */
+    function validateDaysSubjects(days) {
+        var errors = [];
+        (days || []).forEach(function (day) {
+            if (!day || !day.periods) return;
+            day.periods.forEach(function (p, idx) {
+                var value = p && p.subject;
+                if (!value) return;
+                var check = validateSubjectCellValue(value);
+                if (!check.valid) {
+                    errors.push((day.dayLabel || day.date || '') + ' ' + (idx + 1) + '校時「' + value + '」: ' + check.message);
+                }
+            });
+        });
+        return errors;
+    }
+
     // ===== 教科サジェスト =====
     function onSubjectInput(input) {
+        updateSubjectInputValidity(input);
         if (!STATE.masterData) return;
         var val = input.value;
         var dayIdx = input.dataset.day;
@@ -474,7 +579,7 @@
         var cell = el.closest('.grid-cell');
         if (!cell) return;
         var inp = cell.querySelector('[data-field="subject"]');
-        if (inp) inp.value = subject;
+        if (inp) { inp.value = subject; updateSubjectInputValidity(inp); }
         var box = document.getElementById('suggest-' + dayIdx + '-' + pIdx);
         if (box) box.style.display = 'none';
     }
@@ -672,6 +777,16 @@
         _autoSaving = true;
         var days = collectCurrentEditData();
         if (!days) { _autoSaving = false; callback(); return; }
+
+        // 教科セルの検証エラーがある場合はナビゲーションを中断し、編集を続けてもらう
+        var subjectErrors = validateDaysSubjects(days);
+        if (subjectErrors.length > 0) {
+            _autoSaving = false;
+            showToast('error', '教科名の入力に誤りがあるため自動保存できません: ' + subjectErrors[0]
+                + (subjectErrors.length > 1 ? '（他' + (subjectErrors.length - 1) + '件）' : ''));
+            return;
+        }
+
         showToast('info', '自動保存中...');
         google.script.run
             .withSuccessHandler(function (result) {
@@ -701,6 +816,14 @@
     function saveWeeklyPlan() {
         var days = collectCurrentEditData();
         if (!days) return;
+
+        // 教科セルの検証: 「教科名+分数」形式は分数の合計が必ず1
+        var subjectErrors = validateDaysSubjects(days);
+        if (subjectErrors.length > 0) {
+            showToast('error', '教科名の入力に誤りがあります: ' + subjectErrors[0]
+                + (subjectErrors.length > 1 ? '（他' + (subjectErrors.length - 1) + '件）' : ''));
+            return;
+        }
 
         document.getElementById('saveBtn').disabled = true;
         document.getElementById('saveBtn').innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 保存中...';
@@ -5121,18 +5244,23 @@
             tr.appendChild(makeEditorCell('tt_' + dayIndex + '_morning', dayData.morning || ''));
             // 1〜6校時
             for (var p = 0; p < 6; p++) {
-                tr.appendChild(makeEditorCell('tt_' + dayIndex + '_p' + p, (dayData.periods && dayData.periods[p]) || ''));
+                tr.appendChild(makeEditorCell('tt_' + dayIndex + '_p' + p, (dayData.periods && dayData.periods[p]) || '', true));
             }
             tbody.appendChild(tr);
         });
     }
 
-    function makeEditorCell(id, value) {
+    function makeEditorCell(id, value, isSubjectCell) {
         var td = document.createElement('td');
         var input = document.createElement('input');
         input.type = 'text';
         input.id = id;
         input.value = value;
+        if (isSubjectCell) {
+            // 教科セルは「教科名+分数（合計1）」形式の検証をリアルタイムに行う
+            input.addEventListener('input', function () { updateSubjectInputValidity(input); });
+            updateSubjectInputValidity(input);
+        }
         td.appendChild(input);
         return td;
     }
@@ -5157,6 +5285,24 @@
 
     function saveTimetable() {
         var data = gatherTimetableData();
+
+        // 教科セルの検証: 「教科名+分数」形式は分数の合計が必ず1
+        var errors = [];
+        data.forEach(function (dayData, d) {
+            dayData.periods.forEach(function (value, p) {
+                if (!value) return;
+                var check = validateSubjectCellValue(value);
+                if (!check.valid) {
+                    errors.push(DAY_NAMES[d] + '曜 ' + (p + 1) + '校時「' + value + '」: ' + check.message);
+                }
+            });
+        });
+        if (errors.length > 0) {
+            showToast('error', '教科名の入力に誤りがあります: ' + errors[0]
+                + (errors.length > 1 ? '（他' + (errors.length - 1) + '件）' : ''));
+            return;
+        }
+
         showToast('info', '保存中...');
         google.script.run
             .withSuccessHandler(function (res) {
