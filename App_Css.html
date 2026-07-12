@@ -603,6 +603,34 @@
         background: var(--cell-sun-bg);
     }
 
+    /* 土日列の表示/非表示トグルボタン */
+    .weekend-toggle-btn {
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        border-radius: 4px;
+        padding: 2px 8px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        line-height: 1.4;
+        cursor: pointer;
+        transition: opacity 0.15s, background 0.15s;
+    }
+
+    .weekend-toggle-btn.sat {
+        color: var(--col-sat);
+    }
+
+    .weekend-toggle-btn.sun {
+        color: #c62828;
+    }
+
+    .weekend-toggle-btn.off {
+        color: var(--text-hint);
+        background: var(--surface-3);
+        text-decoration: line-through;
+        opacity: 0.65;
+    }
+
     .grid-cell.event-row {
         font-weight: 600;
         color: var(--col-event);
