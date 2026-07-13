@@ -61,7 +61,14 @@ function getWeeklyPlanData(mondayDateStr) {
     const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
-    const dbCols = getDbColumns();
+    // 振り返り・週まとめ列を保証（追加失敗時も週案表示は継続する）
+    let dbCols;
+    try {
+      dbCols = ensureReflectionColumns_();
+    } catch (colErr) {
+      logError('getWeeklyPlanData: 振り返り列の確認', colErr);
+      dbCols = getDbColumns();
+    }
     const dbData = dbSheet.getDataRange().getValues();
 
     // 月曜日を起点に月～日の7日間を準備
@@ -108,15 +115,24 @@ function getWeeklyPlanData(mondayDateStr) {
         afterschool: row ? (row[dbCols.AFTERSCHOOL - 1] || '') : '',
         homework: row ? (row[dbCols.HOMEWORK - 1] || '') : '',
         items: row ? (row[dbCols.ITEMS - 1] || '') : '',
+        reflection: (row && dbCols.REFLECTION) ? String(row[dbCols.REFLECTION - 1] || '') : '',
+        reflectionStatus: (row && dbCols.REFLECTION_STATUS) ? String(row[dbCols.REFLECTION_STATUS - 1] || '').trim() : '',
         found: !!row
       };
     });
+
+    // 週まとめ（同一週番号の日曜日の行の振り返りセルに保存）を取得
+    let weekSummary = '';
+    if (dbCols.REFLECTION) {
+      const sundayIdx = findSundayRowIndexByWeek_(dbData, dbCols, mondayDateStr);
+      if (sundayIdx !== -1) weekSummary = readWeekSummaryFromRow_(dbData[sundayIdx], dbCols);
+    }
 
     // 楽観ロック用リビジョン（この週の現在のDB内容のハッシュ）。保存時に競合検知に用いる。
     const weekDateStrs = weekDates.map(d => formatDate(d));
     const revision = computeWeekRevision_(dbData, dbCols, weekDateStrs);
 
-    return { success: true, days, mondayDateStr, weekNum, revision };
+    return { success: true, days, mondayDateStr, weekNum, revision, weekSummary };
   } catch (e) {
     logError('getWeeklyPlanData', e);
     return { success: false, error: e.message };
