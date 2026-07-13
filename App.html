@@ -101,6 +101,16 @@
                         <span style="font-size:0.85rem; color:var(--text-sub);">週</span>
                     </div>
                 </div>
+
+                <!-- 土日列の表示/非表示トグル -->
+                <div
+                    style="display:flex; align-items:center; gap:4px; margin-left: 12px; padding-left:12px; border-left:1px solid var(--border);">
+                    <span style="font-size:0.75rem; color:var(--text-sub);">表示列</span>
+                    <button type="button" class="weekend-toggle-btn sat" id="toggleSatBtn"
+                        onclick="toggleWeekendDay('sat')" title="土曜日の列を非表示にする">土</button>
+                    <button type="button" class="weekend-toggle-btn sun" id="toggleSunBtn"
+                        onclick="toggleWeekendDay('sun')" title="日曜日の列を非表示にする">日</button>
+                </div>
             </div>
 
             <!-- 編集ツールバー -->

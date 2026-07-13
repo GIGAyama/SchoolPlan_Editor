@@ -22,6 +22,8 @@
         helpModalOpen: false,     // ショートカットヘルプ表示中
         taskViewMode: 'list',     // タスク表示モード: 'list' or 'card'
         grade: 3,                 // 担当学年（デフォルト3）
+        showSat: true,            // 週案グリッドの土曜列 表示/非表示
+        showSun: true,            // 週案グリッドの日曜列 表示/非表示
         // 各ビューの遅延ロード制御フラグ／キャッシュ（旧・散在グローバルを集約）
         timetableLoaded: false,        // 固定時間割エディタ 読込済み
         vacationDatesLoaded: false,    // 長期休業期間設定 読込済み
@@ -62,6 +64,7 @@
 
     // ===== 初期化 =====
     window.onload = function () {
+        initWeekendVisibility(); // 土日列の表示設定を復元（グリッド描画前に必要）
         loadMasterData();
         goToToday();
         loadAnnualHoursView();
@@ -69,6 +72,61 @@
         loadTasks(); // タスクをページ読み込み時に初期ロード（デフォルトでリスト表示）
         restoreTaskSidebarState(); // 週案タスクサイドバーの開閉状態を復元（デフォルトは収納）
     };
+
+    // ===== 週案グリッドの土日列 表示/非表示 =====
+    function isDayVisible(dayIdx) {
+        if (dayIdx === 5) return STATE.showSat;
+        if (dayIdx === 6) return STATE.showSun;
+        return true;
+    }
+
+    function initWeekendVisibility() {
+        try {
+            STATE.showSat = localStorage.getItem('weeklyShowSat') !== '0';
+            STATE.showSun = localStorage.getItem('weeklyShowSun') !== '0';
+        } catch (e) {
+            STATE.showSat = true;
+            STATE.showSun = true;
+        }
+        updateWeekendToggleUI();
+    }
+
+    function toggleWeekendDay(which) {
+        if (which === 'sat') STATE.showSat = !STATE.showSat;
+        else if (which === 'sun') STATE.showSun = !STATE.showSun;
+        try {
+            localStorage.setItem('weeklyShowSat', STATE.showSat ? '1' : '0');
+            localStorage.setItem('weeklyShowSun', STATE.showSun ? '1' : '0');
+        } catch (e) { }
+
+        // 選択中セルが非表示列になった場合は選択を解除
+        if (STATE.selectedCell && !isDayVisible(STATE.selectedCell.day)) clearSelection();
+        updateWeekendToggleUI();
+
+        if (STATE.weekData && STATE.weekData.days) {
+            // 編集モード中は入力中の内容を失わないよう、DOMから回収した最新値で再描画する
+            // （STATE.weekData.days は保存済みベースラインなので書き換えない）
+            var daysToRender = STATE.weekData.days;
+            if (STATE.editMode) {
+                var current = collectCurrentEditData();
+                if (current) daysToRender = current;
+            }
+            renderWeekGrid(daysToRender);
+        }
+    }
+
+    function updateWeekendToggleUI() {
+        var satBtn = document.getElementById('toggleSatBtn');
+        var sunBtn = document.getElementById('toggleSunBtn');
+        if (satBtn) {
+            satBtn.classList.toggle('off', !STATE.showSat);
+            satBtn.title = '土曜日の列を' + (STATE.showSat ? '非表示にする' : '表示する');
+        }
+        if (sunBtn) {
+            sunBtn.classList.toggle('off', !STATE.showSun);
+            sunBtn.title = '日曜日の列を' + (STATE.showSun ? '非表示にする' : '表示する');
+        }
+    }
 
     // ===== 週案タスクサイドバーの展開・収納 =====
     function toggleTaskSidebar() {
@@ -275,11 +333,18 @@
         grid.innerHTML = '';
         grid.className = 'week-grid' + (isEdit ? ' edit-mode' : '');
 
+        // 土日の表示設定に応じて列数を変え、表示列がより広く使えるようにする
+        var visibleCount = 0;
+        days.forEach(function (day, i) { if (isDayVisible(i)) visibleCount++; });
+        grid.style.gridTemplateColumns = '80px repeat(' + visibleCount + ', minmax(140px, 1fr))';
+        grid.style.minWidth = (96 + visibleCount * 144) + 'px';
+
         var corner = document.createElement('div');
         corner.className = 'grid-header';
         grid.appendChild(corner);
 
         days.forEach(function (day, i) {
+            if (!isDayVisible(i)) return;
             var h = document.createElement('div');
             var cls = 'grid-header';
             if (day.date === today) cls += ' today-col';
@@ -313,6 +378,7 @@
             grid.appendChild(label);
 
             days.forEach(function (day, i) {
+                if (!isDayVisible(i)) return;
                 var cell = document.createElement('div');
                 var cls = 'grid-cell';
                 if (day.date === today) cls += ' today-col';
@@ -906,7 +972,14 @@
             selectCell(0, 0, GRID_ROWS[0].key);
             return;
         }
-        var newDay = Math.max(0, Math.min(6, STATE.selectedCell.day + dDay));
+        // 横移動は非表示の土日列をスキップする
+        var newDay = STATE.selectedCell.day;
+        if (dDay !== 0) {
+            var step = dDay > 0 ? 1 : -1;
+            var cand = newDay + step;
+            while (cand >= 0 && cand <= 6 && !isDayVisible(cand)) cand += step;
+            if (cand >= 0 && cand <= 6) newDay = cand;
+        }
         var newRow = Math.max(0, Math.min(GRID_ROWS.length - 1, STATE.selectedCell.row + dRow));
         selectCell(newDay, newRow, GRID_ROWS[newRow].key);
     }
@@ -1623,9 +1696,19 @@
             return;
         }
 
+        // 前回選択したレイアウトを復元（standard: 従来の2ページ / compact: A4・1ページ）
+        var storedLayout = 'standard';
+        try { storedLayout = localStorage.getItem('weeklyPrintLayout') || 'standard'; } catch (e) { }
+        var weekendNote = '土曜: ' + (STATE.showSat ? '含める' : '含めない') + ' ／ 日曜: ' + (STATE.showSun ? '含める' : '含めない');
+
         Swal.fire({
             title: '<span class="material-symbols-outlined">print</span> 印刷オプション',
             html: '<div style="text-align:left;font-size:0.85rem;">'
+                + '<p style="color:var(--text-sub);margin-bottom:8px;">レイアウトを選択してください</p>'
+                + '<label style="display:block;margin-bottom:4px;"><input type="radio" name="po_layout" value="standard"' + (storedLayout !== 'compact' ? ' checked' : '') + '> 標準（A4・2ページ）</label>'
+                + '<label style="display:block;"><input type="radio" name="po_layout" value="compact"' + (storedLayout === 'compact' ? ' checked' : '') + '> コンパクト（A4・1ページ）</label>'
+                + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 0 20px;">※コンパクトは週案画面の土日列の表示設定を反映します（' + weekendNote + '）</div>'
+                + '<hr style="margin:12px 0;">'
                 + '<p style="color:var(--text-sub);margin-bottom:12px;">印刷に含める項目を選択してください</p>'
                 + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">'
                 + '<label><input type="checkbox" id="po_event" checked> 行事</label>'
@@ -1653,7 +1736,11 @@
             }
         }).then(function (result) {
             if (!result.isConfirmed) return;
+            var layoutEl = document.querySelector('input[name="po_layout"]:checked');
+            var layout = layoutEl ? layoutEl.value : 'standard';
+            try { localStorage.setItem('weeklyPrintLayout', layout); } catch (e) { }
             var opts = {
+                layout: layout,
                 event: document.getElementById('po_event').checked,
                 morning: document.getElementById('po_morning').checked,
                 recess1: document.getElementById('po_recess1').checked,
@@ -1726,7 +1813,105 @@
 
         html += '.free-box { flex: 1; display: block; padding-top: 5px; overflow: hidden; border: 1px solid #e0e0e0; border-radius: 4px; min-height: 0; }';
         html += '.line-row { border-bottom: 1px dashed #ccc; height: 6mm; width: 100%; }';
+
+        // コンパクト（A4・1ページ）レイアウト
+        html += '.compact-grid td { height: 44px; }';
+        html += '.compact-grid .recess-row td { height: 16px; }';
+        html += '.compact-grid .event-cell { height: 55px; }';
+        html += '.compact-grid .afterschool-cell { height: 40px; }';
+        html += '.compact-grid th.sat-head { background-color: #bbdefb; }';
+        html += '.compact-grid th.sun-head { background-color: #ffcdd2; }';
+        html += '.compact-bottom { display: flex; gap: 8px; margin-top: 8px; align-items: stretch; }';
+        html += '.compact-bottom .stats-table { width: auto; flex: 1 1 0; }';
+        html += '.compact-bottom .seal-table { width: 180px; margin: 0 0 0 auto; flex: 0 0 auto; }';
         html += '</style>';
+        return html;
+    }
+
+    /**
+     * コンパクト（A4・1ページ）レイアウトのページHTMLを生成する。
+     * 週案編集画面の土日列の表示設定（STATE.showSat / STATE.showSun）を反映し、
+     * 非表示の列は印刷にも含めない。
+     */
+    function buildCompactPageHtml_(opts, days, weekNum, renderDateHeader, renderPeriod) {
+        var visIdx = [0, 1, 2, 3, 4];
+        if (STATE.showSat) visIdx.push(5);
+        if (STATE.showSun) visIdx.push(6);
+
+        var html = '<div class="page">';
+        html += '<div class="doc-title">週間指導計画簿<div class="doc-week">第' + weekNum + '週</div></div>';
+        html += '<table class="grid1 compact-grid">';
+
+        // ヘッダー行
+        html += '<tr><th class="row-header">日付<br>曜日</th>';
+        visIdx.forEach(function (i) {
+            var cls = i === 5 ? ' class="sat-head"' : (i === 6 ? ' class="sun-head"' : '');
+            html += '<th' + cls + '>' + renderDateHeader(days[i]) + '</th>';
+        });
+        html += '</tr>';
+
+        var textRow = function (key, label, cellClass) {
+            var isRecess = (key === 'recess1' || key === 'recess2');
+            var h = '<tr' + (isRecess ? ' class="recess-row"' : '') + '><td class="row-header">' + label + '</td>';
+            visIdx.forEach(function (i) {
+                var v = (days[i] && days[i][key]) ? days[i][key].replace(/\n/g, '<br>') : '';
+                h += '<td' + (cellClass ? ' class="' + cellClass + '"' : '') + '>' + v + '</td>';
+            });
+            return h + '</tr>';
+        };
+        var periodRow = function (pIdx, label) {
+            var h = '<tr><td class="row-header">' + label + '</td>';
+            visIdx.forEach(function (i) {
+                h += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[pIdx]) : '') + '</td>';
+            });
+            return h + '</tr>';
+        };
+
+        if (opts.event) html += textRow('event', '時程<br>行事', 'event-cell');
+        if (opts.morning) html += textRow('morning', '朝学習');
+        html += periodRow(0, '1校時');
+        html += periodRow(1, '2校時');
+        if (opts.recess1) html += textRow('recess1', '中休');
+        html += periodRow(2, '3校時');
+        html += periodRow(3, '4校時');
+        if (opts.recess2) html += textRow('recess2', '昼休');
+        html += periodRow(4, '5校時');
+        html += periodRow(5, '6校時');
+        if (opts.afterschool) html += textRow('afterschool', '放課後');
+        html += '</table>';
+
+        // 下段: 教科時数表（選択時） + 検印枠
+        html += '<div class="compact-bottom">';
+        if (opts.stats) {
+            var summary = STATE.hoursSummaryData || [];
+            var activeSubjects = summary.filter(function (s) { return s && s.subject; });
+            var minRows = activeSubjects.length > 0 ? 0 : 5;
+            var half = Math.max(Math.ceil(activeSubjects.length / 2), minRows);
+            var total = activeSubjects.length > 0 ? activeSubjects.length : half * 2;
+            var buildStats = function (from, to) {
+                var t = '<table class="stats-table"><tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
+                for (var i = from; i < to; i++) {
+                    var s = activeSubjects[i] || { subject: ' ', weekly: '', cumulative: '', percent: '' };
+                    t += '<tr>';
+                    t += '<td style="background-color:#dcedc8;">' + (s.subject || ' ') + '</td>';
+                    t += '<td>' + formatFraction(s.weekly) + '</td>';
+                    t += '<td>' + formatFraction(s.cumulative) + '</td>';
+                    t += '<td>' + (s.percent !== undefined && s.percent !== '' ? s.percent + '%' : '&nbsp;') + '</td>';
+                    t += '</tr>';
+                }
+                return t + '</table>';
+            };
+            html += buildStats(0, half);
+            html += buildStats(half, total);
+        }
+        // 検印枠
+        html += '<table class="seal-table">';
+        html += '<tr><td rowspan="2" class="seal-header" style="width:20px; font-weight:bold; vertical-align:middle; font-size:12px;">検<br><br>印</td><td class="seal-header">校長</td><td class="seal-header">副校長</td><td class="seal-header">担当者</td></tr>';
+        html += '<tr><td style="height:40px;"></td><td></td><td></td></tr>';
+        html += '</table>';
+        html += '</div>'; // end compact-bottom
+
+        html += '</div>'; // end page
         return html;
     }
 
@@ -1776,6 +1961,11 @@
             if (p.content) content += '<div class="content">' + p.content.replace(/\n/g, '<br>') + '</div>';
             return content;
         };
+
+        if (opts.layout === 'compact') {
+            // ====== コンパクト（A4・1ページ）レイアウト ======
+            html += buildCompactPageHtml_(opts, days, weekNum, renderDateHeader, renderPeriod);
+        } else {
 
         // ====== 1ページ目 ======
         html += '<div class="page">';
@@ -2054,6 +2244,8 @@
         html += '</div>'; // end page2-right
         html += '</div>'; // end page2-layout
         html += '</div>'; // end page
+
+        } // end 標準（2ページ）レイアウト
 
         html += '</body></html>';
 
