@@ -68,6 +68,40 @@ function validateParams_(params, rules) {
 }
 
 // ============================================================
+// ===== 教科名の正規化 =====
+// ============================================================
+
+/**
+ * 教科名の別名（略称・表記ゆれ）→ 正式名のマップ。
+ * 「図工」と「図画工作」のような同一教科の表記ゆれを、
+ * 時数計算・単元マスタ照合・自動入力・単元シフトなど
+ * すべての教科名比較で同一視するために使用します。
+ */
+const SUBJECT_NAME_ALIASES_ = {
+  '図工': '図画工作'
+};
+
+/**
+ * 教科名を正規化します（前後の空白を除去し、別名を正式名に変換）。
+ * @param {*} name 教科名
+ * @returns {string} 正規化された教科名
+ */
+function normalizeSubjectName_(name) {
+  const s = (name === null || name === undefined) ? '' : String(name).trim();
+  return SUBJECT_NAME_ALIASES_[s] || s;
+}
+
+/**
+ * 2つの教科名が（表記ゆれを含めて）同一教科かを判定します。
+ * @param {*} a 教科名
+ * @param {*} b 教科名
+ * @returns {boolean}
+ */
+function isSameSubject_(a, b) {
+  return normalizeSubjectName_(a) === normalizeSubjectName_(b);
+}
+
+// ============================================================
 // ===== 日付処理ヘルパー関数 =====
 // ============================================================
 

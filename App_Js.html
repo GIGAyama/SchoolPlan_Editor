@@ -614,6 +614,27 @@
         return errors;
     }
 
+    // ===== 教科名の正規化（サーバー側 normalizeSubjectName_ と同一ルール） =====
+    // 「図工」と「図画工作」のような同一教科の表記ゆれを同じ教科として扱うためのマップ
+    var SUBJECT_NAME_ALIASES = { '図工': '図画工作' };
+
+    function normalizeSubjectName(name) {
+        var s = (name === null || name === undefined) ? '' : String(name).trim();
+        return SUBJECT_NAME_ALIASES[s] || s;
+    }
+
+    /** masterMap から、表記ゆれを同一視して該当教科の単元リストを取得します。 */
+    function findMasterMapUnits(masterMap, subject) {
+        if (!masterMap) return null;
+        if (masterMap[subject]) return masterMap[subject];
+        var canon = normalizeSubjectName(subject);
+        if (masterMap[canon]) return masterMap[canon];
+        for (var key in masterMap) {
+            if (normalizeSubjectName(key) === canon) return masterMap[key];
+        }
+        return null;
+    }
+
     // ===== 教科サジェスト =====
     function onSubjectInput(input) {
         updateSubjectInputValidity(input);
@@ -624,7 +645,10 @@
         var box = document.getElementById('suggest-' + dayIdx + '-' + pIdx);
         if (!box) return;
         var subjects = STATE.masterData.subjects || [];
-        var matches = val ? subjects.filter(function (s) { return s.indexOf(val) >= 0; }) : subjects.slice(0, 8);
+        var matches = val ? subjects.filter(function (s) {
+            // 表記ゆれ（図工/図画工作）も候補に含める
+            return s.indexOf(val) >= 0 || normalizeSubjectName(s).indexOf(normalizeSubjectName(val)) >= 0;
+        }) : subjects.slice(0, 8);
         if (matches.length === 0) { box.style.display = 'none'; return; }
         box.innerHTML = matches.map(function (s) {
             return '<div class="suggest-item" onmousedown="selectSubject(this,\'' + escAttr(s) + '\',\'' + dayIdx + '\',\'' + pIdx + '\')">' + escHtml(s) + '</div>';
@@ -660,8 +684,8 @@
             return;
         }
 
-        // masterMapから該当教科の単元リストを取得
-        var units = (STATE.masterData && STATE.masterData.masterMap) ? STATE.masterData.masterMap[subject] : null;
+        // masterMapから該当教科の単元リストを取得（図工/図画工作などの表記ゆれも同一視）
+        var units = STATE.masterData ? findMasterMapUnits(STATE.masterData.masterMap, subject) : null;
         if (!units || units.length === 0) {
             showToast('warning', '「' + subject + '」の単元マスタデータが見つかりません。');
             return;
@@ -1524,18 +1548,19 @@
     // ===== 教科単位で単元・学習内容を前後にずらす =====
 
     // モーダル用: 候補となる教科名を収集（単元マスタ + 表示中の週）
+    // 表記ゆれ（図工/図画工作）は正規化名に統一して重複候補を避ける
     function collectShiftSubjects() {
         var set = {};
         try {
             if (STATE.masterData && Array.isArray(STATE.masterData.subjects)) {
-                STATE.masterData.subjects.forEach(function (s) { if (s) set[String(s)] = true; });
+                STATE.masterData.subjects.forEach(function (s) { if (s) set[normalizeSubjectName(s)] = true; });
             }
         } catch (e) {}
         try {
             ((STATE.weekData && STATE.weekData.days) || []).forEach(function (day) {
                 (day.periods || []).forEach(function (p) {
                     if (p && p.subject && String(p.subject).trim() && String(p.subject).indexOf('行事') === -1) {
-                        set[String(p.subject).trim()] = true;
+                        set[normalizeSubjectName(p.subject)] = true;
                     }
                 });
             });
