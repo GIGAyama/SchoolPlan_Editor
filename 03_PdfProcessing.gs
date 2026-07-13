@@ -440,16 +440,17 @@ ${names}
     }
 
     // --- 教科の重複防止: 同じ教科の既存行を削除してから追記 ---
+    // 「図工」と「図画工作」のような表記ゆれも同一教科とみなすため、正規化名で比較する
     const newSubjects = new Set();
     extractedUnits.forEach(unit => {
-      if (unit.subject) newSubjects.add(unit.subject);
+      if (unit.subject) newSubjects.add(normalizeSubjectName_(unit.subject));
     });
 
     if (newSubjects.size > 0 && masterSheet.getLastRow() > 1) {
       const lastRow = masterSheet.getLastRow();
       const numDataRows = lastRow - 1;
       const existingData = masterSheet.getRange(2, 1, numDataRows, 5).getValues();
-      const rowsToKeep = existingData.filter(row => !newSubjects.has(row[0]));
+      const rowsToKeep = existingData.filter(row => !newSubjects.has(normalizeSubjectName_(row[0])));
 
       masterSheet.getRange(2, 1, numDataRows, 5).clearContent();
       if (rowsToKeep.length > 0) {

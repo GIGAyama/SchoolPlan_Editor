@@ -24,7 +24,7 @@ function parseUnitProgress_(unitText) {
 function findActivityFromMaster_(masterData, subject, unitName, hourNum) {
   for (let i = 1; i < masterData.length; i++) {
     const row = masterData[i];
-    if (row[MASTER_COL_SUBJECT - 1] === subject && row[MASTER_COL_UNIT_NAME - 1] === unitName && row[MASTER_COL_HOUR_NUM - 1] == hourNum) {
+    if (isSameSubject_(row[MASTER_COL_SUBJECT - 1], subject) && row[MASTER_COL_UNIT_NAME - 1] === unitName && row[MASTER_COL_HOUR_NUM - 1] == hourNum) {
       return row[MASTER_COL_ACTIVITY - 1];
     }
   }
@@ -51,7 +51,7 @@ function findLastLesson_(dbData, subject, weekStartDate) {
         const pCol = dbCols['PERIOD' + n];
         const uCol = dbCols['UNIT' + n];
         if (!pCol || !uCol) continue;
-        if (row[pCol - 1] === subject) {
+        if (isSameSubject_(row[pCol - 1], subject)) {
           const parsed = parseUnitProgress_(row[uCol - 1]); // 単元名のセル
           if (parsed) return parsed;
         }
@@ -99,8 +99,8 @@ function findLastLessonForSlot_(dbData, subject, dayOfWeek, periodIndex, weekSta
     const ourDow = jsDow === 0 ? 6 : jsDow - 1;
     if (ourDow !== dayOfWeek) continue;
 
-    // 同じスロットに同じ教科があるか
-    if (row[pColIdx - 1] === subject) {
+    // 同じスロットに同じ教科があるか（図工/図画工作などの表記ゆれも同一視）
+    if (isSameSubject_(row[pColIdx - 1], subject)) {
       const parsed = parseUnitProgress_(row[uColIdx - 1]);
       if (parsed) return parsed;
     }
@@ -130,7 +130,7 @@ function findLatestUnitState_(dbData, subject, unitName, weekStartDate) {
       const pCol = dbCols['PERIOD' + n];
       const uCol = dbCols['UNIT' + n];
       if (!pCol || !uCol) continue;
-      if (row[pCol - 1] === subject) {
+      if (isSameSubject_(row[pCol - 1], subject)) {
         const parsed = parseUnitProgress_(row[uCol - 1]);
         if (parsed && parsed.unitName === unitName) {
           return { unitName: unitName, currentHour: parsed.currentHour, totalHours: parsed.totalHours };
@@ -159,21 +159,21 @@ function determineNextLesson_(lastLesson, masterData, subject) {
 
   if (lastLesson.unitName) {
     const lastLessonIndex = masterData.findIndex(row =>
-      row[MASTER_COL_SUBJECT - 1] === subject &&
+      isSameSubject_(row[MASTER_COL_SUBJECT - 1], subject) &&
       row[MASTER_COL_UNIT_NAME - 1] === lastLesson.unitName &&
       row[MASTER_COL_HOUR_NUM - 1] == lastLesson.currentHour
     );
 
     if (lastLessonIndex > -1 && lastLessonIndex + 1 < masterData.length) {
       const potentialNextRow = masterData[lastLessonIndex + 1];
-      if (potentialNextRow[MASTER_COL_SUBJECT - 1] === subject) {
+      if (isSameSubject_(potentialNextRow[MASTER_COL_SUBJECT - 1], subject)) {
         nextLessonRow = potentialNextRow;
       }
     }
   }
-  
+
   if (!nextLessonRow) {
-    nextLessonRow = masterData.find(row => row[MASTER_COL_SUBJECT - 1] === subject);
+    nextLessonRow = masterData.find(row => isSameSubject_(row[MASTER_COL_SUBJECT - 1], subject));
   }
 
   if (!nextLessonRow) {
@@ -218,6 +218,8 @@ function calculateAutoFillForWebApp(mondayStr, days) {
       day.periods.forEach((p, pIdx) => {
         const subject = p.subject;
         if (!subject || subject.includes("行事")) return;
+        // 進捗キーは正規化名で統一（「図工」と「図画工作」が混在しても同じ教科として進行）
+        const subjectKey = normalizeSubjectName_(subject);
 
         try {
           // Step 1: スロット記憶方式 — 前週の同じ曜日・校時から使用単元を特定
@@ -226,7 +228,7 @@ function calculateAutoFillForWebApp(mondayStr, days) {
           let lastLesson;
           if (slotLesson) {
             // このスロットに前週の単元がある → その単元の最新進捗を使う
-            const progressKey = `${subject}::${slotLesson.unitName}`;
+            const progressKey = `${subjectKey}::${slotLesson.unitName}`;
             if (unitProgress[progressKey]) {
               lastLesson = unitProgress[progressKey];
             } else {
@@ -236,7 +238,7 @@ function calculateAutoFillForWebApp(mondayStr, days) {
             // スロット履歴なし → 従来方式（教科の最終授業から逐次進行）でフォールバック
             lastLesson = findLastLesson_(dbData, subject, weekStartDate);
             // 既に他のスロットが追跡中の単元なら、その進捗を使う
-            const fallbackKey = lastLesson.unitName ? `${subject}::${lastLesson.unitName}` : null;
+            const fallbackKey = lastLesson.unitName ? `${subjectKey}::${lastLesson.unitName}` : null;
             if (fallbackKey && unitProgress[fallbackKey]) {
               lastLesson = unitProgress[fallbackKey];
             }
@@ -247,7 +249,7 @@ function calculateAutoFillForWebApp(mondayStr, days) {
 
           if (nextLesson && nextLesson.unitName) {
             // 教科+単元名 単位で進捗を更新
-            const progressKey = `${subject}::${nextLesson.unitName}`;
+            const progressKey = `${subjectKey}::${nextLesson.unitName}`;
             unitProgress[progressKey] = nextLesson;
 
             p.unit = `${nextLesson.unitName} ${nextLesson.currentHour}/${nextLesson.totalHours}`;
@@ -327,6 +329,8 @@ function batchAutoFillFromWeek(baseMondayStr) {
       for (const pc of periodCols) {
         const subject = row[pc.subj - 1];
         if (!subject || typeof subject !== 'string' || subject.includes('行事')) continue;
+        // 進捗キーは正規化名で統一（「図工」と「図画工作」が混在しても同じ教科として進行）
+        const subjectKey = normalizeSubjectName_(subject);
 
         try {
           const slotKey = `${dayOfWeek}::${pc.idx}`;
@@ -337,17 +341,17 @@ function batchAutoFillFromWeek(baseMondayStr) {
 
           if (rememberedUnit) {
             // このスロットに記憶された単元がある
-            const progressKey = `${subject}::${rememberedUnit}`;
+            const progressKey = `${subjectKey}::${rememberedUnit}`;
             lastLesson = unitProgress[progressKey] || findLatestUnitState_(dbData, subject, rememberedUnit, nextMonday);
-          } else if (!initializedSubjects.has(subject)) {
+          } else if (!initializedSubjects.has(subjectKey)) {
             // 初遭遇の教科 — スロットベースの初期化を試みる
             const slotLesson = findLastLessonForSlot_(dbData, subject, dayOfWeek, pc.idx, nextMonday);
             if (slotLesson) {
-              const progressKey = `${subject}::${slotLesson.unitName}`;
+              const progressKey = `${subjectKey}::${slotLesson.unitName}`;
               lastLesson = unitProgress[progressKey] || findLatestUnitState_(dbData, subject, slotLesson.unitName, nextMonday);
             } else {
               lastLesson = findLastLesson_(dbData, subject, nextMonday);
-              const fallbackKey = lastLesson.unitName ? `${subject}::${lastLesson.unitName}` : null;
+              const fallbackKey = lastLesson.unitName ? `${subjectKey}::${lastLesson.unitName}` : null;
               if (fallbackKey && unitProgress[fallbackKey]) {
                 lastLesson = unitProgress[fallbackKey];
               }
@@ -355,13 +359,13 @@ function batchAutoFillFromWeek(baseMondayStr) {
           } else {
             // 教科は初期化済みだがこのスロットは未設定 — フォールバック
             lastLesson = findLastLesson_(dbData, subject, nextMonday);
-            const fallbackKey = lastLesson.unitName ? `${subject}::${lastLesson.unitName}` : null;
+            const fallbackKey = lastLesson.unitName ? `${subjectKey}::${lastLesson.unitName}` : null;
             if (fallbackKey && unitProgress[fallbackKey]) {
               lastLesson = unitProgress[fallbackKey];
             }
           }
 
-          initializedSubjects.add(subject);
+          initializedSubjects.add(subjectKey);
 
           // Step 2: 次の時数を決定
           const nextLesson = determineNextLesson_(lastLesson, masterData, subject);
@@ -378,7 +382,7 @@ function batchAutoFillFromWeek(baseMondayStr) {
             }
 
             // 進捗とスロット記憶を更新
-            const progressKey = `${subject}::${nextLesson.unitName}`;
+            const progressKey = `${subjectKey}::${nextLesson.unitName}`;
             unitProgress[progressKey] = nextLesson;
             slotUnitMap[slotKey] = nextLesson.unitName;
           }
@@ -477,7 +481,8 @@ function shiftSubjectLessons(subject, startDateStr, endDateStr, direction, count
       if (t < startDate.getTime() || t > endDate.getTime()) continue;
 
       for (const pc of periodCols) {
-        if (row[pc.subj] === subject) {
+        // 「図工」と「図画工作」のような表記ゆれも同一教科としてシフト対象にする
+        if (isSameSubject_(row[pc.subj], subject)) {
           refs.push({
             rowIdx: i,
             uIdx: pc.unit,

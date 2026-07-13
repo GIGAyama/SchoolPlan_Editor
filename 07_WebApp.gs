@@ -595,13 +595,15 @@ function validateDaysSubjects_(days) {
  * - 学活 → 特活（リネーム）
  * - 図書・書写 → 国語（合算）
  * - 中体育・外体育 → 体育（合算）
+ * - 図工 → 図画工作（同一教科の表記ゆれを合算）
  */
 const SUBJECT_AGGREGATION_RULES_ = [
   { from: '学活', to: '特活' },
   { from: '図書', to: '国語' },
   { from: '書写', to: '国語' },
   { from: '中体育', to: '体育' },
-  { from: '外体育', to: '体育' }
+  { from: '外体育', to: '体育' },
+  { from: '図工', to: '図画工作' }
 ];
 
 /**
@@ -1426,9 +1428,11 @@ function getHoursSummary(mondayStr) {
     // 結果を構築
     const summary = standardHours.map(sh => {
       const subj = sh.subject;
+      // 標準時数側が「図工」等の別名で保存されていても集計結果（正式名キー）と突合できるよう正規化する
+      const key = normalizeSubjectName_(subj);
       const std = sh.hours || 0;
-      const weekly = Math.round((weeklyCount[subj] || 0) * 10) / 10;
-      const cumulative = Math.round((cumulativeCount[subj] || 0) * 10) / 10;
+      const weekly = Math.round((weeklyCount[key] || 0) * 10) / 10;
+      const cumulative = Math.round((cumulativeCount[key] || 0) * 10) / 10;
       const pct = std > 0 ? Math.round(cumulative / std * 100) : 0;
       return { subject: subj, standard: std, weekly: weekly, cumulative: cumulative, percent: pct };
     });
