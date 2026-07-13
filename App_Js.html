@@ -71,6 +71,7 @@
         loadSettingsView();
         loadTasks(); // タスクをページ読み込み時に初期ロード（デフォルトでリスト表示）
         restoreTaskSidebarState(); // 週案タスクサイドバーの開閉状態を復元（デフォルトは収納）
+        checkAutoReflection(); // 放課後にアプリを開いた場合、今日の振り返りモードを自動起動
     };
 
     // ===== 週案グリッドの土日列 表示/非表示 =====
@@ -352,6 +353,33 @@
             else if (i === 6) cls += ' sun-col';
             h.className = cls;
             h.innerHTML = '<div>' + day.dayLabel + '</div><div style="font-size:0.7rem;color:inherit;opacity:0.8;font-weight:400;">' + day.date.slice(5) + '</div>';
+
+            // 振り返り状態チップ（授業がある過去〜今日の日に表示。クリックで振り返りを開く）
+            if (day.date <= today && dayHasLessons(day)) {
+                var chip = document.createElement('button');
+                chip.type = 'button';
+                var st = day.reflectionStatus || '';
+                if (st === '完了') {
+                    chip.className = 'reflection-chip done';
+                    chip.innerHTML = '<span class="material-symbols-outlined">check_circle</span>振り返り済';
+                    chip.title = '振り返りを見る・編集する';
+                } else if (st === '保留') {
+                    chip.className = 'reflection-chip hold';
+                    chip.innerHTML = '<span class="material-symbols-outlined">pause_circle</span>保留中';
+                    chip.title = '保留中の振り返りに取り組む';
+                } else {
+                    chip.className = 'reflection-chip todo';
+                    chip.innerHTML = '<span class="material-symbols-outlined">edit_note</span>未記入';
+                    chip.title = 'この日の振り返りを書く';
+                }
+                (function (dateStr) {
+                    chip.addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        openReflectionWizard(dateStr, {});
+                    });
+                })(day.date);
+                h.appendChild(chip);
+            }
             grid.appendChild(h);
         });
 
@@ -1742,7 +1770,9 @@
                 + '<label><input type="checkbox" id="po_recess2" checked> 昼休み</label>'
                 + '<label><input type="checkbox" id="po_afterschool" checked> 放課後</label>'
                 + '<label><input type="checkbox" id="po_stats" checked> 教科時数表</label>'
+                + '<label><input type="checkbox" id="po_summary" checked> 週のまとめ</label>'
                 + '</div>'
+                + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 0 2px;">※週のまとめは標準レイアウトのフリースペース（時数表と検印欄の間）に印刷されます</div>'
                 + '<hr style="margin:12px 0;">'
                 + '<label style="display:flex;align-items:center;gap:8px;">'
                 + 'フォントサイズ: <input type="range" id="po_fontSize" min="8" max="14" value="10" style="flex:1;">'
@@ -1772,6 +1802,7 @@
                 recess2: document.getElementById('po_recess2').checked,
                 afterschool: document.getElementById('po_afterschool').checked,
                 stats: document.getElementById('po_stats').checked,
+                summary: document.getElementById('po_summary').checked,
                 fontSize: parseInt(document.getElementById('po_fontSize').value)
             };
             printWeeklyPlanExec(opts);
@@ -1838,6 +1869,11 @@
 
         html += '.free-box { flex: 1; display: block; padding-top: 5px; overflow: hidden; border: 1px solid #e0e0e0; border-radius: 4px; min-height: 0; }';
         html += '.line-row { border-bottom: 1px dashed #ccc; height: 6mm; width: 100%; }';
+
+        // 週のまとめ（フリースペース: 時数表〜検印欄の間に配置）
+        html += '.summary-box { border: 1.5px solid #333; border-radius: 4px; padding: 6px 8px; background-color: #fff; flex: 0 1 auto; overflow: hidden; }';
+        html += '.summary-title { font-weight: bold; font-size: 10px; margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px solid #999; }';
+        html += '.summary-text { font-size: 9px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }';
 
         // コンパクト（A4・1ページ）レイアウト
         html += '.compact-grid td { height: 44px; }';
@@ -2253,6 +2289,15 @@
         html += '</div>';
         html += '</div>';
 
+        // 週のまとめ（時数表と検印欄の間のフリースペースに印刷）
+        var weekSummaryText = (STATE.weekData && STATE.weekData.weekSummary) ? STATE.weekData.weekSummary : '';
+        if (opts.summary && weekSummaryText) {
+            html += '<div class="summary-box">';
+            html += '<div class="summary-title">今週のまとめ（報告）</div>';
+            html += '<div class="summary-text">' + escHtml(weekSummaryText) + '</div>';
+            html += '</div>';
+        }
+
         // フリー枠（残りスペースを最大限使用）
         html += '<div class="free-box">';
         for (var i = 0; i < 30; i++) {
@@ -2326,6 +2371,419 @@
         } else {
             setTimeout(doPrint, 500);
         }
+    }
+
+    // ===== 日次振り返り（日報）＆週まとめ（管理職報告） =====
+
+    // 放課後とみなす時刻（この時刻以降にアプリを開くと今日の振り返りモードを自動起動）
+    var REFLECTION_AFTERSCHOOL_HOUR = 15;
+
+    /** その日に授業（教科入力）があるかを判定します。 */
+    function dayHasLessons(day) {
+        return !!(day && day.periods && day.periods.some(function (p) {
+            return p && p.subject && String(p.subject).trim() !== '';
+        }));
+    }
+
+    /** 起動時: 放課後なら今日の振り返りウィザードを自動起動し、未完了バッジを更新します。 */
+    function checkAutoReflection() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res || !res.success) return;
+                updateReflectionBadge(res.pendingCount || 0);
+                var isAfterSchool = new Date().getHours() >= REFLECTION_AFTERSCHOOL_HOUR;
+                // 未記入（保留でも完了でもない）の場合のみ自動起動する
+                if (isAfterSchool && res.hasLessons && res.status === '') {
+                    openReflectionWizard(res.today, { auto: true });
+                }
+            })
+            .withFailureHandler(function () { /* 起動時チェックの失敗はアプリ利用を妨げない */ })
+            .getTodayReflectionStatus();
+    }
+
+    function updateReflectionBadge(count) {
+        var badge = document.getElementById('reflectionBadge');
+        if (!badge) return;
+        badge.textContent = count;
+        badge.style.display = count > 0 ? 'inline-flex' : 'none';
+    }
+
+    function refreshReflectionBadge() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res && res.success) updateReflectionBadge(res.pendingCount || 0);
+            })
+            .withFailureHandler(function () { })
+            .getTodayReflectionStatus();
+    }
+
+    /** 当日の計画（参照用）のコンパクトHTMLを生成します。 */
+    function buildReflectionPlanHtml(ctx) {
+        var rows = '';
+        if (ctx.event) {
+            rows += '<div style="padding:2px 0;"><span style="color:var(--secondary);font-weight:600;">行事</span> ' + escHtml(ctx.event) + '</div>';
+        }
+        (ctx.periods || []).forEach(function (p, i) {
+            if (!p || !p.subject) return;
+            var content = (p.content || '').split('\n')[0];
+            if (content.length > 30) content = content.substring(0, 30) + '…';
+            rows += '<div style="padding:2px 0;"><span style="font-weight:600;">' + (i + 1) + '校時 [' + escHtml(p.subject) + ']</span> '
+                + '<span style="color:var(--text-sub);">' + escHtml(content) + '</span></div>';
+        });
+        if (!rows) return '';
+        return '<div style="text-align:left;font-size:0.75rem;max-height:140px;overflow-y:auto;'
+            + 'border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:var(--surface-2);">'
+            + '<div style="font-weight:600;font-size:0.72rem;color:var(--text-sub);margin-bottom:2px;">今日の予定（参照）</div>'
+            + rows + '</div>';
+    }
+
+    /** 質問への回答から日報形式の振り返りテキストを合成します。 */
+    function composeReflectionText(a) {
+        var lines = [];
+        var changes = (a.changes || '').trim();
+        lines.push('【実施状況】' + (changes ? '一部変更あり' : '予定どおり実施'));
+        if (changes) lines.push('【変更点】' + changes);
+        if ((a.seika || '').trim()) lines.push('【成果】' + a.seika.trim());
+        if ((a.kadai || '').trim()) lines.push('【課題】' + a.kadai.trim());
+        if ((a.tokki || '').trim()) lines.push('【特記】' + a.tokki.trim());
+        return lines.join('\n');
+    }
+
+    /**
+     * 振り返りウィザードを開きます。
+     * 既に振り返り本文がある日は編集ビューを、無い日は質問形式のインタビューを表示します。
+     * @param {string} dateStr "yyyy/MM/dd"
+     * @param {Object} opts { auto: boolean } auto=true は放課後の自動起動（「あとで書く」で保留可能）
+     */
+    async function openReflectionWizard(dateStr, opts) {
+        opts = opts || {};
+        var ctx = await new Promise(function (resolve) {
+            google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(function (e) { resolve({ success: false, error: e.message }); })
+                .getReflectionContext(dateStr);
+        });
+        if (!ctx.success) { showToast('error', '振り返りデータの取得に失敗: ' + ctx.error); return; }
+        if (!ctx.hasLessons) { showToast('info', dateStr + ' は授業データがないため振り返りの対象外です'); return; }
+
+        if (ctx.reflection && ctx.reflection.trim()) {
+            openReflectionEditor(ctx, opts);
+            return;
+        }
+        runReflectionInterview(ctx, opts);
+    }
+
+    /** 既存の振り返りを直接編集するビュー。 */
+    async function openReflectionEditor(ctx, opts) {
+        var res = await Swal.fire({
+            title: ctx.date.slice(5) + '（' + (ctx.dayLabel || '') + '）の振り返り',
+            html: buildReflectionPlanHtml(ctx)
+                + '<textarea id="reflPreview" class="swal2-textarea" style="width:100%;margin:8px 0 0;min-height:200px;font-size:0.85rem;line-height:1.5;">'
+                + escHtml(ctx.reflection) + '</textarea>',
+            width: 560,
+            confirmButtonText: '保存する',
+            confirmButtonColor: '#1a73e8',
+            showDenyButton: true,
+            denyButtonText: '質問からやり直す',
+            denyButtonColor: '#6c757d',
+            showCancelButton: true,
+            cancelButtonText: '閉じる',
+            preConfirm: function () { return document.getElementById('reflPreview').value; }
+        });
+        if (res.isConfirmed) {
+            saveReflectionAndFollowUp(ctx.date, res.value, '完了');
+        } else if (res.isDenied) {
+            runReflectionInterview(ctx, opts);
+        }
+    }
+
+    /** 質問に順に答えて日報を自動生成するインタビューモード。 */
+    async function runReflectionInterview(ctx, opts) {
+        var answers = { changes: '', seika: '', kadai: '', tokki: '' };
+        var steps = [
+            { key: 'changes', title: '予定との変更点はありましたか？', hint: '実施できなかった授業・差し替え・時間変更など。予定どおりなら空欄のまま「次へ」', placeholder: '例: 5校時の理科を学級活動に変更（避難訓練の事前指導のため）', showPlan: true },
+            { key: 'seika', title: '今日の成果は？', hint: 'うまくいったこと・子どもたちの良かった姿・手応えのあった指導', placeholder: '例: 算数の割合の導入で、図を使った説明に多くの子が納得していた' },
+            { key: 'kadai', title: '今日の課題は？', hint: 'うまくいかなかったこと・明日以降に改善したいこと', placeholder: '例: 実験のグループ活動で時間が不足。次回は事前準備を済ませておく' },
+            { key: 'tokki', title: '特記事項はありますか？（任意）', hint: '生徒指導・保護者対応・管理職に伝えたいことなど', placeholder: '例: ○○さんの保護者へ電話連絡済み' }
+        ];
+
+        var step = 0;
+        while (true) {
+            if (step < steps.length) {
+                // 質問ステップ
+                var s = steps[step];
+                var html = '<div style="font-weight:600;text-align:left;margin-bottom:4px;">Q' + (step + 1) + '. ' + escHtml(s.title) + '</div>';
+                if (s.showPlan) html += buildReflectionPlanHtml(ctx);
+                html += '<div style="text-align:left;font-size:0.78rem;color:var(--text-sub);margin:8px 0 4px;">' + escHtml(s.hint) + '</div>';
+                html += '<textarea id="reflAnswer" class="swal2-textarea" style="width:100%;margin:0;min-height:90px;font-size:0.9rem;" placeholder="'
+                    + escAttr(s.placeholder) + '">' + escHtml(answers[s.key]) + '</textarea>';
+
+                var res = await Swal.fire({
+                    title: ctx.date.slice(5) + '（' + (ctx.dayLabel || '') + '）の振り返り',
+                    html: html,
+                    width: 560,
+                    progressSteps: ['1', '2', '3', '4'],
+                    currentProgressStep: step,
+                    confirmButtonText: step === steps.length - 1 ? 'まとめる →' : '次へ →',
+                    confirmButtonColor: '#1a73e8',
+                    showDenyButton: step > 0,
+                    denyButtonText: '← 戻る',
+                    denyButtonColor: '#6c757d',
+                    showCancelButton: true,
+                    cancelButtonText: opts.auto ? 'あとで書く' : '閉じる',
+                    allowOutsideClick: false,
+                    willClose: (function (key) {
+                        return function (popup) {
+                            var ta = popup.querySelector('#reflAnswer');
+                            if (ta) answers[key] = ta.value;
+                        };
+                    })(s.key)
+                });
+                if (res.isConfirmed) { step++; }
+                else if (res.isDenied) { step--; }
+                else {
+                    // あとで書く（自動起動時のみ保留として記録）／閉じる
+                    if (opts.auto) deferReflectionRemote(ctx.date);
+                    return;
+                }
+            } else {
+                // プレビュー（編集可）＆保存ステップ
+                var composed = composeReflectionText(answers);
+                var pres = await Swal.fire({
+                    title: '振り返りの確認',
+                    html: '<div style="text-align:left;font-size:0.78rem;color:var(--text-sub);margin-bottom:4px;">'
+                        + '回答から今日の振り返り（日報）を作成しました。編集して保存できます。</div>'
+                        + '<textarea id="reflPreview" class="swal2-textarea" style="width:100%;margin:0;min-height:200px;font-size:0.85rem;line-height:1.5;">'
+                        + escHtml(composed) + '</textarea>',
+                    width: 560,
+                    confirmButtonText: '保存して完了',
+                    confirmButtonColor: '#1a73e8',
+                    showDenyButton: true,
+                    denyButtonText: '← 質問に戻る',
+                    denyButtonColor: '#6c757d',
+                    showCancelButton: true,
+                    cancelButtonText: opts.auto ? 'あとで書く' : '閉じる',
+                    allowOutsideClick: false,
+                    preConfirm: function () { return document.getElementById('reflPreview').value; }
+                });
+                if (pres.isConfirmed) {
+                    saveReflectionAndFollowUp(ctx.date, pres.value, '完了');
+                    return;
+                }
+                if (pres.isDenied) { step = steps.length - 1; continue; }
+                if (opts.auto) deferReflectionRemote(ctx.date);
+                return;
+            }
+        }
+    }
+
+    /** 振り返りを「保留（あとで書く）」として記録します。 */
+    function deferReflectionRemote(dateStr) {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res && res.success) {
+                    showToast('info', '保留にしました。「振り返り」ボタンからいつでも再開できます。');
+                    applyReflectionLocal(dateStr, null, '保留');
+                }
+            })
+            .withFailureHandler(function () { })
+            .deferReflection(dateStr);
+    }
+
+    /**
+     * 振り返りを保存し、週の全授業日が完了した場合は自動生成された週まとめを表示します。
+     */
+    function saveReflectionAndFollowUp(dateStr, text, status) {
+        showToast('info', '振り返りを保存しています...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) { showToast('error', '保存失敗: ' + res.error); return; }
+                showToast('success', '振り返りを保存しました');
+                applyReflectionLocal(dateStr, text, status);
+                refreshReflectionBadge();
+
+                if (!res.weekComplete) return;
+                if (res.summaryGenerated) {
+                    if (STATE.weekData && res.mondayStr === STATE.mondayStr) STATE.weekData.weekSummary = res.summary;
+                    showWeeklySummaryModal(res.mondayStr, res.summary, true);
+                } else if (res.summaryError) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: '週の振り返りがすべて完了しました',
+                        html: '週まとめ（報告）の自動生成に失敗しました。<br><span style="font-size:0.8rem;color:var(--text-sub);">'
+                            + escHtml(res.summaryError) + '</span><br>「振り返り」ボタンからいつでも再生成できます。'
+                    });
+                } else if (res.summary) {
+                    showToast('info', 'この週の振り返りがすべて完了しました（作成済みの週まとめを保持しています）');
+                }
+            })
+            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .saveDailyReflection(dateStr, text, status);
+    }
+
+    /** 表示中の週のローカル状態（グリッドのチップ表示）を更新します。 */
+    function applyReflectionLocal(dateStr, text, status) {
+        if (!STATE.weekData || !STATE.weekData.days) return;
+        var hit = false;
+        STATE.weekData.days.forEach(function (d) {
+            if (d.date !== dateStr) return;
+            if (text !== null && text !== undefined) d.reflection = text;
+            d.reflectionStatus = status;
+            hit = true;
+        });
+        // 編集モード中の再描画は入力内容を壊すため行わない（次回描画時に反映される）
+        if (hit && !STATE.editMode) renderWeekGrid(STATE.weekData.days);
+    }
+
+    /** 表示中の週の振り返り進捗（授業日数と完了数）をローカルデータから算出します。 */
+    function computeLocalWeekProgress() {
+        var total = 0, done = 0;
+        if (STATE.weekData && STATE.weekData.days) {
+            STATE.weekData.days.forEach(function (d) {
+                if (!dayHasLessons(d)) return;
+                total++;
+                if (d.reflectionStatus === '完了') done++;
+            });
+        }
+        return { total: total, done: done };
+    }
+
+    /** 振り返りハブ: 保留・未記入の一覧と、表示中の週の週まとめ操作。 */
+    function openReflectionHub() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) { showToast('error', '一覧の取得に失敗: ' + res.error); return; }
+                renderReflectionHub(res.list || []);
+            })
+            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .getPendingReflections();
+    }
+
+    function renderReflectionHub(pendingList) {
+        updateReflectionBadge(pendingList.length);
+        var todayStr = formatDateLocal(new Date());
+        var html = '<div style="text-align:left;">';
+
+        html += '<div style="font-weight:600;font-size:0.85rem;margin-bottom:6px;">未記入・保留中の振り返り（' + pendingList.length + '件）</div>';
+        if (pendingList.length === 0) {
+            html += '<div style="font-size:0.82rem;color:var(--text-sub);padding:10px;border:1px dashed var(--border);border-radius:6px;text-align:center;">未完了の振り返りはありません 🎉</div>';
+        } else {
+            html += '<div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">';
+            pendingList.forEach(function (item) {
+                var stChip = item.status === '保留'
+                    ? '<span class="refl-hub-status hold">保留</span>'
+                    : '<span class="refl-hub-status todo">未記入</span>';
+                var isToday = item.date === todayStr;
+                var detail = item.event ? ('行事: ' + item.event) : item.subjects;
+                html += '<div class="refl-hub-item" data-date="' + escAttr(item.date) + '">'
+                    + '<div style="flex:1;min-width:0;">'
+                    + '<div style="font-weight:600;font-size:0.85rem;">' + escHtml(item.date.slice(5)) + '（' + escHtml(item.dayLabel || '') + '）'
+                    + (isToday ? ' <span style="color:var(--primary);font-size:0.72rem;">今日</span>' : '') + '</div>'
+                    + '<div style="font-size:0.72rem;color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(detail || '') + '</div>'
+                    + '</div>' + stChip + '</div>';
+            });
+            html += '</div>';
+        }
+
+        var ws = (STATE.weekData && STATE.weekData.weekSummary) ? STATE.weekData.weekSummary : '';
+        var progress = computeLocalWeekProgress();
+        html += '<hr style="margin:12px 0;">';
+        html += '<div style="font-weight:600;font-size:0.85rem;margin-bottom:6px;">表示中の週の報告（週まとめ）</div>';
+        html += '<div style="font-size:0.78rem;color:var(--text-sub);margin-bottom:8px;">振り返り ' + progress.done + '/' + progress.total + ' 日完了 ／ 週まとめ: '
+            + (ws ? '<span style="color:var(--secondary);font-weight:600;">作成済み</span>' : '未作成') + '</div>';
+        html += '<button type="button" class="btn btn-outline btn-sm" id="reflHubSummaryBtn" style="width:100%;">'
+            + (ws ? '週まとめを表示・編集する' : 'AIで週まとめを作成する') + '</button>';
+        html += '</div>';
+
+        Swal.fire({
+            title: '振り返りと週報',
+            html: html,
+            width: 520,
+            showConfirmButton: false,
+            showCancelButton: true,
+            cancelButtonText: '閉じる',
+            didOpen: function () {
+                var c = Swal.getHtmlContainer();
+                c.querySelectorAll('.refl-hub-item').forEach(function (el) {
+                    el.addEventListener('click', function () {
+                        var date = el.getAttribute('data-date');
+                        Swal.close();
+                        openReflectionWizard(date, {});
+                    });
+                });
+                var sbtn = c.querySelector('#reflHubSummaryBtn');
+                if (sbtn) sbtn.addEventListener('click', function () {
+                    Swal.close();
+                    var mondayStr = STATE.mondayStr;
+                    var wsNow = (STATE.weekData && STATE.weekData.weekSummary) ? STATE.weekData.weekSummary : '';
+                    if (wsNow) showWeeklySummaryModal(mondayStr, wsNow, false);
+                    else regenerateWeeklySummary(mondayStr, false);
+                });
+            }
+        });
+    }
+
+    /** 週まとめの表示・編集モーダル。 */
+    async function showWeeklySummaryModal(mondayStr, summary, generatedNow) {
+        var res = await Swal.fire({
+            icon: generatedNow ? 'success' : undefined,
+            title: generatedNow ? '週の報告が完成しました' : '週のまとめ（報告）',
+            html: '<div style="text-align:left;font-size:0.78rem;color:var(--text-sub);margin-bottom:4px;">'
+                + escHtml(mondayStr) + ' の週 — 編集して保存できます。週案の印刷時はフリースペース（時数表と検印欄の間）に掲載されます。</div>'
+                + '<textarea id="weekSummaryEdit" class="swal2-textarea" style="width:100%;margin:0;min-height:220px;font-size:0.85rem;line-height:1.6;">'
+                + escHtml(summary) + '</textarea>',
+            width: 600,
+            confirmButtonText: '保存する',
+            confirmButtonColor: '#1a73e8',
+            showDenyButton: true,
+            denyButtonText: 'AIで再生成',
+            denyButtonColor: '#1aa260',
+            showCancelButton: true,
+            cancelButtonText: '閉じる',
+            preConfirm: function () { return document.getElementById('weekSummaryEdit').value; }
+        });
+        if (res.isConfirmed) {
+            google.script.run
+                .withSuccessHandler(function (r) {
+                    if (r.success) {
+                        showToast('success', '週まとめを保存しました');
+                        if (STATE.weekData && mondayStr === STATE.mondayStr) STATE.weekData.weekSummary = res.value;
+                    } else {
+                        showToast('error', '保存失敗: ' + r.error);
+                    }
+                })
+                .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+                .saveWeeklySummary(mondayStr, res.value);
+        } else if (res.isDenied) {
+            regenerateWeeklySummary(mondayStr, true);
+        }
+    }
+
+    /** 週まとめのAI生成（再生成）。振り返りが未完了の場合は確認のうえ force で生成します。 */
+    function regenerateWeeklySummary(mondayStr, force) {
+        showToast('info', 'AIが週まとめを作成しています...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    if (STATE.weekData && mondayStr === STATE.mondayStr) STATE.weekData.weekSummary = res.summary;
+                    showWeeklySummaryModal(mondayStr, res.summary, true);
+                } else if (res.incomplete) {
+                    Swal.fire({
+                        icon: 'question',
+                        title: '振り返りが未完了です',
+                        html: escHtml(res.error) + '<br>現時点の内容で週まとめを作成しますか？',
+                        showCancelButton: true,
+                        confirmButtonText: 'この内容で作成',
+                        cancelButtonText: 'やめる'
+                    }).then(function (r) {
+                        if (r.isConfirmed) regenerateWeeklySummary(mondayStr, true);
+                    });
+                } else {
+                    showToast('error', '週まとめの生成に失敗: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .generateWeeklySummary(mondayStr, !!force);
     }
 
     // ===== 年間時数ビュー =====

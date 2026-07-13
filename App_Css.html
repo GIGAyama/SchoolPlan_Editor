@@ -3064,6 +3064,136 @@
         box-shadow: var(--shadow-hover);
     }
 
+    /* ===== 日次振り返り＆週まとめ ===== */
+
+    /* ツールバー「振り返り」ボタンの未完了件数バッジ */
+    .reflection-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 9px;
+        background: var(--danger, #ea4335);
+        color: #fff;
+        font-size: 0.68rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    /* 週案グリッドの日付ヘッダーに表示する振り返り状態チップ */
+    .reflection-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        margin-top: 3px;
+        padding: 1px 6px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        font-size: 0.62rem;
+        font-weight: 600;
+        line-height: 1.4;
+        cursor: pointer;
+        background: var(--surface-2);
+        color: var(--text-sub);
+        transition: filter var(--dur-fast, 0.12s) var(--ease, ease);
+    }
+
+    .reflection-chip:hover {
+        filter: brightness(0.94);
+    }
+
+    .reflection-chip .material-symbols-outlined {
+        font-size: 12px;
+    }
+
+    .reflection-chip.done {
+        background: #e6f4ea;
+        color: #137746;
+        border-color: #a8dab5;
+    }
+
+    .reflection-chip.hold {
+        background: #fef7e0;
+        color: #b26a00;
+        border-color: #fdd663;
+    }
+
+    .reflection-chip.todo {
+        background: var(--surface-2);
+        color: var(--text-sub);
+        border-color: var(--border);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) .reflection-chip.done,
+        :root:not([data-theme="light"]) .refl-hub-status.done {
+            background: #1e3527;
+            border-color: #2e5d3d;
+            color: #81c995;
+        }
+
+        :root:not([data-theme="light"]) .reflection-chip.hold,
+        :root:not([data-theme="light"]) .refl-hub-status.hold {
+            background: #3a2f14;
+            border-color: #5d4a1e;
+            color: #fdd663;
+        }
+    }
+
+    :root[data-theme="dark"] .reflection-chip.done,
+    :root[data-theme="dark"] .refl-hub-status.done {
+        background: #1e3527;
+        border-color: #2e5d3d;
+        color: #81c995;
+    }
+
+    :root[data-theme="dark"] .reflection-chip.hold,
+    :root[data-theme="dark"] .refl-hub-status.hold {
+        background: #3a2f14;
+        border-color: #5d4a1e;
+        color: #fdd663;
+    }
+
+    /* 振り返りハブ（未記入・保留一覧）の行 */
+    .refl-hub-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        transition: background var(--dur-fast, 0.12s) var(--ease, ease);
+    }
+
+    .refl-hub-item:last-child {
+        border-bottom: none;
+    }
+
+    .refl-hub-item:hover {
+        background: var(--primary-light);
+    }
+
+    .refl-hub-status {
+        flex-shrink: 0;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 0.68rem;
+        font-weight: 600;
+    }
+
+    .refl-hub-status.hold {
+        background: #fef7e0;
+        color: #b26a00;
+    }
+
+    .refl-hub-status.todo {
+        background: var(--surface-2);
+        color: var(--text-sub);
+        border: 1px solid var(--border);
+    }
+
     /* モーション低減を希望するユーザーへの配慮 */
     @media (prefers-reduced-motion: reduce) {
 

@@ -54,8 +54,10 @@ function getDbColumns() {
     "4校時": "PERIOD4", "単元4": "UNIT4", "単元名4": "UNIT4", "学習内容4": "CONTENT4", "内容4": "CONTENT4", 
     "5校時": "PERIOD5", "単元5": "UNIT5", "単元名5": "UNIT5", "学習内容5": "CONTENT5", "内容5": "CONTENT5", "内容５": "CONTENT5", 
     "6校時": "PERIOD6", "単元6": "UNIT6", "単元名6": "UNIT6", "学習内容6": "CONTENT6", "内容6": "CONTENT6", 
-    "宿題": "HOMEWORK", "課題": "HOMEWORK", "持ち物": "ITEMS", "中休み": "RECESS1", 
-    "昼休み": "RECESS2", "放課後": "AFTERSCHOOL"
+    "宿題": "HOMEWORK", "課題": "HOMEWORK", "持ち物": "ITEMS", "中休み": "RECESS1",
+    "昼休み": "RECESS2", "放課後": "AFTERSCHOOL",
+    "振り返り": "REFLECTION", "ふり返り": "REFLECTION", "振返り": "REFLECTION",
+    "振り返り状態": "REFLECTION_STATUS"
   };
 
   headers.forEach((header, index) => {
