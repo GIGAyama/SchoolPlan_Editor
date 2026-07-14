@@ -97,9 +97,10 @@ function callGeminiAPI_(prompt) {
             task: { type: "STRING", description: "タスクの具体的な内容" },
             resource: { type: "STRING", description: "必要なリソースや補足情報、準備物" },
             dueDate: { type: "STRING", description: "期限設定（YYYY-MM-DD形式）。特定できない場合は空文字" },
-            source: { type: "STRING", description: "発生源（授業名や会議名などを短く）" }
+            source: { type: "STRING", description: "発生源（授業名や会議名などを短く）" },
+            priority: { type: "STRING", enum: ["高", "中", "低"], description: "重要度・緊急度から判断した優先度。行事や保護者連絡など影響が大きいものは「高」" }
           },
-          required: ["task", "resource", "dueDate", "source"]
+          required: ["task", "resource", "dueDate", "source", "priority"]
         }
       }
     }

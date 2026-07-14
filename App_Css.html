@@ -501,6 +501,32 @@
         color: var(--text-hint);
     }
 
+    .sidebar-task-card.prio-high {
+        border-left: 3px solid var(--danger);
+    }
+
+    .sidebar-task-card.prio-mid {
+        border-left: 3px solid var(--warning);
+    }
+
+    .sidebar-task-card.prio-low {
+        border-left: 3px solid var(--border);
+    }
+
+    .sidebar-task-card.overdue {
+        background: var(--danger-light);
+    }
+
+    .st-overdue-label {
+        color: var(--danger);
+        font-weight: 700;
+    }
+
+    .st-inprogress-label {
+        color: var(--primary);
+        font-weight: 700;
+    }
+
     .st-checkbox-wrapper input[type="checkbox"] {
         width: 14px;
         height: 14px;
@@ -2479,6 +2505,313 @@
     .task-date-badge.urgent {
         background: var(--danger-light);
         color: var(--danger);
+    }
+
+    /* ===== タスク: ナビ・サイドバーの件数バッジ ===== */
+    .nav-task-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        margin-left: 4px;
+        border-radius: 9px;
+        background: var(--danger);
+        color: white;
+        font-size: 0.68rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .sidebar-task-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        margin-left: 6px;
+        border-radius: 9px;
+        background: var(--primary);
+        color: white;
+        font-size: 0.68rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    /* ===== タスク: ステータス切替ボタン（未着手→進行中→完了） ===== */
+    .task-status-btn {
+        flex-shrink: 0;
+        background: transparent;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        transition: transform var(--dur-fast) var(--ease);
+    }
+
+    .task-status-btn:hover {
+        transform: scale(1.15);
+    }
+
+    .task-status-btn .material-symbols-outlined {
+        font-size: 22px;
+    }
+
+    .task-status-btn.sm .material-symbols-outlined {
+        font-size: 18px;
+    }
+
+    .task-status-btn.status-notstarted {
+        color: var(--text-hint);
+    }
+
+    .task-status-btn.status-inprogress {
+        color: var(--primary);
+    }
+
+    .task-status-btn.status-done {
+        color: var(--secondary);
+    }
+
+    /* ===== タスク: 優先度バッジ ===== */
+    .task-priority-badge {
+        flex-shrink: 0;
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        line-height: 1.4;
+        vertical-align: middle;
+    }
+
+    .task-priority-badge.p-high {
+        background: var(--danger-light);
+        color: var(--danger);
+    }
+
+    .task-priority-badge.p-mid {
+        background: var(--warning-light);
+        color: #b45309;
+    }
+
+    .task-priority-badge.p-low {
+        background: var(--surface-3);
+        color: var(--text-sub);
+    }
+
+    /* ===== タスク: 進行状況サマリーバー ===== */
+    .task-summary-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding: 12px 0 4px;
+    }
+
+    .task-stat-chips {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .task-stat-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: var(--radius-pill);
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+        color: var(--text-sub);
+        font-size: 0.75rem;
+        font-family: inherit;
+        line-height: 1.4;
+        white-space: nowrap;
+    }
+
+    .task-stat-chip b {
+        font-size: 0.85rem;
+    }
+
+    .task-stat-chip .material-symbols-outlined {
+        font-size: 14px;
+    }
+
+    button.task-stat-chip {
+        cursor: pointer;
+        transition: box-shadow var(--dur-fast) var(--ease);
+    }
+
+    button.task-stat-chip:hover {
+        box-shadow: var(--shadow-sm);
+    }
+
+    .task-stat-chip.stat-overdue {
+        background: var(--danger-light);
+        border-color: var(--danger);
+        color: var(--danger);
+    }
+
+    .task-stat-chip.stat-today {
+        background: var(--warning-light);
+        border-color: var(--warning);
+        color: #b45309;
+    }
+
+    .task-stat-chip.stat-overdue.zero,
+    .task-stat-chip.stat-today.zero {
+        background: var(--surface-2);
+        border-color: var(--border);
+        color: var(--text-hint);
+    }
+
+    .task-stat-chip.stat-inprogress {
+        color: var(--primary);
+    }
+
+    .task-stat-chip.stat-done {
+        color: var(--secondary);
+    }
+
+    .task-progress-wrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        min-width: 140px;
+        max-width: 280px;
+    }
+
+    .task-progress-track {
+        flex: 1;
+        height: 8px;
+        border-radius: 4px;
+        background: var(--surface-3);
+        overflow: hidden;
+    }
+
+    .task-progress-fill {
+        height: 100%;
+        border-radius: 4px;
+        background: var(--secondary);
+        transition: width 0.3s var(--ease);
+    }
+
+    .task-progress-label {
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: var(--text-sub);
+        min-width: 34px;
+        text-align: right;
+    }
+
+    /* ===== タスク: クイック追加 ===== */
+    .task-quick-add {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+        background: var(--surface-2);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+    }
+
+    .task-quick-add input[type="text"] {
+        flex: 1;
+        min-width: 0;
+    }
+
+    /* ===== タスク: フィルタ・検索バー ===== */
+    .task-filter-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 8px 0 12px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+    }
+
+    .task-filter-chips {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .task-filter-chip {
+        padding: 4px 12px;
+        border-radius: var(--radius-pill);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text-sub);
+        font-size: 0.78rem;
+        font-family: inherit;
+        cursor: pointer;
+        transition: all var(--dur-fast) var(--ease);
+        white-space: nowrap;
+    }
+
+    .task-filter-chip:hover {
+        background: var(--primary-light);
+        border-color: var(--primary);
+    }
+
+    .task-filter-chip.active {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: white;
+        font-weight: 700;
+    }
+
+    .task-filter-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    /* ===== タスク: 進行中の強調・先送りボタン・メモ ===== */
+    .task-list-item.inprogress,
+    .task-card.inprogress {
+        border-left: 3px solid var(--primary);
+    }
+
+    .task-postpone-btn {
+        flex-shrink: 0;
+        background: transparent;
+        border: none;
+        color: var(--warning);
+        cursor: pointer;
+        padding: 2px;
+        border-radius: 4px;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .task-postpone-btn:hover {
+        background: var(--warning-light);
+    }
+
+    .task-postpone-btn .material-symbols-outlined {
+        font-size: 18px;
+    }
+
+    .task-memo-icon {
+        flex-shrink: 0;
+        color: var(--warning);
+        cursor: help;
+        font-size: 0.8rem;
     }
 
     .task-actions {
