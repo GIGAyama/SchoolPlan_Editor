@@ -21,6 +21,10 @@
         dragSource: null,         // D&Dソース {day, period}
         helpModalOpen: false,     // ショートカットヘルプ表示中
         taskViewMode: 'list',     // タスク表示モード: 'list' or 'card'
+        taskFilter: 'all',        // タスク絞り込み: 'all'/'overdue'/'today'/'week'/'nodate'
+        taskSearchKeyword: '',    // タスク検索キーワード
+        taskSortMode: 'dueDate',  // タスク並び替え: 'dueDate'/'priority'/'created'
+        taskReminderLoaded: false, // リマインダー設定 読込済み
         grade: 3,                 // 担当学年（デフォルト3）
         showSat: true,            // 週案グリッドの土曜列 表示/非表示
         showSun: true,            // 週案グリッドの日曜列 表示/非表示
@@ -201,6 +205,7 @@
                 } else if (STATE.taskDataLoaded) {
                     renderTaskList(); // データ読み込み済みの場合は再描画
                 }
+                loadTaskReminderSettings(); // リマインダー設定を初回のみ読込
             }
             if (viewName === 'unitmaster' && !STATE.umDataLoaded) {
                 loadUnitMasterData();
@@ -2280,7 +2285,8 @@
                     var dp = printTasks[i].dueDate.split('-');
                     duePart = '<span class="todo-due">' + parseInt(dp[1]) + '/' + parseInt(dp[2]) + '</span>';
                 }
-                var statusMark = printTasks[i].status === '完了' ? '<span class="todo-done">✔</span>' : '<span class="todo-pending">□</span>';
+                var statusMark = printTasks[i].status === '完了' ? '<span class="todo-done">✔</span>'
+                    : (printTasks[i].status === '進行中' ? '<span class="todo-pending">◐</span>' : '<span class="todo-pending">□</span>');
                 html += '<div class="todo-item">' + statusMark + ' ' + printTasks[i].content + duePart + '</div>';
             } else {
                 html += '<div class="todo-item">&nbsp;</div>';
@@ -6451,8 +6457,7 @@
                     STATE.allTaskData = res.tasks || [];
                     STATE.tasks = STATE.allTaskData;
                     STATE.taskDataLoaded = true;
-                    if (document.getElementById('taskListContainer')) renderTaskList();
-                    if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+                    refreshTaskViews();
                 } else {
                     if (container) container.innerHTML = '<div style="color:var(--danger); padding:20px;">読込エラー: ' + res.error + '</div>';
                     showToast('error', 'タスク取得エラー: ' + res.error);
@@ -6466,71 +6471,223 @@
             .getTasksFromWebApp();
     }
 
-    function renderTaskList() {
-        var container = document.getElementById('taskListContainer');
-        var showCompleted = document.getElementById('chkShowCompletedTasks').checked;
+    // ===== 共通ヘルパー =====
 
-        var filtered = STATE.allTaskData;
-        if (!showCompleted) {
-            filtered = STATE.allTaskData.filter(t => t.status !== '完了');
-        }
+    /** dueDate（yyyy-MM-dd）と比較可能な形式で今日の日付を返す */
+    function taskTodayStr() {
+        // dueDate は "yyyy-MM-dd" 形式のため、比較用の今日の日付も同じ区切り文字に揃える
+        //（"yyyy/MM/dd" と比較すると '-' < '/' のため同年内の未来の期日まで期限切れ扱いになる）
+        return formatDateLocal(new Date()).replace(/\//g, '-');
+    }
 
-        // 期日でソート（未設定は後回し）
-        filtered.sort((a, b) => {
+    /** ステータスに応じたアイコン・クラス・次ステータスを返す */
+    function taskStatusMeta(status) {
+        if (status === '完了') return { icon: 'check_circle', cls: 'status-done', label: '完了' };
+        if (status === '進行中') return { icon: 'timelapse', cls: 'status-inprogress', label: '進行中' };
+        return { icon: 'radio_button_unchecked', cls: 'status-notstarted', label: '未着手' };
+    }
+
+    /** ステータス切替ボタンのHTMLを生成（クリックで 未着手→進行中→完了 を循環） */
+    function taskStatusBtnHtml(t, small) {
+        var s = taskStatusMeta(t.status || '未着手');
+        return `<button class="task-status-btn ${s.cls}${small ? ' sm' : ''}" onclick="cycleTaskStatus('${t.id}')" title="${s.label}（クリックで切替: 未着手→進行中→完了）"><span class="material-symbols-outlined">${s.icon}</span></button>`;
+    }
+
+    /** 優先度バッジのHTMLを生成 */
+    function taskPriorityBadgeHtml(priority) {
+        var p = priority || '中';
+        var cls = p === '高' ? 'p-high' : (p === '低' ? 'p-low' : 'p-mid');
+        return `<span class="task-priority-badge ${cls}" title="優先度: ${p}">${p}</span>`;
+    }
+
+    /** タスク関連の全表示（一覧・サイドバー・ナビバッジ）をまとめて再描画 */
+    function refreshTaskViews() {
+        if (document.getElementById('taskListContainer')) renderTaskList();
+        if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+        updateTaskNavBadge();
+    }
+
+    /** ナビの「タスク」ボタンに期限切れ＋今日締切の未完了件数バッジを表示 */
+    function updateTaskNavBadge() {
+        var badge = document.getElementById('taskNavBadge');
+        if (!badge) return;
+        var todayStr = taskTodayStr();
+        var count = (STATE.allTaskData || []).filter(function (t) {
+            return t.status !== '完了' && t.dueDate && t.dueDate <= todayStr;
+        }).length;
+        badge.style.display = count > 0 ? 'inline-flex' : 'none';
+        badge.textContent = count > 99 ? '99+' : String(count);
+    }
+
+    // ===== フィルタ・検索・並び替え =====
+
+    function setTaskFilter(filter) {
+        STATE.taskFilter = filter;
+        document.querySelectorAll('.task-filter-chip').forEach(function (chip) {
+            chip.classList.toggle('active', chip.dataset.filter === filter);
+        });
+        renderTaskList();
+    }
+
+    function onTaskSearchInput() {
+        var input = document.getElementById('taskSearchInput');
+        STATE.taskSearchKeyword = (input ? input.value : '').trim().toLowerCase();
+        renderTaskList();
+    }
+
+    function setTaskSortMode(mode) {
+        STATE.taskSortMode = mode;
+        renderTaskList();
+    }
+
+    /** フィルタ・検索・並び替えを適用したタスク配列を返す */
+    function getVisibleTasks() {
+        var showCompleted = document.getElementById('chkShowCompletedTasks');
+        showCompleted = showCompleted ? showCompleted.checked : false;
+        var todayStr = taskTodayStr();
+        var weekLater = new Date();
+        weekLater.setDate(weekLater.getDate() + 6);
+        var weekLaterStr = formatDateLocal(weekLater).replace(/\//g, '-');
+        var kw = STATE.taskSearchKeyword;
+
+        var filtered = STATE.allTaskData.filter(function (t) {
+            if (!showCompleted && t.status === '完了') return false;
+            switch (STATE.taskFilter) {
+                case 'overdue': if (!(t.dueDate && t.dueDate < todayStr && t.status !== '完了')) return false; break;
+                case 'today': if (t.dueDate !== todayStr) return false; break;
+                case 'week': if (!(t.dueDate && t.dueDate >= todayStr && t.dueDate <= weekLaterStr)) return false; break;
+                case 'nodate': if (t.dueDate) return false; break;
+            }
+            if (kw) {
+                var haystack = [t.content, t.resource, t.memo, t.source].join(' ').toLowerCase();
+                if (haystack.indexOf(kw) < 0) return false;
+            }
+            return true;
+        });
+
+        var prioOrder = { '高': 0, '中': 1, '低': 2 };
+        var byDue = function (a, b) {
+            if (!a.dueDate && !b.dueDate) return 0;
             if (!a.dueDate) return 1;
             if (!b.dueDate) return -1;
             return a.dueDate.localeCompare(b.dueDate);
-        });
+        };
+        if (STATE.taskSortMode === 'priority') {
+            filtered.sort(function (a, b) {
+                var d = (prioOrder[a.priority] !== undefined ? prioOrder[a.priority] : 1) - (prioOrder[b.priority] !== undefined ? prioOrder[b.priority] : 1);
+                return d !== 0 ? d : byDue(a, b);
+            });
+        } else if (STATE.taskSortMode === 'created') {
+            // シート格納順（＝追加順）のまま
+        } else {
+            filtered.sort(byDue);
+        }
+        return filtered;
+    }
+
+    // ===== 進行状況サマリー =====
+
+    function renderTaskSummary() {
+        var bar = document.getElementById('taskSummaryBar');
+        if (!bar) return;
+        var all = STATE.allTaskData || [];
+        var todayStr = taskTodayStr();
+        var total = all.length;
+        var done = all.filter(function (t) { return t.status === '完了'; }).length;
+        var inProgress = all.filter(function (t) { return t.status === '進行中'; }).length;
+        var notStarted = total - done - inProgress;
+        var overdue = all.filter(function (t) { return t.status !== '完了' && t.dueDate && t.dueDate < todayStr; }).length;
+        var dueToday = all.filter(function (t) { return t.status !== '完了' && t.dueDate === todayStr; }).length;
+        var pct = total > 0 ? Math.round(done / total * 100) : 0;
+
+        bar.innerHTML = `
+            <div class="task-stat-chips">
+                <button class="task-stat-chip stat-overdue${overdue ? '' : ' zero'}" onclick="setTaskFilter('overdue')" title="期限切れの未完了タスク"><span class="material-symbols-outlined">warning</span> 期限切れ <b>${overdue}</b></button>
+                <button class="task-stat-chip stat-today${dueToday ? '' : ' zero'}" onclick="setTaskFilter('today')" title="今日が期日のタスク"><span class="material-symbols-outlined">today</span> 今日 <b>${dueToday}</b></button>
+                <span class="task-stat-chip stat-notstarted">未着手 <b>${notStarted}</b></span>
+                <span class="task-stat-chip stat-inprogress">進行中 <b>${inProgress}</b></span>
+                <span class="task-stat-chip stat-done">完了 <b>${done}</b></span>
+            </div>
+            <div class="task-progress-wrap" title="完了率 ${pct}%（${done}/${total}件）">
+                <div class="task-progress-track"><div class="task-progress-fill" style="width:${pct}%"></div></div>
+                <span class="task-progress-label">${pct}%</span>
+            </div>
+        `;
+    }
+
+    // ===== タスク一覧の描画 =====
+
+    function renderTaskList() {
+        var container = document.getElementById('taskListContainer');
+        if (!container) return;
+        renderTaskSummary();
+        updateTaskNavBadge();
+
+        var filtered = getVisibleTasks();
 
         if (filtered.length === 0) {
-            container.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; background: var(--surface-2); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-hint);">現在登録されているタスクはありません。</div>';
+            var msg = STATE.allTaskData.length === 0
+                ? '現在登録されているタスクはありません。上の入力欄からすぐに追加できます。'
+                : '条件に合うタスクはありません。（フィルタ・検索条件を確認してください）';
+            container.className = 'task-list-view';
+            container.innerHTML = '<div style="text-align: center; padding: 40px 20px; background: var(--surface-2); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-hint);">' + msg + '</div>';
             return;
         }
 
-        // dueDate は "yyyy-MM-dd" 形式のため、比較用の今日の日付も同じ区切り文字に揃える
-        //（"yyyy/MM/dd" と比較すると '-' < '/' のため同年内の未来の期日まで期限切れ扱いになる）
-        var todayStr = formatDateLocal(new Date()).replace(/\//g, '-');
+        var todayStr = taskTodayStr();
 
         // コンテナのクラスを表示モードに応じて切替
         container.className = STATE.taskViewMode === 'list' ? 'task-list-view' : 'task-grid';
 
         container.innerHTML = filtered.map(t => {
             var isComp = (t.status === '完了');
-            var compClass = isComp ? ' completed' : '';
+            var compClass = isComp ? ' completed' : (t.status === '進行中' ? ' inprogress' : '');
+            var isOverdue = !isComp && t.dueDate && (t.dueDate < todayStr);
             var isUrgent = !isComp && t.dueDate && (t.dueDate <= todayStr);
             var dateBadgeClass = isUrgent ? 'task-date-badge urgent' : 'task-date-badge';
             var dateDisplay = t.dueDate ? t.dueDate.replace(/^\d{4}-/, '').replace('-', '/') : '期日未設定';
-            var checkedStr = isComp ? 'checked' : '';
+            if (isOverdue) dateDisplay += ' 期限切れ';
+            var postponeBtn = isOverdue
+                ? `<button class="task-postpone-btn" onclick="postponeTask('${t.id}', 1)" title="期日を明日に先送り"><span class="material-symbols-outlined">event_upcoming</span></button>`
+                : '';
+            var memoIcon = t.memo
+                ? `<span class="task-memo-icon" title="${escHtmlAttr(t.memo)}"><i class="bi bi-sticky"></i></span>`
+                : '';
 
             if (STATE.taskViewMode === 'list') {
                 // リスト表示（コンパクト1行）
                 return `
                     <div class="task-list-item${compClass}">
-                        <input type="checkbox" ${checkedStr} onchange="toggleTaskStatus('${t.id}', this.checked)">
+                        ${taskStatusBtnHtml(t, false)}
+                        ${taskPriorityBadgeHtml(t.priority)}
                         <span class="task-list-title">${escHtml(t.content)}</span>
+                        ${memoIcon}
                         ${t.resource ? `<span class="task-list-resource"><i class="bi bi-box-seam"></i> ${escHtml(t.resource)}</span>` : ''}
                         <span class="${dateBadgeClass}"><i class="bi bi-calendar-event"></i> ${dateDisplay}</span>
+                        ${postponeBtn}
                         <button class="task-edit-btn" onclick="showEditTaskInput('${t.id}')" title="編集"><i class="bi bi-pencil"></i></button>
                         <button class="task-del-btn" onclick="deleteTaskById('${t.id}')" title="削除"><i class="bi bi-trash3"></i></button>
                     </div>
                 `;
             } else {
-                // カード表示（既存）
+                // カード表示
                 return `
                     <div class="task-card${compClass}">
                         <div class="task-checkbox-wrapper">
-                            <input type="checkbox" ${checkedStr} onchange="toggleTaskStatus('${t.id}', this.checked)">
+                            ${taskStatusBtnHtml(t, false)}
                         </div>
                         <div class="task-content-wrapper">
-                            <div class="task-title">${escHtml(t.content)}</div>
+                            <div class="task-title">${taskPriorityBadgeHtml(t.priority)} ${escHtml(t.content)}</div>
                             <div class="task-meta">
                                 ${t.resource ? `<div class="task-meta-item"><i class="bi bi-box-seam task-meta-icon"></i> ${escHtml(t.resource)}</div>` : ''}
+                                ${t.memo ? `<div class="task-meta-item"><i class="bi bi-sticky task-meta-icon"></i> ${escHtml(t.memo)}</div>` : ''}
                                 ${t.source ? `<div class="task-meta-item"><i class="bi bi-journal-text task-meta-icon"></i> ${escHtml(t.source)}</div>` : ''}
                                 <div class="task-meta-item mt-1">
                                     <span class="${dateBadgeClass}"><i class="bi bi-calendar-event"></i> ${dateDisplay}</span>
                                 </div>
                             </div>
                             <div class="task-actions">
+                                ${postponeBtn}
                                 <button class="task-edit-btn" onclick="showEditTaskInput('${t.id}')" title="編集"><i class="bi bi-pencil"></i></button>
                                 <button class="task-del-btn" onclick="deleteTaskById('${t.id}')" title="削除"><i class="bi bi-trash3"></i></button>
                             </div>
@@ -6557,8 +6714,9 @@
             return;
         }
 
-        var startStr = STATE.weekData.days[0].date.replace(/\//g, '-');
         var endStr = STATE.weekData.days[6].date.replace(/\//g, '-');
+        var todayStr = taskTodayStr();
+        var countBadge = document.getElementById('sidebarTaskCount');
 
         var weekTasks = STATE.allTaskData.filter(t => {
             if (t.status === '完了') return false; // 完了済みタスクは非表示
@@ -6567,11 +6725,19 @@
             return false; // 来週以降のタスクは隠す
         });
 
+        var prioOrder = { '高': 0, '中': 1, '低': 2 };
         weekTasks.sort((a, b) => {
-            if (!a.dueDate) return 1;
-            if (!b.dueDate) return -1;
-            return a.dueDate.localeCompare(b.dueDate);
+            if (!a.dueDate && b.dueDate) return 1;
+            if (a.dueDate && !b.dueDate) return -1;
+            if (a.dueDate !== b.dueDate) return String(a.dueDate).localeCompare(String(b.dueDate));
+            // 同じ期日なら優先度が高い順
+            return (prioOrder[a.priority] !== undefined ? prioOrder[a.priority] : 1) - (prioOrder[b.priority] !== undefined ? prioOrder[b.priority] : 1);
         });
+
+        if (countBadge) {
+            countBadge.style.display = weekTasks.length > 0 ? 'inline-flex' : 'none';
+            countBadge.textContent = String(weekTasks.length);
+        }
 
         if (weekTasks.length === 0) {
             container.innerHTML = '<div class="st-empty">今週のタスクはありません。</div>';
@@ -6580,19 +6746,22 @@
 
         container.innerHTML = weekTasks.map(t => {
             var isComp = (t.status === '完了');
-            var compClass = isComp ? ' completed' : '';
-            var checkedStr = isComp ? 'checked' : '';
+            var isOverdue = !isComp && t.dueDate && t.dueDate < todayStr;
+            var cardClass = (isComp ? ' completed' : '') + (isOverdue ? ' overdue' : '');
+            var prioClass = t.priority === '高' ? ' prio-high' : (t.priority === '低' ? ' prio-low' : ' prio-mid');
             var dateDisplay = t.dueDate ? t.dueDate.replace(/^\d{4}-/, '').replace('-', '/') : '未設定';
+            var statusLabel = t.status === '進行中' ? ' <span class="st-inprogress-label">進行中</span>' : '';
+            var overdueLabel = isOverdue ? ' <span class="st-overdue-label">期限切れ</span>' : '';
 
             return `
-                <div class="sidebar-task-card${compClass}">
+                <div class="sidebar-task-card${cardClass}${prioClass}">
                     <div class="st-checkbox-wrapper">
-                        <input type="checkbox" ${checkedStr} onchange="toggleTaskStatus('${t.id}', this.checked)">
+                        ${taskStatusBtnHtml(t, true)}
                     </div>
                     <div class="st-content">
                         <div class="st-title">${escHtml(t.content)}</div>
                         <div class="st-meta">
-                            期日: ${dateDisplay}
+                            期日: ${dateDisplay}${overdueLabel}${statusLabel}
                         </div>
                     </div>
                 </div>
@@ -6601,23 +6770,64 @@
     }
 
     // ===== 個別タスクステータス操作 =====
-    function toggleTaskStatus(taskId, isCompleted) {
-        var newStatus = isCompleted ? '完了' : '未着手';
-        // UI即座反映
+
+    /** ステータスを 未着手→進行中→完了→未着手 と循環させる */
+    function cycleTaskStatus(taskId) {
         var targetTask = STATE.allTaskData.find(t => t.id === taskId);
-        if (targetTask) targetTask.status = newStatus;
-        if (document.getElementById('taskListContainer')) renderTaskList();
-        if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+        if (!targetTask) return;
+        var prevStatus = targetTask.status || '未着手';
+        var newStatus = prevStatus === '未着手' ? '進行中' : (prevStatus === '進行中' ? '完了' : '未着手');
+
+        // UI即座反映（楽観的更新）
+        targetTask.status = newStatus;
+        refreshTaskViews();
 
         // サーバー通信
         google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) {
+                    showToast('error', 'ステータス更新失敗: ' + (res.error || '不明'));
+                    targetTask.status = prevStatus; // ロールバック
+                    refreshTaskViews();
+                }
+            })
             .withFailureHandler(function (e) {
                 showToast('error', 'ステータス更新失敗: ' + e.message);
-                if (targetTask) targetTask.status = isCompleted ? '未着手' : '完了'; // ロールバック
-                if (document.getElementById('taskListContainer')) renderTaskList();
-                if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+                targetTask.status = prevStatus; // ロールバック
+                refreshTaskViews();
             })
             .updateTaskStatusFromWebApp(taskId, newStatus);
+    }
+
+    /** 期限切れタスクの期日を今日からN日後へ先送りする */
+    function postponeTask(taskId, days) {
+        var targetTask = STATE.allTaskData.find(t => t.id === taskId);
+        if (!targetTask) return;
+        var prevDue = targetTask.dueDate;
+        var d = new Date();
+        d.setDate(d.getDate() + days);
+        var newDue = formatDateLocal(d).replace(/\//g, '-');
+
+        // UI即座反映（楽観的更新）
+        targetTask.dueDate = newDue;
+        refreshTaskViews();
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '期日を ' + newDue + ' に先送りしました');
+                } else {
+                    showToast('error', '期日変更失敗: ' + (res.error || '不明'));
+                    targetTask.dueDate = prevDue; // ロールバック
+                    refreshTaskViews();
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '期日変更失敗: ' + e.message);
+                targetTask.dueDate = prevDue; // ロールバック
+                refreshTaskViews();
+            })
+            .updateTaskFromWebApp(taskId, { dueDate: newDue });
     }
 
     async function deleteTaskById(taskId) {
@@ -6634,8 +6844,8 @@
 
         // UI即座反映（一時削除）
         STATE.allTaskData = STATE.allTaskData.filter(t => t.id !== taskId);
-        if (document.getElementById('taskListContainer')) renderTaskList();
-        if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+        STATE.tasks = STATE.allTaskData;
+        refreshTaskViews();
 
         google.script.run
             .withSuccessHandler(function (res) {
@@ -6651,6 +6861,58 @@
             .deleteTaskFromWebApp(taskId);
     }
 
+    // ===== タスク保存の共通処理 =====
+
+    /** タスク配列をサーバーに保存し、成功したらローカルへ差分反映する */
+    function saveTasksAndRefresh(tasks, successMsg) {
+        showToast('info', '保存中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', successMsg || 'タスクを保存しました');
+                    // 差分更新: 返却されたタスクをローカルに追加
+                    if (res.savedTasks) {
+                        STATE.allTaskData = STATE.allTaskData.concat(res.savedTasks);
+                        STATE.tasks = STATE.allTaskData;
+                    }
+                    refreshTaskViews();
+                } else {
+                    showToast('error', '追加エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(e => showToast('error', e.message))
+            .saveTasksFromWebApp(tasks);
+    }
+
+    // ===== クイック追加 =====
+    function quickAddTask() {
+        var input = document.getElementById('quickAddTaskInput');
+        var content = (input ? input.value : '').trim();
+        if (!content) { showToast('error', 'タスク内容を入力してください'); return; }
+        var dueEl = document.getElementById('quickAddTaskDue');
+        var prioEl = document.getElementById('quickAddTaskPriority');
+
+        saveTasksAndRefresh([{
+            content: content,
+            resource: '',
+            dueDate: dueEl ? dueEl.value : '',
+            source: 'クイック追加',
+            priority: prioEl ? prioEl.value : '中',
+            memo: ''
+        }], 'タスクを追加しました');
+
+        input.value = '';
+        input.focus();
+    }
+
+    /** 追加・編集モーダル共通の優先度セレクトHTML */
+    function taskPrioritySelectHtml(id, selected) {
+        var sel = selected || '中';
+        return `<select id="${id}" class="form-select" style="font-family:inherit;">
+            ${['高', '中', '低'].map(p => `<option value="${p}"${p === sel ? ' selected' : ''}>${p}</option>`).join('')}
+        </select>`;
+    }
+
     // ===== 手動・強制追加（プレハブ）=====
     async function showManualTaskInput() {
         const { value: formValues } = await Swal.fire({
@@ -6658,9 +6920,19 @@
             html: `
                 <input id="swal-input1" class="swal2-input" placeholder="タスク内容 (必須)" style="width:80%">
                 <input id="swal-input2" class="swal2-input" placeholder="準備物・リソース" style="width:80%">
-                <div style="margin-top:10px;text-align:left;width:80%;margin:10px auto;">
-                    <label style="font-size:0.8rem;color:var(--text-sub);">期日:</label>
-                    <input id="swal-input3" type="date" class="form-control" style="font-family:inherit;">
+                <div style="text-align:left;width:80%;margin:10px auto; display:flex; gap:12px;">
+                    <div style="flex:1;">
+                        <label style="font-size:0.8rem;color:var(--text-sub);">期日:</label>
+                        <input id="swal-input3" type="date" class="form-control" style="font-family:inherit;">
+                    </div>
+                    <div>
+                        <label style="font-size:0.8rem;color:var(--text-sub);">優先度:</label>
+                        ${taskPrioritySelectHtml('swal-input4', '中')}
+                    </div>
+                </div>
+                <div style="text-align:left;width:80%;margin:10px auto;">
+                    <label style="font-size:0.8rem;color:var(--text-sub);">メモ:</label>
+                    <textarea id="swal-input5" class="form-control" rows="2" style="font-family:inherit;" placeholder="補足メモ（任意）"></textarea>
                 </div>
             `,
             focusConfirm: false,
@@ -6674,30 +6946,15 @@
                     content: content,
                     resource: document.getElementById('swal-input2').value,
                     dueDate: document.getElementById('swal-input3').value,
-                    source: '手動追加'
+                    source: '手動追加',
+                    priority: document.getElementById('swal-input4').value,
+                    memo: document.getElementById('swal-input5').value
                 };
             }
         });
 
         if (formValues) {
-            showToast('info', '保存中...');
-            google.script.run
-                .withSuccessHandler(function (res) {
-                    if (res.success) {
-                        showToast('success', 'タスクを手動追加しました');
-                        // 差分更新: 返却されたタスクをローカルに追加
-                        if (res.savedTasks) {
-                            STATE.allTaskData = STATE.allTaskData.concat(res.savedTasks);
-                            STATE.tasks = STATE.allTaskData;
-                        }
-                        if (document.getElementById('taskListContainer')) renderTaskList();
-                        if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
-                    } else {
-                        showToast('error', '追加エラー: ' + res.error);
-                    }
-                })
-                .withFailureHandler(e => showToast('error', e.message))
-                .saveTasksFromWebApp([formValues]);
+            saveTasksAndRefresh([formValues], 'タスクを手動追加しました');
         }
     }
 
@@ -6711,9 +6968,19 @@
             html: `
                 <input id="swal-edit1" class="swal2-input" placeholder="タスク内容 (必須)" style="width:80%" value="${escHtmlAttr(task.content)}">
                 <input id="swal-edit2" class="swal2-input" placeholder="準備物・リソース" style="width:80%" value="${escHtmlAttr(task.resource || '')}">
-                <div style="margin-top:10px;text-align:left;width:80%;margin:10px auto;">
-                    <label style="font-size:0.8rem;color:var(--text-sub);">期日:</label>
-                    <input id="swal-edit3" type="date" class="form-control" style="font-family:inherit;" value="${task.dueDate || ''}">
+                <div style="text-align:left;width:80%;margin:10px auto; display:flex; gap:12px;">
+                    <div style="flex:1;">
+                        <label style="font-size:0.8rem;color:var(--text-sub);">期日:</label>
+                        <input id="swal-edit3" type="date" class="form-control" style="font-family:inherit;" value="${task.dueDate || ''}">
+                    </div>
+                    <div>
+                        <label style="font-size:0.8rem;color:var(--text-sub);">優先度:</label>
+                        ${taskPrioritySelectHtml('swal-edit4', task.priority || '中')}
+                    </div>
+                </div>
+                <div style="text-align:left;width:80%;margin:10px auto;">
+                    <label style="font-size:0.8rem;color:var(--text-sub);">メモ:</label>
+                    <textarea id="swal-edit5" class="form-control" rows="2" style="font-family:inherit;" placeholder="補足メモ（任意）">${escHtml(task.memo || '')}</textarea>
                 </div>
             `,
             focusConfirm: false,
@@ -6726,7 +6993,9 @@
                 return {
                     content: content,
                     resource: document.getElementById('swal-edit2').value,
-                    dueDate: document.getElementById('swal-edit3').value
+                    dueDate: document.getElementById('swal-edit3').value,
+                    priority: document.getElementById('swal-edit4').value,
+                    memo: document.getElementById('swal-edit5').value
                 };
             }
         });
@@ -6736,8 +7005,9 @@
             task.content = formValues.content;
             task.resource = formValues.resource;
             task.dueDate = formValues.dueDate;
-            if (document.getElementById('taskListContainer')) renderTaskList();
-            if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+            task.priority = formValues.priority;
+            task.memo = formValues.memo;
+            refreshTaskViews();
 
             google.script.run
                 .withSuccessHandler(function (res) {
@@ -6819,7 +7089,7 @@
 
         listEl.innerHTML = STATE.aiPreviewTasks.map((t, idx) => `
             <div style="background:var(--surface); border:1px solid #1a73e8; border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.85rem;">
-                <div style="font-weight:bold; color:var(--text-main); margin-bottom:4px;"><span class="material-symbols-outlined fs-6">task_alt</span> ${escHtml(t.task)}</div>
+                <div style="font-weight:bold; color:var(--text-main); margin-bottom:4px;"><span class="material-symbols-outlined fs-6">task_alt</span> ${taskPriorityBadgeHtml(t.priority)} ${escHtml(t.task)}</div>
                 <div style="color:var(--text-sub); display:flex; gap:10px;">
                     <span><i class="bi bi-box-seam"></i> ${escHtml(t.resource || '設定なし')}</span>
                     <span><i class="bi bi-calendar-event"></i> ${t.dueDate || '未設定'}</span>
@@ -6842,7 +7112,9 @@
             content: t.task,
             resource: t.resource,
             dueDate: t.dueDate,
-            source: t.source
+            source: t.source,
+            priority: ['高', '中', '低'].indexOf(t.priority) >= 0 ? t.priority : '中',
+            memo: ''
         }));
 
         showToast('info', 'タスクリストに保存中...');
@@ -6856,14 +7128,78 @@
                         STATE.allTaskData = STATE.allTaskData.concat(res.savedTasks);
                         STATE.tasks = STATE.allTaskData;
                     }
-                    if (document.getElementById('taskListContainer')) renderTaskList();
-                    if (document.getElementById('sidebarTaskList')) renderWeeklyTaskPanel();
+                    refreshTaskViews();
                 } else {
                     showToast('error', '保存エラー: ' + res.error);
                 }
             })
             .withFailureHandler(e => showToast('error', '通信エラー: ' + e.message))
             .saveTasksFromWebApp(saveTasks);
+    }
+
+    // ===== リマインダー設定（毎朝メール通知） =====
+
+    function loadTaskReminderSettings() {
+        if (STATE.taskReminderLoaded) return;
+        var hourSel = document.getElementById('taskReminderHour');
+        var chk = document.getElementById('chkTaskReminderEnabled');
+        if (!hourSel || !chk) return;
+
+        if (hourSel.options.length === 0) {
+            for (var h = 0; h < 24; h++) {
+                hourSel.add(new Option(h + '時ごろ', String(h)));
+            }
+            hourSel.value = '7';
+        }
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res && res.success) {
+                    STATE.taskReminderLoaded = true;
+                    chk.checked = res.enabled;
+                    hourSel.value = String(res.hour);
+                    updateTaskReminderStatusLabel(res.enabled, res.hour);
+                }
+            })
+            .withFailureHandler(function () { /* 読込失敗時はデフォルト表示のまま */ })
+            .getTaskReminderSettings();
+    }
+
+    function updateTaskReminderStatusLabel(enabled, hour) {
+        var label = document.getElementById('taskReminderStatus');
+        if (!label) return;
+        label.textContent = enabled ? ('現在: 毎日' + hour + '時ごろに送信') : '現在: 無効';
+    }
+
+    function saveTaskReminderSettingsUI() {
+        var enabled = document.getElementById('chkTaskReminderEnabled').checked;
+        var hour = parseInt(document.getElementById('taskReminderHour').value, 10);
+        showToast('info', 'リマインダー設定を保存中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', res.message);
+                    updateTaskReminderStatusLabel(enabled, hour);
+                } else {
+                    showToast('error', '保存エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(e => showToast('error', '通信エラー: ' + e.message))
+            .saveTaskReminderSettings(enabled, hour);
+    }
+
+    function sendTaskReminderTest() {
+        showToast('info', 'テストメールを送信中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', res.message);
+                } else {
+                    showToast('error', '送信エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(e => showToast('error', '通信エラー: ' + e.message))
+            .sendTaskReminderTestFromWebApp();
     }
 
     // ===================================================

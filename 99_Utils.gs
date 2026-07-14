@@ -451,6 +451,7 @@ function cleanupOrphanedTriggers() {
     TRIGGER_FUNCTION_NAME,
     TRIGGER_FUNCTION_NAME_EVENT,
     "postScheduleToClassroom",
+    "sendTaskReminderMail",
     "cleanupOrphanedTriggers"
   ];
 

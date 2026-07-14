@@ -1660,7 +1660,9 @@ function saveTasksFromWebApp(tasks) {
         resource: t.resource || '',
         dueDate: t.dueDate || '',
         source: t.source || '',
-        status: t.status || '未着手'
+        status: ['未着手', '進行中', '完了'].indexOf(t.status) >= 0 ? t.status : '未着手',
+        priority: ['高', '中', '低'].indexOf(t.priority) >= 0 ? t.priority : '中',
+        memo: t.memo || ''
       };
     });
     var isSuccess = saveTasksBulk(savedTasks);
@@ -1676,9 +1678,9 @@ function saveTasksFromWebApp(tasks) {
 }
 
 /**
- * [Webアプリ API] タスクのフィールド（内容・準備物・期日）を更新します
+ * [Webアプリ API] タスクのフィールド（内容・準備物・期日・優先度・メモ）を更新します
  * @param {string} taskId
- * @param {Object} updates { content, resource, dueDate }
+ * @param {Object} updates { content, resource, dueDate, priority, memo }
  * @returns {Object} { success: boolean }
  */
 function updateTaskFromWebApp(taskId, updates) {
@@ -1695,16 +1697,16 @@ function updateTaskFromWebApp(taskId, updates) {
 }
 
 /**
- * [Webアプリ API] タスクのステータス（未着手/完了）を更新します
+ * [Webアプリ API] タスクのステータス（未着手/進行中/完了）を更新します
  * @param {string} taskId
- * @param {string} newStatus 
+ * @param {string} newStatus
  * @returns {Object} { success: boolean }
  */
 function updateTaskStatusFromWebApp(taskId, newStatus) {
   try {
     validateParams_({ taskId, newStatus }, {
       taskId: { type: 'string', required: true, maxLength: 100 },
-      newStatus: { type: 'string', required: true, pattern: /^(未着手|完了)$/ }
+      newStatus: { type: 'string', required: true, pattern: /^(未着手|進行中|完了)$/ }
     });
     const isSuccess = updateTaskStatus(taskId, newStatus);
     return { success: isSuccess };
@@ -1728,6 +1730,129 @@ function deleteTaskFromWebApp(taskId) {
     return { success: isSuccess };
   } catch (e) {
     logError('deleteTaskFromWebApp', e);
+    return { success: false, error: e.message };
+  }
+}
+
+// ===== タスクリマインダー（毎朝メール通知） =====
+
+const SP_KEY_TASK_REMINDER_ENABLED = 'sp_taskReminderEnabled';
+const SP_KEY_TASK_REMINDER_HOUR    = 'sp_taskReminderHour';
+
+/**
+ * [Webアプリ API] タスクリマインダーの設定を取得します
+ * @returns {Object} { success: boolean, enabled: boolean, hour: number }
+ */
+function getTaskReminderSettings() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    return {
+      success: true,
+      enabled: props.getProperty(SP_KEY_TASK_REMINDER_ENABLED) === 'true',
+      hour: parseInt(props.getProperty(SP_KEY_TASK_REMINDER_HOUR), 10) || 7
+    };
+  } catch (e) {
+    logError('getTaskReminderSettings', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] タスクリマインダーの設定を保存し、トリガーを更新します
+ * @param {boolean} enabled 有効/無効
+ * @param {number} hour 送信時刻（0〜23時）
+ * @returns {Object} { success: boolean, message: string }
+ */
+function saveTaskReminderSettings(enabled, hour) {
+  try {
+    const h = parseInt(hour, 10);
+    if (isNaN(h) || h < 0 || h > 23) {
+      throw new Error('送信時刻は0〜23の整数で指定してください。');
+    }
+    const props = PropertiesService.getScriptProperties();
+    props.setProperty(SP_KEY_TASK_REMINDER_ENABLED, enabled ? 'true' : 'false');
+    props.setProperty(SP_KEY_TASK_REMINDER_HOUR, String(h));
+
+    deleteTriggers_('sendTaskReminderMail');
+    if (enabled) {
+      ScriptApp.newTrigger('sendTaskReminderMail').timeBased().everyDays(1).atHour(h).create();
+      logInfo(`タスクリマインダーを設定: 毎日${h}時`);
+      return { success: true, message: `リマインダーを有効化しました（毎日${h}時ごろに送信）` };
+    } else {
+      logInfo('タスクリマインダーを解除しました');
+      return { success: true, message: 'リマインダーを無効化しました' };
+    }
+  } catch (e) {
+    logError('saveTaskReminderSettings', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [トリガー実行] 期限切れ・今日・直近1週間の未完了タスクをメールで通知します。
+ * 対象タスクが1件もない場合は送信をスキップします。
+ * @returns {Object} { success: boolean, sent: boolean, message: string }
+ */
+function sendTaskReminderMail() {
+  try {
+    const tasks = getTaskData().filter(t => t.status !== '完了');
+    const todayStr = Utilities.formatDate(new Date(), 'JST', 'yyyy-MM-dd');
+    const weekLater = new Date();
+    weekLater.setDate(weekLater.getDate() + 7);
+    const weekLaterStr = Utilities.formatDate(weekLater, 'JST', 'yyyy-MM-dd');
+
+    const overdue  = tasks.filter(t => t.dueDate && t.dueDate < todayStr);
+    const today    = tasks.filter(t => t.dueDate === todayStr);
+    const upcoming = tasks.filter(t => t.dueDate && t.dueDate > todayStr && t.dueDate <= weekLaterStr);
+
+    if (overdue.length === 0 && today.length === 0 && upcoming.length === 0) {
+      return { success: true, sent: false, message: '通知対象のタスクがないため送信をスキップしました' };
+    }
+
+    const line = t => {
+      let s = `・${t.content}`;
+      if (t.priority === '高') s += '【優先度:高】';
+      if (t.dueDate) s += `（期日: ${t.dueDate}）`;
+      if (t.resource) s += ` 準備物: ${t.resource}`;
+      if (t.status === '進行中') s += ' [進行中]';
+      return s;
+    };
+    const section = (title, arr) => arr.length ? `■ ${title}（${arr.length}件）\n${arr.map(line).join('\n')}\n\n` : '';
+
+    let body = `おはようございます。今日のタスク状況をお知らせします。\n\n`;
+    body += section('期限切れ', overdue);
+    body += section('今日が期日', today);
+    body += section('今後1週間', upcoming);
+    body += `----\n学校計画ノート タスクリマインダー\n（設定はWebアプリの「タスク」画面から変更できます）`;
+
+    const subjectParts = [];
+    if (overdue.length) subjectParts.push(`期限切れ${overdue.length}件`);
+    if (today.length) subjectParts.push(`今日${today.length}件`);
+    if (upcoming.length) subjectParts.push(`今週${upcoming.length}件`);
+    const subject = `【タスクリマインダー】${subjectParts.join(' / ')}`;
+
+    const email = Session.getEffectiveUser().getEmail();
+    if (!email) throw new Error('送信先メールアドレスを取得できませんでした。');
+    MailApp.sendEmail(email, subject, body);
+    logInfo(`タスクリマインダーを送信しました: ${email}`);
+    return { success: true, sent: true, message: email + ' 宛にリマインダーを送信しました' };
+  } catch (e) {
+    logError('sendTaskReminderMail', e);
+    return { success: false, sent: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] リマインダーメールを今すぐテスト送信します
+ * @returns {Object} { success: boolean, message: string }
+ */
+function sendTaskReminderTestFromWebApp() {
+  try {
+    const res = sendTaskReminderMail();
+    if (!res.success) throw new Error(res.error || '送信に失敗しました');
+    return { success: true, message: res.message };
+  } catch (e) {
+    logError('sendTaskReminderTestFromWebApp', e);
     return { success: false, error: e.message };
   }
 }

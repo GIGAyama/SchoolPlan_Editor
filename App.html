@@ -46,7 +46,8 @@
                     <span class="material-symbols-outlined">calendar_view_week</span> 週案
                 </button>
                 <button class="nav-btn" data-view="task" onclick="switchView('task')">
-                    <span class="material-symbols-outlined">task_alt</span> タスク
+                    <span class="material-symbols-outlined">task_alt</span> タスク<span id="taskNavBadge"
+                        class="nav-task-badge" style="display:none;">0</span>
                 </button>
                 <button class="nav-btn" data-view="unitmaster" onclick="switchView('unitmaster')">
                     <span class="material-symbols-outlined">menu_book</span> 単元
@@ -176,7 +177,8 @@
                                 id="taskSidebarToggleIcon">chevron_left</span>
                         </button>
                         <span class="weekly-task-sidebar-title d-flex align-items-center gap-1"><span
-                                class="material-symbols-outlined fs-6">task_alt</span> 今週のタスク</span>
+                                class="material-symbols-outlined fs-6">task_alt</span> 今週のタスク<span
+                                id="sidebarTaskCount" class="sidebar-task-count" style="display:none;">0</span></span>
                         <div class="weekly-task-sidebar-spacer" style="flex:1"></div>
                         <button class="btn-icon weekly-task-add-btn" onclick="showManualTaskInput()"
                             style="font-size:1.1rem; padding:0 4px; color:var(--primary);" title="タスクを追加">+</button>
@@ -765,17 +767,57 @@
                         <span class="integration-title">現在のタスク・準備物</span>
                     </div>
                     <div class="integration-body" style="padding-top: 0;">
-                        <!-- コントロールバー -->
-                        <div
-                            style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px;">
-                            <div>
-                                <label style="font-size: 0.8rem; cursor: pointer;">
-                                    <input type="checkbox" id="chkShowCompletedTasks" onchange="renderTaskList()">
-                                    完了済みのタスクも表示する
-                                </label>
+
+                        <!-- 進行状況サマリー -->
+                        <div id="taskSummaryBar" class="task-summary-bar">
+                            <!-- JSで動的生成 -->
+                        </div>
+
+                        <!-- クイック追加 -->
+                        <div class="task-quick-add">
+                            <span class="material-symbols-outlined" style="color:var(--text-hint);">add_circle</span>
+                            <input type="text" id="quickAddTaskInput" class="form-control form-control-sm"
+                                placeholder="タスクを入力してEnterで即追加（例: 図工の絵の具を準備する）"
+                                onkeydown="if(event.key==='Enter'&&!event.isComposing){quickAddTask();}">
+                            <input type="date" id="quickAddTaskDue" class="form-control form-control-sm"
+                                style="width:auto;" title="期日（任意）">
+                            <select id="quickAddTaskPriority" class="form-select form-select-sm" style="width:auto;"
+                                title="優先度">
+                                <option value="高">高</option>
+                                <option value="中" selected>中</option>
+                                <option value="低">低</option>
+                            </select>
+                            <button class="btn btn-primary btn-sm" onclick="quickAddTask()">追加</button>
+                        </div>
+
+                        <!-- フィルタ・検索・並び替えバー -->
+                        <div class="task-filter-bar">
+                            <div class="task-filter-chips">
+                                <button class="task-filter-chip active" data-filter="all"
+                                    onclick="setTaskFilter('all')">すべて</button>
+                                <button class="task-filter-chip" data-filter="overdue"
+                                    onclick="setTaskFilter('overdue')">期限切れ</button>
+                                <button class="task-filter-chip" data-filter="today"
+                                    onclick="setTaskFilter('today')">今日</button>
+                                <button class="task-filter-chip" data-filter="week"
+                                    onclick="setTaskFilter('week')">今週</button>
+                                <button class="task-filter-chip" data-filter="nodate"
+                                    onclick="setTaskFilter('nodate')">期日なし</button>
                             </div>
-                            <div>
-                                <div class="btn-group me-2" role="group">
+                            <div class="task-filter-tools">
+                                <input type="search" id="taskSearchInput" class="form-control form-control-sm"
+                                    placeholder="キーワード検索..." style="width:160px;" oninput="onTaskSearchInput()">
+                                <select id="taskSortSelect" class="form-select form-select-sm" style="width:auto;"
+                                    onchange="setTaskSortMode(this.value)" title="並び替え">
+                                    <option value="dueDate" selected>期日順</option>
+                                    <option value="priority">優先度順</option>
+                                    <option value="created">追加順</option>
+                                </select>
+                                <label style="font-size: 0.8rem; cursor: pointer; white-space:nowrap;">
+                                    <input type="checkbox" id="chkShowCompletedTasks" onchange="renderTaskList()">
+                                    完了も表示
+                                </label>
+                                <div class="btn-group" role="group">
                                     <button class="btn btn-outline btn-sm active" id="taskViewListBtn"
                                         onclick="setTaskViewMode('list')" title="リスト表示"><span
                                             class="material-symbols-outlined"
@@ -785,10 +827,10 @@
                                             class="material-symbols-outlined"
                                             style="font-size:16px">view_module</span></button>
                                 </div>
-                                <button class="btn btn-outline btn-sm" onclick="loadTasks()"><i
-                                        class="bi bi-arrow-clockwise"></i> 更新</button>
-                                <button class="btn btn-outline btn-sm ms-2" onclick="showManualTaskInput()"><i
-                                        class="bi bi-plus-lg"></i> 手動追加</button>
+                                <button class="btn btn-outline btn-sm" onclick="loadTasks()" title="最新の状態に更新"><i
+                                        class="bi bi-arrow-clockwise"></i></button>
+                                <button class="btn btn-outline btn-sm" onclick="showManualTaskInput()"
+                                    title="詳細を指定して追加"><i class="bi bi-plus-lg"></i> 詳細追加</button>
                             </div>
                         </div>
 
@@ -797,6 +839,36 @@
                             <!-- JSで動的生成 -->
                             <div style="text-align: center; padding: 20px; color: var(--text-hint);">読み込み中...</div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- 3. リマインダー設定 -->
+                <div class="integration-section">
+                    <div class="integration-header" style="background: linear-gradient(135deg, #e37400, #b45309);">
+                        <span class="integration-icon"><span
+                                class="material-symbols-outlined fs-6">notifications_active</span></span>
+                        <span class="integration-title">リマインダー（毎朝メール通知）</span>
+                    </div>
+                    <div class="integration-body">
+                        <p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:12px">
+                            期限切れ・今日が期日・今後1週間の未完了タスクを、毎朝あなたのGoogleアカウント宛にメールでお知らせします。タスクの忘れ防止に。
+                        </p>
+                        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:0.85rem;">
+                            <label style="cursor:pointer; font-weight:bold;">
+                                <input type="checkbox" id="chkTaskReminderEnabled"> リマインダーを有効にする
+                            </label>
+                            <span>送信時刻:</span>
+                            <select id="taskReminderHour" class="form-select form-select-sm" style="width:auto;">
+                            </select>
+                            <button class="btn btn-primary btn-sm" onclick="saveTaskReminderSettingsUI()"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">save</span> 設定を保存</button>
+                            <button class="btn btn-outline btn-sm" onclick="sendTaskReminderTest()"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">send</span> 今すぐテスト送信</button>
+                            <span id="taskReminderStatus" style="font-size:0.78rem; color:var(--text-hint);"></span>
+                        </div>
+                        <small class="text-muted d-block mt-2">※通知対象のタスクが1件もない日は送信されません。時刻はおおよその目安です（Googleの仕様上、指定時刻から1時間以内に送信されます）。</small>
                     </div>
                 </div>
 

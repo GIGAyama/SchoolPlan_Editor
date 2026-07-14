@@ -399,7 +399,7 @@ function initTaskSheet_(ss) {
   let sheet = ss.getSheetByName(SHEET_NAME_TASK);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAME_TASK);
-    const headers = ['TaskID', 'TaskContent', 'Resource', 'DueDate', 'Source', 'Status'];
+    const headers = ['TaskID', 'TaskContent', 'Resource', 'DueDate', 'Source', 'Status', 'Priority', 'Memo'];
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.getRange(1, 1, 1, headers.length).setBackground('#1a73e8').setFontColor('white').setFontWeight('bold');
     sheet.setFrozenRows(1);
@@ -409,7 +409,16 @@ function initTaskSheet_(ss) {
     sheet.setColumnWidth(4, 100);
     sheet.setColumnWidth(5, 150);
     sheet.setColumnWidth(6, 80);
+    sheet.setColumnWidth(7, 80);
+    sheet.setColumnWidth(8, 250);
     logInfo(`「${SHEET_NAME_TASK}」シートを新規作成しました。`);
+  } else if (sheet.getLastColumn() < 8) {
+    // 旧6列構成（〜Status）のシートに Priority / Memo 列を追加するマイグレーション
+    sheet.getRange(1, 7, 1, 2).setValues([['Priority', 'Memo']])
+      .setBackground('#1a73e8').setFontColor('white').setFontWeight('bold');
+    sheet.setColumnWidth(7, 80);
+    sheet.setColumnWidth(8, 250);
+    logInfo(`「${SHEET_NAME_TASK}」シートに Priority / Memo 列を追加しました。`);
   }
   return sheet;
 }
@@ -425,14 +434,16 @@ function getTaskData() {
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return [];
 
-    const data = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+    const data = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
     return data.map(row => ({
       id: row[0],
       content: row[1],
       resource: row[2],
       dueDate: row[3] instanceof Date ? Utilities.formatDate(row[3], "JST", "yyyy-MM-dd") : row[3],
       source: row[4],
-      status: row[5]
+      status: row[5] || '未着手',
+      priority: row[6] || '中',
+      memo: row[7] || ''
     })).filter(t => t.id); // IDが空の行は除外
   } catch (e) {
     logError('getTaskData', e);
@@ -468,10 +479,12 @@ function saveTasksBulk(tasks) {
       String(t.resource || '').substring(0, 2000),
       t.dueDate || '',
       String(t.source || '').substring(0, 500),
-      t.status || '未着手'
+      t.status || '未着手',
+      ['高', '中', '低'].indexOf(t.priority) >= 0 ? t.priority : '中',
+      String(t.memo || '').substring(0, 5000)
     ]);
-    
-    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 6).setValues(newRows);
+
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 8).setValues(newRows);
     return true;
   } catch (e) {
     logError('saveTasksBulk', e);
@@ -482,7 +495,7 @@ function saveTasksBulk(tasks) {
 /**
  * 特定のタスクのフィールドを更新します。
  * @param {string} taskId
- * @param {Object} updates { content, resource, dueDate } 更新するフィールド
+ * @param {Object} updates { content, resource, dueDate, priority, memo } 更新するフィールド
  * @returns {boolean}
  */
 function updateTask(taskId, updates) {
@@ -495,9 +508,12 @@ function updateTask(taskId, updates) {
       if (data[i][0] === taskId) {
         // パフォーマンス: 変更対象を1回のバッチ書き込みで更新
         const row = data[i];
+        while (row.length < 8) row.push('');
         if (updates.content !== undefined) row[1] = updates.content;
         if (updates.resource !== undefined) row[2] = updates.resource;
         if (updates.dueDate !== undefined) row[3] = updates.dueDate;
+        if (updates.priority !== undefined && ['高', '中', '低'].indexOf(updates.priority) >= 0) row[6] = updates.priority;
+        if (updates.memo !== undefined) row[7] = updates.memo;
         sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
         return true;
       }
@@ -512,7 +528,7 @@ function updateTask(taskId, updates) {
 /**
  * 特定のタスクのステータスを更新します。
  * @param {string} taskId
- * @param {string} newStatus "未着手" または "完了"
+ * @param {string} newStatus "未着手" / "進行中" / "完了"
  * @returns {boolean}
  */
 function updateTaskStatus(taskId, newStatus) {
