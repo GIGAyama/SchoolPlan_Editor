@@ -373,6 +373,10 @@ function getMonthlyHoursData(year, month) {
     const dbCols = getDbColumns();
     const dbData = dbSheet.getDataRange().getValues();
 
+    // モジュール学習設定（朝学習の1/3時間加算。週・年間の集計と同じルール）
+    const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
+    const moduleSubjects = moduleEnabled ? getModuleCountableSubjects_() : null;
+
     const hoursBySubject = {};
     const periodCols = [dbCols.PERIOD1, dbCols.PERIOD2, dbCols.PERIOD3, dbCols.PERIOD4, dbCols.PERIOD5, dbCols.PERIOD6].filter(c => c);
 
@@ -386,6 +390,14 @@ function getMonthlyHoursData(year, month) {
         const parsed = parseSubjectHours_(row[col - 1]);
         for (const { subject, fraction } of parsed) {
           hoursBySubject[subject] = (hoursBySubject[subject] || 0) + fraction;
+        }
+      }
+
+      // モジュール学習: 朝学習に教科名（標準時数の教科＋行事のみ）が入っていれば 1/3 時間を加算
+      if (moduleEnabled && dbCols.MORNING) {
+        const morningSubject = getModuleSubjectFromMorningCell_(row[dbCols.MORNING - 1], moduleSubjects);
+        if (morningSubject) {
+          hoursBySubject[morningSubject] = (hoursBySubject[morningSubject] || 0) + 1 / 3;
         }
       }
     }
@@ -414,6 +426,10 @@ function getAnnualHoursData(academicYear) {
     const dbCols = getDbColumns();
     const dbData = dbSheet.getDataRange().getValues();
 
+    // モジュール学習設定（朝学習の1/3時間加算。週・月別の集計と同じルール）
+    const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
+    const moduleSubjects = moduleEnabled ? getModuleCountableSubjects_() : null;
+
     // hoursData: { "国語": { "4": 15.333, "5": 20, ... }, "算数": ... }
     const hoursData = {};
 
@@ -422,13 +438,13 @@ function getAnnualHoursData(academicYear) {
     for (const row of dbData.slice(1)) {
       const date = row[dbCols.DATE - 1];
       if (!(date instanceof Date)) continue;
-      
+
       const year = date.getFullYear();
       const month = date.getMonth() + 1;
-      
+
       let rowAcademicYear = year;
       if (month <= 3) rowAcademicYear -= 1;
-      
+
       if (rowAcademicYear !== academicYear) continue;
 
       for (const col of periodCols) {
@@ -437,6 +453,15 @@ function getAnnualHoursData(academicYear) {
           if (!hoursData[subject]) hoursData[subject] = {};
           if (!hoursData[subject][month]) hoursData[subject][month] = 0;
           hoursData[subject][month] += fraction;
+        }
+      }
+
+      // モジュール学習: 朝学習に教科名（標準時数の教科＋行事のみ）が入っていれば 1/3 時間を加算
+      if (moduleEnabled && dbCols.MORNING) {
+        const morningSubject = getModuleSubjectFromMorningCell_(row[dbCols.MORNING - 1], moduleSubjects);
+        if (morningSubject) {
+          if (!hoursData[morningSubject]) hoursData[morningSubject] = {};
+          hoursData[morningSubject][month] = (hoursData[morningSubject][month] || 0) + 1 / 3;
         }
       }
     }
@@ -658,6 +683,59 @@ function aggregateHoursData_(hoursData) {
  */
 function aggregateSubjectCounts_(counts) {
   aggregateSubjects_(counts, false);
+}
+
+/**
+ * 教科名に集約ルール（学活→特活、図書→国語 等）と正規化（図工→図画工作 等）を
+ * 適用した、集計後の最終的な教科名を返します。
+ * @param {*} name 教科名
+ * @returns {string}
+ */
+function resolveAggregatedSubjectName_(name) {
+  let s = (name === null || name === undefined) ? '' : String(name).trim();
+  const rule = SUBJECT_AGGREGATION_RULES_.find(function(r) { return r.from === s; });
+  if (rule) s = rule.to;
+  return normalizeSubjectName_(s);
+}
+
+/**
+ * モジュール学習（朝学習）で時数カウントの対象とする教科名セットを返します。
+ * カウント対象は標準時数マスタに登録されている教科と「行事」のみです。
+ * キーは集約・正規化後の教科名（resolveAggregatedSubjectName_）で保持します。
+ * @param {Array<{subject: string}>} [standardHours] 取得済みの標準時数データ（省略時は内部で取得）
+ * @returns {Object} 教科名をキーとするセット
+ */
+function getModuleCountableSubjects_(standardHours) {
+  if (!standardHours) {
+    const stdResult = getStandardHours();
+    standardHours = (stdResult.success && stdResult.data) ? stdResult.data : [];
+  }
+  const set = {};
+  standardHours.forEach(function(sh) {
+    const key = resolveAggregatedSubjectName_(sh.subject);
+    if (key) set[key] = true;
+  });
+  set['行事'] = true;
+  return set;
+}
+
+/**
+ * 朝学習セルの値から、モジュール学習として1/3時間をカウントする教科名を返します。
+ * ルール:
+ *  - 空欄・数字始まり（時刻などのメモ書き）はカウント対象外
+ *  - セル先頭の教科名のみを対象とする（分数付き入力でも固定1/3時間）
+ *  - 標準時数マスタに登録された教科と「行事」以外（「読書」などのメモ書き）はカウント対象外
+ * @param {*} cellValue 朝学習セルの値
+ * @param {Object} countableSubjects getModuleCountableSubjects_() が返す教科名セット
+ * @returns {string} カウント対象の教科名（対象外なら空文字）
+ */
+function getModuleSubjectFromMorningCell_(cellValue, countableSubjects) {
+  const val = (cellValue === null || cellValue === undefined) ? '' : cellValue.toString().trim();
+  if (!val || /^\d/.test(val)) return '';
+  const entries = parseSubjectCell_(val).entries;
+  const subject = entries.length > 0 ? entries[0].subject : '';
+  if (!subject || !countableSubjects[resolveAggregatedSubjectName_(subject)]) return '';
+  return subject;
 }
 
 /**
@@ -1374,6 +1452,11 @@ function getHoursSummary(mondayStr) {
     // モジュール学習設定
     const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
 
+    // 標準時数を取得（集計結果の表示と、モジュール学習のカウント対象判定に使用）
+    const stdResult = getStandardHours();
+    const standardHours = (stdResult.success && stdResult.data) ? stdResult.data : [];
+    const moduleSubjects = moduleEnabled ? getModuleCountableSubjects_(standardHours) : null;
+
     // 対象週の月曜日
     const targetMonday = new Date(mondayStr.replace(/-/g, '/'));
     targetMonday.setHours(0,0,0,0);
@@ -1413,21 +1496,14 @@ function getHoursSummary(mondayStr) {
         }
       });
 
-      // モジュール学習: 朝学習に教科名が入っていれば 1/3 時間を加算
+      // モジュール学習: 朝学習に教科名（標準時数の教科＋行事のみ）が入っていれば 1/3 時間を加算
       if (moduleEnabled && dbCols.MORNING) {
-        const morningVal = (dbData[i][dbCols.MORNING - 1] || '').toString().trim();
-        if (morningVal && !/^\d/.test(morningVal)) {
-          // 分数付き入力（例: "国語1/3行事2/3"）でも先頭の教科名だけを正しく取り出す
-          const morningEntries = parseSubjectCell_(morningVal).entries;
-          const morningSubject = morningEntries.length > 0 ? morningEntries[0].subject : '';
-          if (morningSubject) {
-            const moduleFraction = 1 / 3;
-            if (!cumulativeCount[morningSubject]) cumulativeCount[morningSubject] = 0;
-            cumulativeCount[morningSubject] += moduleFraction;
-            if (isThisWeek) {
-              if (!weeklyCount[morningSubject]) weeklyCount[morningSubject] = 0;
-              weeklyCount[morningSubject] += moduleFraction;
-            }
+        const morningSubject = getModuleSubjectFromMorningCell_(dbData[i][dbCols.MORNING - 1], moduleSubjects);
+        if (morningSubject) {
+          const moduleFraction = 1 / 3;
+          cumulativeCount[morningSubject] = (cumulativeCount[morningSubject] || 0) + moduleFraction;
+          if (isThisWeek) {
+            weeklyCount[morningSubject] = (weeklyCount[morningSubject] || 0) + moduleFraction;
           }
         }
       }
@@ -1436,10 +1512,6 @@ function getHoursSummary(mondayStr) {
     // 表示用の教科名集約: 学活→特活、図書・書写→国語に合算
     aggregateSubjectCounts_(weeklyCount);
     aggregateSubjectCounts_(cumulativeCount);
-
-    // 標準時数を取得
-    const stdResult = getStandardHours();
-    const standardHours = (stdResult.success && stdResult.data) ? stdResult.data : [];
 
     // 結果を構築
     const summary = standardHours.map(sh => {
@@ -1452,6 +1524,17 @@ function getHoursSummary(mondayStr) {
       const pct = std > 0 ? Math.round(cumulative / std * 100) : 0;
       return { subject: subj, standard: std, weekly: weekly, cumulative: cumulative, percent: pct };
     });
+
+    // 「行事」は標準時数マスタに行がないが集計対象（校時セルの分数入力・朝学習）のため、
+    // 実績がある場合のみ標準時数0の行として末尾に追加する
+    const hasGyojiRow = standardHours.some(sh => resolveAggregatedSubjectName_(sh.subject) === '行事');
+    if (!hasGyojiRow) {
+      const gyojiWeekly = Math.round((weeklyCount['行事'] || 0) * 10) / 10;
+      const gyojiCumulative = Math.round((cumulativeCount['行事'] || 0) * 10) / 10;
+      if (gyojiWeekly > 0 || gyojiCumulative > 0) {
+        summary.push({ subject: '行事', standard: 0, weekly: gyojiWeekly, cumulative: gyojiCumulative, percent: 0 });
+      }
+    }
 
     return { success: true, data: summary };
   } catch (e) {
