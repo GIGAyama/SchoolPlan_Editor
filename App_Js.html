@@ -542,6 +542,10 @@
             + 'onclick="event.stopPropagation(); openLinkInsertDialog(document.getElementById(\'content-' + dayIdx + '-' + pIdx + '\'))">'
             + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">link</span></button>'
             + '</div>'
+            + '<button type="button" class="task-picker-btn" onclick="openTaskPickerForContent(' + dayIdx + ',' + pIdx + ')" '
+            + 'title="タスクから選択（教科名が空の時間向け・複数選択可）" '
+            + 'style="margin-top:2px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;font-size:0.65rem;line-height:1.4;color:var(--text-sub);display:inline-flex;align-items:center;gap:2px;">'
+            + '<span class="material-symbols-outlined" style="font-size:13px;">checklist</span>タスクから選択</button>'
             + '<div class="suggest-box" id="suggest-' + dayIdx + '-' + pIdx + '" style="display:none;"></div>';
     }
 
@@ -803,6 +807,131 @@
                 })
                 .getActivityFromMaster(subject, unitName, hourNum);
         });
+    }
+
+    // ===== タスク選択（教科名が空の時間の内容入力） =====
+    /**
+     * 教科名が入力されていない時間の内容欄に、タスクから選択して転記します。
+     * タスクは複数選択でき、選択した未着手タスクは自動的に「進行中」になります。
+     */
+    function openTaskPickerForContent(dayIdx, pIdx) {
+        // 教科名が入力されている時間は対象外
+        var subjectEl = document.querySelector('[data-field="subject"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+        var subject = subjectEl ? subjectEl.value.trim() : '';
+        if (subject) {
+            showToast('warning', '教科名が入力されている時間ではタスクを選択できません。教科名を空にしてからお試しください。');
+            return;
+        }
+
+        // タスクが未読込の場合は取得してからモーダルを開く
+        if (STATE.taskDataLoaded && STATE.allTaskData) {
+            showTaskPickerModal(dayIdx, pIdx);
+        } else {
+            showToast('info', 'タスクを読み込んでいます...');
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (res.success) {
+                        STATE.allTaskData = res.tasks || [];
+                        STATE.tasks = STATE.allTaskData;
+                        STATE.taskDataLoaded = true;
+                        showTaskPickerModal(dayIdx, pIdx);
+                    } else {
+                        showToast('error', 'タスク取得エラー: ' + res.error);
+                    }
+                })
+                .withFailureHandler(function (e) { showToast('error', 'タスク取得に失敗: ' + e.message); })
+                .getTasksFromWebApp();
+        }
+    }
+
+    /** タスク選択モーダル（複数選択チェックボックス）を表示します。 */
+    function showTaskPickerModal(dayIdx, pIdx) {
+        // 完了済みを除いた未完了タスクを対象にする
+        var tasks = (STATE.allTaskData || []).filter(function (t) { return t.status !== '完了'; });
+        if (tasks.length === 0) {
+            showToast('warning', '選択できる未完了タスクがありません。');
+            return;
+        }
+
+        var listHtml = tasks.map(function (t, i) {
+            var statusMeta = taskStatusMeta(t.status || '未着手');
+            var due = t.dueDate ? t.dueDate.replace(/^\d{4}-/, '').replace('-', '/') : '期日なし';
+            return '<label class="task-pick-item" style="display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;">'
+                + '<input type="checkbox" class="task-pick-cb" value="' + i + '" style="margin-top:3px;flex-shrink:0;">'
+                + '<span style="text-align:left;line-height:1.4;">'
+                + '<span style="font-weight:600;">☐' + escHtml(t.content) + '</span>'
+                + (t.resource ? '<br><span style="font-size:0.8rem;color:var(--text-sub);">・' + escHtml(t.resource) + '</span>' : '')
+                + '<br><span style="font-size:0.72rem;color:var(--text-hint);">' + statusMeta.label + ' / ' + due + '</span>'
+                + '</span></label>';
+        }).join('');
+
+        Swal.fire({
+            title: 'タスクから選択',
+            html: '<div style="font-size:0.8rem;color:var(--text-sub);margin-bottom:6px;text-align:left;">選択したタスクを内容欄に追加します（複数選択可）。未着手のタスクは自動的に「進行中」になります。</div>'
+                + '<div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">' + listHtml + '</div>',
+            showCancelButton: true,
+            confirmButtonText: '追加する',
+            cancelButtonText: 'キャンセル',
+            focusConfirm: false,
+            preConfirm: function () {
+                var checked = Swal.getHtmlContainer().querySelectorAll('.task-pick-cb:checked');
+                if (checked.length === 0) {
+                    Swal.showValidationMessage('タスクを1つ以上選択してください。');
+                    return false;
+                }
+                return Array.prototype.map.call(checked, function (cb) { return parseInt(cb.value, 10); });
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            var selected = result.value.map(function (i) { return tasks[i]; });
+            applySelectedTasksToContent(dayIdx, pIdx, selected);
+        });
+    }
+
+    /**
+     * 選択したタスクを内容欄へ「☐タスク名 + 改行 + ・内容の詳細」形式で追記し、
+     * 未着手タスクを「進行中」に自動更新します。
+     */
+    function applySelectedTasksToContent(dayIdx, pIdx, selectedTasks) {
+        var contentEl = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+        if (!contentEl) return;
+
+        // 表示テキスト生成: ☐タスク名 で改行し ・内容の詳細
+        var blocks = selectedTasks.map(function (t) {
+            var line = '☐' + (t.content || '');
+            if (t.resource) line += '\n・' + t.resource;
+            return line;
+        });
+        var addText = blocks.join('\n');
+
+        var existing = contentEl.value.replace(/\s+$/, '');
+        contentEl.value = existing ? (existing + '\n' + addText) : addText;
+        autoResizeTextarea(contentEl);
+
+        // 未着手（未実施）のタスクを進行中（実施中）へ自動変更
+        var toStart = selectedTasks.filter(function (t) { return (t.status || '未着手') === '未着手'; });
+        toStart.forEach(function (t) {
+            var prevStatus = t.status || '未着手';
+            t.status = '進行中'; // 楽観的更新
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (!res.success) {
+                        showToast('error', 'ステータス更新失敗: ' + (res.error || '不明'));
+                        t.status = prevStatus; // ロールバック
+                        refreshTaskViews();
+                    }
+                })
+                .withFailureHandler(function (e) {
+                    showToast('error', 'ステータス更新失敗: ' + e.message);
+                    t.status = prevStatus; // ロールバック
+                    refreshTaskViews();
+                })
+                .updateTaskStatusFromWebApp(t.id, '進行中');
+        });
+        if (toStart.length > 0) refreshTaskViews();
+
+        showToast('success', selectedTasks.length + '件のタスクを内容に追加しました。'
+            + (toStart.length ? '（' + toStart.length + '件を進行中に変更）' : ''));
     }
 
     // ===== 編集モード制御 =====
