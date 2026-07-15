@@ -471,6 +471,18 @@
                             linkBtn.addEventListener('click', function(e) { e.stopPropagation(); openLinkInsertDialog(textarea); });
                         })(ta);
                         cell.appendChild(linkBtn);
+                        // タスク選択ボタン（朝学習・中休み・昼休み・放課後などの空き時間向け）
+                        if (['morning', 'recess1', 'recess2', 'afterschool'].indexOf(rowDef.key) >= 0) {
+                            var taskBtn = document.createElement('button');
+                            taskBtn.type = 'button';
+                            taskBtn.className = 'field-task-btn';
+                            taskBtn.title = 'タスクから選択（複数選択可）';
+                            taskBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">checklist</span>';
+                            (function(dayIndex, fieldKey) {
+                                taskBtn.addEventListener('click', function(e) { e.stopPropagation(); openTaskPickerForField(dayIndex, fieldKey); });
+                            })(i, rowDef.key);
+                            cell.appendChild(taskBtn);
+                        }
                     } else {
                         var escaped = escHtml(val);
                         var linked = linkify(escaped.replace(/\n/g, '<br>'));
@@ -516,10 +528,26 @@
 
     function renderPeriodView(p) {
         if (!p.subject && !p.unit && !p.content) return '';
+        var free = isFreeContent(p.content);
         var html = '';
-        if (p.subject) html += '<div class="period-subject">' + escHtml(p.subject) + '</div>';
+        if (p.subject) {
+            html += '<div class="period-subject">' + escHtml(p.subject)
+                + (free ? '<span class="period-free-badge">空き</span>' : '') + '</div>';
+        }
         if (p.unit) html += '<div class="period-unit">' + linkify(escHtml(p.unit)) + '</div>';
-        if (p.content) html += '<div class="period-content">' + linkify(escHtml(p.content).replace(/\n/g, '<br>')) + '</div>';
+        if (p.content) {
+            if (free) {
+                // 空き時間: 授業内容とタスクを分割して表示
+                var parts = splitFreeContent(p.content);
+                if (parts.subjectPart.trim()) {
+                    html += '<div class="period-content">' + linkify(escHtml(parts.subjectPart.trim()).replace(/\n/g, '<br>')) + '</div>';
+                }
+                html += '<div class="period-freetask"><span class="period-freetask-label">タスク</span>'
+                    + (parts.taskPart.trim() ? linkify(escHtml(parts.taskPart.trim()).replace(/\n/g, '<br>')) : '') + '</div>';
+            } else {
+                html += '<div class="period-content">' + linkify(escHtml(p.content).replace(/\n/g, '<br>')) + '</div>';
+            }
+        }
         return html;
     }
 
@@ -531,8 +559,10 @@
             + '<input type="text" placeholder="単元名" value="' + escAttr(p.unit) + '" '
             + 'data-field="unit" data-day="' + dayIdx + '" data-period="' + pIdx + '" style="flex:1;min-width:0;">'
             + '<button type="button" class="unit-picker-btn" onclick="openUnitPicker(' + dayIdx + ',' + pIdx + ')" '
-            + 'title="単元マスタから選択（教科名が空の時間はタスクから選択）" style="flex-shrink:0;padding:1px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;line-height:1;">'
-            + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">list_alt</span></button></div>'
+            + 'title="単元マスタから選択（教科名が空の時間・空き時間はタスクから選択）" style="flex-shrink:0;padding:1px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;line-height:1;">'
+            + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">list_alt</span></button>'
+            + '<button type="button" class="free-slot-btn' + (isFreeContent(p.content) ? ' free-slot-active' : '') + '" onclick="toggleFreeSlot(' + dayIdx + ',' + pIdx + ',this)" '
+            + 'title="空き時間（別教員担当）に設定。教科の内容とタスクを分けて入力できます" style="flex-shrink:0;padding:1px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;line-height:1;font-size:0.62rem;">空</button></div>'
             + '<div style="position:relative;">'
             + '<textarea rows="2" placeholder="学習内容" style="font-size:0.72rem;min-height:36px;height:auto;" '
             + 'data-field="content" data-day="' + dayIdx + '" data-period="' + pIdx + '" '
@@ -712,8 +742,9 @@
         // 対象スロットの教科名を取得
         var subjectEl = document.querySelector('[data-field="subject"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
         var subject = subjectEl ? subjectEl.value.trim() : '';
-        if (!subject) {
-            // 教科名が空の時間は「タスクから選択」モーダルを開く
+        var contentEl = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+        // 教科名が空の時間、または空き時間（別教員担当）は「タスクから選択」モーダルを開く
+        if (!subject || (contentEl && isFreeContent(contentEl.value))) {
             openTaskPickerForContent(dayIdx, pIdx);
             return;
         }
@@ -806,43 +837,97 @@
         });
     }
 
-    // ===== タスク選択（教科名が空の時間の内容入力） =====
+    // ===== 空き時間（別教員担当の時間）ヘルパー =====
+    // 教科の内容とタスクを1つの内容欄内で分割するための区切りマーカー。
+    // このマーカーが内容に含まれる時間を「空き時間」として扱う。
+    var FREE_TASK_DIVIDER = '─── タスク ───';
+    /** 内容テキストが空き時間（区切りマーカーを含む）かどうかを判定します。 */
+    function isFreeContent(text) {
+        return !!text && text.indexOf(FREE_TASK_DIVIDER) !== -1;
+    }
+    /** 空き時間の内容を「授業内容」と「タスク」に分割します。 */
+    function splitFreeContent(text) {
+        var t = String(text || '');
+        var idx = t.indexOf(FREE_TASK_DIVIDER);
+        if (idx === -1) return { subjectPart: t, taskPart: '' };
+        return {
+            subjectPart: t.slice(0, idx).replace(/\n+$/, ''),
+            taskPart: t.slice(idx + FREE_TASK_DIVIDER.length).replace(/^\n+/, '')
+        };
+    }
+
     /**
-     * 教科名が入力されていない時間の内容欄に、タスクから選択して転記します。
+     * 校時セルの「空き時間」設定をトグルします。
+     * ONにすると内容欄に区切りマーカーを挿入し、教科内容とタスクを分割入力できるようにします。
+     */
+    function toggleFreeSlot(dayIdx, pIdx, btn) {
+        var contentEl = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+        if (!contentEl) return;
+        if (isFreeContent(contentEl.value)) {
+            // 空き時間を解除：区切りマーカーを除去して授業内容とタスクを結合
+            var parts = splitFreeContent(contentEl.value);
+            contentEl.value = [parts.subjectPart, parts.taskPart].filter(function (s) { return s.trim(); }).join('\n');
+            if (btn) btn.classList.remove('free-slot-active');
+            showToast('info', '空き時間の設定を解除しました。');
+        } else {
+            // 空き時間に設定：末尾に区切りマーカーを追加
+            var existing = contentEl.value.replace(/\s+$/, '');
+            contentEl.value = (existing ? existing + '\n' : '') + FREE_TASK_DIVIDER + '\n';
+            if (btn) btn.classList.add('free-slot-active');
+            showToast('success', 'この時間を空き時間に設定しました。教科の内容とタスクを分けて入力できます。');
+        }
+        autoResizeTextarea(contentEl);
+    }
+
+    // ===== タスク選択（教科名が空の時間・空き時間の内容入力） =====
+    /** タスクが未読込の場合はサーバーから取得し、その後にcbを実行します。 */
+    function withTasksLoaded(cb) {
+        if (STATE.taskDataLoaded && STATE.allTaskData) { cb(); return; }
+        showToast('info', 'タスクを読み込んでいます...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    STATE.allTaskData = res.tasks || [];
+                    STATE.tasks = STATE.allTaskData;
+                    STATE.taskDataLoaded = true;
+                    cb();
+                } else {
+                    showToast('error', 'タスク取得エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) { showToast('error', 'タスク取得に失敗: ' + e.message); })
+            .getTasksFromWebApp();
+    }
+
+    /**
+     * 校時セルの内容欄に、タスクから選択して転記します。
+     * 教科名が空の時間、または空き時間（別教員担当）でのみ利用できます。
      * タスクは複数選択でき、選択した未着手タスクは自動的に「進行中」になります。
      */
     function openTaskPickerForContent(dayIdx, pIdx) {
-        // 教科名が入力されている時間は対象外
+        var contentEl = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+        if (!contentEl) return;
         var subjectEl = document.querySelector('[data-field="subject"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
         var subject = subjectEl ? subjectEl.value.trim() : '';
-        if (subject) {
-            showToast('warning', '教科名が入力されている時間ではタスクを選択できません。教科名を空にしてからお試しください。');
+        // 教科名がある通常の時間は対象外（空き時間に設定されている場合は許可）
+        if (subject && !isFreeContent(contentEl.value)) {
+            showToast('warning', '教科名が入力されている時間です。タスクを入れる場合は「空き」ボタンで空き時間に設定してください。');
             return;
         }
-
-        // タスクが未読込の場合は取得してからモーダルを開く
-        if (STATE.taskDataLoaded && STATE.allTaskData) {
-            showTaskPickerModal(dayIdx, pIdx);
-        } else {
-            showToast('info', 'タスクを読み込んでいます...');
-            google.script.run
-                .withSuccessHandler(function (res) {
-                    if (res.success) {
-                        STATE.allTaskData = res.tasks || [];
-                        STATE.tasks = STATE.allTaskData;
-                        STATE.taskDataLoaded = true;
-                        showTaskPickerModal(dayIdx, pIdx);
-                    } else {
-                        showToast('error', 'タスク取得エラー: ' + res.error);
-                    }
-                })
-                .withFailureHandler(function (e) { showToast('error', 'タスク取得に失敗: ' + e.message); })
-                .getTasksFromWebApp();
-        }
+        withTasksLoaded(function () { showTaskPickerModal(contentEl); });
     }
 
-    /** タスク選択モーダル（複数選択チェックボックス）を表示します。 */
-    function showTaskPickerModal(dayIdx, pIdx) {
+    /**
+     * 日課レベルのセル（朝学習・中休み・昼休み・放課後）の入力欄にタスクを転記します。
+     */
+    function openTaskPickerForField(dayIdx, key) {
+        var el = document.querySelector('[data-field="' + key + '"][data-day="' + dayIdx + '"]');
+        if (!el) return;
+        withTasksLoaded(function () { showTaskPickerModal(el); });
+    }
+
+    /** タスク選択モーダル（複数選択チェックボックス）を表示し、確定時に対象要素へ転記します。 */
+    function showTaskPickerModal(targetEl) {
         // 完了済みを除いた未完了タスクを対象にする
         var tasks = (STATE.allTaskData || []).filter(function (t) { return t.status !== '完了'; });
         if (tasks.length === 0) {
@@ -881,17 +966,17 @@
         }).then(function (result) {
             if (!result.isConfirmed) return;
             var selected = result.value.map(function (i) { return tasks[i]; });
-            applySelectedTasksToContent(dayIdx, pIdx, selected);
+            applySelectedTasksToTextarea(targetEl, selected);
         });
     }
 
     /**
-     * 選択したタスクを内容欄へ「☐タスク名 + 改行 + ・内容の詳細」形式で追記し、
+     * 選択したタスクを対象の入力欄へ「☐タスク名 + 改行 + ・内容の詳細」形式で追記し、
      * 未着手タスクを「進行中」に自動更新します。
+     * 空き時間の場合はタスクは区切りマーカーより後（タスク欄）に追記されます。
      */
-    function applySelectedTasksToContent(dayIdx, pIdx, selectedTasks) {
-        var contentEl = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
-        if (!contentEl) return;
+    function applySelectedTasksToTextarea(targetEl, selectedTasks) {
+        if (!targetEl) return;
 
         // 表示テキスト生成: ☐タスク名 で改行し ・内容の詳細
         var blocks = selectedTasks.map(function (t) {
@@ -901,9 +986,9 @@
         });
         var addText = blocks.join('\n');
 
-        var existing = contentEl.value.replace(/\s+$/, '');
-        contentEl.value = existing ? (existing + '\n' + addText) : addText;
-        autoResizeTextarea(contentEl);
+        var existing = targetEl.value.replace(/\s+$/, '');
+        targetEl.value = existing ? (existing + '\n' + addText) : addText;
+        autoResizeTextarea(targetEl);
 
         // 未着手（未実施）のタスクを進行中（実施中）へ自動変更
         var toStart = selectedTasks.filter(function (t) { return (t.status || '未着手') === '未着手'; });
