@@ -531,7 +531,7 @@
             + '<input type="text" placeholder="単元名" value="' + escAttr(p.unit) + '" '
             + 'data-field="unit" data-day="' + dayIdx + '" data-period="' + pIdx + '" style="flex:1;min-width:0;">'
             + '<button type="button" class="unit-picker-btn" onclick="openUnitPicker(' + dayIdx + ',' + pIdx + ')" '
-            + 'title="単元マスタから選択" style="flex-shrink:0;padding:1px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;line-height:1;">'
+            + 'title="単元マスタから選択（教科名が空の時間はタスクから選択）" style="flex-shrink:0;padding:1px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;line-height:1;">'
             + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">list_alt</span></button></div>'
             + '<div style="position:relative;">'
             + '<textarea rows="2" placeholder="学習内容" style="font-size:0.72rem;min-height:36px;height:auto;" '
@@ -542,10 +542,6 @@
             + 'onclick="event.stopPropagation(); openLinkInsertDialog(document.getElementById(\'content-' + dayIdx + '-' + pIdx + '\'))">'
             + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">link</span></button>'
             + '</div>'
-            + '<button type="button" class="task-picker-btn" onclick="openTaskPickerForContent(' + dayIdx + ',' + pIdx + ')" '
-            + 'title="タスクから選択（教科名が空の時間向け・複数選択可）" '
-            + 'style="margin-top:2px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;font-size:0.65rem;line-height:1.4;color:var(--text-sub);display:inline-flex;align-items:center;gap:2px;">'
-            + '<span class="material-symbols-outlined" style="font-size:13px;">checklist</span>タスクから選択</button>'
             + '<div class="suggest-box" id="suggest-' + dayIdx + '-' + pIdx + '" style="display:none;"></div>';
     }
 
@@ -717,7 +713,8 @@
         var subjectEl = document.querySelector('[data-field="subject"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
         var subject = subjectEl ? subjectEl.value.trim() : '';
         if (!subject) {
-            showToast('warning', '先に教科名を入力してください。');
+            // 教科名が空の時間は「タスクから選択」モーダルを開く
+            openTaskPickerForContent(dayIdx, pIdx);
             return;
         }
 
