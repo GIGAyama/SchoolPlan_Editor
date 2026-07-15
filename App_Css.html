@@ -820,6 +820,66 @@
         right: 1px;
     }
 
+    /* 日課セル（朝学習・中休み・昼休み・放課後）のタスク選択ボタン */
+    .field-task-btn {
+        position: absolute;
+        top: 2px;
+        right: 22px;
+        padding: 1px 3px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+        cursor: pointer;
+        line-height: 1;
+        opacity: 0.5;
+        transition: opacity 0.15s;
+        z-index: 1;
+    }
+    .field-task-btn:hover {
+        opacity: 1;
+        background: var(--bg-hover, #f0f0f0);
+    }
+
+    /* 空き時間トグルボタン（編集モード） */
+    .free-slot-btn {
+        color: var(--text-sub);
+    }
+    .free-slot-btn.free-slot-active {
+        background: var(--primary, #1a73e8) !important;
+        color: #fff !important;
+        border-color: var(--primary, #1a73e8) !important;
+    }
+
+    /* 空き時間バッジ（閲覧モード・教科名帯の中） */
+    .grid-cell .period-free-badge {
+        display: inline-block;
+        margin-left: 4px;
+        padding: 0 4px;
+        font-size: 0.6rem;
+        font-weight: 600;
+        color: #fff;
+        background: var(--primary, #1a73e8);
+        border-radius: 3px;
+        vertical-align: middle;
+    }
+
+    /* 空き時間のタスク欄（閲覧モード） */
+    .grid-cell .period-freetask {
+        color: var(--text-hint);
+        font-size: 0.72rem;
+        line-height: 1.4;
+        margin-top: 3px;
+        padding-top: 3px;
+        border-top: 1px dashed var(--border);
+    }
+    .grid-cell .period-freetask-label {
+        display: inline-block;
+        font-size: 0.6rem;
+        font-weight: 600;
+        color: var(--primary, #1a73e8);
+        margin-right: 4px;
+    }
+
     /* ===== UX強化: D&D ビジュアルフィードバック ===== */
     .grid-cell.dragging {
         opacity: 0.4;
