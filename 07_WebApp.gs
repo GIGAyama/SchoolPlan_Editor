@@ -1689,7 +1689,8 @@ function updateTaskFromWebApp(taskId, updates) {
       taskId: { type: 'string', required: true, maxLength: 100 }
     });
     var isSuccess = updateTask(taskId, updates);
-    return { success: isSuccess };
+    if (isSuccess) return { success: true };
+    return { success: false, error: '対象のタスクが見つかりませんでした（すでに削除された可能性があります）。' };
   } catch (e) {
     logError('updateTaskFromWebApp', e);
     return { success: false, error: e.message };
@@ -1709,7 +1710,8 @@ function updateTaskStatusFromWebApp(taskId, newStatus) {
       newStatus: { type: 'string', required: true, pattern: /^(未着手|進行中|完了)$/ }
     });
     const isSuccess = updateTaskStatus(taskId, newStatus);
-    return { success: isSuccess };
+    if (isSuccess) return { success: true };
+    return { success: false, error: '対象のタスクが見つかりませんでした（すでに削除された可能性があります）。' };
   } catch (e) {
     logError('updateTaskStatusFromWebApp', e);
     return { success: false, error: e.message };
@@ -1727,7 +1729,8 @@ function deleteTaskFromWebApp(taskId) {
       taskId: { type: 'string', required: true, maxLength: 100 }
     });
     const isSuccess = deleteTask(taskId);
-    return { success: isSuccess };
+    if (isSuccess) return { success: true };
+    return { success: false, error: '対象のタスクが見つかりませんでした（すでに削除された可能性があります）。' };
   } catch (e) {
     logError('deleteTaskFromWebApp', e);
     return { success: false, error: e.message };

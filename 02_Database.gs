@@ -493,6 +493,19 @@ function saveTasksBulk(tasks) {
 }
 
 /**
+ * TaskID同士を型に依存せず比較します。
+ * getValues() はセルの内容によっては TaskID を数値などの非文字列として返すため、
+ * クライアントから渡される文字列の taskId と厳密等価（===）で比較すると
+ * 一致せず、更新・削除が無言で失敗する。前後空白を除いた文字列同士で比較する。
+ * @param {*} a
+ * @param {*} b
+ * @returns {boolean}
+ */
+function isSameTaskId_(a, b) {
+  return String(a).trim() === String(b).trim();
+}
+
+/**
  * 特定のタスクのフィールドを更新します。
  * @param {string} taskId
  * @param {Object} updates { content, resource, dueDate, priority, memo } 更新するフィールド
@@ -505,7 +518,7 @@ function updateTask(taskId, updates) {
     const data = sheet.getDataRange().getValues();
 
     for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === taskId) {
+      if (isSameTaskId_(data[i][0], taskId)) {
         // パフォーマンス: 変更対象を1回のバッチ書き込みで更新
         const row = data[i];
         while (row.length < 8) row.push('');
@@ -538,7 +551,7 @@ function updateTaskStatus(taskId, newStatus) {
     const data = sheet.getDataRange().getValues();
     
     for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === taskId) {
+      if (isSameTaskId_(data[i][0], taskId)) {
         sheet.getRange(i + 1, 6).setValue(newStatus);
         return true;
       }
@@ -562,8 +575,10 @@ function deleteTask(taskId) {
     const data = sheet.getDataRange().getValues();
     
     for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === taskId) {
+      if (isSameTaskId_(data[i][0], taskId)) {
         sheet.deleteRow(i + 1);
+        // 行削除を即座にスプレッドシートへ反映してから成功を返す
+        SpreadsheetApp.flush();
         return true;
       }
     }
