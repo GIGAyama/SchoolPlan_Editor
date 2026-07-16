@@ -1778,6 +1778,16 @@ function saveTaskReminderSettings(enabled, hour) {
 
     deleteTriggers_('sendTaskReminderMail');
     if (enabled) {
+      // メール送信権限（script.send_mail / userinfo.email）を有効化時に事前確認する。
+      // ここで権限が付与されていないと、後日トリガーが「権限不足」で無言失敗するため、
+      // 設定操作の中で明示的にチェックして分かりやすいエラーを返す。
+      try {
+        MailApp.getRemainingDailyQuota();      // 未承認なら例外（script.send_mail）
+        Session.getEffectiveUser().getEmail(); // 送信先取得の権限確認（userinfo.email）
+      } catch (permErr) {
+        logError('saveTaskReminderSettings.permissionCheck', permErr);
+        throw new Error('メール送信の権限が不足しています。アプリを開き直して表示される権限リクエストを承認してから、もう一度お試しください。');
+      }
       ScriptApp.newTrigger('sendTaskReminderMail').timeBased().everyDays(1).atHour(h).create();
       logInfo(`タスクリマインダーを設定: 毎日${h}時`);
       return { success: true, message: `リマインダーを有効化しました（毎日${h}時ごろに送信）` };
