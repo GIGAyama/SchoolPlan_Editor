@@ -50,6 +50,7 @@
     // UX: 行定義（セルナビゲーション用）
     const GRID_ROWS = [
         { key: 'event', label: '行事', multi: false },
+        { key: 'preclass', label: '登校前', multi: false },
         { key: 'morning', label: '朝学習', multi: false },
         { key: 'period0', label: '1校時', multi: true },
         { key: 'period1', label: '2校時', multi: true },
@@ -390,6 +391,7 @@
 
         var rows = [
             { key: 'event', label: '行事', multi: false, section: true },
+            { key: 'preclass', label: '登校前', multi: false },
             { key: 'morning', label: '朝学習', multi: false },
             { key: 'period0', label: '1校時', multi: true, section: true },
             { key: 'period1', label: '2校時', multi: true },
@@ -472,7 +474,7 @@
                         })(ta);
                         cell.appendChild(linkBtn);
                         // タスク選択ボタン（朝学習・中休み・昼休み・放課後などの空き時間向け）
-                        if (['morning', 'recess1', 'recess2', 'afterschool'].indexOf(rowDef.key) >= 0) {
+                        if (['preclass', 'morning', 'recess1', 'recess2', 'afterschool'].indexOf(rowDef.key) >= 0) {
                             var taskBtn = document.createElement('button');
                             taskBtn.type = 'button';
                             taskBtn.className = 'field-task-btn';
@@ -1071,7 +1073,7 @@
         if (!STATE.weekData) return null;
         return STATE.weekData.days.map(function (day, dayIdx) {
             var newDay = JSON.parse(JSON.stringify(day));
-            ['event', 'morning', 'recess1', 'recess2', 'afterschool', 'homework', 'items'].forEach(function (field) {
+            ['event', 'preclass', 'morning', 'recess1', 'recess2', 'afterschool', 'homework', 'items'].forEach(function (field) {
                 var el = document.querySelector('[data-field="' + field + '"][data-day="' + dayIdx + '"]');
                 if (el) newDay[field] = el.value;
             });
@@ -1968,6 +1970,9 @@
         // 前回選択したレイアウトを復元（standard: 従来の2ページ / compact: A4・1ページ）
         var storedLayout = 'standard';
         try { storedLayout = localStorage.getItem('weeklyPrintLayout') || 'standard'; } catch (e) { }
+        // 「登校前」列を印刷に含めるかの前回選択を復元（デフォルトは含めない）
+        var storedPreclass = false;
+        try { storedPreclass = localStorage.getItem('weeklyPrintPreclass') === '1'; } catch (e) { }
         var weekendNote = '土曜: ' + (STATE.showSat ? '含める' : '含めない') + ' ／ 日曜: ' + (STATE.showSun ? '含める' : '含めない');
 
         Swal.fire({
@@ -1981,6 +1986,7 @@
                 + '<p style="color:var(--text-sub);margin-bottom:12px;">印刷に含める項目を選択してください</p>'
                 + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">'
                 + '<label><input type="checkbox" id="po_event" checked> 行事</label>'
+                + '<label><input type="checkbox" id="po_preclass"' + (storedPreclass ? ' checked' : '') + '> 登校前</label>'
                 + '<label><input type="checkbox" id="po_morning" checked> 朝学習</label>'
                 + '<label><input type="checkbox" id="po_recess1" checked> 中休み</label>'
                 + '<label><input type="checkbox" id="po_recess2" checked> 昼休み</label>'
@@ -2010,9 +2016,12 @@
             var layoutEl = document.querySelector('input[name="po_layout"]:checked');
             var layout = layoutEl ? layoutEl.value : 'standard';
             try { localStorage.setItem('weeklyPrintLayout', layout); } catch (e) { }
+            var preclassChecked = document.getElementById('po_preclass').checked;
+            try { localStorage.setItem('weeklyPrintPreclass', preclassChecked ? '1' : '0'); } catch (e) { }
             var opts = {
                 layout: layout,
                 event: document.getElementById('po_event').checked,
+                preclass: preclassChecked,
                 morning: document.getElementById('po_morning').checked,
                 recess1: document.getElementById('po_recess1').checked,
                 recess2: document.getElementById('po_recess2').checked,
@@ -2145,6 +2154,7 @@
         };
 
         if (opts.event) html += textRow('event', '時程<br>行事', 'event-cell');
+        if (opts.preclass) html += textRow('preclass', '登校前');
         if (opts.morning) html += textRow('morning', '朝学習');
         html += periodRow(0, '1校時');
         html += periodRow(1, '2校時');
@@ -2261,6 +2271,13 @@
             html += '</tr>';
         }
 
+        // 登校前
+        if (opts.preclass) {
+            html += '<tr><td class="row-header">登校前</td>';
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].preclass) ? days[i].preclass.replace(/\n/g, '<br>') : '') + '</td>'; }
+            html += '</tr>';
+        }
+
         // 朝学習
         if (opts.morning) {
             html += '<tr><td class="row-header">朝学習</td>';
@@ -2347,6 +2364,14 @@
             html += '<tr><td class="row-header">時程<br>行事</td>';
             html += '<td class="event-cell">' + renderWeekendContent("event", 5) + '</td>';
             html += '<td class="event-cell">' + renderWeekendContent("event", 6) + '</td>';
+            html += '</tr>';
+        }
+
+        // 登校前
+        if (opts.preclass) {
+            html += '<tr><td class="row-header">登校前</td>';
+            html += '<td>' + renderWeekendContent("preclass", 5) + '</td>';
+            html += '<td>' + renderWeekendContent("preclass", 6) + '</td>';
             html += '</tr>';
         }
 

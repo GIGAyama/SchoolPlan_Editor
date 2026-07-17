@@ -207,7 +207,7 @@ function repairTruncatedJsonArray_(text) {
  * @returns {string} リビジョン（16進ハッシュ）
  */
 function computeWeekRevision_(dbData, dbCols, weekDateStrs) {
-  const FIELDS = ['EVENT', 'MORNING', 'PERIOD1', 'UNIT1', 'CONTENT1', 'PERIOD2', 'UNIT2', 'CONTENT2', 'RECESS1',
+  const FIELDS = ['EVENT', 'PRECLASS', 'MORNING', 'PERIOD1', 'UNIT1', 'CONTENT1', 'PERIOD2', 'UNIT2', 'CONTENT2', 'RECESS1',
     'PERIOD3', 'UNIT3', 'CONTENT3', 'PERIOD4', 'UNIT4', 'CONTENT4', 'RECESS2', 'PERIOD5', 'UNIT5', 'CONTENT5',
     'PERIOD6', 'UNIT6', 'CONTENT6', 'AFTERSCHOOL', 'HOMEWORK', 'ITEMS'];
   const rowByDate = new Map();

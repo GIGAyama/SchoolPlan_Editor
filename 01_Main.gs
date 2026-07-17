@@ -28,6 +28,7 @@ function onOpen() {
       .addItem('指導計画PDFの読み込み', 'createUnitMasterFromPdfs_UI')
       .addItem('行事予定PDFをフォルダから読込', 'importEventsFromFolder_UI')
       .addSeparator()
+      .addItem('登校前タスク列を追加', 'ensurePreClassColumn_UI')
       .addItem('データベースの入力内容をクリア', 'clearDatabaseDataWithConfirmation')
       .addItem('（PDF読込処理を強制停止）', 'resetAllPdfProcessing_UI')
       .addItem('クラス一覧を取得', 'listCoursesToSheet')

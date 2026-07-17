@@ -102,6 +102,7 @@ function getWeeklyPlanData(mondayDateStr) {
         date: dateStr,
         dayLabel: DAY_LABELS[i],
         event: row ? (row[dbCols.EVENT - 1] || '') : '',
+        preclass: (row && dbCols.PRECLASS) ? (row[dbCols.PRECLASS - 1] || '') : '',
         morning: row ? (row[dbCols.MORNING - 1] || '') : '',
         periods: row
           ? [1, 2, 3, 4, 5, 6].map(n => ({
@@ -251,6 +252,7 @@ function saveWeeklyPlanData(mondayDateStr, days, baseRevision) {
         const row = dbData[rowIdx];
 
         row[dbCols.EVENT - 1]      = day.event || '';
+        if (dbCols.PRECLASS) row[dbCols.PRECLASS - 1] = day.preclass || '';
         row[dbCols.MORNING - 1]    = day.morning || '';
         row[dbCols.PERIOD1 - 1]    = day.periods[0]?.subject || '';
         row[dbCols.UNIT1 - 1]      = day.periods[0]?.unit || '';

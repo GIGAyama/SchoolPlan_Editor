@@ -588,3 +588,60 @@ function deleteTask(taskId) {
     return false;
   }
 }
+
+/**
+ * データベースシートに「登校前タスク」列（出勤後・児童登校前に行うタスク用）を
+ * 「行事」列の直後に挿入します。既に存在する場合は何もしません。
+ * 既存のスプレッドシートへ後付けで列を追加するためのユーティリティです。
+ * @returns {{ inserted: boolean, message: string }}
+ */
+function ensurePreClassColumn() {
+  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+  if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
+
+  const headers = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
+
+  // 既に登校前タスク列が存在するか判定（getDbColumns と同じエイリアスで判定）
+  const preClassAliases = ['登校前タスク', '登校前', '始業前', '登校前業務', '出勤後タスク'];
+  const hasPreClass = headers.some(h => preClassAliases.indexOf(h.toString().trim()) >= 0);
+  if (hasPreClass) {
+    return { inserted: false, message: '登校前タスク列は既に存在します。' };
+  }
+
+  // 「行事」列を探す。見つかればその直後、なければ「朝学習」の直前、どちらも無ければ末尾に追加。
+  let eventIdx = headers.findIndex(h => h.toString().trim() === '行事');
+  let insertAfter;
+  if (eventIdx >= 0) {
+    insertAfter = eventIdx + 1; // 1始まりの列番号（行事列の位置）
+  } else {
+    const morningIdx = headers.findIndex(h => h.toString().trim() === '朝学習');
+    if (morningIdx >= 0) {
+      insertAfter = morningIdx; // 朝学習の直前に挿入するため、その1つ前の後ろへ
+    } else {
+      insertAfter = headers.length; // 末尾
+    }
+  }
+
+  dbSheet.insertColumnAfter(insertAfter);
+  const newColIndex = insertAfter + 1;
+  dbSheet.getRange(1, newColIndex).setValue('登校前タスク');
+
+  // 列構成が変わったのでキャッシュをクリア
+  clearDbColumnsCache();
+
+  return { inserted: true, message: '「登校前タスク」列を行事列の直後に追加しました。' };
+}
+
+/**
+ * [メニュー用] 登校前タスク列を追加し、結果をダイアログで通知します。
+ */
+function ensurePreClassColumn_UI() {
+  try {
+    const result = ensurePreClassColumn();
+    SpreadsheetApp.getUi().alert(result.message);
+  } catch (e) {
+    logError('ensurePreClassColumn_UI', e);
+    SpreadsheetApp.getUi().alert(`エラー: ${e.message}`);
+  }
+}
