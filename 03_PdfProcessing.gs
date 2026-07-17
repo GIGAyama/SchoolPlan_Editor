@@ -371,50 +371,7 @@ function processSinglePdf(file) {
   const apiKey = getApiKey_();
   const grade = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_GRADE) || '';
   const gradeContext = grade ? `対象学年は${grade}です。` : '';
-  const prompt = `あなたは日本の小学校教育の専門家です。添付された年間指導計画のPDFから、以下の情報を抽出し、指定されたJSON形式で出力してください。
-このPDFは複数ページにわたる長いものである可能性があります。すべてのページを注意深く読み取り、すべての単元を抽出してください。
-${gradeContext}
-
-抽出項目:
-1.  **subject**: 教科名（例：国語, 算数）
-2.  **unitName**: 単元名や題材名
-3.  **totalHours**: その単元に配当されている合計時間数（半角数字）
-4.  **hourlyActivities**: その単元の、時間ごとの学習活動のリスト。
-    - **hour**: 何時間目かを示す半角数字。
-    - **activity**: その時間の学習活動を、以下のルールに従って構造的に記述してください。
-
-## activityの記述ルール
-週案を見ただけで授業の流れが把握できるよう、以下の形式で改行（\\n）を使って構造的に記載してください。
-ただし、全体で100〜150文字程度に収め、冗長にならないようにしてください。
-
-### 形式
-（めあて）1行目にその時間のめあてを簡潔に書く
-（学習活動）・（中黒）で始まる箇条書きで主な活動を2〜3項目
-（準備物）教師の準備物や児童の持ち物がある場合のみ、末尾に▶で記載
-
-### 記述例
-"めあて：物語の場面構成を捉えよう\\n・全文を通読し初発の感想を書く\\n・場面分けをして構成を整理する\\n▶ワークシート"
-"めあて：1Lより小さいかさの表し方を考えよう\\n・dLの単位を知り水のかさを量る\\n・dLを使って身の回りの容器のかさを調べる\\n▶1Lます・水筒（児童）"
-"めあて：春の生き物を観察しよう\\n・校庭で春の植物や昆虫を観察する\\n・観察カードに記録をまとめる\\n▶観察カード・虫めがね（児童）"
-
-### 注意事項
-- PDFに準備物や持ち物の情報がない場合は、あなたの教育の専門知識をもとに、その授業で一般的に必要と考えられるものを補完してください。ただし、特に必要ないと判断した時間には▶行を付けなくて構いません。
-- めあては指導要領の目標に沿った具体的な文言にしてください。
-- 学習活動は動詞で終わる簡潔な表現にしてください（例：「〜する」「〜を調べる」）。
-
-出力は、必ず単一の有効なJSON配列としてください。途中で途切れたり、フォーマットが崩れたりしないようにしてください。
-出力形式（JSON配列）:
-[
-  {
-    "subject": "教科名",
-    "unitName": "単元名1",
-    "totalHours": 8,
-    "hourlyActivities": [
-      { "hour": 1, "activity": "めあて：〜\\n・〜\\n・〜\\n▶準備物" },
-      { "hour": 2, "activity": "めあて：〜\\n・〜\\n・〜" }
-    ]
-  }
-]`;
+  const prompt = buildUnitMasterPrompt_(gradeContext);
   logInfo(`PDF処理中: ${file.getName()}`);
   try {
     const blob = file.getBlob();
@@ -703,6 +660,446 @@ function getPdfProcessingStatusForWebApp() {
     return { success: true, eventStatus, unitStatus };
   } catch(e) {
     return { success: false, error: e.message };
+  }
+}
+
+// ===================================================
+// ===== Webアプリ用 プレビュー方式 API (v2) =====
+// =====（抽出→プレビュー確認→反映 の2段階方式）=====
+// ===================================================
+
+/**
+ * クライアントから渡されたファイル参照（Drive fileId または base64直接アップロード）からPDF Blobを取得します。
+ * @param {{fileId?: string, base64?: string, name?: string}} fileRef
+ * @returns {{blob: GoogleAppsScript.Base.Blob, name: string}}
+ */
+function getPdfBlobFromRef_(fileRef) {
+  // Gemini API の inline_data はリクエスト全体で約20MBが上限のため、余裕を持たせて制限する
+  const MAX_PDF_BYTES = 15 * 1024 * 1024;
+
+  if (!fileRef || typeof fileRef !== 'object') {
+    throw new Error('ファイル情報が指定されていません。');
+  }
+
+  if (fileRef.fileId) {
+    const file = DriveApp.getFileById(fileRef.fileId);
+    const blob = file.getBlob();
+    if (blob.getBytes().length > MAX_PDF_BYTES) {
+      throw new Error(`「${file.getName()}」のサイズが大きすぎます（15MBまで対応）。`);
+    }
+    return { blob: blob, name: file.getName() };
+  }
+
+  if (fileRef.base64) {
+    const name = fileRef.name || 'アップロードPDF.pdf';
+    let bytes;
+    try {
+      bytes = Utilities.base64Decode(fileRef.base64);
+    } catch (e) {
+      throw new Error(`「${name}」のアップロードデータを読み取れませんでした。`);
+    }
+    if (bytes.length > MAX_PDF_BYTES) {
+      throw new Error(`「${name}」のサイズが大きすぎます（15MBまで対応）。`);
+    }
+    return { blob: Utilities.newBlob(bytes, 'application/pdf', name), name: name };
+  }
+
+  throw new Error('ファイル情報の形式が不正です。');
+}
+
+/**
+ * 処理対象の月（今月以降の年度内の月）を求めます。
+ * @param {number} fiscalYear 年度（西暦・4月始まり）
+ * @returns {{month: number, year: number}[]}
+ */
+function getTargetEventMonths_(fiscalYear) {
+  const today = new Date();
+  const firstDayOfCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const allMonths = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+  return allMonths
+    .map(month => ({ month: month, year: (month >= 4) ? fiscalYear : fiscalYear + 1 }))
+    .filter(m => new Date(m.year, m.month - 1, 1) >= firstDayOfCurrentMonth);
+}
+
+/**
+ * [Webアプリ API] 行事予定PDFを解析し、書き込みは行わずに抽出結果を返します（プレビュー用）。
+ * 従来の「1ファイル×月ごとに1回」のAPI呼び出しを、1ファイル1回の呼び出しに統合して高速化しています。
+ * @param {{fileId?: string, base64?: string, name?: string}} fileRef
+ * @param {number|string} fiscalYear 年度（西暦・4月始まり）
+ * @returns {{success: boolean, fileName?: string, events?: Object[], error?: string}}
+ */
+function extractEventsFromPdfForWeb(fileRef, fiscalYear) {
+  try {
+    fiscalYear = parseInt(fiscalYear, 10);
+    if (isNaN(fiscalYear)) throw new Error('対象年度の形式が不正です。西暦4桁で指定してください。');
+
+    const targetMonths = getTargetEventMonths_(fiscalYear);
+    if (targetMonths.length === 0) throw new Error('処理対象となる月（今月以降）がありませんでした。対象年度を確認してください。');
+
+    const { blob, name } = getPdfBlobFromRef_(fileRef);
+    const apiKey = getApiKey_();
+
+    const monthListText = targetMonths.map(m => `${m.year}年${m.month}月`).join(', ');
+    const prompt = `あなたは日本の学校の行事予定を整理する専門家です。
+添付されたPDFファイルは、ある学校の ${fiscalYear} 年度（ ${fiscalYear} 年4月～ ${fiscalYear + 1} 年3月）の行事予定表です。
+このPDFの中から、以下の対象期間に含まれる予定をすべて抽出し、ルールに従ってJSON形式の配列で出力してください。
+# 対象期間（この期間以外の予定は無視してください）
+${monthListText}
+# 抽出ルール
+1.  日付の特定:
+    - ${fiscalYear} 年度なので、4月～12月は ${fiscalYear} 年、1月～3月は ${fiscalYear + 1} 年として日付を生成してください。
+    - 最終的な日付は必ず "YYYY-MM-DD" 形式にしてください。
+2.  内容の分類:
+    - 児童生徒が関わる学校行事（例：始業式, 遠足, 運動会, 委員会, クラブ）は、typeを "event" としてください。
+    - 教職員のみが関わる予定（例：会議, 研修, 出張, 初任研, 三部会）は、typeを "meeting" としてください。
+3.  複数予定の分割: 1つの日付に複数の予定がある場合は、それぞれ別のオブジェクトとしてください。
+4.  日付順: 出力は日付の昇順に並べてください。
+# 出力形式 (JSON配列)
+[
+  { "date": "YYYY-MM-DD", "content": "（予定の内容）", "type": "event" },
+  { "date": "YYYY-MM-DD", "content": "（予定の内容）", "type": "meeting" }
+]`;
+
+    const buildContinuation = (collected) => {
+      const items = collected.map(e => `${e.date}: ${e.content}`).join(', ');
+      return `${prompt}
+
+【重要な追加指示】
+前回のリクエストで出力がトークン上限に達し、途中で切れてしまいました。
+以下の ${collected.length} 件の予定は既に取得済みです:
+${items}
+
+上記の予定は絶対に出力しないでください。まだ出力されていない残りの予定のみを、同じJSON配列形式で出力してください。`;
+    };
+
+    const extracted = callGeminiApiChunked_(prompt, apiKey, [blob], buildContinuation);
+    if (!extracted || !Array.isArray(extracted)) {
+      throw new Error(`PDF「${name}」からデータを抽出できませんでした。APIレスポンスが不正です。`);
+    }
+
+    // 対象期間内かどうかの検証と、DB照合用の情報付与
+    const allowedMonths = new Set(targetMonths.map(m => `${m.year}-${String(m.month).padStart(2, '0')}`));
+    const dbDates = getDatabaseDateSet_();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const events = [];
+    extracted.forEach(item => {
+      if (!item || !item.date || !/^\d{4}-\d{2}-\d{2}$/.test(item.date) || !item.content) return;
+      if (!allowedMonths.has(item.date.substring(0, 7))) return;
+      const d = new Date(item.date.replace(/-/g, '/'));
+      if (isNaN(d.getTime())) return;
+      d.setHours(0, 0, 0, 0);
+      events.push({
+        date: item.date,
+        content: String(item.content).trim(),
+        type: (item.type === 'meeting') ? 'meeting' : 'event',
+        inDb: dbDates.has(formatDate(d)),
+        isPast: d < today
+      });
+    });
+    events.sort((a, b) => a.date.localeCompare(b.date));
+
+    logInfo(`行事予定プレビュー抽出: PDF「${name}」から ${events.length} 件を抽出しました。`);
+    return { success: true, fileName: name, events: events };
+  } catch (e) {
+    logError('extractEventsFromPdfForWeb', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * データベースシートに存在する日付（"yyyy/MM/dd"）のセットを返します。
+ * @returns {Set<string>}
+ */
+function getDatabaseDateSet_() {
+  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+  const dates = new Set();
+  if (!dbSheet) return dates;
+  const dbCols = getDbColumns();
+  const lastRow = dbSheet.getLastRow();
+  if (lastRow < 2) return dates;
+  const values = dbSheet.getRange(2, dbCols.DATE, lastRow - 1, 1).getValues();
+  values.forEach(row => {
+    if (row[0] instanceof Date) dates.add(formatDate(row[0]));
+  });
+  return dates;
+}
+
+/**
+ * [Webアプリ API] プレビューで確認・修正済みの行事予定をデータベースに反映します。
+ * @param {{date: string, content: string, type: string}[]} events
+ * @returns {{success: boolean, updated?: number, skippedPast?: number, skippedDuplicate?: number, notInDb?: number, error?: string}}
+ */
+function applyExtractedEventsFromWeb(events) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    return { success: false, error: '他の処理が実行中です。しばらく待ってから再度お試しください。' };
+  }
+  try {
+    if (!events || !Array.isArray(events) || events.length === 0) {
+      throw new Error('反映する予定がありません。');
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
+
+    const dbCols = getDbColumns();
+    const dbData = dbSheet.getDataRange().getValues();
+    const dateMap = new Map();
+    for (let i = 1; i < dbData.length; i++) {
+      if (dbData[i][dbCols.DATE - 1] instanceof Date) {
+        dateMap.set(formatDate(dbData[i][dbCols.DATE - 1]), i);
+      }
+    }
+
+    let updated = 0, skippedPast = 0, skippedDuplicate = 0, notInDb = 0;
+    let isDbModified = false;
+
+    events.forEach(item => {
+      if (!item || !item.date || !/^\d{4}-\d{2}-\d{2}$/.test(item.date) || !item.content) return;
+      const targetDate = new Date(item.date.replace(/-/g, '/'));
+      if (isNaN(targetDate.getTime())) return;
+      targetDate.setHours(0, 0, 0, 0);
+      const targetDateStr = formatDate(targetDate);
+
+      if (!dateMap.has(targetDateStr)) { notInDb++; return; }
+      if (targetDate < today) { skippedPast++; return; }
+
+      const rowIdx = dateMap.get(targetDateStr);
+      const targetCol = (item.type === 'meeting') ? dbCols.AFTERSCHOOL : dbCols.EVENT;
+      if (!targetCol) return;
+
+      const currentValue = (dbData[rowIdx][targetCol - 1] || '').toString();
+      const newContent = String(item.content).trim();
+      if (!newContent) return;
+      if (currentValue.includes(newContent)) { skippedDuplicate++; return; }
+
+      dbData[rowIdx][targetCol - 1] = currentValue ? `${currentValue}\n${newContent}` : newContent;
+      updated++;
+      isDbModified = true;
+    });
+
+    if (isDbModified) {
+      dbSheet.getDataRange().setValues(dbData);
+    }
+
+    logInfo(`行事予定プレビュー反映: ${updated} 件転記（過去: ${skippedPast}, 重複: ${skippedDuplicate}, DB対象外: ${notInDb}）。`);
+    return { success: true, updated, skippedPast, skippedDuplicate, notInDb };
+  } catch (e) {
+    logError('applyExtractedEventsFromWeb', e);
+    return { success: false, error: e.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * [Webアプリ API] 指導計画PDFを解析し、書き込みは行わずに単元情報を返します（プレビュー用）。
+ * @param {{fileId?: string, base64?: string, name?: string}} fileRef
+ * @returns {{success: boolean, fileName?: string, units?: Object[], error?: string}}
+ */
+function extractUnitsFromPdfForWeb(fileRef) {
+  try {
+    const { blob, name } = getPdfBlobFromRef_(fileRef);
+    const apiKey = getApiKey_();
+    const grade = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_GRADE) || '';
+    const gradeContext = grade ? `対象学年は${grade}です。` : '';
+    const prompt = buildUnitMasterPrompt_(gradeContext);
+
+    const buildContinuation = (collected) => {
+      const names = collected.map(u => `「${u.unitName}」`).join(', ');
+      return `${prompt}
+
+【重要な追加指示】
+前回のリクエストで出力がトークン上限に達し、途中で切れてしまいました。
+以下の ${collected.length} 件の単元は既に取得済みです:
+${names}
+
+上記の単元は絶対に出力しないでください。まだ出力されていない残りの単元のみを、同じJSON配列形式で出力してください。`;
+    };
+
+    const extracted = callGeminiApiChunked_(prompt, apiKey, [blob], buildContinuation);
+    if (!extracted || !Array.isArray(extracted)) {
+      throw new Error(`PDF「${name}」からデータを抽出できませんでした。APIレスポンスが不正です。`);
+    }
+
+    const units = [];
+    extracted.forEach(unit => {
+      if (!unit || (!unit.unitName && !unit.subject)) return;
+      const hourlyActivities = [];
+      if (unit.hourlyActivities && Array.isArray(unit.hourlyActivities)) {
+        unit.hourlyActivities.forEach(a => {
+          if (!a) return;
+          hourlyActivities.push({
+            hour: parseInt(a.hour, 10) || (hourlyActivities.length + 1),
+            activity: String(a.activity || '').trim()
+          });
+        });
+      }
+      units.push({
+        subject: String(unit.subject || '').trim(),
+        unitName: String(unit.unitName || '').trim(),
+        totalHours: parseInt(unit.totalHours, 10) || hourlyActivities.length || 0,
+        hourlyActivities: hourlyActivities
+      });
+    });
+
+    logInfo(`単元マスタプレビュー抽出: PDF「${name}」から ${units.length} 単元を抽出しました。`);
+    return { success: true, fileName: name, units: units };
+  } catch (e) {
+    logError('extractUnitsFromPdfForWeb', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * 指導計画PDF解析用のプロンプトを構築します（トリガー処理・プレビュー処理で共用）。
+ * @param {string} gradeContext 学年の補足文
+ * @returns {string}
+ */
+function buildUnitMasterPrompt_(gradeContext) {
+  return `あなたは日本の小学校教育の専門家です。添付された年間指導計画のPDFから、以下の情報を抽出し、指定されたJSON形式で出力してください。
+このPDFは複数ページにわたる長いものである可能性があります。すべてのページを注意深く読み取り、すべての単元を抽出してください。
+${gradeContext}
+
+抽出項目:
+1.  **subject**: 教科名（例：国語, 算数）
+2.  **unitName**: 単元名や題材名
+3.  **totalHours**: その単元に配当されている合計時間数（半角数字）
+4.  **hourlyActivities**: その単元の、時間ごとの学習活動のリスト。
+    - **hour**: 何時間目かを示す半角数字。
+    - **activity**: その時間の学習活動を、以下のルールに従って構造的に記述してください。
+
+## activityの記述ルール
+週案を見ただけで授業の流れが把握できるよう、以下の形式で改行（\\n）を使って構造的に記載してください。
+ただし、全体で100〜150文字程度に収め、冗長にならないようにしてください。
+
+### 形式
+（めあて）1行目にその時間のめあてを簡潔に書く
+（学習活動）・（中黒）で始まる箇条書きで主な活動を2〜3項目
+（準備物）教師の準備物や児童の持ち物がある場合のみ、末尾に▶で記載
+
+### 記述例
+"めあて：物語の場面構成を捉えよう\\n・全文を通読し初発の感想を書く\\n・場面分けをして構成を整理する\\n▶ワークシート"
+"めあて：1Lより小さいかさの表し方を考えよう\\n・dLの単位を知り水のかさを量る\\n・dLを使って身の回りの容器のかさを調べる\\n▶1Lます・水筒（児童）"
+"めあて：春の生き物を観察しよう\\n・校庭で春の植物や昆虫を観察する\\n・観察カードに記録をまとめる\\n▶観察カード・虫めがね（児童）"
+
+### 注意事項
+- PDFに準備物や持ち物の情報がない場合は、あなたの教育の専門知識をもとに、その授業で一般的に必要と考えられるものを補完してください。ただし、特に必要ないと判断した時間には▶行を付けなくて構いません。
+- めあては指導要領の目標に沿った具体的な文言にしてください。
+- 学習活動は動詞で終わる簡潔な表現にしてください（例：「〜する」「〜を調べる」）。
+
+出力は、必ず単一の有効なJSON配列としてください。途中で途切れたり、フォーマットが崩れたりしないようにしてください。
+出力形式（JSON配列）:
+[
+  {
+    "subject": "教科名",
+    "unitName": "単元名1",
+    "totalHours": 8,
+    "hourlyActivities": [
+      { "hour": 1, "activity": "めあて：〜\\n・〜\\n・〜\\n▶準備物" },
+      { "hour": 2, "activity": "めあて：〜\\n・〜\\n・〜" }
+    ]
+  }
+]`;
+}
+
+/**
+ * [Webアプリ API] プレビューで確認・修正済みの単元情報を「単元マスタ」シートに反映します。
+ * 同じ教科（表記ゆれを正規化して比較）の既存行は削除して置き換えます。
+ * @param {Object[]} units 反映する単元の配列 { subject, unitName, totalHours, hourlyActivities }
+ * @param {{addSummaryRows?: boolean}} options
+ * @returns {{success: boolean, unitCount?: number, rowCount?: number, replacedSubjects?: string[], error?: string}}
+ */
+function applyExtractedUnitsFromWeb(units, options) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    return { success: false, error: '他の処理が実行中です。しばらく待ってから再度お試しください。' };
+  }
+  try {
+    if (!units || !Array.isArray(units) || units.length === 0) {
+      throw new Error('反映する単元がありません。');
+    }
+    options = options || {};
+    const addSummaryRows = options.addSummaryRows !== false; // デフォルトON（従来動作と同じ）
+
+    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    let masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!masterSheet) {
+      masterSheet = ss.insertSheet(SHEET_NAME_UNIT_MASTER);
+      masterSheet.getRange("A1:E1").setValues([["教科", "単元名", "総時間数", "何時間目", "時間ごとの学習活動"]]).setFontWeight("bold");
+    }
+
+    // 反映対象の教科（正規化名）
+    const newSubjects = new Set();
+    const subjectLabels = new Set();
+    units.forEach(unit => {
+      if (unit.subject) {
+        newSubjects.add(normalizeSubjectName_(unit.subject));
+        subjectLabels.add(String(unit.subject).trim());
+      }
+    });
+
+    // 同一教科の既存行を削除（従来のトリガー処理と同じ置き換え仕様）
+    if (newSubjects.size > 0 && masterSheet.getLastRow() > 1) {
+      const numDataRows = masterSheet.getLastRow() - 1;
+      const existingData = masterSheet.getRange(2, 1, numDataRows, 5).getValues();
+      const rowsToKeep = existingData.filter(row => !newSubjects.has(normalizeSubjectName_(row[0])));
+      masterSheet.getRange(2, 1, numDataRows, 5).clearContent();
+      if (rowsToKeep.length > 0) {
+        masterSheet.getRange(2, 1, rowsToKeep.length, 5).setValues(rowsToKeep);
+      }
+      const removedCount = numDataRows - rowsToKeep.length;
+      if (removedCount > 0) {
+        logInfo(`単元マスタ: 教科「${[...subjectLabels].join(', ')}」の既存 ${removedCount} 行を削除し、プレビュー確認済みデータで置換します。`);
+      }
+    }
+
+    const allRows = [];
+    let unitCount = 0;
+    units.forEach(unit => {
+      const activities = (unit.hourlyActivities && Array.isArray(unit.hourlyActivities)) ? unit.hourlyActivities : [];
+      let hasRow = false;
+      activities.forEach(activity => {
+        if (!activity || !activity.activity) return;
+        allRows.push([
+          unit.subject || '',
+          unit.unitName || '',
+          unit.totalHours || '',
+          activity.hour || '',
+          activity.activity || ''
+        ]);
+        hasRow = true;
+      });
+      if (hasRow) unitCount++;
+      if (addSummaryRows && unit.unitName && unit.totalHours > 0 && hasRow) {
+        allRows.push([
+          unit.subject || '',
+          `${unit.unitName} のまとめ`,
+          1,
+          1,
+          "めあて：単元の学習を振り返ろう\n・学習内容の要点を確認する\n・まとめテストやふり返りカードに取り組む"
+        ]);
+      }
+    });
+
+    if (allRows.length > 0) {
+      masterSheet.getRange(masterSheet.getLastRow() + 1, 1, allRows.length, allRows[0].length).setValues(allRows);
+    }
+
+    logInfo(`単元マスタプレビュー反映: ${unitCount} 単元・${allRows.length} 行を書き込みました。`);
+    return { success: true, unitCount: unitCount, rowCount: allRows.length, replacedSubjects: [...subjectLabels] };
+  } catch (e) {
+    logError('applyExtractedUnitsFromWeb', e);
+    return { success: false, error: e.message };
+  } finally {
+    lock.releaseLock();
   }
 }
 

@@ -77,6 +77,7 @@
         loadTasks(); // タスクをページ読み込み時に初期ロード（デフォルトでリスト表示）
         restoreTaskSidebarState(); // 週案タスクサイドバーの開閉状態を復元（デフォルトは収納）
         checkAutoReflection(); // 放課後にアプリを開いた場合、今日の振り返りモードを自動起動
+        initPdfImportUI(); // PDF読み込み（ドロップゾーン・ファイル選択）の配線
     };
 
     // ===== 週案グリッドの土日列 表示/非表示 =====
@@ -5902,112 +5903,801 @@
         });
     };
 
-    // ===== データ連携 (PDF処理) =====
-    function fetchPdfList(type) {
-        var listEl = document.getElementById(type + 'FileList');
-        var statusEl = document.getElementById(type + 'StatusText');
-        listEl.innerHTML = '<div class="empty-message">読み込み中...</div>';
-        statusEl.textContent = '一覧を取得中...';
+    // =====================================================================
+    // ===== データ連携 (PDF読み込み v2)
+    // ===== 直接アップロード / Drive選択 → 並列AI解析（ファイル別進捗） →
+    // ===== プレビュー（行事=月ごと / 単元=教科ごと）で確認・修正・除外 → 反映
+    // =====================================================================
 
-        google.script.run
-            .withSuccessHandler(function (res) {
-                if (res.success) {
-                    renderFileList(type, res.files);
-                    statusEl.textContent = res.files.length + '件のPDFを取得しました。';
-                } else {
-                    listEl.innerHTML = '<div class="empty-message" style="color:var(--danger)">エラー: ' + escHtml(res.error) + '</div>';
-                    statusEl.textContent = '';
-                }
-            })
-            .withFailureHandler(function (e) {
-                listEl.innerHTML = '<div class="empty-message" style="color:var(--danger)">通信エラー: ' + escHtml(e.message) + '</div>';
-                statusEl.textContent = '';
-            })
-            .getPdfFileListForWebApp(type);
+    var PDF_MAX_FILE_BYTES = 15 * 1024 * 1024; // サーバー側 (Gemini inline_data 上限) と合わせる
+    var PDF_EXTRACT_CONCURRENCY = 2;           // AI解析の同時実行数
+
+    var PDF_IMPORT = {
+        unit: { files: [], running: false, seq: 0 },
+        event: { files: [], running: false, seq: 0 }
+    };
+
+    var PDF_PREVIEW = { type: null, groups: [] }; // 表示中プレビューの作業データ
+
+    // google.script.run の Promise ラッパー（並列制御に使用）
+    function pdfRunServer_(method) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return new Promise(function (resolve, reject) {
+            var runner = google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(function (e) {
+                    reject(new Error(e && e.message ? e.message : '通信エラーが発生しました'));
+                });
+            runner[method].apply(runner, args);
+        });
     }
 
-    function renderFileList(type, files) {
-        var listEl = document.getElementById(type + 'FileList');
-        if (files.length === 0) {
-            listEl.innerHTML = '<div class="empty-message">PDFファイルが見つかりません。</div>';
-            document.getElementById('start' + type.charAt(0).toUpperCase() + type.slice(1) + 'Btn').disabled = true;
+    // ---- 初期化（ドロップゾーン・ファイル入力の配線） ----
+    function initPdfImportUI() {
+        ['unit', 'event'].forEach(function (type) {
+            var zone = document.getElementById(type + 'DropZone');
+            var input = document.getElementById(type + 'FileInput');
+            if (!zone || !input) return;
+
+            zone.addEventListener('click', function () { input.click(); });
+            zone.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+            });
+            zone.addEventListener('dragover', function (e) {
+                e.preventDefault();
+                zone.classList.add('dragover');
+            });
+            zone.addEventListener('dragleave', function () { zone.classList.remove('dragover'); });
+            zone.addEventListener('drop', function (e) {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                if (e.dataTransfer && e.dataTransfer.files) addUploadedPdfFiles(type, e.dataTransfer.files);
+            });
+            input.addEventListener('change', function () {
+                addUploadedPdfFiles(type, input.files);
+                input.value = ''; // 同じファイルを再選択できるようにリセット
+            });
+        });
+
+        // 対象年度の初期値（1〜3月は前年が年度）
+        var yearInput = document.getElementById('eventFiscalYear');
+        if (yearInput && !yearInput.value) {
+            var now = new Date();
+            yearInput.value = (now.getMonth() + 1 <= 3) ? now.getFullYear() - 1 : now.getFullYear();
+        }
+    }
+
+    // ---- キュー管理 ----
+    function addUploadedPdfFiles(type, fileList) {
+        var state = PDF_IMPORT[type];
+        var added = 0, rejected = [];
+        Array.prototype.forEach.call(fileList, function (f) {
+            var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+            if (!isPdf) { rejected.push(f.name + '（PDFではありません）'); return; }
+            if (f.size > PDF_MAX_FILE_BYTES) { rejected.push(f.name + '（15MBを超えています）'); return; }
+            var dup = state.files.some(function (item) {
+                return item.source === 'upload' && item.name === f.name && item.size === f.size;
+            });
+            if (dup) { rejected.push(f.name + '（追加済み）'); return; }
+            state.files.push({
+                id: 'f' + (++state.seq),
+                name: f.name,
+                size: f.size,
+                source: 'upload',
+                file: f,          // Fileオブジェクト（base64化は解析開始時に実施）
+                status: 'pending',
+                error: null,
+                items: null       // 抽出結果
+            });
+            added++;
+        });
+        if (added > 0) showToast('success', added + '件のPDFを追加しました。');
+        if (rejected.length > 0) showToast('error', '追加できないファイル: ' + rejected.join(' / '));
+        renderPdfQueue(type);
+    }
+
+    function addDrivePdfFile_(type, fileId, name) {
+        var state = PDF_IMPORT[type];
+        var dup = state.files.some(function (item) { return item.fileId === fileId; });
+        if (dup) return false;
+        state.files.push({
+            id: 'f' + (++state.seq),
+            name: name || '(名称不明のPDF)',
+            size: 0,
+            source: 'drive',
+            fileId: fileId,
+            status: 'pending',
+            error: null,
+            items: null
+        });
+        return true;
+    }
+
+    function removePdfQueueItem(type, id) {
+        var state = PDF_IMPORT[type];
+        if (state.running) return;
+        state.files = state.files.filter(function (item) { return item.id !== id; });
+        renderPdfQueue(type);
+    }
+
+    function clearPdfQueue(type) {
+        var state = PDF_IMPORT[type];
+        if (state.running) { showToast('error', '解析の実行中はクリアできません。'); return; }
+        state.files = [];
+        renderPdfQueue(type);
+    }
+
+    // ---- キュー描画（ファイルごとの処理状況表示） ----
+    function renderPdfQueue(type) {
+        var state = PDF_IMPORT[type];
+        var queueEl = document.getElementById(type + 'Queue');
+        var listEl = document.getElementById(type + 'QueueList');
+        var summaryEl = document.getElementById(type + 'QueueSummary');
+        var extractBtn = document.getElementById(type + 'ExtractBtn');
+        var previewBtn = document.getElementById(type + 'PreviewBtn');
+        if (!queueEl || !listEl) return;
+
+        if (state.files.length === 0) {
+            queueEl.style.display = 'none';
+            listEl.innerHTML = '';
+            if (extractBtn) {
+                extractBtn.disabled = true;
+                extractBtn.innerHTML = '<span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">neurology</span> AI解析を開始（プレビュー）';
+            }
+            if (previewBtn) previewBtn.style.display = 'none';
+            updatePdfProgressBar(type);
             return;
         }
 
+        queueEl.style.display = '';
         listEl.innerHTML = '';
-        files.forEach(function (file) {
-            var item = document.createElement('div');
-            item.className = 'file-item';
+        state.files.forEach(function (item) {
+            var row = document.createElement('div');
+            row.className = 'pdf-queue-item';
 
-            var cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.value = file.id;
-            cb.className = type + '-file-cb';
-            cb.id = 'cb_' + file.id;
-            cb.onchange = function () { updateSelection(type); };
+            var statusChip = document.createElement('span');
+            statusChip.className = 'pdf-file-status st-' + item.status;
+            if (item.status === 'pending') {
+                statusChip.innerHTML = '<span class="material-symbols-outlined" style="font-size:15px;">schedule</span> 待機中';
+            } else if (item.status === 'processing') {
+                statusChip.innerHTML = '<span class="material-symbols-outlined spin">progress_activity</span> AI解析中...';
+            } else if (item.status === 'done') {
+                var count = item.items ? item.items.length : 0;
+                var unitLabel = (type === 'unit') ? '単元' : '件';
+                statusChip.innerHTML = '<span class="material-symbols-outlined" style="font-size:15px;">check_circle</span> 抽出完了（' + count + unitLabel + '）';
+            } else {
+                statusChip.innerHTML = '<span class="material-symbols-outlined" style="font-size:15px;">error</span> エラー';
+            }
 
-            var label = document.createElement('label');
-            label.htmlFor = 'cb_' + file.id;
-            label.textContent = file.name;
+            var icon = document.createElement('span');
+            icon.className = 'material-symbols-outlined';
+            icon.style.cssText = 'font-size:18px;color:var(--danger);flex-shrink:0;';
+            icon.textContent = 'picture_as_pdf';
 
-            var dateSpan = document.createElement('span');
-            dateSpan.className = 'file-date';
-            dateSpan.textContent = new Date(file.dateCreated).toLocaleDateString('ja-JP');
+            var nameEl = document.createElement('span');
+            nameEl.className = 'pdf-file-name';
+            nameEl.textContent = item.name;
+            nameEl.title = item.name;
 
-            item.appendChild(cb);
-            item.appendChild(label);
-            item.appendChild(dateSpan);
-            listEl.appendChild(item);
+            var sourceEl = document.createElement('span');
+            sourceEl.className = 'pdf-file-source';
+            sourceEl.textContent = item.source === 'upload' ? 'アップロード' : 'Drive';
+
+            row.appendChild(icon);
+            row.appendChild(nameEl);
+            row.appendChild(sourceEl);
+            row.appendChild(statusChip);
+
+            if (!state.running) {
+                var removeBtn = document.createElement('button');
+                removeBtn.className = 'pdf-file-remove';
+                removeBtn.title = 'リストから削除';
+                removeBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:17px;">close</span>';
+                removeBtn.onclick = function () { removePdfQueueItem(type, item.id); };
+                row.appendChild(removeBtn);
+            }
+
+            if (item.status === 'error' && item.error) {
+                var errEl = document.createElement('div');
+                errEl.className = 'pdf-file-error-msg';
+                errEl.textContent = item.error;
+                row.appendChild(errEl);
+            }
+            listEl.appendChild(row);
         });
-        updateSelection(type);
+
+        var doneCount = state.files.filter(function (f) { return f.status === 'done'; }).length;
+        var errorCount = state.files.filter(function (f) { return f.status === 'error'; }).length;
+        var summary = state.files.length + ' ファイル';
+        if (doneCount > 0 || errorCount > 0) {
+            var parts = [];
+            if (doneCount > 0) parts.push('抽出済み ' + doneCount);
+            if (errorCount > 0) parts.push('エラー ' + errorCount);
+            summary += '（' + parts.join(' / ') + '）';
+        }
+        if (summaryEl) summaryEl.textContent = summary;
+
+        var pendingCount = state.files.filter(function (f) { return f.status === 'pending' || f.status === 'error'; }).length;
+        if (extractBtn) {
+            extractBtn.disabled = state.running || pendingCount === 0;
+            if (state.running) {
+                extractBtn.innerHTML = '<span class="material-symbols-outlined fs-6 spin" style="vertical-align:text-bottom;">progress_activity</span> AI解析中...';
+            } else {
+                var label = (errorCount > 0 && pendingCount === errorCount) ? 'エラーのファイルを再解析' : 'AI解析を開始（プレビュー）';
+                extractBtn.innerHTML = '<span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">neurology</span> ' + label;
+            }
+        }
+
+        var extractedTotal = countExtractedItems_(type);
+        if (previewBtn) {
+            previewBtn.style.display = (extractedTotal > 0 && !state.running) ? '' : 'none';
+        }
+        updatePdfProgressBar(type);
     }
 
-    function updateSelection(type) {
-        var count = document.querySelectorAll('.' + type + '-file-cb:checked').length;
-        var btn = document.getElementById('start' + type.charAt(0).toUpperCase() + type.slice(1) + 'Btn');
-        btn.disabled = count === 0;
-        var statusEl = document.getElementById(type + 'StatusText');
-        statusEl.textContent = count + '件のファイルが選択されています。';
+    function countExtractedItems_(type) {
+        return PDF_IMPORT[type].files.reduce(function (sum, f) {
+            return sum + ((f.status === 'done' && f.items) ? f.items.length : 0);
+        }, 0);
     }
 
-    async function startProcessing(type) {
-        var checkboxes = document.querySelectorAll('.' + type + '-file-cb:checked');
-        var fileIds = Array.from(checkboxes).map(function (cb) { return cb.value; });
+    function updatePdfProgressBar(type) {
+        var state = PDF_IMPORT[type];
+        var track = document.getElementById(type + 'ProgressTrack');
+        var fill = document.getElementById(type + 'ProgressFill');
+        if (!track || !fill) return;
+        var total = state.files.length;
+        var finished = state.files.filter(function (f) { return f.status === 'done' || f.status === 'error'; }).length;
+        if (!state.running && (total === 0 || finished === 0)) {
+            track.style.display = 'none';
+            fill.style.width = '0%';
+            return;
+        }
+        track.style.display = '';
+        fill.style.width = (total === 0 ? 0 : Math.round(finished / total * 100)) + '%';
+    }
 
-        if (fileIds.length === 0) return;
-
-        var result = await Swal.fire({
-            title: '処理の開始',
-            text: '選択した ' + fileIds.length + ' 個のPDFからデータの読み込みを開始します。よろしいですか？',
-            icon: 'question',
-            showCancelButton: true,
-            confirmButtonText: '開始する',
-            cancelButtonText: 'キャンセル',
-            confirmButtonColor: '#1a73e8'
+    // ---- ファイル読み込み（アップロード分の base64 化） ----
+    function readFileAsBase64_(file) {
+        return new Promise(function (resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function () {
+                var result = String(reader.result || '');
+                var idx = result.indexOf(',');
+                resolve(idx >= 0 ? result.substring(idx + 1) : result);
+            };
+            reader.onerror = function () { reject(new Error('ファイルの読み込みに失敗しました。')); };
+            reader.readAsDataURL(file);
         });
-        if (!result.isConfirmed) return;
+    }
 
-        showToast('info', 'バッチ処理をリクエスト中...');
+    // ---- AI解析（並列実行・ファイル別進捗更新） ----
+    async function startExtraction(type) {
+        var state = PDF_IMPORT[type];
+        if (state.running) return;
 
+        var fiscalYear = null;
         if (type === 'event') {
-            var year = document.getElementById('eventFiscalYear').value;
-            if (!year) {
-                showToast('error', '対象年度を入力してください。');
+            fiscalYear = parseInt(document.getElementById('eventFiscalYear').value, 10);
+            if (!fiscalYear || fiscalYear < 2000 || fiscalYear > 2100) {
+                showToast('error', '対象年度を西暦4桁で入力してください。');
                 return;
             }
-            google.script.run
-                .withSuccessHandler(onProcessStartSuccess)
-                .withFailureHandler(onProcessStartFail)
-                .startEventPdfProcessingFromWebApp(fileIds, parseInt(year));
+        }
+
+        var targets = state.files.filter(function (f) { return f.status === 'pending' || f.status === 'error'; });
+        if (targets.length === 0) { showToast('info', '解析するファイルがありません。'); return; }
+
+        state.running = true;
+        targets.forEach(function (f) { f.error = null; });
+        renderPdfQueue(type);
+
+        var queue = targets.slice();
+        var worker = async function () {
+            while (queue.length > 0) {
+                var item = queue.shift();
+                item.status = 'processing';
+                renderPdfQueue(type);
+                try {
+                    var fileRef;
+                    if (item.source === 'upload') {
+                        fileRef = { base64: await readFileAsBase64_(item.file), name: item.name };
+                    } else {
+                        fileRef = { fileId: item.fileId };
+                    }
+                    var res;
+                    if (type === 'event') {
+                        res = await pdfRunServer_('extractEventsFromPdfForWeb', fileRef, fiscalYear);
+                    } else {
+                        res = await pdfRunServer_('extractUnitsFromPdfForWeb', fileRef);
+                    }
+                    if (!res || !res.success) throw new Error((res && res.error) || '抽出に失敗しました。');
+
+                    var raw = (type === 'event') ? (res.events || []) : (res.units || []);
+                    item.items = raw.map(function (r, i) {
+                        var copy = Object.assign({}, r);
+                        copy._uid = item.id + '_' + i;
+                        copy._fileName = res.fileName || item.name;
+                        // 除外の初期値: 行事はDBに日付がある未来の予定のみON。単元は全てON。
+                        copy.checked = (type === 'event') ? (r.inDb && !r.isPast) : true;
+                        return copy;
+                    });
+                    item.status = 'done';
+                } catch (e) {
+                    item.status = 'error';
+                    item.error = e.message;
+                }
+                renderPdfQueue(type);
+            }
+        };
+
+        var workers = [];
+        for (var i = 0; i < Math.min(PDF_EXTRACT_CONCURRENCY, queue.length); i++) workers.push(worker());
+        await Promise.all(workers);
+
+        state.running = false;
+        renderPdfQueue(type);
+
+        var extractedTotal = countExtractedItems_(type);
+        var errorCount = state.files.filter(function (f) { return f.status === 'error'; }).length;
+        if (extractedTotal > 0) {
+            showToast('success', 'AI解析が完了しました（' + extractedTotal + (type === 'unit' ? '単元' : '件') + '抽出）。プレビューを確認してください。');
+            openPdfPreview(type);
+        } else if (errorCount > 0) {
+            showToast('error', 'すべてのファイルでエラーが発生しました。内容を確認して再解析してください。');
         } else {
-            google.script.run
-                .withSuccessHandler(onProcessStartSuccess)
-                .withFailureHandler(onProcessStartFail)
-                .startUnitMasterProcessingFromWebApp(fileIds);
+            showToast('info', '抽出できるデータが見つかりませんでした。');
         }
     }
 
-    // ===== データ連携 (Google Picker 追加機能) =====
+    // =====================================================================
+    // ===== 抽出結果プレビュー（確認・修正・除外 → 反映） =====
+    // =====================================================================
+
+    function openPdfPreview(type) {
+        var doneFiles = PDF_IMPORT[type].files.filter(function (f) { return f.status === 'done' && f.items && f.items.length > 0; });
+        var allItems = [];
+        doneFiles.forEach(function (f) { allItems = allItems.concat(f.items); });
+        if (allItems.length === 0) { showToast('info', 'プレビューできる抽出結果がありません。'); return; }
+
+        PDF_PREVIEW.type = type;
+        if (type === 'event') {
+            buildEventPreviewGroups_(allItems);
+        } else {
+            buildUnitPreviewGroups_(allItems);
+        }
+
+        document.getElementById('pdfPreviewTitle').textContent =
+            (type === 'event') ? '行事予定の抽出結果プレビュー（月ごと）' : '単元マスタの抽出結果プレビュー（教科ごと）';
+        document.getElementById('pdfPreviewSub').textContent =
+            doneFiles.map(function (f) { return f.name; }).join(' / ') +
+            ((type === 'event') ? ' ─ チェックした予定だけがデータベースに反映されます。内容は直接修正できます。'
+                : ' ─ チェックした単元だけが単元マスタに反映されます。単元名・時間数・学習活動は直接修正できます。');
+
+        renderPdfPreviewToolbar_(type);
+        renderPdfPreviewBody_(type);
+        updatePdfPreviewCount_();
+        document.getElementById('pdfPreviewOverlay').style.display = 'flex';
+    }
+
+    function closePdfPreview() {
+        document.getElementById('pdfPreviewOverlay').style.display = 'none';
+    }
+
+    // 月ごと（"2025-04" 単位）にグループ化
+    function buildEventPreviewGroups_(items) {
+        var byMonth = {};
+        items.forEach(function (it) {
+            var key = (it.date || '').substring(0, 7);
+            if (!key) return;
+            (byMonth[key] = byMonth[key] || []).push(it);
+        });
+        PDF_PREVIEW.groups = Object.keys(byMonth).sort().map(function (key) {
+            var parts = key.split('-');
+            return {
+                key: key,
+                label: parseInt(parts[0], 10) + '年' + parseInt(parts[1], 10) + '月',
+                items: byMonth[key]
+            };
+        });
+    }
+
+    // 教科ごとにグループ化
+    function buildUnitPreviewGroups_(items) {
+        var bySubject = {};
+        var order = [];
+        items.forEach(function (it) {
+            var key = (it.subject || 'その他').trim() || 'その他';
+            if (!bySubject[key]) { bySubject[key] = []; order.push(key); }
+            bySubject[key].push(it);
+        });
+        PDF_PREVIEW.groups = order.map(function (key) {
+            return { key: key, label: key, items: bySubject[key] };
+        });
+    }
+
+    function renderPdfPreviewToolbar_(type) {
+        var bar = document.getElementById('pdfPreviewToolbar');
+        bar.innerHTML = '';
+
+        var selAll = document.createElement('button');
+        selAll.className = 'btn btn-outline btn-sm';
+        selAll.textContent = '全選択';
+        selAll.onclick = function () { setAllPreviewChecked_(true); };
+        var selNone = document.createElement('button');
+        selNone.className = 'btn btn-outline btn-sm';
+        selNone.textContent = '全解除';
+        selNone.onclick = function () { setAllPreviewChecked_(false); };
+        bar.appendChild(selAll);
+        bar.appendChild(selNone);
+
+        var hint = document.createElement('span');
+        hint.style.cssText = 'color:var(--text-hint);font-size:0.72rem;';
+        if (type === 'event') {
+            hint.textContent = '※過去の日付・データベースに無い日付の予定は、はじめからチェックが外れています。';
+        } else {
+            hint.textContent = '※反映時、同じ教科の既存データは置き換えられます。内容を空にした時間は反映されません。';
+        }
+        bar.appendChild(hint);
+
+        if (type === 'unit') {
+            var lbl = document.createElement('label');
+            lbl.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-left:auto;cursor:pointer;font-size:0.75rem;color:var(--text-main);';
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.id = 'pdfAddSummaryRows';
+            cb.checked = true;
+            lbl.appendChild(cb);
+            lbl.appendChild(document.createTextNode('各単元の最後に「まとめ」の1時間を自動追加'));
+            bar.appendChild(lbl);
+        }
+    }
+
+    function setAllPreviewChecked_(checked) {
+        PDF_PREVIEW.groups.forEach(function (g) {
+            g.items.forEach(function (it) { it.checked = checked; });
+        });
+        renderPdfPreviewBody_(PDF_PREVIEW.type);
+        updatePdfPreviewCount_();
+    }
+
+    function renderPdfPreviewBody_(type) {
+        var body = document.getElementById('pdfPreviewBody');
+        body.innerHTML = '';
+        PDF_PREVIEW.groups.forEach(function (group, gi) {
+            body.appendChild(type === 'event' ? buildEventGroupEl_(group, gi) : buildUnitGroupEl_(group, gi));
+        });
+    }
+
+    // ---- グループ共通ヘッダー ----
+    function buildGroupHeaderEl_(group, groupEl, countLabelFn) {
+        var header = document.createElement('div');
+        header.className = 'pdf-preview-group-header';
+
+        var groupCb = document.createElement('input');
+        groupCb.type = 'checkbox';
+        groupCb.style.cssText = 'width:16px;height:16px;cursor:pointer;';
+        groupCb.title = 'このグループを全選択/全解除';
+        var syncGroupCb = function () {
+            var checkedCount = group.items.filter(function (it) { return it.checked; }).length;
+            groupCb.checked = checkedCount > 0 && checkedCount === group.items.length;
+            groupCb.indeterminate = checkedCount > 0 && checkedCount < group.items.length;
+        };
+        syncGroupCb();
+        groupCb.onclick = function (e) {
+            e.stopPropagation();
+            group.items.forEach(function (it) { it.checked = groupCb.checked; });
+            renderPdfPreviewBody_(PDF_PREVIEW.type);
+            updatePdfPreviewCount_();
+        };
+
+        var title = document.createElement('span');
+        title.className = 'group-title';
+        title.textContent = group.label;
+
+        var count = document.createElement('span');
+        count.className = 'group-count';
+        count.textContent = countLabelFn();
+        group._countEl = count;
+        group._syncHeader = function () { count.textContent = countLabelFn(); syncGroupCb(); };
+
+        var expandIcon = document.createElement('span');
+        expandIcon.className = 'material-symbols-outlined expand-icon';
+        expandIcon.textContent = 'expand_more';
+
+        header.appendChild(groupCb);
+        header.appendChild(title);
+        header.appendChild(count);
+        header.appendChild(expandIcon);
+        header.onclick = function () { groupEl.classList.toggle('collapsed'); };
+        return header;
+    }
+
+    // ---- 行事予定グループ（月ごと） ----
+    function buildEventGroupEl_(group) {
+        var groupEl = document.createElement('div');
+        groupEl.className = 'pdf-preview-group';
+
+        groupEl.appendChild(buildGroupHeaderEl_(group, groupEl, function () {
+            var checkedCount = group.items.filter(function (it) { return it.checked; }).length;
+            return checkedCount + ' / ' + group.items.length + ' 件を反映';
+        }));
+
+        var bodyEl = document.createElement('div');
+        bodyEl.className = 'pdf-preview-group-body';
+
+        group.items.forEach(function (item) {
+            var row = document.createElement('div');
+            row.className = 'pdf-preview-item' + (item.checked ? '' : ' excluded');
+
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = item.checked;
+            cb.onchange = function () {
+                item.checked = cb.checked;
+                row.classList.toggle('excluded', !item.checked);
+                group._syncHeader();
+                updatePdfPreviewCount_();
+            };
+
+            var dateInput = document.createElement('input');
+            dateInput.type = 'date';
+            dateInput.value = item.date;
+            dateInput.onchange = function () { if (dateInput.value) item.date = dateInput.value; };
+
+            var typeSelect = document.createElement('select');
+            [['event', '行事'], ['meeting', '会議・研修（放課後）']].forEach(function (opt) {
+                var o = document.createElement('option');
+                o.value = opt[0];
+                o.textContent = opt[1];
+                typeSelect.appendChild(o);
+            });
+            typeSelect.value = item.type;
+            typeSelect.onchange = function () { item.type = typeSelect.value; };
+
+            var contentInput = document.createElement('input');
+            contentInput.type = 'text';
+            contentInput.className = 'pdf-ev-content';
+            contentInput.value = item.content;
+            contentInput.oninput = function () { item.content = contentInput.value; };
+
+            row.appendChild(cb);
+            row.appendChild(dateInput);
+            row.appendChild(typeSelect);
+            row.appendChild(contentInput);
+
+            if (item.isPast || !item.inDb) {
+                var warn = document.createElement('div');
+                warn.className = 'pdf-item-warn';
+                var warns = [];
+                if (item.isPast) warns.push('過去の日付のため反映されません');
+                else if (!item.inDb) warns.push('この日付はデータベースにありません（反映してもスキップされます）');
+                warn.textContent = '⚠ ' + warns.join(' / ');
+                row.appendChild(warn);
+            }
+            bodyEl.appendChild(row);
+        });
+
+        groupEl.appendChild(bodyEl);
+        return groupEl;
+    }
+
+    // ---- 単元マスタグループ（教科ごと） ----
+    function buildUnitGroupEl_(group) {
+        var groupEl = document.createElement('div');
+        groupEl.className = 'pdf-preview-group';
+
+        groupEl.appendChild(buildGroupHeaderEl_(group, groupEl, function () {
+            var checkedCount = group.items.filter(function (it) { return it.checked; }).length;
+            return checkedCount + ' / ' + group.items.length + ' 単元を反映';
+        }));
+
+        var bodyEl = document.createElement('div');
+        bodyEl.className = 'pdf-preview-group-body';
+
+        group.items.forEach(function (unit) {
+            var block = document.createElement('div');
+            block.className = 'pdf-unit-block' + (unit.checked ? '' : ' excluded');
+            if (!unit.checked) block.style.opacity = '0.45';
+
+            var head = document.createElement('div');
+            head.className = 'pdf-unit-head';
+
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = unit.checked;
+            cb.onchange = function () {
+                unit.checked = cb.checked;
+                block.style.opacity = unit.checked ? '' : '0.45';
+                group._syncHeader();
+                updatePdfPreviewCount_();
+            };
+
+            var nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.className = 'pdf-unit-name-input';
+            nameInput.value = unit.unitName;
+            nameInput.placeholder = '単元名';
+            nameInput.oninput = function () { unit.unitName = nameInput.value; };
+
+            var hoursLabel = document.createElement('span');
+            hoursLabel.className = 'pdf-unit-hours-label';
+            hoursLabel.textContent = '総時間:';
+
+            var hoursInput = document.createElement('input');
+            hoursInput.type = 'number';
+            hoursInput.min = '0';
+            hoursInput.style.width = '64px';
+            hoursInput.value = unit.totalHours || '';
+            hoursInput.onchange = function () { unit.totalHours = parseInt(hoursInput.value, 10) || 0; };
+
+            var toggleBtn = document.createElement('button');
+            toggleBtn.className = 'pdf-unit-toggle';
+            var hourCount = unit.hourlyActivities ? unit.hourlyActivities.length : 0;
+            toggleBtn.textContent = '時間ごとの内容（' + hourCount + '）▼';
+            toggleBtn.onclick = function () {
+                block.classList.toggle('expanded');
+                toggleBtn.textContent = '時間ごとの内容（' + hourCount + '）' + (block.classList.contains('expanded') ? '▲' : '▼');
+            };
+
+            head.appendChild(cb);
+            head.appendChild(nameInput);
+            head.appendChild(hoursLabel);
+            head.appendChild(hoursInput);
+            head.appendChild(toggleBtn);
+            block.appendChild(head);
+
+            var hoursEl = document.createElement('div');
+            hoursEl.className = 'pdf-unit-hours';
+            (unit.hourlyActivities || []).forEach(function (act) {
+                var hourRow = document.createElement('div');
+                hourRow.className = 'pdf-hour-row';
+
+                var num = document.createElement('span');
+                num.className = 'pdf-hour-num';
+                num.textContent = act.hour + '時間目';
+
+                var ta = document.createElement('textarea');
+                ta.value = act.activity || '';
+                ta.rows = 2;
+                ta.oninput = function () { act.activity = ta.value; };
+
+                hourRow.appendChild(num);
+                hourRow.appendChild(ta);
+                hoursEl.appendChild(hourRow);
+            });
+            block.appendChild(hoursEl);
+            bodyEl.appendChild(block);
+        });
+
+        groupEl.appendChild(bodyEl);
+        return groupEl;
+    }
+
+    function updatePdfPreviewCount_() {
+        var countEl = document.getElementById('pdfPreviewCount');
+        var applyBtn = document.getElementById('pdfPreviewApplyBtn');
+        var total = 0, checked = 0;
+        PDF_PREVIEW.groups.forEach(function (g) {
+            g.items.forEach(function (it) { total++; if (it.checked) checked++; });
+        });
+        var unitLabel = (PDF_PREVIEW.type === 'unit') ? '単元' : '件';
+        countEl.textContent = '反映対象: ' + checked + ' / ' + total + ' ' + unitLabel;
+        if (applyBtn) applyBtn.disabled = checked === 0;
+    }
+
+    // ---- 反映の実行 ----
+    async function applyPdfPreview() {
+        var type = PDF_PREVIEW.type;
+        if (!type) return;
+        var applyBtn = document.getElementById('pdfPreviewApplyBtn');
+
+        if (type === 'event') {
+            var events = [];
+            PDF_PREVIEW.groups.forEach(function (g) {
+                g.items.forEach(function (it) {
+                    if (it.checked && it.date && (it.content || '').trim()) {
+                        events.push({ date: it.date, content: it.content.trim(), type: it.type });
+                    }
+                });
+            });
+            if (events.length === 0) { showToast('error', '反映する予定がありません。'); return; }
+
+            applyBtn.disabled = true;
+            applyBtn.innerHTML = '<span class="material-symbols-outlined fs-6 spin" style="vertical-align:text-bottom;">progress_activity</span> 反映中...';
+            try {
+                var res = await pdfRunServer_('applyExtractedEventsFromWeb', events);
+                if (!res || !res.success) throw new Error((res && res.error) || '反映に失敗しました。');
+                closePdfPreview();
+                clearAppliedPdfResults_(type);
+                var lines = ['<b>' + res.updated + ' 件</b>の予定をデータベースに反映しました。'];
+                var skipped = [];
+                if (res.skippedDuplicate > 0) skipped.push('重複 ' + res.skippedDuplicate + '件');
+                if (res.skippedPast > 0) skipped.push('過去日 ' + res.skippedPast + '件');
+                if (res.notInDb > 0) skipped.push('DBに無い日付 ' + res.notInDb + '件');
+                if (skipped.length > 0) lines.push('<span style="font-size:0.85em;color:#888;">スキップ: ' + skipped.join(' / ') + '</span>');
+                Swal.fire({ icon: 'success', title: '反映が完了しました', html: lines.join('<br>'), confirmButtonColor: '#1a73e8' });
+                // 表示中の週案に反映結果を反映
+                if (STATE.mondayStr && typeof loadWeeklyPlan === 'function') {
+                    try { loadWeeklyPlan(STATE.mondayStr); } catch (e) { }
+                }
+            } catch (e) {
+                showToast('error', 'エラー: ' + e.message);
+            } finally {
+                applyBtn.disabled = false;
+                applyBtn.innerHTML = '<span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">task_alt</span> チェックした項目を反映する';
+            }
+        } else {
+            var units = [];
+            PDF_PREVIEW.groups.forEach(function (g) {
+                g.items.forEach(function (it) {
+                    if (!it.checked) return;
+                    var activities = (it.hourlyActivities || []).filter(function (a) { return (a.activity || '').trim(); })
+                        .map(function (a) { return { hour: a.hour, activity: a.activity.trim() }; });
+                    if (activities.length === 0) return;
+                    units.push({
+                        subject: it.subject,
+                        unitName: it.unitName,
+                        totalHours: it.totalHours,
+                        hourlyActivities: activities
+                    });
+                });
+            });
+            if (units.length === 0) { showToast('error', '反映する単元がありません。'); return; }
+
+            var subjects = [];
+            units.forEach(function (u) { if (u.subject && subjects.indexOf(u.subject) < 0) subjects.push(u.subject); });
+            var confirm = await Swal.fire({
+                title: '単元マスタへの反映',
+                html: subjects.length > 0
+                    ? '教科「<b>' + escHtml(subjects.join('・')) + '</b>」の既存データを、チェックした ' + units.length + ' 単元で<b>置き換え</b>ます。よろしいですか？'
+                    : units.length + ' 単元を単元マスタに反映します。よろしいですか？',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '反映する',
+                cancelButtonText: 'キャンセル',
+                confirmButtonColor: '#1a73e8'
+            });
+            if (!confirm.isConfirmed) return;
+
+            var addSummaryEl = document.getElementById('pdfAddSummaryRows');
+            var options = { addSummaryRows: !addSummaryEl || addSummaryEl.checked };
+
+            applyBtn.disabled = true;
+            applyBtn.innerHTML = '<span class="material-symbols-outlined fs-6 spin" style="vertical-align:text-bottom;">progress_activity</span> 反映中...';
+            try {
+                var res2 = await pdfRunServer_('applyExtractedUnitsFromWeb', units, options);
+                if (!res2 || !res2.success) throw new Error((res2 && res2.error) || '反映に失敗しました。');
+                closePdfPreview();
+                clearAppliedPdfResults_(type);
+                Swal.fire({
+                    icon: 'success',
+                    title: '反映が完了しました',
+                    html: '<b>' + res2.unitCount + ' 単元（' + res2.rowCount + ' 行）</b>を単元マスタに反映しました。',
+                    confirmButtonColor: '#1a73e8'
+                });
+                // 単元マスタ関連のキャッシュを更新
+                STATE.umDataLoaded = false;
+                if (typeof loadMasterData === 'function') { try { loadMasterData(); } catch (e) { } }
+            } catch (e) {
+                showToast('error', 'エラー: ' + e.message);
+            } finally {
+                applyBtn.disabled = false;
+                applyBtn.innerHTML = '<span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">task_alt</span> チェックした項目を反映する';
+            }
+        }
+    }
+
+    // 反映が完了したファイル（抽出済み）をキューから取り除く。エラー・未処理のものは残す。
+    function clearAppliedPdfResults_(type) {
+        var state = PDF_IMPORT[type];
+        state.files = state.files.filter(function (f) { return f.status !== 'done'; });
+        renderPdfQueue(type);
+    }
+
+    // =====================================================================
+    // ===== データ連携 (Drive / フォルダからの追加・従来型バックグラウンド処理) =====
+    // =====================================================================
 
     function openGooglePicker(type) {
         STATE.currentPickerType = type;
@@ -6049,58 +6739,51 @@
         picker.setVisible(true);
     }
 
-    async function pickerCallback(data) {
-        if (data.action === google.picker.Action.PICKED) {
-            var fileIds = data.docs.map(function (doc) { return doc.id; });
-            var type = STATE.currentPickerType;
+    // Picker で選択したファイルは解析キューに追加し、直接アップロードと同じプレビューフローに乗せる
+    function pickerCallback(data) {
+        if (data.action !== google.picker.Action.PICKED) return;
+        var type = STATE.currentPickerType;
+        var added = 0;
+        (data.docs || []).forEach(function (doc) {
+            if (addDrivePdfFile_(type, doc.id, doc.name)) added++;
+        });
+        renderPdfQueue(type);
+        if (added > 0) {
+            showToast('success', added + '件のPDFを追加しました。「AI解析を開始」を押してください。');
+        } else {
+            showToast('info', '選択されたファイルはすでに追加されています。');
+        }
+    }
 
-            if (fileIds.length === 0) return;
-            var swalResult = await Swal.fire({
-                title: '処理の開始',
-                text: '選択した ' + fileIds.length + ' 個のPDFからデータの読み込みを開始します。よろしいですか？',
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: '開始する',
-                cancelButtonText: 'キャンセル',
-                confirmButtonColor: '#1a73e8'
-            });
-            if (!swalResult.isConfirmed) return;
-
-            showToast('info', 'バッチ処理をリクエスト中...');
-
-            if (type === 'event') {
-                var year = document.getElementById('eventFiscalYear').value;
-                if (!year) {
-                    showToast('error', '対象年度を入力してください。');
+    // 設定ダッシュボードで指定されたフォルダ内のPDFを解析キューに追加する
+    function addFolderPdfs(type) {
+        showToast('info', 'フォルダ内のPDF一覧を取得中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) {
+                    showToast('error', 'エラー: ' + res.error);
                     return;
                 }
-                google.script.run
-                    .withSuccessHandler(onProcessStartSuccess)
-                    .withFailureHandler(onProcessStartFail)
-                    .startEventPdfProcessingFromWebApp(fileIds, parseInt(year));
-            } else {
-                google.script.run
-                    .withSuccessHandler(onProcessStartSuccess)
-                    .withFailureHandler(onProcessStartFail)
-                    .startUnitMasterProcessingFromWebApp(fileIds);
-            }
-        }
+                if (!res.files || res.files.length === 0) {
+                    showToast('info', 'フォルダにPDFファイルが見つかりませんでした。');
+                    return;
+                }
+                var added = 0;
+                res.files.forEach(function (f) {
+                    if (addDrivePdfFile_(type, f.id, f.name)) added++;
+                });
+                renderPdfQueue(type);
+                if (added > 0) {
+                    showToast('success', added + '件のPDFを追加しました。不要なファイルは×で外せます。');
+                } else {
+                    showToast('info', 'フォルダ内のPDFはすべて追加済みです。');
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .getPdfFileListForWebApp(type);
     }
 
-    // ===== データ連携 処理結果コールバックなど =====
-    function onProcessStartSuccess(res) {
-        if (res.success) {
-            showToast('success', '' + res.message);
-            setTimeout(checkProcessingStatus, 2000);
-        } else {
-            showToast('error', 'エラー: ' + res.error);
-        }
-    }
-
-    function onProcessStartFail(e) {
-        showToast('error', '通信エラー: ' + e.message);
-    }
-
+    // 従来型（スプレッドシートのメニューから開始した）バックグラウンド処理の状態表示
     function checkProcessingStatus() {
         // 現在データ連携タブを開いていない場合はポーリングしない
         var viewIntegration = document.getElementById('view-integration');
@@ -6109,37 +6792,23 @@
         google.script.run
             .withSuccessHandler(function (res) {
                 if (!res.success) return;
+                var statusEl = document.getElementById('bgProcessStatusText');
+                if (!statusEl) return;
 
-                var unitBtn = document.getElementById('startUnitBtn');
-                var eventBtn = document.getElementById('startEventBtn');
-                var unitStatusMsg = document.getElementById('unitStatusText');
-                var eventStatusMsg = document.getElementById('eventStatusText');
+                var parts = [];
+                if (res.unitStatus.isRunning) parts.push('指導計画: 実行中（残 ' + res.unitStatus.remaining + ' / 全 ' + res.unitStatus.total + '）');
+                if (res.eventStatus.isRunning) parts.push('行事予定: 実行中（残 ' + res.eventStatus.remaining + ' / 全 ' + res.eventStatus.total + '）');
 
-                if (res.unitStatus.isRunning) {
-                    unitBtn.disabled = true;
-                    unitBtn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...';
-                    unitStatusMsg.innerHTML = '<span style="color:var(--danger)">実行中 (残件: ' + res.unitStatus.remaining + ' / 全 ' + res.unitStatus.total + ')</span>';
-                } else {
-                    unitBtn.innerHTML = '<span class="material-symbols-outlined fs-6">play_arrow</span> 単元マスタ再構築を開始';
-                    updateSelection('unit');
-                }
-
-                if (res.eventStatus.isRunning) {
-                    eventBtn.disabled = true;
-                    eventBtn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 処理中...';
-                    eventStatusMsg.innerHTML = '<span style="color:var(--danger)">実行中 (残件: ' + res.eventStatus.remaining + ' / 全 ' + res.eventStatus.total + ')</span>';
-                } else {
-                    eventBtn.innerHTML = '<span class="material-symbols-outlined fs-6">play_arrow</span> 行事予定読み込みを開始';
-                    updateSelection('event');
-                }
-
-                if (res.unitStatus.isRunning || res.eventStatus.isRunning) {
+                if (parts.length > 0) {
+                    statusEl.innerHTML = '<span style="color:var(--danger);font-weight:600;">' + parts.join(' ／ ') + '</span>';
                     setTimeout(checkProcessingStatus, 3000);
+                } else {
+                    statusEl.textContent = '';
                 }
             })
             .withFailureHandler(function (e) {
-                // 一時的な通信エラーでポーリングが止まり「処理中...」のまま固まらないよう、
-                // トーストは出さず（連発防止）少し待って再試行する。タブを離れると先頭ガードで停止する。
+                // 一時的な通信エラーでポーリングが止まらないよう、トーストは出さず少し待って再試行する。
+                // タブを離れると先頭ガードで停止する。
                 console.error('PDF処理状況の取得に失敗（ポーリング継続）:', e && e.message);
                 setTimeout(checkProcessingStatus, 5000);
             })
