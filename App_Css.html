@@ -3653,4 +3653,21 @@
             scroll-behavior: auto !important;
         }
     }
+
+    /* ===== タッチ端末（タブレット）向け操作性 ===== */
+    /* セル上のダブルタップズームを無効化し、2連タップでの編集開始を確実にする
+       （パン・ピンチズームは従来どおり可能） */
+    .week-grid .grid-cell {
+        touch-action: manipulation;
+    }
+
+    /* タッチ端末では、閲覧モードのセルで長押しメニューと競合する
+       テキスト選択・コールアウトを無効化する（編集モードの入力欄とPCは従来どおり） */
+    @media (pointer: coarse) {
+        .week-grid:not(.edit-mode) .grid-cell {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+    }
 </style>

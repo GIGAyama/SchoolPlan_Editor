@@ -503,17 +503,28 @@
                     }
                 }
 
-                // UX: 閲覧モード — セル選択イベント
+                // UX: 閲覧モード — セル選択イベント（同一セルの2連タップ/クリックで編集開始）
                 if (!isEdit) {
-                    cell.addEventListener('click', function () { selectCell(i, rowIdx, rowDef.key); });
+                    cell.addEventListener('click', function () {
+                        var now = Date.now();
+                        var isDoubleTap = (_lastCellTap.day === i && _lastCellTap.row === rowIdx
+                            && (now - _lastCellTap.time) < DOUBLE_TAP_MS);
+                        _lastCellTap = { day: i, row: rowIdx, time: isDoubleTap ? 0 : now };
+                        selectCell(i, rowIdx, rowDef.key);
+                        if (isDoubleTap) startEditAtSelectedCell();
+                    });
                 }
-                // UX: 右クリックコンテキストメニュー（校時セルのみ）
+                // UX: 右クリックコンテキストメニュー（校時セルのみ）。
+                // タッチ端末では右クリックが使えないため、閲覧モードでは長押しでも開けるようにする。
                 if (rowDef.multi) {
                     cell.addEventListener('contextmenu', function (e) {
                         e.preventDefault();
                         selectCell(i, rowIdx, rowDef.key);
                         showContextMenu(e, i, parseInt(rowDef.key.replace('period', '')));
                     });
+                    if (!isEdit) {
+                        attachTouchLongPress(cell, i, rowIdx, rowDef.key, parseInt(rowDef.key.replace('period', '')));
+                    }
                 }
 
                 grid.appendChild(cell);
@@ -1256,6 +1267,80 @@
     // ===== UX 強化機能 (Phase A〜G) =====
     // ================================================================
 
+    // ===== タッチ操作対応 =====
+    // キーボードのないタブレットでも、ダブルタップで編集開始・長押しでメニュー表示が
+    // できるようにする（PCではダブルクリック・右クリックとして同じ経路が動く）。
+
+    /**
+     * 選択中のセルで編集モードを開始し、対応する入力欄へフォーカスを移します。
+     * キーボードの Enter と、ダブルタップ（ダブルクリック）から共用されます。
+     */
+    function startEditAtSelectedCell() {
+        if (!STATE.selectedCell || STATE.editMode) return;
+        toggleEditMode();
+        // 選択セルの入力欄にフォーカス
+        setTimeout(function () {
+            var s = STATE.selectedCell;
+            if (!s) return;
+            var field = GRID_ROWS[s.row].multi ? 'subject' : GRID_ROWS[s.row].key;
+            var sel = GRID_ROWS[s.row].multi
+                ? '[data-field="subject"][data-day="' + s.day + '"][data-period="' + GRID_ROWS[s.row].key.replace('period', '') + '"]'
+                : '[data-field="' + field + '"][data-day="' + s.day + '"]';
+            var el = document.querySelector(sel);
+            if (el) el.focus();
+        }, 50);
+    }
+
+    // ダブルタップ判定用: 直前にタップしたセルと時刻
+    var _lastCellTap = { day: -1, row: -1, time: 0 };
+    var DOUBLE_TAP_MS = 400;
+
+    /**
+     * 校時セルに「タッチ長押しでコンテキストメニュー」を取り付けます。
+     * タッチ端末には右クリックがないため、長押しをその代替にします
+     * （Androidの標準長押し contextmenu とも共存。閲覧モード専用）。
+     */
+    var LONG_PRESS_MS = 550;
+    function attachTouchLongPress(cell, dayIdx, rowIdx, key, pIdx) {
+        var timer = null;
+        var fired = false;
+        var sx = 0, sy = 0;
+        cell.addEventListener('touchstart', function (e) {
+            if (STATE.editMode || e.touches.length !== 1) return;
+            fired = false;
+            var t = e.touches[0];
+            sx = t.clientX; sy = t.clientY;
+            var px = t.pageX, py = t.pageY;
+            timer = setTimeout(function () {
+                timer = null;
+                fired = true;
+                selectCell(dayIdx, rowIdx, key);
+                showContextMenu({ pageX: px, pageY: py }, dayIdx, pIdx);
+            }, LONG_PRESS_MS);
+        }, { passive: true });
+        cell.addEventListener('touchmove', function (e) {
+            if (!timer) return;
+            var t = e.touches[0];
+            // スクロール操作と区別: 指が動いたら長押しをキャンセル
+            if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        }, { passive: true });
+        cell.addEventListener('touchend', function (e) {
+            if (timer) { clearTimeout(timer); timer = null; }
+            if (fired) {
+                // メニュー表示直後の指離しで発生するクリックがメニューを閉じないよう抑止
+                e.preventDefault();
+                fired = false;
+            }
+        });
+        cell.addEventListener('touchcancel', function () {
+            if (timer) { clearTimeout(timer); timer = null; }
+            fired = false;
+        });
+    }
+
     // ===== Phase B: セル選択 =====
     function selectCell(day, row, key) {
         // 以前の選択を解除
@@ -1645,18 +1730,7 @@
         // Enter: インライン編集（セル選択時）
         if (e.key === 'Enter' && STATE.selectedCell && !STATE.editMode) {
             e.preventDefault();
-            toggleEditMode();
-            // 選択セルの入力欄にフォーカス
-            setTimeout(function () {
-                var s = STATE.selectedCell;
-                if (!s) return;
-                var field = GRID_ROWS[s.row].multi ? 'subject' : GRID_ROWS[s.row].key;
-                var sel = GRID_ROWS[s.row].multi
-                    ? '[data-field="subject"][data-day="' + s.day + '"][data-period="' + GRID_ROWS[s.row].key.replace('period', '') + '"]'
-                    : '[data-field="' + field + '"][data-day="' + s.day + '"]';
-                var el = document.querySelector(sel);
-                if (el) el.focus();
-            }, 50);
+            startEditAtSelectedCell();
             return;
         }
 
@@ -1688,6 +1762,9 @@
                 + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>やり直し</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>印刷</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>?</kbd></td><td>このヘルプを表示</td></tr>'
+                + '<tr style="border-bottom:2px solid #e0e0e0"><th style="padding:6px;color:var(--primary)">タッチ操作</th><th style="padding:6px">アクション</th></tr>'
+                + '<tr><td style="padding:4px 6px">ダブルタップ<br>（ダブルクリック）</td><td>そのセルの編集を開始</td></tr>'
+                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px">コマを長押し<br>（右クリック）</td><td>メニュー表示（コピー / ペースト / クリア）</td></tr>'
                 + '<tr><td colspan="2" style="padding:8px 6px;color:#999;font-size:0.78rem">💡 編集モードではドラッグ＆ドロップでコマの入れ替えが可能です</td></tr>'
                 + '</table>',
             width: 520,
