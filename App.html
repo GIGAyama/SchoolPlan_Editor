@@ -940,26 +940,46 @@
                         <span class="integration-title">指導計画PDFの読み込み（単元マスタ自動構築）</span>
                     </div>
                     <div class="integration-body">
-                        <p style="font-size:0.8rem;color:var(--text-sub)">
-                            単元マスタを再構築する対象のPDFファイルを選択してください。<br>
-                            ※実行すると現在の単元マスタは上書きされます。
+                        <p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:4px;">
+                            年間指導計画のPDFをAIが解析し、単元情報を抽出します。<br>
+                            抽出結果は<strong>教科ごとのプレビュー</strong>で確認・修正・除外してから反映できます（反映時に同じ教科の既存データは置き換えられます）。
                         </p>
-                        <div class="input-with-btn">
-                            <button class="btn btn-primary" onclick="openGooglePicker('unit')"><span
-                                    class="material-symbols-outlined fs-6">folder</span> Google
-                                Driveから選ぶ</button>
-                            <span style="font-size: 0.8rem; color: var(--text-hint); margin: 0 8px;">または</span>
-                            <button class="btn btn-outline" onclick="fetchPdfList('unit')">指定フォルダを読み込む</button>
-                            <span id="unitStatusText"
-                                style="flex:1; font-size: 0.8rem; font-weight: bold; color: var(--primary);"></span>
+                        <div class="pdf-drop-zone" id="unitDropZone" tabindex="0" role="button"
+                            aria-label="指導計画PDFを選択">
+                            <span class="material-symbols-outlined pdf-drop-icon">upload_file</span>
+                            <div class="pdf-drop-main">ここにPDFをドラッグ＆ドロップ<span class="pdf-drop-or">または</span>クリックして選択
+                            </div>
+                            <div class="pdf-drop-sub">複数ファイル可 / 1ファイル15MBまで</div>
                         </div>
-                        <div class="file-list-container" id="unitFileList">
-                            <div class="empty-message">一覧を取得していません...</div>
+                        <input type="file" id="unitFileInput" accept="application/pdf,.pdf" multiple
+                            style="display:none;">
+                        <div class="pdf-source-row">
+                            <span style="font-size:0.75rem;color:var(--text-hint);">その他の追加方法:</span>
+                            <button class="btn btn-outline btn-sm" onclick="openGooglePicker('unit')"><span
+                                    class="material-symbols-outlined fs-6">add_to_drive</span>
+                                Google Driveから選ぶ</button>
+                            <button class="btn btn-outline btn-sm" onclick="addFolderPdfs('unit')"><span
+                                    class="material-symbols-outlined fs-6">folder</span> 設定フォルダから追加</button>
                         </div>
-                        <div class="integration-row" style="justify-content: flex-end;">
-                            <button class="btn btn-primary" id="startUnitBtn" onclick="startProcessing('unit')"
+                        <div class="pdf-queue" id="unitQueue" style="display:none;">
+                            <div class="pdf-queue-header">
+                                <span class="pdf-queue-summary" id="unitQueueSummary"></span>
+                                <button class="pdf-queue-clear" id="unitQueueClearBtn"
+                                    onclick="clearPdfQueue('unit')">すべてクリア</button>
+                            </div>
+                            <div class="pdf-queue-list" id="unitQueueList"></div>
+                            <div class="pdf-progress-track" id="unitProgressTrack" style="display:none;">
+                                <div class="pdf-progress-fill" id="unitProgressFill"></div>
+                            </div>
+                        </div>
+                        <div class="integration-row" style="justify-content: flex-end; gap: 8px;">
+                            <button class="btn btn-primary" id="unitExtractBtn" onclick="startExtraction('unit')"
                                 disabled><span class="material-symbols-outlined fs-6"
-                                    style="vertical-align:text-bottom;">play_arrow</span> 単元マスタ再構築を開始</button>
+                                    style="vertical-align:text-bottom;">neurology</span> AI解析を開始（プレビュー）</button>
+                            <button class="btn btn-primary pdf-preview-open-btn" id="unitPreviewBtn"
+                                onclick="openPdfPreview('unit')" style="display:none;"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">preview</span> プレビューを確認して反映</button>
                         </div>
                     </div>
                 </div>
@@ -972,48 +992,95 @@
                         <span class="integration-title">行事予定PDFの読み込み</span>
                     </div>
                     <div class="integration-body">
-                        <p style="font-size:0.8rem;color:var(--text-sub)">
-                            行事予定PDFファイルから予定を抽出し、データベースに書き込みます。
+                        <p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:4px;">
+                            行事予定のPDFをAIが解析し、今月以降の予定を抽出します。<br>
+                            抽出結果は<strong>月ごとのプレビュー</strong>で確認・修正・除外してからデータベースに反映できます。
                         </p>
-                        <div class="input-with-btn">
-                            <button class="btn btn-primary" onclick="openGooglePicker('event')"><span
-                                    class="material-symbols-outlined fs-6">folder</span> Google
-                                Driveから選ぶ</button>
-                            <span style="font-size: 0.8rem; color: var(--text-hint); margin: 0 8px;">または</span>
-                            <button class="btn btn-outline" onclick="fetchPdfList('event')">指定フォルダを読み込む</button>
-                            <span id="eventStatusText"
-                                style="flex:1; font-size: 0.8rem; font-weight: bold; color: var(--primary);"></span>
+                        <div class="pdf-drop-zone" id="eventDropZone" tabindex="0" role="button"
+                            aria-label="行事予定PDFを選択">
+                            <span class="material-symbols-outlined pdf-drop-icon">upload_file</span>
+                            <div class="pdf-drop-main">ここにPDFをドラッグ＆ドロップ<span class="pdf-drop-or">または</span>クリックして選択
+                            </div>
+                            <div class="pdf-drop-sub">複数ファイル可 / 1ファイル15MBまで</div>
                         </div>
-                        <div class="file-list-container" id="eventFileList">
-                            <div class="empty-message">一覧を取得していません...</div>
+                        <input type="file" id="eventFileInput" accept="application/pdf,.pdf" multiple
+                            style="display:none;">
+                        <div class="pdf-source-row">
+                            <span style="font-size:0.75rem;color:var(--text-hint);">その他の追加方法:</span>
+                            <button class="btn btn-outline btn-sm" onclick="openGooglePicker('event')"><span
+                                    class="material-symbols-outlined fs-6">add_to_drive</span>
+                                Google Driveから選ぶ</button>
+                            <button class="btn btn-outline btn-sm" onclick="addFolderPdfs('event')"><span
+                                    class="material-symbols-outlined fs-6">folder</span> 設定フォルダから追加</button>
                         </div>
-                        <div class="integration-row">
+                        <div class="pdf-queue" id="eventQueue" style="display:none;">
+                            <div class="pdf-queue-header">
+                                <span class="pdf-queue-summary" id="eventQueueSummary"></span>
+                                <button class="pdf-queue-clear" id="eventQueueClearBtn"
+                                    onclick="clearPdfQueue('event')">すべてクリア</button>
+                            </div>
+                            <div class="pdf-queue-list" id="eventQueueList"></div>
+                            <div class="pdf-progress-track" id="eventProgressTrack" style="display:none;">
+                                <div class="pdf-progress-fill" id="eventProgressFill"></div>
+                            </div>
+                        </div>
+                        <div class="integration-row" style="gap: 8px;">
                             <div style="flex: 1; display:flex; flex-direction:column; gap:4px;">
                                 <label style="font-size:0.75rem;font-weight:600;color:var(--text-sub)">対象年度（西暦:
                                     4月始まり）</label>
                                 <input type="number" id="eventFiscalYear" placeholder="例: 2025"
                                     style="height:34px;padding:0 12px;border:1px solid var(--border);border-radius:6px;width:120px;" />
                             </div>
-                            <button class="btn btn-primary" id="startEventBtn" onclick="startProcessing('event')"
+                            <button class="btn btn-primary" id="eventExtractBtn" onclick="startExtraction('event')"
                                 disabled><span class="material-symbols-outlined fs-6"
-                                    style="vertical-align:text-bottom;">play_arrow</span> 行事予定読み込みを開始</button>
+                                    style="vertical-align:text-bottom;">neurology</span> AI解析を開始（プレビュー）</button>
+                            <button class="btn btn-primary pdf-preview-open-btn" id="eventPreviewBtn"
+                                onclick="openPdfPreview('event')" style="display:none;"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">preview</span> プレビューを確認して反映</button>
                         </div>
                     </div>
                 </div>
 
-                <!-- リセット -->
+                <!-- バックグラウンド処理・リセット -->
                 <div class="integration-section" style="border-color: var(--danger);">
                     <div class="integration-body"
                         style="flex-direction:row; align-items:center; justify-content:space-between;">
                         <div>
                             <span class="integration-title d-flex align-items-center gap-1"
                                 style="color: var(--danger);"><span
-                                    class="material-symbols-outlined text-danger">warning</span> 処理の強制リセット</span>
+                                    class="material-symbols-outlined text-danger">warning</span> バックグラウンド処理の強制リセット</span>
                             <p style="font-size:0.75rem;color:var(--text-sub);margin-top:4px;">
-                                実行中のすべてのPDF読み込みタスクを強制終了します。</p>
+                                スプレッドシートのメニューから開始した従来型のPDF読み込みタスクを強制終了します。</p>
+                            <p id="bgProcessStatusText" style="font-size:0.75rem;margin-top:2px;"></p>
                         </div>
                         <button class="btn btn-outline" style="border-color: var(--danger); color: var(--danger);"
                             onclick="resetPdfProcessing()">強制リセット</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== PDF抽出結果プレビューモーダル ===== -->
+        <div id="pdfPreviewOverlay" class="pdf-preview-overlay" style="display:none;">
+            <div class="pdf-preview-modal" role="dialog" aria-modal="true" aria-labelledby="pdfPreviewTitle">
+                <div class="pdf-preview-header">
+                    <div>
+                        <div class="pdf-preview-title" id="pdfPreviewTitle">抽出結果のプレビュー</div>
+                        <div class="pdf-preview-sub" id="pdfPreviewSub"></div>
+                    </div>
+                    <button class="pdf-preview-close" onclick="closePdfPreview()" aria-label="閉じる"><span
+                            class="material-symbols-outlined">close</span></button>
+                </div>
+                <div class="pdf-preview-toolbar" id="pdfPreviewToolbar"></div>
+                <div class="pdf-preview-body" id="pdfPreviewBody"></div>
+                <div class="pdf-preview-footer">
+                    <div class="pdf-preview-count" id="pdfPreviewCount"></div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-outline" onclick="closePdfPreview()">閉じる</button>
+                        <button class="btn btn-primary" id="pdfPreviewApplyBtn" onclick="applyPdfPreview()"><span
+                                class="material-symbols-outlined fs-6"
+                                style="vertical-align:text-bottom;">task_alt</span> チェックした項目を反映する</button>
                     </div>
                 </div>
             </div>
