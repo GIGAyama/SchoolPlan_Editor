@@ -139,7 +139,7 @@
                             class="material-symbols-outlined fs-6">smart_toy</span> 単元自動入力</button>
                     <button class="btn btn-outline align-items-center gap-1" id="batchAutoFillBtn"
                         onclick="runBatchAutoFill()"
-                        style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
+                        style="display:flex; color: var(--secondary); border-color: var(--secondary);"><span
                             class="material-symbols-outlined fs-6">fast_forward</span> 以降を一括自動入力</button>
                     <button class="btn btn-outline align-items-center gap-1" id="shiftLessonBtn"
                         onclick="showShiftLessonModal()"
@@ -401,7 +401,7 @@
                                         <input type="text" id="sysCourseName" placeholder="例：4年1組 令和7年度"
                                             style="flex:1; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
                                         <button class="btn btn-outline" style="padding:0 8px;"
-                                            onclick="fetchSettingCourseList()">一覧取得</button>
+                                            onclick="fetchSettingCourseList(this)">一覧取得</button>
                                     </div>
                                     <select id="sysCourseSelect"
                                         style="display:none; width:100%; margin-top:4px; padding:6px;"

@@ -300,6 +300,11 @@
     function doLoadWeeklyPlan() {
         console.log('[DEBUG] loadWeeklyPlan called, mondayStr:', STATE.mondayStr);
         var grid = document.getElementById('weekGrid');
+        // 前回描画時の inline 幅指定（minWidth / gridTemplateColumns）が残ると、
+        // 空のグリッドが横に広がったまま横スクロールが発生するためリセットする
+        // （ローディング表示自体は position:fixed で常に画面中央に出る）
+        grid.style.minWidth = '';
+        grid.style.gridTemplateColumns = '';
         grid.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>読み込み中...</p></div>';
         document.getElementById('weekLabel').textContent = '読み込み中...';
 
@@ -498,17 +503,28 @@
                     }
                 }
 
-                // UX: 閲覧モード — セル選択イベント
+                // UX: 閲覧モード — セル選択イベント（同一セルの2連タップ/クリックで編集開始）
                 if (!isEdit) {
-                    cell.addEventListener('click', function () { selectCell(i, rowIdx, rowDef.key); });
+                    cell.addEventListener('click', function () {
+                        var now = Date.now();
+                        var isDoubleTap = (_lastCellTap.day === i && _lastCellTap.row === rowIdx
+                            && (now - _lastCellTap.time) < DOUBLE_TAP_MS);
+                        _lastCellTap = { day: i, row: rowIdx, time: isDoubleTap ? 0 : now };
+                        selectCell(i, rowIdx, rowDef.key);
+                        if (isDoubleTap) startEditAtSelectedCell();
+                    });
                 }
-                // UX: 右クリックコンテキストメニュー（校時セルのみ）
+                // UX: 右クリックコンテキストメニュー（校時セルのみ）。
+                // タッチ端末では右クリックが使えないため、閲覧モードでは長押しでも開けるようにする。
                 if (rowDef.multi) {
                     cell.addEventListener('contextmenu', function (e) {
                         e.preventDefault();
                         selectCell(i, rowIdx, rowDef.key);
                         showContextMenu(e, i, parseInt(rowDef.key.replace('period', '')));
                     });
+                    if (!isEdit) {
+                        attachTouchLongPress(cell, i, rowIdx, rowDef.key, parseInt(rowDef.key.replace('period', '')));
+                    }
                 }
 
                 grid.appendChild(cell);
@@ -770,7 +786,7 @@
             var hours = typeof u === 'string' ? '?' : u.totalHours;
             return '<div class="unit-picker-item" data-idx="' + i + '" '
                 + 'style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;" '
-                + 'onmouseover="this.style.background=\'var(--bg-hover)\'" onmouseout="this.style.background=\'transparent\'">'
+                + 'onmouseover="this.style.background=\'var(--bg-hover, var(--surface-hover))\'" onmouseout="this.style.background=\'transparent\'">'
                 + '<strong>' + escHtml(name) + '</strong>'
                 + '<span style="color:var(--text-sub);margin-left:8px;font-size:0.8rem;">（' + hours + '時間）</span>'
                 + '</div>';
@@ -1194,6 +1210,34 @@
             .saveWeeklyPlanData(STATE.mondayStr, days, STATE.weekData.revision);
     }
 
+    // ===== 閲覧モードでのセル操作（D&D・ペースト・クリア・Undo等）の自動保存 =====
+    // これらの操作は STATE.weekData.days（保存済みベースライン）を直接書き換えるため、
+    // そのままではサーバーに保存されず、週を移動すると変更が静かに失われていた。
+    // 操作後に短いデバウンスを挟んで自動保存し、画面表示とDBの内容を一致させる。
+    var _viewSaveTimer = null;
+    function persistViewMutation() {
+        if (STATE.editMode || !STATE.weekData || !STATE.mondayStr) return;
+        var weekData = STATE.weekData;
+        var mondayStr = STATE.mondayStr;
+        clearTimeout(_viewSaveTimer);
+        _viewSaveTimer = setTimeout(function () {
+            google.script.run
+                .withSuccessHandler(function (result) {
+                    if (result.success) {
+                        weekData.revision = result.revision;
+                    } else if (result.conflict) {
+                        handleSaveConflict();
+                    } else {
+                        showToast('error', '変更の保存に失敗: ' + result.error);
+                    }
+                })
+                .withFailureHandler(function (e) {
+                    showToast('error', '変更の保存に失敗（通信エラー）: ' + e.message);
+                })
+                .saveWeeklyPlanData(mondayStr, weekData.days, weekData.revision);
+        }, 600);
+    }
+
     // ===== 保存競合（楽観ロック）時の処理 =====
     // 他の端末やAI処理でこの週が更新されていた場合に、上書きを防いで再読み込みを促す。
     function handleSaveConflict() {
@@ -1222,6 +1266,80 @@
     // ================================================================
     // ===== UX 強化機能 (Phase A〜G) =====
     // ================================================================
+
+    // ===== タッチ操作対応 =====
+    // キーボードのないタブレットでも、ダブルタップで編集開始・長押しでメニュー表示が
+    // できるようにする（PCではダブルクリック・右クリックとして同じ経路が動く）。
+
+    /**
+     * 選択中のセルで編集モードを開始し、対応する入力欄へフォーカスを移します。
+     * キーボードの Enter と、ダブルタップ（ダブルクリック）から共用されます。
+     */
+    function startEditAtSelectedCell() {
+        if (!STATE.selectedCell || STATE.editMode) return;
+        toggleEditMode();
+        // 選択セルの入力欄にフォーカス
+        setTimeout(function () {
+            var s = STATE.selectedCell;
+            if (!s) return;
+            var field = GRID_ROWS[s.row].multi ? 'subject' : GRID_ROWS[s.row].key;
+            var sel = GRID_ROWS[s.row].multi
+                ? '[data-field="subject"][data-day="' + s.day + '"][data-period="' + GRID_ROWS[s.row].key.replace('period', '') + '"]'
+                : '[data-field="' + field + '"][data-day="' + s.day + '"]';
+            var el = document.querySelector(sel);
+            if (el) el.focus();
+        }, 50);
+    }
+
+    // ダブルタップ判定用: 直前にタップしたセルと時刻
+    var _lastCellTap = { day: -1, row: -1, time: 0 };
+    var DOUBLE_TAP_MS = 400;
+
+    /**
+     * 校時セルに「タッチ長押しでコンテキストメニュー」を取り付けます。
+     * タッチ端末には右クリックがないため、長押しをその代替にします
+     * （Androidの標準長押し contextmenu とも共存。閲覧モード専用）。
+     */
+    var LONG_PRESS_MS = 550;
+    function attachTouchLongPress(cell, dayIdx, rowIdx, key, pIdx) {
+        var timer = null;
+        var fired = false;
+        var sx = 0, sy = 0;
+        cell.addEventListener('touchstart', function (e) {
+            if (STATE.editMode || e.touches.length !== 1) return;
+            fired = false;
+            var t = e.touches[0];
+            sx = t.clientX; sy = t.clientY;
+            var px = t.pageX, py = t.pageY;
+            timer = setTimeout(function () {
+                timer = null;
+                fired = true;
+                selectCell(dayIdx, rowIdx, key);
+                showContextMenu({ pageX: px, pageY: py }, dayIdx, pIdx);
+            }, LONG_PRESS_MS);
+        }, { passive: true });
+        cell.addEventListener('touchmove', function (e) {
+            if (!timer) return;
+            var t = e.touches[0];
+            // スクロール操作と区別: 指が動いたら長押しをキャンセル
+            if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        }, { passive: true });
+        cell.addEventListener('touchend', function (e) {
+            if (timer) { clearTimeout(timer); timer = null; }
+            if (fired) {
+                // メニュー表示直後の指離しで発生するクリックがメニューを閉じないよう抑止
+                e.preventDefault();
+                fired = false;
+            }
+        });
+        cell.addEventListener('touchcancel', function () {
+            if (timer) { clearTimeout(timer); timer = null; }
+            fired = false;
+        });
+    }
 
     // ===== Phase B: セル選択 =====
     function selectCell(day, row, key) {
@@ -1274,6 +1392,7 @@
         STATE.weekData.days = STATE.undoStack.pop();
         renderWeekGrid(STATE.weekData.days);
         showToast('info', '↩ 元に戻しました');
+        persistViewMutation();
     }
 
     function redo() {
@@ -1282,6 +1401,7 @@
         STATE.weekData.days = STATE.redoStack.pop();
         renderWeekGrid(STATE.weekData.days);
         showToast('info', '↪ やり直しました');
+        persistViewMutation();
     }
 
     // ===== Phase D: コピー＆ペースト =====
@@ -1326,6 +1446,7 @@
         }
         renderWeekGrid(STATE.weekData.days);
         showToast('success', '📋 ペーストしました');
+        persistViewMutation();
     }
 
     // ===== Phase B: セルクリア =====
@@ -1344,6 +1465,7 @@
         }
         renderWeekGrid(STATE.weekData.days);
         showToast('info', '🗑 クリアしました');
+        persistViewMutation();
     }
 
     // ===== Phase C: ドラッグ＆ドロップ =====
@@ -1402,6 +1524,7 @@
 
         renderWeekGrid(STATE.weekData.days);
         showToast('success', '🔄 コマを入れ替えました');
+        persistViewMutation();
     }
 
     function handleDragEnd(e) {
@@ -1476,6 +1599,7 @@
                 }
                 renderWeekGrid(STATE.weekData.days);
                 showToast('info', '🗑 ' + DAY_LABELS_JP[dayIdx] + '曜の全コマをクリアしました');
+                persistViewMutation();
                 break;
             case 'clearPeriod':
                 pushUndo();
@@ -1484,6 +1608,7 @@
                 }
                 renderWeekGrid(STATE.weekData.days);
                 showToast('info', '🗑 ' + (pIdx + 1) + '校時を全曜日クリアしました');
+                persistViewMutation();
                 break;
         }
     }
@@ -1605,18 +1730,7 @@
         // Enter: インライン編集（セル選択時）
         if (e.key === 'Enter' && STATE.selectedCell && !STATE.editMode) {
             e.preventDefault();
-            toggleEditMode();
-            // 選択セルの入力欄にフォーカス
-            setTimeout(function () {
-                var s = STATE.selectedCell;
-                if (!s) return;
-                var field = GRID_ROWS[s.row].multi ? 'subject' : GRID_ROWS[s.row].key;
-                var sel = GRID_ROWS[s.row].multi
-                    ? '[data-field="subject"][data-day="' + s.day + '"][data-period="' + GRID_ROWS[s.row].key.replace('period', '') + '"]'
-                    : '[data-field="' + field + '"][data-day="' + s.day + '"]';
-                var el = document.querySelector(sel);
-                if (el) el.focus();
-            }, 50);
+            startEditAtSelectedCell();
             return;
         }
 
@@ -1648,6 +1762,9 @@
                 + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>やり直し</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>印刷</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>?</kbd></td><td>このヘルプを表示</td></tr>'
+                + '<tr style="border-bottom:2px solid #e0e0e0"><th style="padding:6px;color:var(--primary)">タッチ操作</th><th style="padding:6px">アクション</th></tr>'
+                + '<tr><td style="padding:4px 6px">ダブルタップ<br>（ダブルクリック）</td><td>そのセルの編集を開始</td></tr>'
+                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px">コマを長押し<br>（右クリック）</td><td>メニュー表示（コピー / ペースト / クリア）</td></tr>'
                 + '<tr><td colspan="2" style="padding:8px 6px;color:#999;font-size:0.78rem">💡 編集モードではドラッグ＆ドロップでコマの入れ替えが可能です</td></tr>'
                 + '</table>',
             width: 520,
@@ -2155,7 +2272,7 @@
             var isRecess = (key === 'recess1' || key === 'recess2');
             var h = '<tr' + (isRecess ? ' class="recess-row"' : '') + '><td class="row-header">' + label + '</td>';
             visIdx.forEach(function (i) {
-                var v = (days[i] && days[i][key]) ? days[i][key].replace(/\n/g, '<br>') : '';
+                var v = (days[i] && days[i][key]) ? escHtml(days[i][key]).replace(/\n/g, '<br>') : '';
                 h += '<td' + (cellClass ? ' class="' + cellClass + '"' : '') + '>' + v + '</td>';
             });
             return h + '</tr>';
@@ -2195,7 +2312,7 @@
                 for (var i = from; i < to; i++) {
                     var s = activeSubjects[i] || { subject: ' ', weekly: '', cumulative: '', percent: '' };
                     t += '<tr>';
-                    t += '<td style="background-color:#dcedc8;">' + (s.subject || ' ') + '</td>';
+                    t += '<td style="background-color:#dcedc8;">' + (escHtml(s.subject) || ' ') + '</td>';
                     t += '<td>' + formatFraction(s.weekly) + '</td>';
                     t += '<td>' + formatFraction(s.cumulative) + '</td>';
                     t += '<td>' + (s.percent !== undefined && s.percent !== '' ? s.percent + '%' : '&nbsp;') + '</td>';
@@ -2262,9 +2379,9 @@
 
         var renderPeriod = function (p) {
             var content = "";
-            if (p.subject) content += '<div class="subject">' + p.subject + '</div>';
-            if (p.unit) content += '<div class="unit">' + p.unit + '</div>';
-            if (p.content) content += '<div class="content">' + p.content.replace(/\n/g, '<br>') + '</div>';
+            if (p.subject) content += '<div class="subject">' + escHtml(p.subject) + '</div>';
+            if (p.unit) content += '<div class="unit">' + escHtml(p.unit) + '</div>';
+            if (p.content) content += '<div class="content">' + escHtml(p.content).replace(/\n/g, '<br>') + '</div>';
             return content;
         };
 
@@ -2291,7 +2408,7 @@
             html += '<tr><td class="row-header">時程<br>行事</td>';
             for (var i = 0; i < 5; i++) {
                 var evtCls = 'event-cell' + ((days[i] && days[i].holiday) ? ' holiday-cell' : '');
-                html += '<td class="' + evtCls + '">' + ((days[i] && days[i].event) ? days[i].event.replace(/\n/g, '<br>') : '') + '</td>';
+                html += '<td class="' + evtCls + '">' + ((days[i] && days[i].event) ? escHtml(days[i].event).replace(/\n/g, '<br>') : '') + '</td>';
             }
             html += '</tr>';
         }
@@ -2299,14 +2416,14 @@
         // 登校前
         if (opts.preclass) {
             html += '<tr><td class="row-header">登校前</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].preclass) ? days[i].preclass.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].preclass) ? escHtml(days[i].preclass).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
         // 朝学習
         if (opts.morning) {
             html += '<tr><td class="row-header">朝学習</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? days[i].morning.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? escHtml(days[i].morning).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -2323,7 +2440,7 @@
         // 中休み
         if (opts.recess1) {
             html += '<tr class="recess-row"><td class="row-header">中休</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess1) ? days[i].recess1.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess1) ? escHtml(days[i].recess1).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -2340,7 +2457,7 @@
         // 昼休み
         if (opts.recess2) {
             html += '<tr class="recess-row"><td class="row-header">昼休</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess2) ? days[i].recess2.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess2) ? escHtml(days[i].recess2).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -2357,7 +2474,7 @@
         // 放課後
         if (opts.afterschool) {
             html += '<tr><td class="row-header">放課後</td>';
-            for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? days[i].afterschool.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? escHtml(days[i].afterschool).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -2381,7 +2498,7 @@
             if (p_idx !== undefined) {
                 return d.periods ? renderPeriod(d.periods[p_idx]) : '';
             }
-            return d[key] ? d[key].replace(/\n/g, '<br>') : '';
+            return d[key] ? escHtml(d[key]).replace(/\n/g, '<br>') : '';
         };
 
         // 行事
@@ -2480,7 +2597,7 @@
             for (var i = 0; i < half; i++) {
                 var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
                 html += '<tr>';
-                html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
+                html += '<td style="background-color:#dcedc8;">' + (escHtml(s.subject) || " ") + '</td>';
                 html += '<td>' + formatFraction(s.weekly) + '</td>';
                 html += '<td>' + formatFraction(s.cumulative) + '</td>';
                 html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
@@ -2495,7 +2612,7 @@
             for (var i = half; i < half2; i++) {
                 var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
                 html += '<tr>';
-                html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
+                html += '<td style="background-color:#dcedc8;">' + (escHtml(s.subject) || " ") + '</td>';
                 html += '<td>' + formatFraction(s.weekly) + '</td>';
                 html += '<td>' + formatFraction(s.cumulative) + '</td>';
                 html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
@@ -2548,7 +2665,7 @@
                 }
                 var statusMark = printTasks[i].status === '完了' ? '<span class="todo-done">✔</span>'
                     : (printTasks[i].status === '進行中' ? '<span class="todo-pending">◐</span>' : '<span class="todo-pending">□</span>');
-                html += '<div class="todo-item">' + statusMark + ' ' + printTasks[i].content + duePart + '</div>';
+                html += '<div class="todo-item">' + statusMark + ' ' + escHtml(printTasks[i].content) + duePart + '</div>';
             } else {
                 html += '<div class="todo-item">&nbsp;</div>';
             }
@@ -6078,8 +6195,10 @@
             '<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$1<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
         );
         // 2) 素の URL（Markdown リンクに変換済みの href="..." 内は除外）
+        //    escHtml 済みテキストでは & は &amp; になっているため、&amp; をURLの一部として
+        //    許可する（除外すると「?a=1&b=2」のようなクエリ付きURLが途中で切れてしまう）
         md = md.replace(
-            /(^|[^"=])(https?:\/\/[^\s<&]+)/g,
+            /(^|[^"=])(https?:\/\/(?:&amp;|[^\s<&])+)/g,
             '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$2<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
         );
         return md;
@@ -6622,8 +6741,7 @@
             .saveAppSettings(settings);
     }
 
-    function fetchSettingCourseList() {
-        var inputBtn = event.target;
+    function fetchSettingCourseList(inputBtn) {
         inputBtn.disabled = true;
         inputBtn.textContent = '取得中...';
 
