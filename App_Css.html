@@ -995,15 +995,33 @@
     }
 
     /* ローディング */
+    /* ローディング表示: コンテナの幅・高さ・スクロール位置に関わらず、
+       縦画面・横画面どちらでも常にビューポート（画面）中央に表示する。
+       pointer-events:none のため背後の操作は妨げない。 */
     .loading-state {
+        position: fixed;
+        inset: 0;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         gap: 16px;
-        padding: 60px;
+        padding: 24px;
         color: var(--text-sub);
-        grid-column: 1 / -1;
+        text-align: center;
+        z-index: 100;
+        pointer-events: none;
+        animation: loadingFadeIn 0.25s ease both;
+    }
+
+    @keyframes loadingFadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
     }
 
     .spinner-lg {
@@ -1013,6 +1031,9 @@
         border-top-color: var(--primary);
         border-radius: 50%;
         animation: spin 0.9s linear infinite;
+        /* flexコンテナ外（テーブルセル等）で使われた場合も水平中央に置く */
+        margin-left: auto;
+        margin-right: auto;
     }
 
     @keyframes spin {

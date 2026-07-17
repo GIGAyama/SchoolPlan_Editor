@@ -300,6 +300,11 @@
     function doLoadWeeklyPlan() {
         console.log('[DEBUG] loadWeeklyPlan called, mondayStr:', STATE.mondayStr);
         var grid = document.getElementById('weekGrid');
+        // 前回描画時の inline 幅指定（minWidth / gridTemplateColumns）が残ると、
+        // 空のグリッドが横に広がったまま横スクロールが発生するためリセットする
+        // （ローディング表示自体は position:fixed で常に画面中央に出る）
+        grid.style.minWidth = '';
+        grid.style.gridTemplateColumns = '';
         grid.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>読み込み中...</p></div>';
         document.getElementById('weekLabel').textContent = '読み込み中...';
 
