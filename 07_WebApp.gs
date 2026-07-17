@@ -94,6 +94,9 @@ function getWeeklyPlanData(mondayDateStr) {
       }
     }
 
+    // 祝日データ（yyyy/MM/dd → 祝日名）。各日に祝日名を付与し、UI・印刷で明示できるようにする。
+    const holidayMap = getHolidayMap_();
+
     const DAY_LABELS = ['月', '火', '水', '木', '金', '土', '日'];
     const days = weekDates.map((date, i) => {
       const dateStr = formatDate(date);
@@ -101,6 +104,7 @@ function getWeeklyPlanData(mondayDateStr) {
       return {
         date: dateStr,
         dayLabel: DAY_LABELS[i],
+        holiday: holidayMap[dateStr] || '',
         event: row ? (row[dbCols.EVENT - 1] || '') : '',
         preclass: (row && dbCols.PRECLASS) ? (row[dbCols.PRECLASS - 1] || '') : '',
         morning: row ? (row[dbCols.MORNING - 1] || '') : '',
@@ -1260,18 +1264,48 @@ function clearDbColumnsCacheFromWeb() {
 // ===================================================
 
 const SP_KEY_HOLIDAYS = 'holidayDates';
+const SP_KEY_HOLIDAYS_UPDATED = 'holidayDatesUpdatedAt';
+// 祝日データの自動更新間隔（日）。この日数を超えていれば onOpen 等で再取得する。
+const HOLIDAY_REFRESH_INTERVAL_DAYS = 25;
+
+/**
+ * 日付文字列を「yyyy/MM/dd」（ゼロ埋め）形式に正規化します。
+ * 内閣府CSVは「2025/1/1」のような非ゼロ埋め表記のため、DBの日付表記と揃えます。
+ * @param {string} s 日付文字列
+ * @returns {string} 正規化した日付文字列（形式不明ならそのまま返す）
+ */
+function normalizeDateStr_(s) {
+  const m = String(s == null ? '' : s).trim().match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (!m) return String(s == null ? '' : s).trim();
+  return m[1] + '/' + ('0' + m[2]).slice(-2) + '/' + ('0' + m[3]).slice(-2);
+}
 
 /**
  * 内閣府CSVから祝日データを取得し、スクリプトプロパティに保存します。
  * onOpenトリガーやメニューから呼び出し可能。
+ * @param {boolean} [force] true の場合、更新間隔に関わらず強制的に再取得します。
+ * @returns {boolean} 取得（更新）を行った場合 true、間隔内でスキップした場合 false
  */
-function fetchAndStoreHolidays() {
+function fetchAndStoreHolidays(force) {
   try {
+    const props = PropertiesService.getScriptProperties();
+    // 更新間隔内なら（かつデータが存在すれば）ネットワーク取得をスキップして負荷を抑える
+    if (!force) {
+      const has = props.getProperty(SP_KEY_HOLIDAYS);
+      const updatedAt = props.getProperty(SP_KEY_HOLIDAYS_UPDATED);
+      if (has && updatedAt) {
+        const ageMs = Date.now() - new Date(updatedAt).getTime();
+        if (ageMs >= 0 && ageMs < HOLIDAY_REFRESH_INTERVAL_DAYS * 24 * 60 * 60 * 1000) {
+          return false;
+        }
+      }
+    }
+
     const url = 'https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv';
     const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
     if (response.getResponseCode() !== 200) {
       logInfo('祝日CSVの取得に失敗 (HTTP ' + response.getResponseCode() + ')');
-      return;
+      return false;
     }
     const csvText = response.getContentText('Shift_JIS');
     const lines = csvText.split('\n');
@@ -1281,13 +1315,42 @@ function fetchAndStoreHolidays() {
       if (!line) continue;
       const parts = line.split(',');
       if (parts.length >= 2) {
-        holidays.push({ date: parts[0].trim(), name: parts[1].trim() });
+        // DBの日付表記（ゼロ埋め yyyy/MM/dd）と一致させるため正規化して保存する
+        holidays.push({ date: normalizeDateStr_(parts[0]), name: parts[1].trim() });
       }
     }
-    PropertiesService.getScriptProperties().setProperty(SP_KEY_HOLIDAYS, JSON.stringify(holidays));
+    props.setProperty(SP_KEY_HOLIDAYS, JSON.stringify(holidays));
+    props.setProperty(SP_KEY_HOLIDAYS_UPDATED, new Date().toISOString());
     logInfo('祝日データを更新しました (' + holidays.length + '件)');
+    return true;
   } catch (e) {
     logError('fetchAndStoreHolidays', e);
+    return false;
+  }
+}
+
+/**
+ * 保存済みの祝日データを「yyyy/MM/dd」→ 祝日名 の連想配列（Map的オブジェクト）で返します。
+ * データが未取得の場合は取得を試みます。週案データ生成などサーバー内部で利用します。
+ * @returns {Object} { 'yyyy/MM/dd': '祝日名', ... }
+ */
+function getHolidayMap_() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    let json = props.getProperty(SP_KEY_HOLIDAYS);
+    if (!json) {
+      fetchAndStoreHolidays(true);
+      json = props.getProperty(SP_KEY_HOLIDAYS);
+    }
+    const list = json ? JSON.parse(json) : [];
+    const map = {};
+    list.forEach(function (h) {
+      if (h && h.date) map[normalizeDateStr_(h.date)] = h.name || '祝日';
+    });
+    return map;
+  } catch (e) {
+    logError('getHolidayMap_', e);
+    return {};
   }
 }
 
@@ -1299,7 +1362,7 @@ function getHolidays() {
     const json = PropertiesService.getScriptProperties().getProperty(SP_KEY_HOLIDAYS);
     if (json) return { success: true, data: JSON.parse(json) };
     // まだ取得していなければ取得して返す
-    fetchAndStoreHolidays();
+    fetchAndStoreHolidays(true);
     const json2 = PropertiesService.getScriptProperties().getProperty(SP_KEY_HOLIDAYS);
     return { success: true, data: json2 ? JSON.parse(json2) : [] };
   } catch (e) {

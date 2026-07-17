@@ -357,8 +357,13 @@
             if (day.date === today) cls += ' today-col';
             else if (i === 5) cls += ' sat-col';
             else if (i === 6) cls += ' sun-col';
+            if (day.holiday) cls += ' holiday-col';
             h.className = cls;
-            h.innerHTML = '<div>' + day.dayLabel + '</div><div style="font-size:0.7rem;color:inherit;opacity:0.8;font-weight:400;">' + day.date.slice(5) + '</div>';
+            var headerHtml = '<div>' + day.dayLabel + '</div><div style="font-size:0.7rem;color:inherit;opacity:0.8;font-weight:400;">' + day.date.slice(5) + '</div>';
+            if (day.holiday) {
+                headerHtml += '<div class="holiday-name" title="' + escAttr(day.holiday) + '">' + escHtml(day.holiday) + '</div>';
+            }
+            h.innerHTML = headerHtml;
 
             // 振り返り状態チップ（授業がある過去〜今日の日に表示。クリックで振り返りを開く）
             if (day.date <= today && dayHasLessons(day)) {
@@ -419,6 +424,7 @@
                 if (day.date === today) cls += ' today-col';
                 else if (i === 5) cls += ' sat-col';
                 else if (i === 6) cls += ' sun-col';
+                if (day.holiday) cls += ' holiday-col';
                 if (rowDef.section) cls += ' section-top';
                 if (rowDef.key === 'event') cls += ' event-row';
 
@@ -2074,6 +2080,11 @@
         html += '.sat-col { background-color: #bbdefb; width: 40%; }';
         html += '.sun-col { background-color: #ffcdd2; width: 40%; }';
 
+        // 祝日: 列ヘッダーを赤系で強調し、祝日名を明示する（印刷でも一目でわかるように）
+        html += '.holiday-print { font-size: 0.82em; font-weight: bold; color: #c62828; margin-top: 1px; line-height: 1.15; }';
+        html += 'th.holiday-head { background-color: #ffd6da; }';
+        html += '.holiday-cell { background-color: #fdecef; }';
+
         html += '.stats-table th, .stats-table td { font-size: 8px; text-align: center; padding: 2px; border: 1px solid #333; }';
         html += '.stats-table th { background-color: #e0e0e0; }';
         html += '.stats-table { width: 100%; border: 1.5px solid #333; }';
@@ -2131,7 +2142,11 @@
         // ヘッダー行
         html += '<tr><th class="row-header">日付<br>曜日</th>';
         visIdx.forEach(function (i) {
-            var cls = i === 5 ? ' class="sat-head"' : (i === 6 ? ' class="sun-head"' : '');
+            var classes = [];
+            if (i === 5) classes.push('sat-head');
+            else if (i === 6) classes.push('sun-head');
+            if (days[i] && days[i].holiday) classes.push('holiday-head');
+            var cls = classes.length ? ' class="' + classes.join(' ') + '"' : '';
             html += '<th' + cls + '>' + renderDateHeader(days[i]) + '</th>';
         });
         html += '</tr>';
@@ -2238,7 +2253,11 @@
         var renderDateHeader = function (d) {
             if (!d) return "";
             var p = d.date.split("/");
-            return p[1] + "/" + p[2] + "<br>" + d.dayLabel;
+            var html = p[1] + "/" + p[2] + "<br>" + d.dayLabel;
+            if (d.holiday) {
+                html += '<div class="holiday-print">' + escHtml(d.holiday) + '</div>';
+            }
+            return html;
         };
 
         var renderPeriod = function (p) {
@@ -2261,13 +2280,19 @@
 
         // ヘッダー行
         html += '<tr><th class="row-header">日付<br>曜日</th>';
-        for (var i = 0; i < 5; i++) { html += '<th>' + renderDateHeader(days[i]) + '</th>'; }
+        for (var i = 0; i < 5; i++) {
+            var thCls = (days[i] && days[i].holiday) ? ' class="holiday-head"' : '';
+            html += '<th' + thCls + '>' + renderDateHeader(days[i]) + '</th>';
+        }
         html += '</tr>';
 
         // 行事
         if (opts.event) {
             html += '<tr><td class="row-header">時程<br>行事</td>';
-            for (var i = 0; i < 5; i++) { html += '<td class="event-cell">' + ((days[i] && days[i].event) ? days[i].event.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) {
+                var evtCls = 'event-cell' + ((days[i] && days[i].holiday) ? ' holiday-cell' : '');
+                html += '<td class="' + evtCls + '">' + ((days[i] && days[i].event) ? days[i].event.replace(/\n/g, '<br>') : '') + '</td>';
+            }
             html += '</tr>';
         }
 

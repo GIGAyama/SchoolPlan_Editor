@@ -63,7 +63,9 @@
         --cell-today-border: #b3cef5;
         --cell-sat-bg: #f8fbff;
         --cell-sun-bg: #fff8f8;
+        --cell-holiday-bg: #fdecef;
         --col-sat: #1565c0;
+        --col-holiday: #c62828;
         --col-event: #d32f2f;
         --kbd-bg: #f5f5f5;
         --kbd-border: #ccc;
@@ -96,7 +98,9 @@
             --cell-today-border: #2f4763;
             --cell-sat-bg: #1a2027;
             --cell-sun-bg: #2a1c1c;
+            --cell-holiday-bg: #331f22;
             --col-sat: #7eb3ff;
+            --col-holiday: #ff9a9a;
             --col-event: #ff8a80;
             --kbd-bg: #2a2c30;
             --kbd-border: #4a4d52;
@@ -592,6 +596,30 @@
         color: #c62828;
     }
 
+    /* 祝日の列ヘッダー: 曜日色より優先して赤系で強調する */
+    .grid-header.holiday-col {
+        background: var(--cell-holiday-bg);
+        color: var(--col-holiday);
+    }
+
+    /* 祝日名バッジ（列ヘッダーの日付の下に表示） */
+    .holiday-name {
+        margin-top: 3px;
+        display: inline-block;
+        max-width: 100%;
+        padding: 1px 6px;
+        font-size: 0.62rem;
+        font-weight: 700;
+        line-height: 1.5;
+        color: #fff;
+        background: var(--col-holiday);
+        border-radius: 999px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        box-sizing: border-box;
+    }
+
     .grid-label {
         background: var(--surface-3);
         border: 1px solid var(--border);
@@ -627,6 +655,11 @@
 
     .grid-cell.sun-col {
         background: var(--cell-sun-bg);
+    }
+
+    /* 祝日の列セル: 曜日色より優先して赤系の背景で強調する */
+    .grid-cell.holiday-col {
+        background: var(--cell-holiday-bg);
     }
 
     /* 土日列の表示/非表示トグルボタン */
