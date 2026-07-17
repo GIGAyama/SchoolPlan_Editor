@@ -1,6 +1,39 @@
 # コード最適化 進捗・引き継ぎメモ
 
-## 【最新セッション】全体レビューによるバグ修正 8件（branch: claude/app-review-optimize-t9mci1）
+## 【最新セッション】全体レビューによるバグ修正 7件（branch: claude/app-review-optimization-io12ss）
+
+全 .gs / .html を通読し、実バグのみを修正。全変更ファイル node --check 済み。
+
+1. **[FE/重要] 閲覧モードのセル操作が保存されず消える** — D&Dのコマ入替・ペースト・クリア・
+   右クリック一括クリア・Undo/Redo は `STATE.weekData.days`（保存済みベースライン）を直接書き換えるため、
+   サーバーへ保存されず週を移動すると変更が静かに失われていた → 操作後600msデバウンスで
+   `saveWeeklyPlanData` を自動実行する `persistViewMutation()` を追加（楽観ロック・競合ダイアログ対応。
+   編集モード中は既存の保存フローに任せるため何もしない）。
+2. **[FE] クエリ付きURLのリンク化が途中で切れる**（`linkify`）— escHtml後の `&amp;` をURL文字として
+   除外していたため `?a=1&b=2` 形式のURL（YouTube等）が `&` で切れていた → `(?:&amp;|[^\s<&])+` に修正。
+3. **[FE] 週案印刷のセル値が未エスケープ** — `<` `>` を含む入力が印刷HTMLを壊し、数値のみのセルは
+   `.replace` で例外になり印刷自体が失敗しうる → 印刷HTML生成（標準/コンパクト/週末/時数表/Todo）の
+   全セル出力を `escHtml()` 経由に統一。
+4. **[FE] 単元マスタピッカーのホバー色が効かない** — 未定義変数 `var(--bg-hover)` をフォールバック無しで
+   使用 → `var(--bg-hover, var(--surface-hover))` に修正。
+5. **[FE] 「以降を一括自動入力」ボタンが初回ロード時だけ非表示** — `updateEditUI()` は閲覧モードでも
+   表示する仕様（display:flex）なのに、初期HTMLが display:none のため編集モードを一度通るまで
+   出現しなかった → 初期スタイルを display:flex に統一。
+6. **[FE] 設定画面「一覧取得」ボタンが暗黙のグローバル `event` 依存** — `fetchSettingCourseList(this)`
+   でボタン要素を明示的に渡す形に修正（App.html + App_Js.html）。
+7. **[BE] 行事予定PDF処理の年度が文字列だと過去月まで処理対象になる**（03_PdfProcessing.gs
+   `startEventPdfProcessingFromWebApp`）— `fiscalYear + 1` が文字列連結（"2025"+1→"20251"）になり
+   1〜3月の年判定が壊れる → `parseInt` で正規化し NaN はエラーに（現行フロントは数値を渡すため防御的修正）。
+
+### 要GAS/ブラウザ検証
+- 閲覧モードでコマをD&D入替 → 週を移動して戻り、入替が保持されているか（自動保存）。
+- セルにYouTube等の `&` 入りURLを入れてリンク全体がクリック可能か。
+- 週案印刷（標準/コンパクト）が従来どおりの見た目か（エスケープ追加による差異がないか）。
+- 閲覧モードのツールバーに「以降を一括自動入力」が最初から表示されるか。
+
+---
+
+## 【前々セッション】全体レビューによるバグ修正 8件（branch: claude/app-review-optimize-t9mci1）
 
 全 .gs / .html を通読し、実バグのみを修正（機能追加・見た目変更なし）。全ファイル node --check 済み。
 

@@ -770,7 +770,7 @@
             var hours = typeof u === 'string' ? '?' : u.totalHours;
             return '<div class="unit-picker-item" data-idx="' + i + '" '
                 + 'style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;" '
-                + 'onmouseover="this.style.background=\'var(--bg-hover)\'" onmouseout="this.style.background=\'transparent\'">'
+                + 'onmouseover="this.style.background=\'var(--bg-hover, var(--surface-hover))\'" onmouseout="this.style.background=\'transparent\'">'
                 + '<strong>' + escHtml(name) + '</strong>'
                 + '<span style="color:var(--text-sub);margin-left:8px;font-size:0.8rem;">（' + hours + '時間）</span>'
                 + '</div>';
@@ -1194,6 +1194,34 @@
             .saveWeeklyPlanData(STATE.mondayStr, days, STATE.weekData.revision);
     }
 
+    // ===== 閲覧モードでのセル操作（D&D・ペースト・クリア・Undo等）の自動保存 =====
+    // これらの操作は STATE.weekData.days（保存済みベースライン）を直接書き換えるため、
+    // そのままではサーバーに保存されず、週を移動すると変更が静かに失われていた。
+    // 操作後に短いデバウンスを挟んで自動保存し、画面表示とDBの内容を一致させる。
+    var _viewSaveTimer = null;
+    function persistViewMutation() {
+        if (STATE.editMode || !STATE.weekData || !STATE.mondayStr) return;
+        var weekData = STATE.weekData;
+        var mondayStr = STATE.mondayStr;
+        clearTimeout(_viewSaveTimer);
+        _viewSaveTimer = setTimeout(function () {
+            google.script.run
+                .withSuccessHandler(function (result) {
+                    if (result.success) {
+                        weekData.revision = result.revision;
+                    } else if (result.conflict) {
+                        handleSaveConflict();
+                    } else {
+                        showToast('error', '変更の保存に失敗: ' + result.error);
+                    }
+                })
+                .withFailureHandler(function (e) {
+                    showToast('error', '変更の保存に失敗（通信エラー）: ' + e.message);
+                })
+                .saveWeeklyPlanData(mondayStr, weekData.days, weekData.revision);
+        }, 600);
+    }
+
     // ===== 保存競合（楽観ロック）時の処理 =====
     // 他の端末やAI処理でこの週が更新されていた場合に、上書きを防いで再読み込みを促す。
     function handleSaveConflict() {
@@ -1274,6 +1302,7 @@
         STATE.weekData.days = STATE.undoStack.pop();
         renderWeekGrid(STATE.weekData.days);
         showToast('info', '↩ 元に戻しました');
+        persistViewMutation();
     }
 
     function redo() {
@@ -1282,6 +1311,7 @@
         STATE.weekData.days = STATE.redoStack.pop();
         renderWeekGrid(STATE.weekData.days);
         showToast('info', '↪ やり直しました');
+        persistViewMutation();
     }
 
     // ===== Phase D: コピー＆ペースト =====
@@ -1326,6 +1356,7 @@
         }
         renderWeekGrid(STATE.weekData.days);
         showToast('success', '📋 ペーストしました');
+        persistViewMutation();
     }
 
     // ===== Phase B: セルクリア =====
@@ -1344,6 +1375,7 @@
         }
         renderWeekGrid(STATE.weekData.days);
         showToast('info', '🗑 クリアしました');
+        persistViewMutation();
     }
 
     // ===== Phase C: ドラッグ＆ドロップ =====
@@ -1402,6 +1434,7 @@
 
         renderWeekGrid(STATE.weekData.days);
         showToast('success', '🔄 コマを入れ替えました');
+        persistViewMutation();
     }
 
     function handleDragEnd(e) {
@@ -1476,6 +1509,7 @@
                 }
                 renderWeekGrid(STATE.weekData.days);
                 showToast('info', '🗑 ' + DAY_LABELS_JP[dayIdx] + '曜の全コマをクリアしました');
+                persistViewMutation();
                 break;
             case 'clearPeriod':
                 pushUndo();
@@ -1484,6 +1518,7 @@
                 }
                 renderWeekGrid(STATE.weekData.days);
                 showToast('info', '🗑 ' + (pIdx + 1) + '校時を全曜日クリアしました');
+                persistViewMutation();
                 break;
         }
     }
@@ -2155,7 +2190,7 @@
             var isRecess = (key === 'recess1' || key === 'recess2');
             var h = '<tr' + (isRecess ? ' class="recess-row"' : '') + '><td class="row-header">' + label + '</td>';
             visIdx.forEach(function (i) {
-                var v = (days[i] && days[i][key]) ? days[i][key].replace(/\n/g, '<br>') : '';
+                var v = (days[i] && days[i][key]) ? escHtml(days[i][key]).replace(/\n/g, '<br>') : '';
                 h += '<td' + (cellClass ? ' class="' + cellClass + '"' : '') + '>' + v + '</td>';
             });
             return h + '</tr>';
@@ -2195,7 +2230,7 @@
                 for (var i = from; i < to; i++) {
                     var s = activeSubjects[i] || { subject: ' ', weekly: '', cumulative: '', percent: '' };
                     t += '<tr>';
-                    t += '<td style="background-color:#dcedc8;">' + (s.subject || ' ') + '</td>';
+                    t += '<td style="background-color:#dcedc8;">' + (escHtml(s.subject) || ' ') + '</td>';
                     t += '<td>' + formatFraction(s.weekly) + '</td>';
                     t += '<td>' + formatFraction(s.cumulative) + '</td>';
                     t += '<td>' + (s.percent !== undefined && s.percent !== '' ? s.percent + '%' : '&nbsp;') + '</td>';
@@ -2262,9 +2297,9 @@
 
         var renderPeriod = function (p) {
             var content = "";
-            if (p.subject) content += '<div class="subject">' + p.subject + '</div>';
-            if (p.unit) content += '<div class="unit">' + p.unit + '</div>';
-            if (p.content) content += '<div class="content">' + p.content.replace(/\n/g, '<br>') + '</div>';
+            if (p.subject) content += '<div class="subject">' + escHtml(p.subject) + '</div>';
+            if (p.unit) content += '<div class="unit">' + escHtml(p.unit) + '</div>';
+            if (p.content) content += '<div class="content">' + escHtml(p.content).replace(/\n/g, '<br>') + '</div>';
             return content;
         };
 
@@ -2291,7 +2326,7 @@
             html += '<tr><td class="row-header">時程<br>行事</td>';
             for (var i = 0; i < 5; i++) {
                 var evtCls = 'event-cell' + ((days[i] && days[i].holiday) ? ' holiday-cell' : '');
-                html += '<td class="' + evtCls + '">' + ((days[i] && days[i].event) ? days[i].event.replace(/\n/g, '<br>') : '') + '</td>';
+                html += '<td class="' + evtCls + '">' + ((days[i] && days[i].event) ? escHtml(days[i].event).replace(/\n/g, '<br>') : '') + '</td>';
             }
             html += '</tr>';
         }
@@ -2299,14 +2334,14 @@
         // 登校前
         if (opts.preclass) {
             html += '<tr><td class="row-header">登校前</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].preclass) ? days[i].preclass.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].preclass) ? escHtml(days[i].preclass).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
         // 朝学習
         if (opts.morning) {
             html += '<tr><td class="row-header">朝学習</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? days[i].morning.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? escHtml(days[i].morning).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -2323,7 +2358,7 @@
         // 中休み
         if (opts.recess1) {
             html += '<tr class="recess-row"><td class="row-header">中休</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess1) ? days[i].recess1.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess1) ? escHtml(days[i].recess1).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -2340,7 +2375,7 @@
         // 昼休み
         if (opts.recess2) {
             html += '<tr class="recess-row"><td class="row-header">昼休</td>';
-            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess2) ? days[i].recess2.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess2) ? escHtml(days[i].recess2).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -2357,7 +2392,7 @@
         // 放課後
         if (opts.afterschool) {
             html += '<tr><td class="row-header">放課後</td>';
-            for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? days[i].afterschool.replace(/\n/g, '<br>') : '') + '</td>'; }
+            for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? escHtml(days[i].afterschool).replace(/\n/g, '<br>') : '') + '</td>'; }
             html += '</tr>';
         }
 
@@ -2381,7 +2416,7 @@
             if (p_idx !== undefined) {
                 return d.periods ? renderPeriod(d.periods[p_idx]) : '';
             }
-            return d[key] ? d[key].replace(/\n/g, '<br>') : '';
+            return d[key] ? escHtml(d[key]).replace(/\n/g, '<br>') : '';
         };
 
         // 行事
@@ -2480,7 +2515,7 @@
             for (var i = 0; i < half; i++) {
                 var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
                 html += '<tr>';
-                html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
+                html += '<td style="background-color:#dcedc8;">' + (escHtml(s.subject) || " ") + '</td>';
                 html += '<td>' + formatFraction(s.weekly) + '</td>';
                 html += '<td>' + formatFraction(s.cumulative) + '</td>';
                 html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
@@ -2495,7 +2530,7 @@
             for (var i = half; i < half2; i++) {
                 var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
                 html += '<tr>';
-                html += '<td style="background-color:#dcedc8;">' + (s.subject || " ") + '</td>';
+                html += '<td style="background-color:#dcedc8;">' + (escHtml(s.subject) || " ") + '</td>';
                 html += '<td>' + formatFraction(s.weekly) + '</td>';
                 html += '<td>' + formatFraction(s.cumulative) + '</td>';
                 html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
@@ -2548,7 +2583,7 @@
                 }
                 var statusMark = printTasks[i].status === '完了' ? '<span class="todo-done">✔</span>'
                     : (printTasks[i].status === '進行中' ? '<span class="todo-pending">◐</span>' : '<span class="todo-pending">□</span>');
-                html += '<div class="todo-item">' + statusMark + ' ' + printTasks[i].content + duePart + '</div>';
+                html += '<div class="todo-item">' + statusMark + ' ' + escHtml(printTasks[i].content) + duePart + '</div>';
             } else {
                 html += '<div class="todo-item">&nbsp;</div>';
             }
@@ -6078,8 +6113,10 @@
             '<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$1<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
         );
         // 2) 素の URL（Markdown リンクに変換済みの href="..." 内は除外）
+        //    escHtml 済みテキストでは & は &amp; になっているため、&amp; をURLの一部として
+        //    許可する（除外すると「?a=1&b=2」のようなクエリ付きURLが途中で切れてしまう）
         md = md.replace(
-            /(^|[^"=])(https?:\/\/[^\s<&]+)/g,
+            /(^|[^"=])(https?:\/\/(?:&amp;|[^\s<&])+)/g,
             '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$2<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
         );
         return md;
@@ -6622,8 +6659,7 @@
             .saveAppSettings(settings);
     }
 
-    function fetchSettingCourseList() {
-        var inputBtn = event.target;
+    function fetchSettingCourseList(inputBtn) {
         inputBtn.disabled = true;
         inputBtn.textContent = '取得中...';
 

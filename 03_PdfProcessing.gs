@@ -590,8 +590,12 @@ function startEventPdfProcessingFromWebApp(fileIds, fiscalYear) {
   try {
     if (!fileIds || fileIds.length === 0) throw new Error("ファイルが選択されていません。");
     if (!fiscalYear) throw new Error("対象年度が指定されていません。");
+    // 文字列で渡された場合に「fiscalYear + 1」が文字列連結（例: "2025" + 1 → "20251"）となり、
+    // 1〜3月の年判定が壊れて過去月まで処理対象に含まれてしまうため、数値に正規化する
+    fiscalYear = parseInt(fiscalYear, 10);
+    if (isNaN(fiscalYear)) throw new Error("対象年度の形式が不正です。西暦4桁で指定してください。");
 
-    resetEventPdfProcessing(); 
+    resetEventPdfProcessing();
 
     const today = new Date();
     const firstDayOfCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
