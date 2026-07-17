@@ -2117,7 +2117,7 @@
                 + '<label><input type="checkbox" id="po_stats" checked> 教科時数表</label>'
                 + '<label><input type="checkbox" id="po_summary" checked> 週のまとめ</label>'
                 + '</div>'
-                + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 0 2px;">※週のまとめは標準レイアウトのフリースペース（時数表と検印欄の間）に印刷されます</div>'
+                + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 0 2px;">※週のまとめは標準ではフリースペース（時数表と検印欄の間）、コンパクトでは週案表の下に印刷されます</div>'
                 + '<hr style="margin:12px 0;">'
                 + '<label style="display:flex;align-items:center;gap:8px;">'
                 + 'フォントサイズ: <input type="range" id="po_fontSize" min="8" max="14" value="10" style="flex:1;">'
@@ -2238,6 +2238,7 @@
         html += '.compact-bottom { display: flex; gap: 8px; margin-top: 8px; align-items: stretch; }';
         html += '.compact-bottom .stats-table { width: auto; flex: 1 1 0; }';
         html += '.compact-bottom .seal-table { width: 180px; margin: 0 0 0 auto; flex: 0 0 auto; }';
+        html += '.compact-summary { margin-top: 8px; flex: 0 1 auto; }';
         html += '</style>';
         return html;
     }
@@ -2298,6 +2299,15 @@
         html += periodRow(5, '6校時');
         if (opts.afterschool) html += textRow('afterschool', '放課後');
         html += '</table>';
+
+        // 週のまとめ（表と下段（時数表・検印枠）の間に全幅で印刷）
+        var weekSummaryText = (STATE.weekData && STATE.weekData.weekSummary) ? STATE.weekData.weekSummary : '';
+        if (opts.summary && weekSummaryText) {
+            html += '<div class="summary-box compact-summary">';
+            html += '<div class="summary-title">今週のまとめ（報告）</div>';
+            html += '<div class="summary-text">' + escHtml(weekSummaryText) + '</div>';
+            html += '</div>';
+        }
 
         // 下段: 教科時数表（選択時） + 検印枠
         html += '<div class="compact-bottom">';
@@ -3113,7 +3123,7 @@
             icon: generatedNow ? 'success' : undefined,
             title: generatedNow ? '週の報告が完成しました' : '週のまとめ（報告）',
             html: '<div style="text-align:left;font-size:0.78rem;color:var(--text-sub);margin-bottom:4px;">'
-                + escHtml(mondayStr) + ' の週 — 編集して保存できます。週案の印刷時はフリースペース（時数表と検印欄の間）に掲載されます。</div>'
+                + escHtml(mondayStr) + ' の週 — 編集して保存できます。週案の印刷時は標準ではフリースペース（時数表と検印欄の間）、コンパクトでは週案表の下に掲載されます。</div>'
                 + '<textarea id="weekSummaryEdit" class="swal2-textarea" style="width:100%;margin:0;min-height:220px;font-size:0.85rem;line-height:1.6;">'
                 + escHtml(summary) + '</textarea>',
             width: 600,
