@@ -32,7 +32,7 @@ const TRIGGER_FUNCTION_NAME_EVENT = 'processNextEventPdf';
  */
 function getDbColumns() {
   const cache = CacheService.getScriptCache();
-  const cachedCols = cache.get('dbColumnsMap_v3');
+  const cachedCols = cache.get('dbColumnsMap_v4');
   if (cachedCols) {
     return JSON.parse(cachedCols);
   }
@@ -47,7 +47,9 @@ function getDbColumns() {
   const headerKeys = {
     "第何週": "WEEK_NUM", "週番号": "WEEK_NUM",
     "日付": "DATE", "曜日": "DAY_OF_WEEK", "時程": "TIME", 
-    "行事": "EVENT", "朝学習": "MORNING", 
+    "行事": "EVENT",
+    "登校前タスク": "PRECLASS", "登校前": "PRECLASS", "始業前": "PRECLASS", "登校前業務": "PRECLASS", "出勤後タスク": "PRECLASS",
+    "朝学習": "MORNING",
     "1校時": "PERIOD1", "単元1": "UNIT1", "単元名1": "UNIT1", "学習内容1": "CONTENT1", "内容1": "CONTENT1", 
     "2校時": "PERIOD2", "単元2": "UNIT2", "単元名2": "UNIT2", "学習内容2": "CONTENT2", "内容2": "CONTENT2", 
     "3校時": "PERIOD3", "単元3": "UNIT3", "単元名3": "UNIT3", "学習内容3": "CONTENT3", "内容3": "CONTENT3", 
@@ -70,7 +72,7 @@ function getDbColumns() {
 
   if (!colMap.DATE) throw new Error("データベースシートに「日付」という名前のヘッダー列が見つかりません。");
 
-  cache.put('dbColumnsMap_v3', JSON.stringify(colMap), 3600);
+  cache.put('dbColumnsMap_v4', JSON.stringify(colMap), 3600);
   return colMap;
 }
 
@@ -78,7 +80,7 @@ function getDbColumns() {
  * データベースの列構成を変更した際にキャッシュをクリアする関数です。
  */
 function clearDbColumnsCache() {
-  CacheService.getScriptCache().remove('dbColumnsMap_v3');
+  CacheService.getScriptCache().remove('dbColumnsMap_v4');
   logInfo("データベースの列構成キャッシュをクリアしました。");
 }
 
