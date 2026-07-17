@@ -541,6 +541,102 @@ function getPdfFileListForWebApp(type) {
 }
 
 /**
+ * [Webアプリ API] 「行事予定」タブ用: 行事予定PDFフォルダ内のPDFを
+ * 学校（サブフォルダ）ごとにグループ化して返します。
+ * フォルダ直下のPDFは school が空文字のグループとして返します。
+ * サブフォルダはPDFが0件でも返します（アップロード先の選択肢として使うため）。
+ * @returns {{success: boolean, folderName?: string, groups?: Array<{school: string, files: Array<{id: string, name: string, updatedAt: number, size: number}>}>, error?: string, notConfigured?: boolean}}
+ */
+function getEventPdfLibraryForWebApp() {
+  try {
+    const folderId = getSetting(SP_KEY_EVENT_PDF_FOLDER_ID);
+    if (!folderId) {
+      return {
+        success: false,
+        notConfigured: true,
+        error: '行事予定PDFフォルダIDが未設定です。「設定」タブの「PDF格納フォルダID」で設定してください。'
+      };
+    }
+
+    const collectPdfs = (folder) => {
+      const files = folder.getFilesByType(MimeType.PDF);
+      const list = [];
+      while (files.hasNext()) {
+        const f = files.next();
+        list.push({
+          id: f.getId(),
+          name: f.getName(),
+          updatedAt: f.getLastUpdated().getTime(),
+          size: f.getSize()
+        });
+      }
+      list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+      return list;
+    };
+
+    const rootFolder = DriveApp.getFolderById(folderId);
+    const groups = [];
+
+    // フォルダ直下のPDF（学校フォルダに分けていない運用）
+    const rootFiles = collectPdfs(rootFolder);
+    if (rootFiles.length > 0) {
+      groups.push({ school: '', files: rootFiles });
+    }
+
+    // サブフォルダ = 学校ごとのグループ
+    const subFolders = rootFolder.getFolders();
+    const schoolGroups = [];
+    while (subFolders.hasNext()) {
+      const sub = subFolders.next();
+      schoolGroups.push({ school: sub.getName(), files: collectPdfs(sub) });
+    }
+    schoolGroups.sort((a, b) => a.school.localeCompare(b.school, 'ja'));
+    groups.push(...schoolGroups);
+
+    return { success: true, folderName: rootFolder.getName(), groups: groups };
+  } catch (e) {
+    logError('getEventPdfLibraryForWebApp', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 「行事予定」タブ用: PDFを行事予定PDFフォルダに保存します。
+ * schoolName が指定された場合は同名のサブフォルダ（なければ作成）に保存します。
+ * @param {string} fileName ファイル名
+ * @param {string} base64Data PDFのbase64文字列（dataURLヘッダなし）
+ * @param {string} schoolName 保存先の学校名（サブフォルダ名）。空ならフォルダ直下
+ * @returns {{success: boolean, fileId?: string, message?: string, error?: string}}
+ */
+function uploadEventSchedulePdf(fileName, base64Data, schoolName) {
+  try {
+    const folderId = getSetting(SP_KEY_EVENT_PDF_FOLDER_ID);
+    if (!folderId) {
+      throw new Error('行事予定PDFフォルダIDが未設定です。「設定」タブの「PDF格納フォルダID」で設定してください。');
+    }
+    if (!fileName || !base64Data) throw new Error('ファイルデータが不正です。');
+
+    const bytes = Utilities.base64Decode(base64Data);
+    if (bytes.length > 15 * 1024 * 1024) throw new Error('ファイルサイズが15MBを超えています。');
+
+    const rootFolder = DriveApp.getFolderById(folderId);
+    let targetFolder = rootFolder;
+    const school = String(schoolName || '').trim();
+    if (school) {
+      const existing = rootFolder.getFoldersByName(school);
+      targetFolder = existing.hasNext() ? existing.next() : rootFolder.createFolder(school);
+    }
+
+    const file = targetFolder.createFile(Utilities.newBlob(bytes, MimeType.PDF, fileName));
+    logInfo(`行事予定PDFを保存しました: ${fileName}（保存先: ${targetFolder.getName()}）`);
+    return { success: true, fileId: file.getId(), message: `「${fileName}」を保存しました。` };
+  } catch (e) {
+    logError('uploadEventSchedulePdf', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
  * [Webアプリ API] 選択された行事予定PDFの読み込み処理を開始します。
  */
 function startEventPdfProcessingFromWebApp(fileIds, fiscalYear) {
