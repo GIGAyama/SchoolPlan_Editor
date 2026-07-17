@@ -12,7 +12,7 @@ function onOpen() {
     PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ssId);
   } catch(e) {}
 
-  // 祝日データの定期取得（プロパティ未設定 or 月1回更新）
+  // 祝日データの定期取得（プロパティ未設定、または前回更新から約1か月経過時のみ再取得）
   try { fetchAndStoreHolidays(); } catch(e) {}
 
   const ui = SpreadsheetApp.getUi();
@@ -29,6 +29,7 @@ function onOpen() {
       .addItem('行事予定PDFをフォルダから読込', 'importEventsFromFolder_UI')
       .addSeparator()
       .addItem('登校前タスク列を追加', 'ensurePreClassColumn_UI')
+      .addItem('祝日データを更新', 'refreshHolidays_UI')
       .addItem('データベースの入力内容をクリア', 'clearDatabaseDataWithConfirmation')
       .addItem('（PDF読込処理を強制停止）', 'resetAllPdfProcessing_UI')
       .addItem('クラス一覧を取得', 'listCoursesToSheet')
@@ -63,6 +64,22 @@ function TodaysRow() {
   } catch (e) {
     logError("TodaysRow", e);
     SpreadsheetApp.getUi().alert(`エラー: ${e.message}`);
+  }
+}
+
+/**
+ * 祝日データを内閣府CSVから強制的に再取得します（メニューからの手動更新用）。
+ */
+function refreshHolidays_UI() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    fetchAndStoreHolidays(true);
+    const res = getHolidays();
+    const count = (res && res.success && Array.isArray(res.data)) ? res.data.length : 0;
+    ui.alert(`祝日データを更新しました（${count}件）。`);
+  } catch (e) {
+    logError("refreshHolidays_UI", e);
+    ui.alert(`祝日データの更新に失敗しました: ${e.message}`);
   }
 }
 
