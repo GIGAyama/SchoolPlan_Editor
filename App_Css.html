@@ -4625,4 +4625,154 @@
         margin-top: 6px;
         line-height: 1.5;
     }
+
+    /* ===================================================================== */
+    /* ===== ツールバー最適化（ボタンの1行維持・ドロップダウン収納）     ===== */
+    /* ===================================================================== */
+
+    /* --- ヘッダーナビ: 折り返さず、収まらない場合のみ横スクロール --- */
+    .header-nav {
+        flex-wrap: nowrap;
+        min-width: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .header-nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav-btn {
+        position: relative;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    /* 中間幅（タブレット横・小型ノート）: アイコンの下に小さめラベルを
+       縦積みしてナビ全体を圧縮する。ラベルは常に表示し役割を明示する */
+    @media (max-width: 1280px) and (min-width: 769px) {
+        .app-header {
+            height: auto;
+            min-height: var(--header-h);
+            padding: 6px 12px;
+        }
+
+        .nav-btn {
+            flex-direction: column;
+            justify-content: center;
+            gap: 2px;
+            height: auto;
+            min-height: 44px;
+            padding: 5px 9px;
+            font-size: 0.62rem;
+            line-height: 1.1;
+            border-radius: 10px;
+        }
+
+        .nav-btn .material-symbols-outlined {
+            font-size: 1.2rem;
+        }
+
+        /* 縦積み時、バッジは3段目にならないようボタンの右上に重ねる */
+        .nav-btn .nav-task-badge {
+            position: absolute;
+            top: 0;
+            right: 0;
+            margin-left: 0;
+        }
+
+        /* テーマ切替はラベルなしの丸ボタンのまま維持 */
+        .nav-btn.theme-toggle {
+            width: 36px;
+            height: 36px;
+            min-height: 36px;
+            padding: 0;
+            border-radius: 50%;
+            align-self: center;
+        }
+    }
+
+    /* --- ツールバー用ドロップダウン（収納メニュー） ---
+       項目はすべて「アイコン + フルラベル」で表示し、役割が分かる状態を保つ */
+    .tb-dropdown {
+        position: relative;
+        display: inline-flex;
+    }
+
+    .tb-dropdown-toggle .tb-caret {
+        font-size: 1.05rem;
+        margin-left: -2px;
+        transition: transform 0.15s;
+    }
+
+    .tb-dropdown.open .tb-dropdown-toggle .tb-caret {
+        transform: rotate(180deg);
+    }
+
+    .tb-menu {
+        display: none;
+        position: absolute;
+        top: calc(100% + 6px);
+        right: 0;
+        z-index: 1100;
+        min-width: 230px;
+        padding: 6px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        box-shadow: var(--shadow-lg);
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .tb-dropdown.open .tb-menu {
+        display: flex;
+    }
+
+    .tb-menu.left {
+        right: auto;
+        left: 0;
+    }
+
+    .tb-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 8px 10px;
+        border: none;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-main);
+        font-size: 0.82rem;
+        font-family: inherit;
+        text-align: left;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .tb-menu-item:hover {
+        background: var(--primary-light);
+    }
+
+    .tb-menu-item:disabled {
+        opacity: 0.55;
+        cursor: default;
+    }
+
+    .tb-menu-sep {
+        border-top: 1px solid var(--border);
+        margin: 4px 2px;
+    }
+
+    /* --- 編集ツールバー: ドロップダウン収納後も万一収まらない場合は折り返す --- */
+    .edit-toolbar {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .toolbar-actions {
+        flex-wrap: wrap;
+    }
 </style>
