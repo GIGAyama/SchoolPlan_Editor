@@ -1467,21 +1467,64 @@
 
     function autoFillPlan() {
         if (!STATE.mondayStr) return;
+
+        // 前回選んだオプションを既定値として復元
+        var saved = {};
+        try { saved = JSON.parse(localStorage.getItem('autoFillOptions') || '{}'); } catch (e) { saved = {}; }
+        var fillModeEmpty = saved.fillMode === 'empty';
+        var useAI = !!saved.useAI;
+
+        Swal.fire({
+            title: '単元自動入力',
+            width: 500,
+            html:
+                '<div style="text-align:left;font-size:0.9rem;line-height:1.7;">' +
+                '<p style="margin:0 0 8px;">単元マスタと指導履歴から、今週の単元名・学習内容を計算して入力します。<br>指導済みの時数はスキップされ、二重に入力されることはありません。</p>' +
+                '<label style="display:block;font-weight:600;margin:8px 0 2px;">入力対象</label>' +
+                '<label style="display:block;font-weight:400;"><input type="radio" name="afFillMode" value="all"' + (fillModeEmpty ? '' : ' checked') + '> すべてのコマを再計算（既存の入力を上書き）</label>' +
+                '<label style="display:block;font-weight:400;"><input type="radio" name="afFillMode" value="empty"' + (fillModeEmpty ? ' checked' : '') + '> 空欄のコマのみ入力（手入力した内容を優先）</label>' +
+                '<label style="display:block;font-weight:600;margin:10px 0 2px;">AI最適化</label>' +
+                '<label style="display:block;font-weight:400;"><input type="checkbox" id="afUseAI"' + (useAI ? ' checked' : '') + '> AI（Gemini）で割り当てを最適化する</label>' +
+                '<p style="margin:4px 0 0;font-size:0.78rem;color:var(--text-sub);">行事や単元の区切りを考慮して配置を調整します（Gemini APIキーの設定が必要）。AIの提案は必ずルール検証され、指導済みの時数や時数の飛びが入り込むことはありません。</p>' +
+                '</div>',
+            showCancelButton: true,
+            confirmButtonText: '実行する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8',
+            focusConfirm: false,
+            preConfirm: function () {
+                var checked = document.querySelector('input[name="afFillMode"]:checked');
+                return {
+                    fillMode: (checked && checked.value) || 'all',
+                    useAI: !!document.getElementById('afUseAI').checked
+                };
+            }
+        }).then(function (res) {
+            if (!res.isConfirmed || !res.value) return;
+            try { localStorage.setItem('autoFillOptions', JSON.stringify(res.value)); } catch (e) { }
+            runAutoFillRequest(res.value);
+        });
+    }
+
+    function runAutoFillRequest(options) {
         var currentDays = collectCurrentEditData();
         if (!currentDays) return;
 
         var btn = document.getElementById('autoFillBtn');
         if (btn) { btn.disabled = true; btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 計算中...'; }
-        showToast('info', '単元マスタから学習内容を自動計算しています...');
+        showToast('info', options.useAI ? '単元マスタとAIで学習内容を計算しています...' : '単元マスタから学習内容を自動計算しています...');
 
         google.script.run
             .withSuccessHandler(function (result) {
                 if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">smart_toy</span> 単元自動入力'; }
                 if (result.success) {
                     STATE.weekData.days = result.days;
-                    // 編集状態のまま画面を再描画（AIの結果を反映）
+                    // 編集状態のまま画面を再描画（計算結果を反映）
                     renderWeekGrid(STATE.weekData.days);
-                    showToast('success', 'AI自動入力が完了しました。内容を確認し、問題なければ「保存する」を押してください。');
+                    var msg = '自動入力が完了しました。内容を確認し、問題なければ「保存する」を押してください。';
+                    if (result.aiApplied > 0) msg = 'AIが' + result.aiApplied + 'コマの割り当てを調整しました。' + msg;
+                    showToast('success', msg);
+                    showAutoFillWarnings(result.warnings);
                 } else {
                     showToast('error', '自動入力エラー: ' + result.error);
                 }
@@ -1490,7 +1533,21 @@
                 if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">smart_toy</span> 単元自動入力'; }
                 showToast('error', '通信エラー: ' + e.message);
             })
-            .calculateAutoFillForWebApp(STATE.mondayStr, currentDays);
+            .calculateAutoFillForWebApp(STATE.mondayStr, currentDays, options);
+    }
+
+    // 自動入力・一括入力で検出された確認事項（時数の不一致・指導済みスキップ等）を表示
+    function showAutoFillWarnings(warnings) {
+        if (!warnings || !warnings.length) return;
+        var items = warnings.map(function (w) {
+            return '<li style="margin:4px 0;">' + escHtml(w) + '</li>';
+        }).join('');
+        Swal.fire({
+            icon: 'info',
+            title: '自動入力の確認事項',
+            html: '<ul style="text-align:left;font-size:0.85rem;padding-left:20px;max-height:300px;overflow-y:auto;">' + items + '</ul>',
+            confirmButtonText: 'OK'
+        });
     }
 
     // ===== 翌週以降を一括自動入力 =====
@@ -1545,7 +1602,8 @@
                 + '<p>現在表示中の週（<strong>' + STATE.mondayStr + '〜</strong>）の進捗を基準に、'
                 + '<strong>翌週以降のすべての週</strong>の単元名と学習内容を自動入力し直します。</p>'
                 + '<p style="color:var(--danger);margin-top:8px;">⚠ 翌週以降の単元名・学習内容は上書きされます。<br>教科名（時間割）は変更されません。</p>'
-                + '<p style="color:var(--text-sub);margin-top:8px;font-size:0.8rem;">※ 先に「固定時間割の転記」で教科名を入れておく必要があります。</p>'
+                + '<p style="color:var(--text-sub);margin-top:8px;font-size:0.8rem;">※ 先に「固定時間割の転記」で教科名を入れておく必要があります。<br>'
+                + '※ 指導済みの単元・時数は再入力されません。マスタと実績の時数が食い違う場合は大きい方に合わせて継続し、検出した不一致は実行後に表示されます。</p>'
                 + '</div>',
             icon: 'warning',
             showCancelButton: true,
@@ -1565,6 +1623,7 @@
                 if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">fast_forward</span> 以降を一括自動入力'; }
                 if (res.success) {
                     showToast('success', res.message);
+                    showAutoFillWarnings(res.warnings);
                     loadWeeklyPlan(); // 現在の週をリロード
                 } else {
                     showToast('error', 'エラー: ' + res.error);
@@ -1653,8 +1712,11 @@
                 '</select>' +
                 '<label style="display:block;margin:10px 0 2px;font-weight:600;">ずらすコマ数</label>' +
                 '<input id="shiftCount" type="number" min="1" step="1" value="1" class="swal2-input" style="margin:0;width:100%;">' +
-                '<p style="margin:10px 0 0;font-size:0.8rem;color:var(--text-sub);">※ 進捗番号（例: 2/5）は振り直さず、入力された値ごと移動します。' +
-                '期間の端からあふれたコマは切り捨てられます。</p>' +
+                '<label style="display:block;margin:10px 0 2px;font-weight:600;">オプション</label>' +
+                '<label style="display:block;font-weight:400;"><input type="checkbox" id="shiftRenumber" checked> 進捗番号（例: 2/5）を指導履歴に合わせて振り直す</label>' +
+                '<p style="margin:4px 0 0;font-size:0.8rem;color:var(--text-sub);">ONにすると、ずらした後の時数を期間開始日までの指導実績から連番で振り直し、' +
+                '総時数と学習内容も単元マスタに合わせて再計算します（時数の重複・飛びを自動解消）。<br>' +
+                'OFFの場合は入力された値ごとそのまま移動します。いずれも期間の端からあふれたコマは切り捨てられます。</p>' +
                 '</div>',
             showCancelButton: true,
             confirmButtonText: '実行する',
@@ -1667,11 +1729,12 @@
                 var end = document.getElementById('shiftEnd').value;
                 var direction = document.getElementById('shiftDirection').value;
                 var count = parseInt(document.getElementById('shiftCount').value, 10);
+                var renumber = !!document.getElementById('shiftRenumber').checked;
                 if (!subject) { Swal.showValidationMessage('教科を入力してください。'); return false; }
                 if (!start || !end) { Swal.showValidationMessage('開始日と終了日を指定してください。'); return false; }
                 if (start > end) { Swal.showValidationMessage('開始日が終了日より後になっています。'); return false; }
                 if (!count || count < 1) count = 1;
-                return { subject: subject, start: start, end: end, direction: direction, count: count };
+                return { subject: subject, start: start, end: end, direction: direction, count: count, renumber: renumber };
             }
         }).then(function (res) {
             if (res.isConfirmed && res.value) {
@@ -1743,7 +1806,7 @@
                 if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">move_down</span> 単元をずらす'; }
                 showToast('error', '通信エラー: ' + (e && e.message ? e.message : e));
             })
-            .shiftSubjectLessons(params.subject, params.start, params.end, params.direction, params.count);
+            .shiftSubjectLessons(params.subject, params.start, params.end, params.direction, params.count, { renumber: params.renumber });
     }
 
 </script>
