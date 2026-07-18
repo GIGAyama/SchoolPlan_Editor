@@ -225,6 +225,89 @@
         });
     }
 
+    // ===== 2本指スワイプによるビュー切り替え（タッチ端末向け・ループ対応） =====
+    (function () {
+        var SWIPE_MIN_X = 80;       // 発火に必要な横移動量(px)
+        var SWIPE_MAX_Y_RATIO = 0.6; // 縦移動が横移動のこの比率を超えたら斜め操作として無効
+        var PINCH_TOLERANCE = 60;    // 2本指の間隔変化がこれを超えたらピンチズームとみなす
+
+        var tracking = false; // 2本指ジェスチャーを追跡中か
+        var handled = false;  // このジェスチャーで切り替え済みか（全指が離れるまで再発火しない）
+        var startMidX = 0, startMidY = 0, startDist = 0;
+
+        function getViewOrder() {
+            return Array.prototype.map.call(
+                document.querySelectorAll('.header-nav .nav-btn[data-view]'),
+                function (b) { return b.dataset.view; }
+            );
+        }
+
+        function isSwipeBlocked() {
+            // ピンチズームで拡大表示中は2本指操作をパン/ズームに譲る
+            if (window.visualViewport && window.visualViewport.scale > 1.01) return true;
+            // SweetAlert2 のダイアログ表示中は誤操作防止のため無効
+            if (document.body.classList.contains('swal2-shown')) return true;
+            // PDFプレビューモーダル表示中も無効
+            var overlay = document.getElementById('pdfPreviewOverlay');
+            if (overlay && overlay.style.display !== 'none') return true;
+            return false;
+        }
+
+        function midAndDist(touches) {
+            var t0 = touches[0], t1 = touches[1];
+            return {
+                x: (t0.clientX + t1.clientX) / 2,
+                y: (t0.clientY + t1.clientY) / 2,
+                dist: Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY)
+            };
+        }
+
+        function switchViewBySwipe(direction) {
+            var order = getViewOrder();
+            if (order.length < 2) return;
+            var idx = order.indexOf(STATE.view);
+            if (idx < 0) idx = 0;
+            // ループスクロール: 端のタブから反対側の端へ回り込む
+            switchView(order[(idx + direction + order.length) % order.length]);
+        }
+
+        document.addEventListener('touchstart', function (e) {
+            if (e.touches.length === 2 && !handled && !isSwipeBlocked()) {
+                var m = midAndDist(e.touches);
+                startMidX = m.x;
+                startMidY = m.y;
+                startDist = m.dist;
+                tracking = true;
+            } else if (e.touches.length > 2) {
+                tracking = false;
+            }
+        }, { passive: true });
+
+        document.addEventListener('touchmove', function (e) {
+            if (!tracking || e.touches.length !== 2) return;
+            var m = midAndDist(e.touches);
+            if (Math.abs(m.dist - startDist) > PINCH_TOLERANCE) {
+                tracking = false; // ピンチズーム操作なので追跡をやめる
+                return;
+            }
+            var dx = m.x - startMidX;
+            var dy = m.y - startMidY;
+            if (Math.abs(dx) >= SWIPE_MIN_X && Math.abs(dy) <= Math.abs(dx) * SWIPE_MAX_Y_RATIO) {
+                tracking = false;
+                handled = true;
+                // 左へスワイプ→右隣のタブ / 右へスワイプ→左隣のタブ
+                switchViewBySwipe(dx < 0 ? 1 : -1);
+            }
+        }, { passive: true });
+
+        function onTouchSettle(e) {
+            if (e.touches.length < 2) tracking = false;
+            if (e.touches.length === 0) handled = false;
+        }
+        document.addEventListener('touchend', onTouchSettle, { passive: true });
+        document.addEventListener('touchcancel', onTouchSettle, { passive: true });
+    })();
+
     // ===== 単元マスタ読み込み =====
     function loadMasterData() {
         google.script.run
