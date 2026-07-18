@@ -13,7 +13,8 @@ function onEdit(e) {
   try {
     if (!e || !e.range) return;
     const sheet = e.range.getSheet();
-    if (sheet.getName() !== SHEET_NAME_DATABASE) return;
+    // 複数学級モードでは各学級のデータベースシートも対象にする
+    if (!isDbSheetName_(sheet.getName())) return;
 
     const editStartRow = e.range.getRow();
     const editStartCol = e.range.getColumn();
@@ -77,7 +78,7 @@ function onEdit(e) {
  */
 function transferWeeklyTimetable(targetDate) {
   const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-  const shData = ss.getSheetByName(SHEET_NAME_DATABASE);
+  const shData = getDbSheet_(ss);
   if (!shData) throw new Error("データベースシートが見つかりません");
 
   const timetableData = getTimetableData_();
@@ -171,7 +172,7 @@ function processBulkTransferWithExclusion(dates) {
     validExclusionPeriods.forEach(p => Logger.log(`有効な除外期間: ${p.name} ${formatDate(p.start)} ～ ${formatDate(p.end)}`));
 
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-    const shData = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const shData = getDbSheet_(ss);
     if (!shData) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません`);
     
     const dbCols = getDbColumns();
@@ -273,7 +274,7 @@ function processBulkTransferWithExclusion(dates) {
 function getDefaultExclusionDates() {
   try {
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-    const databaseSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const databaseSheet = getDbSheet_(ss);
     if (!databaseSheet) throw new Error("データベースシートが見つかりません");
     
     // 年度を現在の日付から算出（4月始まり）。冬休み・春休みも年度基準で算出する
@@ -329,7 +330,7 @@ function getDefaultExclusionDates() {
 function clearDatabaseDataWithConfirmation() {
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+  const dbSheet = getDbSheet_(ss);
 
   if (!dbSheet) {
     ui.alert(`エラー: シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
@@ -337,7 +338,7 @@ function clearDatabaseDataWithConfirmation() {
   }
 
   const dbCols = getDbColumns();
-  const confirmationMessage = `「${SHEET_NAME_DATABASE}」シートの入力内容（D2以降）を全てクリアします。\n元に戻せません。よろしいですか？`;
+  const confirmationMessage = `「${dbSheet.getName()}」シートの入力内容（D2以降）を全てクリアします。\n元に戻せません。よろしいですか？`;
   const response = ui.alert('データクリア確認', confirmationMessage, ui.ButtonSet.YES_NO);
 
   if (response == ui.Button.YES) {
@@ -358,18 +359,37 @@ function clearDatabaseDataWithConfirmation() {
  */
 function clearDatabaseData_core_() {
   const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-  const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+  const dbSheet = getDbSheet_(ss);
   if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
+  return clearDatabaseInputsForSheet_(dbSheet, getDbColumns());
+}
 
-  const dbCols = getDbColumns();
+/**
+ * 指定したデータベースシートの入力内容（時程〜放課後）をクリアします。
+ * 複数学級モードの学級シート作成（コピー後の初期化）でも使用します。
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} dbSheet 対象シート
+ * @param {Object} dbCols 対象シートの列マップ（getDbColumns() と同形式）
+ * @param {boolean} [includeReflection] 振り返り・振り返り状態の列もクリアするか（学級シート作成時のみ true）
+ * @returns {{cleared: boolean, message: string}}
+ */
+function clearDatabaseInputsForSheet_(dbSheet, dbCols, includeReflection) {
   const lastRow = dbSheet.getLastRow();
   if (lastRow < 2) {
-    return { cleared: false, message: `「${SHEET_NAME_DATABASE}」にクリア対象のデータがありません。` };
+    return { cleared: false, message: `「${dbSheet.getName()}」にクリア対象のデータがありません。` };
   }
   const rangeToClear = dbSheet.getRange(2, dbCols.TIME, lastRow - 1, dbCols.AFTERSCHOOL - dbCols.TIME + 1);
   rangeToClear.clearContent();
-  logInfo(`データベースクリア完了: ${rangeToClear.getA1Notation()}`);
-  return { cleared: true, message: 'データベースの入力内容をクリアしました。' };
+  if (includeReflection) {
+    // 振り返り・振り返り状態の列（時程〜放課後の範囲外）もクリアする
+    if (dbCols.REFLECTION) {
+      dbSheet.getRange(2, dbCols.REFLECTION, lastRow - 1, 1).clearContent();
+    }
+    if (dbCols.REFLECTION_STATUS) {
+      dbSheet.getRange(2, dbCols.REFLECTION_STATUS, lastRow - 1, 1).clearContent();
+    }
+  }
+  logInfo(`データベースクリア完了 (${dbSheet.getName()}): ${rangeToClear.getA1Notation()}`);
+  return { cleared: true, message: `「${dbSheet.getName()}」の入力内容をクリアしました。` };
 }
 
 /**
@@ -597,7 +617,7 @@ function deleteTask(taskId) {
  */
 function ensurePreClassColumn() {
   const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-  const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+  const dbSheet = getDbSheet_(ss);
   if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
 
   const headers = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];

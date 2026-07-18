@@ -135,7 +135,7 @@ function recordPostedSchedule_(fingerprint) {
 function postScheduleToClassroom_core_(options) {
     const isManual = !!(options && options.manual);
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-    const databaseSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const databaseSheet = getDbSheet_(ss);
     if (!databaseSheet) throw new Error("データベースシートが見つかりません");
 
     const courseName = getCourseNameSafe_();

@@ -45,7 +45,7 @@ function onOpen() {
  */
 function TodaysRow() {
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME_DATABASE);
+    const sheet = getDbSheet_(SpreadsheetApp.getActiveSpreadsheet());
     if (!sheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
     
     const dbCols = getDbColumns();

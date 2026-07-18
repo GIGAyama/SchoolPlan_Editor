@@ -27,7 +27,7 @@ function ensureReflectionColumns_() {
   if (cols.REFLECTION && cols.REFLECTION_STATUS) return cols;
 
   const ss = getSs_();
-  const sheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+  const sheet = getDbSheet_(ss);
   if (!sheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
 
   const headersToAdd = [];
@@ -142,7 +142,7 @@ function getTodayReflectionStatus() {
   try {
     const cols = ensureReflectionColumns_();
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
     const dbData = dbSheet.getDataRange().getValues();
 
@@ -188,7 +188,7 @@ function getReflectionContext(dateStr) {
     });
     const cols = ensureReflectionColumns_();
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
     const dbData = dbSheet.getDataRange().getValues();
 
@@ -236,7 +236,7 @@ function getPendingReflections() {
   try {
     const cols = ensureReflectionColumns_();
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
     const dbData = dbSheet.getDataRange().getValues();
 
@@ -320,7 +320,7 @@ function saveDailyReflection(dateStr, reflectionText, status) {
 
     const cols = ensureReflectionColumns_();
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
     const dbData = dbSheet.getDataRange().getValues();
 
@@ -387,7 +387,7 @@ function deferReflection(dateStr) {
     });
     const cols = ensureReflectionColumns_();
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
     const dbData = dbSheet.getDataRange().getValues();
 
@@ -467,7 +467,7 @@ ${contextText}`;
   if (!summary) throw new Error('AIが週まとめを生成できませんでした。');
 
   const ss = getSs_();
-  const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+  const dbSheet = getDbSheet_(ss);
   writeWeekSummaryToSunday_(dbSheet, dbData, cols, sundayIdx, summary);
   logInfo(`週まとめを生成し、日曜日の振り返りセルへ保存しました（${mondayStr} 週）`);
   return summary;
@@ -486,7 +486,7 @@ function generateWeeklySummary(mondayStr, force) {
     });
     const cols = ensureReflectionColumns_();
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
     const dbData = dbSheet.getDataRange().getValues();
 
@@ -522,7 +522,7 @@ function saveWeeklySummary(mondayStr, text) {
     });
     const cols = ensureReflectionColumns_();
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
     const dbData = dbSheet.getDataRange().getValues();
 

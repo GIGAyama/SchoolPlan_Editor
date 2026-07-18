@@ -26,21 +26,106 @@ const SCRIPT_PROP_EVENT_PDF_YEAR = 'eventPdfProcessingYear';
 const TRIGGER_FUNCTION_NAME_EVENT = 'processNextEventPdf';  
 
 
+// === 複数学級モード（専科教員向け・設定でON/OFF） ===
+// 有効にすると学級ごとに専用のデータベースシートを持ち、切り替えて使用できます。
+// 無効（デフォルト）の場合は従来どおり単一の「データベース」シートを使用します。
+const SCRIPT_PROP_MULTICLASS_ENABLED = 'sp_multiClassEnabled';
+const SCRIPT_PROP_CLASS_LIST = 'sp_classList';          // JSON: [{name, sheetName, grade, standardHours}]
+const SCRIPT_PROP_ACTIVE_CLASS = 'sp_activeClassSheet'; // アクティブ学級のシート名
+
+/**
+ * 複数学級モードが有効かを返します。
+ * @returns {boolean}
+ */
+function isMultiClassEnabled_() {
+  return PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_MULTICLASS_ENABLED) === 'true';
+}
+
+/**
+ * 登録されている学級リストを返します（モード無効時は空配列）。
+ * @returns {Array<{name: string, sheetName: string, grade: string|number, standardHours: ?Array}>}
+ */
+function getClassList_() {
+  try {
+    const json = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_CLASS_LIST);
+    const list = json ? JSON.parse(json) : [];
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * 現在使用すべきデータベースシートを解決して返します。
+ * 複数学級モードが有効ならアクティブ学級のシート、
+ * 無効（またはアクティブシートが見つからない場合）は既定の「データベース」シートを返します。
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} [ss]
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet|null}
+ */
+function resolveDbSheet_(ss) {
+  ss = ss || (typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet());
+  if (isMultiClassEnabled_()) {
+    const active = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_ACTIVE_CLASS);
+    if (active && active !== SHEET_NAME_DATABASE) {
+      const sheet = ss.getSheetByName(active);
+      if (sheet) return sheet;
+    }
+  }
+  return ss.getSheetByName(SHEET_NAME_DATABASE);
+}
+
+/**
+ * アクティブなデータベースシートを返します（resolveDbSheet_ の別名）。
+ * 既存コードの `ss.getSheetByName(SHEET_NAME_DATABASE)` の置き換え先です。
+ * 見つからない場合は null を返します（呼び出し元の既存の null チェックを活かすため）。
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} [ss]
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet|null}
+ */
+function getDbSheet_(ss) {
+  return resolveDbSheet_(ss);
+}
+
+/**
+ * 指定シート名がデータベースシート（既定または登録学級のいずれか）かを判定します。
+ * onEdit などシート名でのフィルタリングに使用します。
+ * @param {string} sheetName
+ * @returns {boolean}
+ */
+function isDbSheetName_(sheetName) {
+  if (sheetName === SHEET_NAME_DATABASE) return true;
+  if (!isMultiClassEnabled_()) return false;
+  return getClassList_().some(c => c.sheetName === sheetName);
+}
+
 /**
  * データベースシートの列インデックスを動的に取得します（ヘッダー行に基づく）。
  * 戻り値は1始まりの列インデックスのオブジェクトです。
+ * 複数学級モードではアクティブ学級のシートを対象とし、キャッシュはシート別に保持します。
  */
 function getDbColumns() {
+  const dbSheet = resolveDbSheet_();
+  if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
+
+  const cacheKey = 'dbColumnsMap_v4::' + dbSheet.getName();
   const cache = CacheService.getScriptCache();
-  const cachedCols = cache.get('dbColumnsMap_v4');
+  const cachedCols = cache.get(cacheKey);
   if (cachedCols) {
     return JSON.parse(cachedCols);
   }
 
-  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-  const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
-  if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
+  const colMap = scanDbHeaderForSheet_(dbSheet);
 
+  cache.put(cacheKey, JSON.stringify(colMap), 3600);
+  return colMap;
+}
+
+/**
+ * 指定したデータベースシートのヘッダー行から列マップを構築します（キャッシュなし）。
+ * getDbColumns() の実体で、複数学級モードの学級シート作成時にも直接使用します。
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} dbSheet 対象シート
+ * @returns {Object} 1始まりの列インデックスのマップ
+ */
+function scanDbHeaderForSheet_(dbSheet) {
   const headers = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
   const colMap = {};
 
@@ -70,17 +155,20 @@ function getDbColumns() {
     }
   });
 
-  if (!colMap.DATE) throw new Error("データベースシートに「日付」という名前のヘッダー列が見つかりません。");
+  if (!colMap.DATE) throw new Error(`シート「${dbSheet.getName()}」に「日付」という名前のヘッダー列が見つかりません。`);
 
-  cache.put('dbColumnsMap_v4', JSON.stringify(colMap), 3600);
   return colMap;
 }
 
 /**
  * データベースの列構成を変更した際にキャッシュをクリアする関数です。
+ * 複数学級モードでは全学級シート分のキャッシュをクリアします。
  */
 function clearDbColumnsCache() {
-  CacheService.getScriptCache().remove('dbColumnsMap_v4');
+  const cache = CacheService.getScriptCache();
+  const names = [SHEET_NAME_DATABASE].concat(getClassList_().map(c => c.sheetName));
+  cache.removeAll(names.map(n => 'dbColumnsMap_v4::' + n));
+  cache.remove('dbColumnsMap_v4'); // 旧形式キーの掃除（後方互換）
   logInfo("データベースの列構成キャッシュをクリアしました。");
 }
 

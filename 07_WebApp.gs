@@ -58,7 +58,7 @@ function getWeeklyPlanData(mondayDateStr) {
       mondayDateStr: { type: 'string', required: true, pattern: /^\d{4}\/\d{1,2}\/\d{1,2}$/ }
     });
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     // 振り返り・週まとめ列を保証（追加失敗時も週案表示は継続する）
@@ -153,7 +153,7 @@ function getWeeklyPlanData(mondayDateStr) {
 function getMondayStrByWeekNumber(weekNum) {
   try {
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();
@@ -207,7 +207,7 @@ function saveWeeklyPlanData(mondayDateStr, days, baseRevision) {
     }
 
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();
@@ -373,7 +373,7 @@ function getMonthlyHoursData(year, month) {
       month: { type: 'number', required: true, min: 1, max: 12 }
     });
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();
@@ -426,7 +426,7 @@ function getMonthlyHoursData(year, month) {
 function getAnnualHoursData(academicYear) {
   try {
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();
@@ -809,7 +809,7 @@ function generateNewsletterPdf(mondayDateStr) {
     if (!sheet) throw new Error(`「${SHEET_NAME_NEWSLETTER}」シートが見つかりません`);
 
     // DBから当該週の週番号を取得
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
     const dbCols = getDbColumns();
     const dbData = dbSheet.getDataRange().getValues();
@@ -1202,6 +1202,12 @@ function protectSheets_core_() {
     SHEET_NAME_DATABASE, SHEET_NAME_UNIT_MASTER, SHEET_NAME_LOG,
     SHEET_NAME_NEWSLETTER
   ];
+  // 複数学級モードの学級シートも保護対象に含める
+  getClassList_().forEach(c => {
+    if (c.sheetName && sheetsToProtect.indexOf(c.sheetName) === -1) {
+      sheetsToProtect.push(c.sheetName);
+    }
+  });
   const owner = Session.getEffectiveUser();
 
   sheetsToProtect.forEach(name => {
@@ -1437,11 +1443,16 @@ function saveGrade(gradeNum) {
   try {
     const props = PropertiesService.getScriptProperties();
     props.setProperty(SCRIPT_PROP_GRADE, gradeNum.toString());
-    
+
     // 学年変更に伴い、標準時数をその学年のマスタで上書きする
     const newStandardHours = getStandardHoursMaster(gradeNum);
     props.setProperty(SP_KEY_STANDARD_HOURS, JSON.stringify(newStandardHours));
-    
+
+    // 複数学級モードでは、アクティブ学級のエントリにも学年・標準時数を保存する
+    if (isMultiClassEnabled_()) {
+      updateActiveClassEntry_({ grade: gradeNum.toString(), standardHours: newStandardHours });
+    }
+
     return { success: true, message: gradeNum + '年生の設定を適用しました。', data: newStandardHours };
   } catch (e) {
     logError('saveGrade', e);
@@ -1489,6 +1500,12 @@ function saveStandardHours(data) {
   try {
     if (!data || !Array.isArray(data)) throw new Error('無効なデータ');
     PropertiesService.getScriptProperties().setProperty(SP_KEY_STANDARD_HOURS, JSON.stringify(data));
+
+    // 複数学級モードでは、アクティブ学級のエントリにも標準時数を保存する
+    if (isMultiClassEnabled_()) {
+      updateActiveClassEntry_({ standardHours: data });
+    }
+
     return { success: true, message: '標準時数を保存しました。' };
   } catch (e) {
     logError('saveStandardHours', e);
@@ -1508,7 +1525,7 @@ function saveStandardHours(data) {
 function getHoursSummary(mondayStr) {
   try {
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();
@@ -1621,7 +1638,7 @@ function getHoursSummary(mondayStr) {
 function generateAnnualCalendar(year, startMondayStr) {
   try {
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();
@@ -2123,7 +2140,7 @@ function searchWeeklyPlans(keyword) {
     if (!query) throw new Error('検索キーワードを入力してください。');
 
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();
@@ -2214,7 +2231,7 @@ function getHoursSimulation(academicYear) {
       academicYear: { type: 'number', required: true, min: 2000, max: 2100 }
     });
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();

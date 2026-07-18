@@ -136,7 +136,7 @@ function callGeminiAPI_(prompt) {
 function extractTasksFromSchedule_WebApp(startDateStr, endDateStr) {
   try {
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     // 指定期間のデータを取得（日付、行事、各教科・活動内容）

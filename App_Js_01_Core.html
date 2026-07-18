@@ -84,6 +84,7 @@
         checkAutoReflection(); // 放課後にアプリを開いた場合、今日の振り返りモードを自動起動
         initPdfImportUI(); // PDF読み込み（ドロップゾーン・ファイル選択）の配線
         maybeOfferSetupWizard(); // 初回起動時（設定が不十分な場合のみ）に初期設定ウィザードを表示
+        loadMultiClassState(); // 複数学級モードの状態を読込（無効時はUI非表示のまま）
     };
 
     // ===== 週案グリッドの土日列 表示/非表示 =====
