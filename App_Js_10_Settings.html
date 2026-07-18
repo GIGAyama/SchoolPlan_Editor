@@ -1,0 +1,537 @@
+<script>
+    'use strict';
+    // ===== 固定時間割エディタ =====
+    var DAY_NAMES = ['月', '火', '水', '木', '金'];
+
+    function loadTimetableEditor() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    renderTimetableEditor(res.data);
+                    STATE.timetableLoaded = true;
+                } else {
+                    showToast('error', 'エラー: ' + (res.error || ''));
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .getTimetableForEditor();
+    }
+
+    function renderTimetableEditor(data) {
+        var tbody = document.getElementById('timetableBody');
+        tbody.innerHTML = '';
+        data.forEach(function (dayData, dayIndex) {
+            var tr = document.createElement('tr');
+            // 曜日ラベル
+            var tdLabel = document.createElement('td');
+            tdLabel.textContent = DAY_NAMES[dayIndex];
+            tr.appendChild(tdLabel);
+            // 時程
+            tr.appendChild(makeEditorCell('tt_' + dayIndex + '_time', dayData.time || ''));
+            // 朝学習
+            tr.appendChild(makeEditorCell('tt_' + dayIndex + '_morning', dayData.morning || ''));
+            // 1〜6校時
+            for (var p = 0; p < 6; p++) {
+                tr.appendChild(makeEditorCell('tt_' + dayIndex + '_p' + p, (dayData.periods && dayData.periods[p]) || '', true));
+            }
+            tbody.appendChild(tr);
+        });
+    }
+
+    function makeEditorCell(id, value, isSubjectCell) {
+        var td = document.createElement('td');
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.id = id;
+        input.value = value;
+        if (isSubjectCell) {
+            // 教科セルは「教科名+分数（合計1）」形式の検証をリアルタイムに行う
+            input.addEventListener('input', function () { updateSubjectInputValidity(input); });
+            updateSubjectInputValidity(input);
+        }
+        td.appendChild(input);
+        return td;
+    }
+
+    function gatherTimetableData() {
+        var data = [];
+        for (var d = 0; d < 5; d++) {
+            var periods = [];
+            for (var p = 0; p < 6; p++) {
+                var el = document.getElementById('tt_' + d + '_p' + p);
+                periods.push(el ? el.value : '');
+            }
+            data.push({
+                day: d,
+                time: (document.getElementById('tt_' + d + '_time') || {}).value || '',
+                morning: (document.getElementById('tt_' + d + '_morning') || {}).value || '',
+                periods: periods
+            });
+        }
+        return data;
+    }
+
+    function saveTimetable() {
+        var data = gatherTimetableData();
+
+        // 教科セルの検証: 「教科名+分数」形式は分数の合計が必ず1
+        var errors = [];
+        data.forEach(function (dayData, d) {
+            dayData.periods.forEach(function (value, p) {
+                if (!value) return;
+                var check = validateSubjectCellValue(value);
+                if (!check.valid) {
+                    errors.push(DAY_NAMES[d] + '曜 ' + (p + 1) + '校時「' + value + '」: ' + check.message);
+                }
+            });
+        });
+        if (errors.length > 0) {
+            showToast('error', '教科名の入力に誤りがあります: ' + errors[0]
+                + (errors.length > 1 ? '（他' + (errors.length - 1) + '件）' : ''));
+            return;
+        }
+
+        showToast('info', '保存中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '' + res.message);
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .saveTimetableFromEditor(data);
+    }
+
+    async function applyTimetableToCurrentWeek() {
+        if (!STATE.mondayStr) {
+            showToast('error', '表示中の週が設定されていません。');
+            return;
+        }
+        var result = await Swal.fire({
+            title: '時間割の転記',
+            text: STATE.mondayStr + ' 週に固定時間割を転記します。既存データは上書きされます。よろしいですか？',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '転記する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8'
+        });
+        if (!result.isConfirmed) return;
+        showToast('info', '転記中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '' + res.message);
+                    STATE.editMode = false;
+                    updateEditUI();
+                    doLoadWeeklyPlan(); // 転記後、週案を再読み込み（自動保存をスキップ）
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .applyTimetableToWeek(STATE.mondayStr);
+    }
+
+    // ===== 長期休業期間設定 & 年間一括転記 =====
+
+    function loadVacationDates() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res) {
+                    document.getElementById('vacSummerStart').value = res.summerStart || '';
+                    document.getElementById('vacSummerEnd').value = res.summerEnd || '';
+                    document.getElementById('vacWinterStart').value = res.winterStart || '';
+                    document.getElementById('vacWinterEnd').value = res.winterEnd || '';
+                    document.getElementById('vacSpringStart').value = res.springStart || '';
+                    document.getElementById('vacSpringEnd').value = res.springEnd || '';
+                    STATE.vacationDatesLoaded = true;
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '休業日データの取得に失敗: ' + e.message);
+            })
+            .getDefaultExclusionDates();
+    }
+
+    async function runBulkTransfer() {
+        var dates = {
+            summerStart: document.getElementById('vacSummerStart').value,
+            summerEnd: document.getElementById('vacSummerEnd').value,
+            winterStart: document.getElementById('vacWinterStart').value,
+            winterEnd: document.getElementById('vacWinterEnd').value,
+            springStart: document.getElementById('vacSpringStart').value,
+            springEnd: document.getElementById('vacSpringEnd').value
+        };
+
+        var swalResult = await Swal.fire({
+            title: '年間一括転記',
+            text: '長期休業期間を除外し、今後のすべての週に固定時間割を一括転記します。既存のデータは上書きされます。',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '実行する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#e65100'
+        });
+        if (!swalResult.isConfirmed) return;
+
+        var statusEl = document.getElementById('bulkTransferStatus');
+        statusEl.textContent = '一括転記を実行中...（数分かかることがあります）';
+        showToast('info', '年間一括転記を実行中...');
+
+        google.script.run
+            .withSuccessHandler(function (msg) {
+                statusEl.textContent = '';
+                showToast('success', '' + (msg || '一括転記が完了しました。'));
+            })
+            .withFailureHandler(function (e) {
+                statusEl.textContent = '';
+                showToast('error', 'エラー: ' + e.message);
+            })
+            .processBulkTransferWithExclusion(dates);
+    }
+
+    // ===== 教科別標準時数エディタ =====
+
+    function loadStandardHours() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    STATE.stdHoursData = res.data;
+                    renderStdHoursEditor(res.data);
+                    STATE.stdHoursLoaded = true;
+                } else {
+                    showToast('error', 'エラー: ' + (res.error || ''));
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .getStandardHours();
+    }
+
+    function renderStdHoursEditor(data) {
+        var container = document.getElementById('standardHoursEditor');
+        container.innerHTML = '';
+        data.forEach(function (item, i) {
+            var div = document.createElement('div');
+            div.className = 'std-hours-item';
+            div.innerHTML =
+                '<label>' + escHtml(item.subject) + '</label>' +
+                '<input type="number" id="stdH_' + i + '" value="' + (item.hours || 0) + '" min="0">';
+            container.appendChild(div);
+        });
+    }
+
+    function saveStdHours() {
+        var data = [];
+        var container = document.getElementById('standardHoursEditor');
+        var items = container.querySelectorAll('.std-hours-item');
+        items.forEach(function (item, i) {
+            var label = item.querySelector('label').textContent;
+            var input = item.querySelector('input');
+            data.push({ subject: label, hours: parseInt(input.value) || 0 });
+        });
+        showToast('info', '保存中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', '' + res.message);
+                    STATE.stdHoursData = data;
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .saveStandardHours(data);
+    }
+
+    // ===== 時数集計ダッシュボード =====
+    function loadHoursSummary() {
+        if (!STATE.mondayStr) return;
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    STATE.hoursSummaryData = res.data;
+                    renderHoursSummary(res.data);
+                } else {
+                    showToast('error', '時数集計エラー: ' + (res.error || ''));
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .getHoursSummary(STATE.mondayStr);
+    }
+
+    function renderHoursSummary(data) {
+        var container = document.getElementById('hoursSummaryContent');
+        if (!data || data.length === 0) {
+            container.innerHTML = '<p style="text-align:center;color:var(--text-sub);padding:16px;font-size:0.82rem;">データがありません</p>';
+            return;
+        }
+        var html = '<table class="hours-summary-table"><thead><tr>' +
+            '<th>教科</th><th>当週</th><th>累計</th><th>標準</th><th style="width:40%">進捗</th><th>%</th>' +
+            '</tr></thead><tbody>';
+        data.forEach(function (row) {
+            var pct = Math.min(row.percent, 150);
+            var overClass = row.percent > 100 ? ' over' : '';
+            html += '<tr>' +
+                '<td style="font-weight:600;">' + escHtml(row.subject) + '</td>' +
+                '<td>' + formatFraction(row.weekly) + '</td>' +
+                '<td>' + formatFraction(row.cumulative) + '</td>' +
+                '<td>' + row.standard + '</td>' +
+                '<td><div class="progress-bar-wrap"><div class="progress-bar-fill' + overClass + '" style="width:' + Math.min(pct, 100) + '%"></div></div></td>' +
+                '<td class="pct-label">' + row.percent + '%</td>' +
+                '</tr>';
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    // ===== システム設定 =====
+
+    /**
+     * Gemini APIから利用可能なモデル一覧を取得し、プルダウンに反映する。
+     * @param {boolean} forceReload キャッシュを無視して再取得するか
+     */
+    function loadGeminiModels(forceReload) {
+        if (STATE.geminiModelsCache && !forceReload) {
+            populateGeminiModelSelect(STATE.geminiModelsCache);
+            return;
+        }
+        var select = document.getElementById('sysGeminiModelName');
+        select.innerHTML = '<option value="">読み込み中...</option>';
+        select.disabled = true;
+        var warningDiv = document.getElementById('geminiModelWarning');
+        warningDiv.style.display = 'none';
+
+        google.script.run
+            .withSuccessHandler(function (result) {
+                select.disabled = false;
+                if (result.success && result.models.length > 0) {
+                    STATE.geminiModelsCache = result.models;
+                    populateGeminiModelSelect(result.models);
+                } else {
+                    // API取得失敗時はフォールバック（手入力可能にはしない）
+                    select.innerHTML = '<option value="gemini-2.5-flash">gemini-2.5-flash</option>';
+                    if (result.error) {
+                        warningDiv.textContent = 'モデル一覧の自動取得に失敗しました: ' + result.error;
+                        warningDiv.style.display = 'block';
+                    }
+                    applyCurrentModelSelection();
+                }
+            })
+            .withFailureHandler(function (e) {
+                select.disabled = false;
+                select.innerHTML = '<option value="gemini-2.5-flash">gemini-2.5-flash</option>';
+                var warningDiv = document.getElementById('geminiModelWarning');
+                warningDiv.textContent = 'モデル一覧の取得中にエラーが発生しました: ' + e.message;
+                warningDiv.style.display = 'block';
+                applyCurrentModelSelection();
+            })
+            .getAvailableGeminiModels();
+    }
+
+    /**
+     * モデル一覧をセレクトボックスに反映する。
+     * @param {Array} models モデル配列 [{name, displayName}]
+     */
+    function populateGeminiModelSelect(models) {
+        var select = document.getElementById('sysGeminiModelName');
+        var currentValue = select.dataset.pendingValue || select.value || '';
+        select.innerHTML = '';
+
+        models.forEach(function (m) {
+            var opt = document.createElement('option');
+            opt.value = m.name;
+            opt.textContent = m.name + (m.displayName !== m.name ? ' (' + m.displayName + ')' : '');
+            select.appendChild(opt);
+        });
+
+        applyCurrentModelSelection();
+    }
+
+    /**
+     * 現在保存されているモデル名をセレクトに反映し、利用不可の場合は警告を表示する。
+     */
+    function applyCurrentModelSelection() {
+        var select = document.getElementById('sysGeminiModelName');
+        var savedModel = select.dataset.pendingValue || '';
+        var warningDiv = document.getElementById('geminiModelWarning');
+
+        if (!savedModel) return;
+
+        // 保存されているモデルがリストにあるか確認
+        var found = false;
+        for (var i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === savedModel) {
+                found = true;
+                break;
+            }
+        }
+
+        if (found) {
+            select.value = savedModel;
+            warningDiv.style.display = 'none';
+        } else {
+            // リストにない場合：選択肢の先頭に追加し警告を表示
+            var opt = document.createElement('option');
+            opt.value = savedModel;
+            opt.textContent = savedModel + ' (利用不可)';
+            opt.style.color = '#dc3545';
+            select.insertBefore(opt, select.firstChild);
+            select.value = savedModel;
+            warningDiv.innerHTML = '<strong>⚠ 注意:</strong> 現在設定されているモデル「' + savedModel + '」は利用可能なモデル一覧に含まれていません。モデルが廃止された可能性があります。別のモデルを選択してください。';
+            warningDiv.style.display = 'block';
+        }
+        delete select.dataset.pendingValue;
+    }
+
+    function loadSystemSettings() {
+        if (STATE.isSystemSettingsLoaded) return;
+        showToast('info', 'システム設定を読み込み中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                document.getElementById('sysCourseName').value = res.courseName || '';
+                document.getElementById('sysPostHour').value = res.postHour || '';
+                document.getElementById('sysPdfFolderId').value = res.pdfFolderId || '';
+                document.getElementById('sysEventPdfFolderId').value = res.eventPdfFolderId || '';
+                // Geminiモデル名を保留値として保存し、モデル一覧取得後に反映する
+                var modelSelect = document.getElementById('sysGeminiModelName');
+                modelSelect.dataset.pendingValue = res.geminiModelName || 'gemini-2.5-flash';
+                loadGeminiModels(false);
+
+                // 担当学年の反映
+                var gradeSelect = document.getElementById('sysGradeSelect');
+                if (gradeSelect) {
+                    gradeSelect.value = res.grade || '3';
+                    // 学年変更イベントの登録
+                    gradeSelect.onchange = function () {
+                        var newGrade = this.value;
+                        showToast('info', '学年設定を変更中...');
+                        google.script.run
+                            .withSuccessHandler(function (r) {
+                                if (r.success) {
+                                    STATE.grade = parseInt(newGrade, 10) || 3;
+                                    showToast('success', r.message);
+                                    // 標準時数エディタの内容も再描画する
+                                    STATE.stdHoursData = r.data;
+                                    renderStdHoursEditor(r.data);
+                                } else {
+                                    showToast('error', 'エラー: ' + r.error);
+                                }
+                            })
+                            .withFailureHandler(_onCommError)
+                            .saveGrade(newGrade);
+                    };
+                }
+
+                // APIキー（マスク表示対応）
+                document.getElementById('sysGeminiApiKey').value = res.geminiApiKey || '';
+
+                // モジュール学習
+                document.getElementById('sysModuleEnabled').checked = !!res.moduleEnabled;
+
+                STATE.isSystemSettingsLoaded = true;
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '設定の読み込みに失敗しました: ' + e.message);
+            })
+            .getAppSettings();
+    }
+
+    function saveSystemSettings() {
+        var settings = {
+            courseName: document.getElementById('sysCourseName').value,
+            postHour: document.getElementById('sysPostHour').value,
+            pdfFolderId: document.getElementById('sysPdfFolderId').value,
+            eventPdfFolderId: document.getElementById('sysEventPdfFolderId').value,
+            geminiApiKey: document.getElementById('sysGeminiApiKey').value,
+            geminiModelName: document.getElementById('sysGeminiModelName').value,
+            moduleEnabled: document.getElementById('sysModuleEnabled').checked
+        };
+
+        showToast('info', 'システム設定を保存中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', res.message);
+                    // 保存後、念のため再取得してリフレッシュ
+                    STATE.isSystemSettingsLoaded = false;
+                    loadSystemSettings();
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '設定の保存に失敗しました: ' + e.message);
+            })
+            .saveAppSettings(settings);
+    }
+
+    function fetchSettingCourseList(inputBtn) {
+        inputBtn.disabled = true;
+        inputBtn.textContent = '取得中...';
+
+        google.script.run
+            .withSuccessHandler(function (courses) {
+                inputBtn.disabled = false;
+                inputBtn.textContent = '一覧取得';
+                if (!courses || courses.length === 0) {
+                    showToast('error', '有効なクラスが見つかりません');
+                    return;
+                }
+                var select = document.getElementById('sysCourseSelect');
+                select.innerHTML = '<option value="">-- 一覧から選択するか直打ちしてください --</option>';
+                courses.forEach(function (c) {
+                    var opt = document.createElement('option');
+                    opt.value = c;
+                    opt.textContent = c;
+                    select.appendChild(opt);
+                });
+                select.style.display = 'block';
+                showToast('success', 'コース一覧を取得しました');
+            })
+            .withFailureHandler(function (e) {
+                inputBtn.disabled = false;
+                inputBtn.textContent = '一覧取得';
+                showToast('error', 'コース取得エラー: ' + e.message);
+            })
+            .getCourseListForDashboard();
+    }
+
+    async function confirmGenerateCalendar() {
+        var year = document.getElementById('sysCalYear').value;
+        var startMondayStr = document.getElementById('sysCalStartMonday').value;
+
+        if (!year || !startMondayStr) {
+            showToast('error', '対象年度と第1週目の月曜日を入力してください。');
+            return;
+        }
+
+        var swalResult = await Swal.fire({
+            title: 'カレンダー再生成',
+            html: year + '年度のカレンダー（起点: ' + startMondayStr + '）をデータベースに展開します。<br><small>既存の行事や週案データは消えません</small>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '再生成する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#e65100'
+        });
+        if (!swalResult.isConfirmed) return;
+
+        showToast('info', 'カレンダー生成中...（数秒〜十数秒かかります）');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res.success) {
+                    showToast('success', res.message);
+                } else {
+                    showToast('error', 'エラー: ' + res.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '致命的なエラー: ' + e.message);
+            })
+            .generateAnnualCalendar(year, startMondayStr);
+    }
+
+</script>

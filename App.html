@@ -1176,7 +1176,20 @@
 
     </div><!-- /app -->
 
-    <?!= include('App_Js'); ?>
+    <!-- フロントエンドJS（機能別に分割。読み込み順を維持するため番号順にinclude） -->
+    <?!= include('App_Js_01_Core'); ?>
+    <?!= include('App_Js_02_Plan'); ?>
+    <?!= include('App_Js_03_Print'); ?>
+    <?!= include('App_Js_04_Reflection'); ?>
+    <?!= include('App_Js_05_Hours'); ?>
+    <?!= include('App_Js_06_Newsletter'); ?>
+    <?!= include('App_Js_07_PdfImport'); ?>
+    <?!= include('App_Js_08_Events'); ?>
+    <?!= include('App_Js_09_Utils'); ?>
+    <?!= include('App_Js_10_Settings'); ?>
+    <?!= include('App_Js_11_Task'); ?>
+    <?!= include('App_Js_12_UnitMaster'); ?>
+    <?!= include('App_Js_13_SystemTools'); ?>
 
 </body>
 

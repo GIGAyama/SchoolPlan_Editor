@@ -1,0 +1,278 @@
+<script>
+    'use strict';
+    // ===== 年間時数ビュー =====
+    function navigateYear(delta) {
+        STATE.hoursYear += delta;
+        loadAnnualHoursView();
+    }
+
+    function loadAnnualHoursView() {
+        document.getElementById('yearLabel').textContent = STATE.hoursYear + '年度';
+        var content = document.getElementById('hoursContent');
+        content.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>時数データを集計しています...</p></div>';
+        google.script.run
+            .withSuccessHandler(function (data) {
+                if (!data.success) { content.innerHTML = '<div class="hours-empty">取得失敗: ' + data.error + '</div>'; return; }
+                renderAnnualHoursTable(data.hoursData);
+            })
+            .withFailureHandler(function (e) {
+                // 失敗時にローディング表示が残らないよう、内容領域にエラーを表示する
+                content.innerHTML = '<div class="hours-empty">通信エラー: ' + (e && e.message ? e.message : '取得に失敗しました') + '</div>';
+            })
+            .getAnnualHoursData(STATE.hoursYear);
+        loadHoursSimulation();
+    }
+
+    // ===== 時数シミュレーション（年度末着地予測） =====
+
+    /** 年度末の時数過不足シミュレーションを取得して描画します。 */
+    function loadHoursSimulation() {
+        var content = document.getElementById('hoursSimContent');
+        if (!content) return;
+        content.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>シミュレーションを計算しています...</p></div>';
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) {
+                    content.innerHTML = '<p style="font-size:0.82rem;color:var(--text-sub);text-align:center;padding:16px;">'
+                        + escHtml(res.error || 'シミュレーションの計算に失敗しました') + '</p>';
+                    return;
+                }
+                renderHoursSimulation(res);
+            })
+            .withFailureHandler(function (e) {
+                content.innerHTML = '<p style="font-size:0.82rem;color:var(--text-sub);text-align:center;padding:16px;">通信エラー: '
+                    + escHtml(e && e.message ? e.message : '取得に失敗しました') + '</p>';
+            })
+            .getHoursSimulation(STATE.hoursYear);
+    }
+
+    /** シミュレーション結果（警告サマリー＋教科別テーブル）を描画します。 */
+    function renderHoursSimulation(res) {
+        var content = document.getElementById('hoursSimContent');
+        var rows = res.rows || [];
+        if (rows.length === 0) {
+            content.innerHTML = '<p style="font-size:0.82rem;color:var(--text-sub);text-align:center;padding:16px;">標準時数が設定されていません。</p>';
+            return;
+        }
+
+        // 不足見込みの教科を抽出（見込みが標準を下回るもの）
+        var shortages = rows.filter(function (r) { return r.standard > 0 && r.diff < 0; });
+
+        var html = '';
+        if (shortages.length > 0) {
+            var items = shortages.map(function (r) {
+                return '<strong>' + escHtml(r.subject) + '</strong>が約' + formatFraction(Math.abs(r.diff)) + '時間';
+            });
+            html += '<div class="hours-sim-alert">⚠ 現在の年間予定のままだと、年度末に '
+                + items.join('、') + ' 不足する見込みです。';
+            if (res.remainingWeeks > 0) {
+                html += '<br>残り約' + res.remainingWeeks + '週です。下の表の「残り必要ペース」を目安に、今後の週案を調整してください。';
+            }
+            html += '</div>';
+        } else {
+            html += '<div class="hours-sim-ok">✅ 現在の年間予定をすべて実施すれば、全教科が標準時数に到達する見込みです。</div>';
+        }
+
+        html += '<div style="overflow-x:auto;"><table class="hours-sim-table"><thead><tr>'
+            + '<th>教科</th><th>標準</th><th>実施済み<br>(' + escHtml(res.asOf) + 'まで)</th>'
+            + '<th>今後の予定</th><th>年度末見込み</th><th>過不足</th>'
+            + (res.remainingWeeks > 0 ? '<th>残り必要ペース<br>(時間/週)</th>' : '')
+            + '</tr></thead><tbody>';
+
+        rows.forEach(function (r) {
+            var diffHtml;
+            if (r.diff < 0) {
+                diffHtml = '<span class="hours-sim-shortage">−' + formatFraction(Math.abs(r.diff)) + '</span>';
+            } else if (r.diff > 0) {
+                diffHtml = '<span class="hours-sim-surplus">+' + formatFraction(r.diff) + '</span>';
+            } else {
+                diffHtml = '±0';
+            }
+            html += '<tr>'
+                + '<td>' + escHtml(r.subject) + '</td>'
+                + '<td>' + r.standard + '</td>'
+                + '<td>' + formatFraction(r.done) + '</td>'
+                + '<td>' + formatFraction(r.planned) + '</td>'
+                + '<td style="font-weight:600;">' + formatFraction(r.projected) + '</td>'
+                + '<td>' + diffHtml + '</td>'
+                + (res.remainingWeeks > 0
+                    ? '<td>' + (r.neededPerWeek > 0 ? formatFraction(r.neededPerWeek) : '—') + '</td>'
+                    : '')
+                + '</tr>';
+        });
+        html += '</tbody></table></div>';
+
+        html += '<div class="hours-sim-note">※ 「実施済み」は今日までに週案へ入力された時数、「今後の予定」は明日以降に入力済みの時数です。'
+            + '年度末見込み＝実施済み＋今後の予定。まだ週案を入力していない週は予定に含まれないため、'
+            + '「年間一括転記」や「以降を一括自動入力」で先の週まで予定を入れておくと予測の精度が上がります。</div>';
+
+        content.innerHTML = html;
+    }
+
+    /** 
+     * 分数表示用ヘルパー 
+     * (小数を 1/2, 1/3, 1/4, 1/6, 1/8 などの近似分数にフォーマット)
+     */
+    function formatFraction(value) {
+        if (!value) return "0";
+
+        var eps = 0.01;
+        var whole = Math.floor(value + eps);
+        var rem = value - whole;
+
+        if (rem < eps || rem > 1 - eps) {
+            return Math.round(value).toString();
+        }
+
+        var denoms = [2, 3, 4, 6, 8];
+        var bestFrac = null;
+        var minErr = Infinity;
+
+        for (var i = 0; i < denoms.length; i++) {
+            var d = denoms[i];
+            for (var n = 1; n < d; n++) {
+                var err = Math.abs(rem - (n / d));
+                if (err < minErr) {
+                    minErr = err;
+                    bestFrac = { n: n, d: d };
+                }
+            }
+        }
+
+        if (minErr > 0.05) {
+            // 近似できないほど半端な数は小数第一位で出す
+            return value.toFixed(1);
+        }
+
+        var fracStr = '<span class="fraction-text">' + bestFrac.n + '/' + bestFrac.d + '</span>';
+        if (whole === 0) return fracStr;
+        return whole + ' ' + fracStr;
+    }
+
+    function renderAnnualHoursTable(hoursData) {
+        var content = document.getElementById('hoursContent');
+
+        var defaultSubjects = ['国語', '社会', '算数', '理科', '生活', '音楽', '図画工作', '家庭', '体育', '外国語', '道徳', '外国語活動', '総合', '特活', '行事'];
+        var foundSubjects = Object.keys(hoursData);
+        var customSubjects = foundSubjects.filter(function (s) { return defaultSubjects.indexOf(s) === -1 && s.trim() !== ''; });
+        var allSubjects = defaultSubjects.concat(customSubjects);
+
+        var html = '<table class="annual-hours-table"><thead><tr>';
+        html += '<th></th>';
+
+        var months = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
+        months.forEach(function (m) { html += '<th>' + m + '</th>'; });
+        html += '<th class="term-total-col border-right-red">1学期</th>';
+        html += '<th class="term-total-col border-right-red">2学期</th>';
+        html += '<th class="term-total-col border-right-red">3学期</th>';
+        html += '<th class="term-total-col">各教科等計</th>';
+        html += '</tr></thead><tbody>';
+
+        var monthTotals = {};
+        var termTotals = { 1: 0, 2: 0, 3: 0 };
+        var grandTotal = 0;
+
+        var monthTotalsNoEvent = {};
+        var termTotalsNoEvent = { 1: 0, 2: 0, 3: 0 };
+        var grandTotalNoEvent = 0;
+
+        months.forEach(function (m) {
+            monthTotals[m] = 0;
+            monthTotalsNoEvent[m] = 0;
+        });
+
+        var rowCount = 0;
+        allSubjects.forEach(function (sub) {
+            var dataSub = hoursData[sub] || {};
+            var hasData = Object.keys(dataSub).length > 0;
+            if (!hasData && customSubjects.indexOf(sub) !== -1) return; // カスタム科目でデータないものは除外
+
+            var subTotal = 0;
+            var subTerm1 = 0, subTerm2 = 0, subTerm3 = 0;
+
+            var rowHtml = '<tr>';
+            rowHtml += '<td>' + escHtml(sub) + '</td>';
+
+            months.forEach(function (m) {
+                var val = dataSub[m] || 0;
+                subTotal += val;
+                monthTotals[m] += val;
+                if (sub !== '行事') monthTotalsNoEvent[m] += val;
+
+                if (m >= 4 && m <= 7) subTerm1 += val;
+                else if (m >= 8 && m <= 12) subTerm2 += val;
+                else subTerm3 += val;
+
+                var cls = (m === 7 || m === 12 || m === 3) ? ' class="border-right-red"' : '';
+                rowHtml += '<td' + cls + '>' + formatFraction(val) + '</td>';
+            });
+
+            if (sub !== '行事') {
+                termTotalsNoEvent[1] += subTerm1;
+                termTotalsNoEvent[2] += subTerm2;
+                termTotalsNoEvent[3] += subTerm3;
+                grandTotalNoEvent += subTotal;
+            }
+
+            termTotals[1] += subTerm1;
+            termTotals[2] += subTerm2;
+            termTotals[3] += subTerm3;
+            grandTotal += subTotal;
+
+            rowHtml += '<td class="term-total-col border-right-red">' + formatFraction(subTerm1) + '</td>';
+            rowHtml += '<td class="term-total-col border-right-red">' + formatFraction(subTerm2) + '</td>';
+            rowHtml += '<td class="term-total-col border-right-red">' + formatFraction(subTerm3) + '</td>';
+            rowHtml += '<td class="term-total-col">' + formatFraction(subTotal) + '</td>';
+            rowHtml += '</tr>';
+
+            // データが全く無いデフォルト科目を行事として見せないための処理。今回は表示しておく。
+            html += rowHtml;
+            rowCount++;
+        });
+
+        if (rowCount === 0) {
+            content.innerHTML = '<div class="hours-empty">📭 データがありません。</div>';
+            return;
+        }
+
+        // 月別授業時数（行事除外）
+        html += '<tr class="total-row-1 border-top-red"><td>月別授業時数</td>';
+        months.forEach(function (m) {
+            var cls = (m === 7 || m === 12 || m === 3) ? ' class="border-right-red"' : '';
+            html += '<td' + cls + '>' + formatFraction(monthTotalsNoEvent[m]) + '</td>';
+        });
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotalsNoEvent[1]) + '</td>';
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotalsNoEvent[2]) + '</td>';
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotalsNoEvent[3]) + '</td>';
+        html += '<td class="term-total-col">' + formatFraction(grandTotalNoEvent) + '</td></tr>';
+
+        // 月別総時数（行事含む）
+        html += '<tr class="total-row-2 border-top-red"><td>月別総時数</td>';
+        months.forEach(function (m) {
+            var cls = (m === 7 || m === 12 || m === 3) ? ' class="border-right-red"' : '';
+            html += '<td' + cls + '>' + formatFraction(monthTotals[m]) + '</td>';
+        });
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotals[1]) + '</td>';
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotals[2]) + '</td>';
+        html += '<td class="term-total-col border-right-red">' + formatFraction(termTotals[3]) + '</td>';
+        html += '<td class="term-total-col">' + formatFraction(grandTotal) + '</td></tr>';
+
+        html += '</tbody></table>';
+        content.innerHTML = html;
+    }
+
+    // ===== 設定ビュー =====
+    function loadSettingsView() {
+        google.script.run
+            .withSuccessHandler(function (settings) {
+                if (settings) {
+                    var el = document.getElementById('settingCourseNameDisp');
+                    if (el) el.textContent = settings.courseName || '未設定';
+                    STATE.grade = parseInt(settings.grade, 10) || 3;
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .getAppSettings();
+    }
+
+</script>
