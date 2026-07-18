@@ -141,21 +141,34 @@
                         onclick="openReflectionHub()" title="日々の振り返りと週の報告"><span
                             class="material-symbols-outlined fs-6">rate_review</span> 振り返り<span
                             id="reflectionBadge" class="reflection-badge" style="display:none;">0</span></button>
-                    <button class="btn btn-outline align-items-center gap-1" id="timetableApplyBtn"
-                        onclick="applyTimetableToCurrentWeek()"
-                        style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
-                            class="material-symbols-outlined fs-6">calendar_month</span> 固定時間割反映</button>
-                    <button class="btn btn-outline align-items-center gap-1" id="autoFillBtn" onclick="autoFillPlan()"
-                        style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
-                            class="material-symbols-outlined fs-6">smart_toy</span> 単元自動入力</button>
-                    <button class="btn btn-outline align-items-center gap-1" id="batchAutoFillBtn"
-                        onclick="runBatchAutoFill()"
-                        style="display:flex; color: var(--secondary); border-color: var(--secondary);"><span
-                            class="material-symbols-outlined fs-6">fast_forward</span> 以降を一括自動入力</button>
-                    <button class="btn btn-outline align-items-center gap-1" id="shiftLessonBtn"
-                        onclick="showShiftLessonModal()"
-                        style="display:none; color: var(--secondary); border-color: var(--secondary);"><span
-                            class="material-symbols-outlined fs-6">move_down</span> 単元をずらす</button>
+                    <!-- 入力支援メニュー: 時間割反映・自動入力系のボタンをまとめて収納
+                         （各ボタンのIDと表示切替ロジックは従来のまま） -->
+                    <div class="tb-dropdown">
+                        <button type="button" class="btn btn-outline d-flex align-items-center gap-1 tb-dropdown-toggle"
+                            aria-haspopup="true" aria-expanded="false" onclick="toggleToolbarDropdown(this)"
+                            title="固定時間割の反映や単元の自動入力などの入力支援メニュー"
+                            style="color: var(--secondary); border-color: var(--secondary);">
+                            <span class="material-symbols-outlined fs-6">auto_fix_high</span> 入力支援
+                            <span class="material-symbols-outlined tb-caret">expand_more</span>
+                        </button>
+                        <div class="tb-menu" role="menu">
+                            <button class="tb-menu-item" role="menuitem" id="timetableApplyBtn"
+                                onclick="applyTimetableToCurrentWeek()" title="固定時間割をこの週に転記します"
+                                style="display:none;"><span
+                                    class="material-symbols-outlined fs-6">calendar_month</span> 固定時間割反映</button>
+                            <button class="tb-menu-item" role="menuitem" id="autoFillBtn" onclick="autoFillPlan()"
+                                title="この週の単元・学習内容を自動入力します" style="display:none;"><span
+                                    class="material-symbols-outlined fs-6">smart_toy</span> 単元自動入力</button>
+                            <button class="tb-menu-item" role="menuitem" id="batchAutoFillBtn"
+                                onclick="runBatchAutoFill()" title="この週以降の単元を一括で自動入力します"
+                                style="display:flex;"><span
+                                    class="material-symbols-outlined fs-6">fast_forward</span> 以降を一括自動入力</button>
+                            <button class="tb-menu-item" role="menuitem" id="shiftLessonBtn"
+                                onclick="showShiftLessonModal()" title="単元の予定を前後の時間にずらします"
+                                style="display:none;"><span
+                                    class="material-symbols-outlined fs-6">move_down</span> 単元をずらす</button>
+                        </div>
+                    </div>
                     <button class="btn btn-primary align-items-center gap-1" id="saveBtn" onclick="saveWeeklyPlan()"
                         style="display:none"><span class="material-symbols-outlined fs-6">save</span>
                         保存する</button>
@@ -316,21 +329,32 @@
             <div class="section-header-bar">
                 <h2><span class="material-symbols-outlined fs-6">newspaper</span> 学級通信エディタ</h2>
                 <div class="nw-header-actions">
-                    <button class="btn btn-outline btn-sm" onclick="NW.newNewsletter()">
-                        <span class="material-symbols-outlined fs-6">note_add</span> 新規
-                    </button>
+                    <!-- ファイルメニュー: 新規・開く・テンプレート操作を収納（各項目はフルラベル表示） -->
+                    <div class="tb-dropdown">
+                        <button type="button" class="btn btn-outline btn-sm tb-dropdown-toggle" aria-haspopup="true"
+                            aria-expanded="false" onclick="toggleToolbarDropdown(this)"
+                            title="新規作成・開く・テンプレートの操作">
+                            <span class="material-symbols-outlined fs-6">folder</span> ファイル
+                            <span class="material-symbols-outlined tb-caret">expand_more</span>
+                        </button>
+                        <div class="tb-menu left" role="menu">
+                            <button class="tb-menu-item" role="menuitem" onclick="NW.newNewsletter()">
+                                <span class="material-symbols-outlined fs-6">note_add</span> 新規作成
+                            </button>
+                            <button class="tb-menu-item" role="menuitem" onclick="NW.openFromSheet()">
+                                <span class="material-symbols-outlined fs-6">folder_open</span> 開く
+                            </button>
+                            <div class="tb-menu-sep"></div>
+                            <button class="tb-menu-item" role="menuitem" onclick="NW.saveAsTemplate()">
+                                <span class="material-symbols-outlined fs-6">bookmark_add</span> テンプレートとして保存
+                            </button>
+                            <button class="tb-menu-item" role="menuitem" onclick="NW.openTemplates()">
+                                <span class="material-symbols-outlined fs-6">bookmarks</span> テンプレートから作成
+                            </button>
+                        </div>
+                    </div>
                     <button class="btn btn-outline btn-sm" onclick="NW.saveToSheet()">
                         <span class="material-symbols-outlined fs-6">save</span> 保存
-                    </button>
-                    <button class="btn btn-outline btn-sm" onclick="NW.openFromSheet()">
-                        <span class="material-symbols-outlined fs-6">folder_open</span> 開く
-                    </button>
-                    <div class="nw-act-sep-v"></div>
-                    <button class="btn btn-outline btn-sm" onclick="NW.saveAsTemplate()" title="テンプレートとして保存">
-                        <span class="material-symbols-outlined fs-6">bookmark_add</span> テンプレ保存
-                    </button>
-                    <button class="btn btn-outline btn-sm" onclick="NW.openTemplates()" title="テンプレートから作成">
-                        <span class="material-symbols-outlined fs-6">bookmarks</span> テンプレート
                     </button>
                     <div class="nw-act-sep-v"></div>
                     <div class="week-mini-nav">

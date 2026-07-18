@@ -444,6 +444,42 @@
             .getWeeklyPlanData(STATE.mondayStr);
     }
 
+    // ===== ツールバーのドロップダウンメニュー制御 =====
+    // 編集ツールバー「入力支援」や学級通信「ファイル」などの収納メニューを開閉する。
+    // メニュー項目は通常のボタン（onclick属性）のまま収納しているため、
+    // 既存の表示切替ロジック（updateEditUI など）はそのまま機能する。
+    function toggleToolbarDropdown(btn) {
+        var dd = btn.closest('.tb-dropdown');
+        if (!dd) return;
+        var willOpen = !dd.classList.contains('open');
+        closeToolbarDropdowns();
+        if (willOpen) {
+            dd.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+        }
+    }
+
+    function closeToolbarDropdowns() {
+        document.querySelectorAll('.tb-dropdown.open').forEach(function (dd) {
+            dd.classList.remove('open');
+            var toggle = dd.querySelector('.tb-dropdown-toggle');
+            if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    // メニュー外クリックで閉じる。メニュー項目クリック時は実行後に閉じる
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('.tb-dropdown')) {
+            closeToolbarDropdowns();
+            return;
+        }
+        if (e.target.closest('.tb-menu-item')) closeToolbarDropdowns();
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeToolbarDropdowns();
+    });
+
     function updateWeekHeader(days, weekNum) {
         if (!days || days.length === 0) return;
         var mon = days[0];
