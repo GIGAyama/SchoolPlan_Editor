@@ -104,6 +104,11 @@
                             style="width:50px; border:1px solid var(--border); border-radius:4px; padding:2px 4px; font-size:0.85rem; text-align:center; background:var(--bg-card); color:var(--text-main);">
                         <span style="font-size:0.85rem; color:var(--text-sub);">週</span>
                     </div>
+
+                    <button type="button" class="btn btn-outline btn-sm d-flex align-items-center gap-1"
+                        onclick="openPlanSearch()" title="全ての週の週案からキーワード検索">
+                        <span class="material-symbols-outlined fs-6">search</span> 検索
+                    </button>
                 </div>
 
                 <!-- 土日列の表示/非表示トグル -->
@@ -265,6 +270,25 @@
                 <!-- テーブルはJSで動的に注入される -->
             </div>
 
+            <!-- 年度末シミュレーション（時数の過不足予測） -->
+            <div style="padding: 20px 20px 0;">
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon"><span
+                                class="material-symbols-outlined fs-6">query_stats</span></span>
+                        <span class="integration-title">年度末シミュレーション（時数の過不足予測）</span>
+                    </div>
+                    <div class="integration-body">
+                        <div id="hoursSimContent">
+                            <div class="loading-state">
+                                <div class="spinner-lg"></div>
+                                <p>シミュレーションを計算しています...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 年間時数進捗ダッシュボード -->
             <div style="padding: 20px;">
                 <div class="integration-section">
@@ -386,6 +410,10 @@
         <div id="view-settings" class="view">
             <div class="section-header-bar">
                 <h2><span class="material-symbols-outlined fs-6">settings</span> 設定</h2>
+                <button class="btn btn-outline btn-sm d-flex align-items-center gap-1"
+                    onclick="openSetupWizard({ manual: true })" title="初期設定を順番に案内するウィザードを開きます">
+                    <span class="material-symbols-outlined fs-6">auto_fix_high</span> 初期設定ウィザード
+                </button>
             </div>
             <div style="padding: 0 20px 20px;">
                 <div class="integration-section">

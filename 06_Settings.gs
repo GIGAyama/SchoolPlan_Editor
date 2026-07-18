@@ -232,3 +232,64 @@ function getAvailableGeminiModels() {
     return { success: false, models: [], error: e.message };
   }
 }
+
+// ====================================================
+// ===== 初期設定ウィザード API =====
+// ====================================================
+
+// ウィザード完了フラグのスクリプトプロパティキー
+const SP_KEY_SETUP_WIZARD_DONE = 'sp_setupWizardDone';
+
+/**
+ * [Web API] 初期設定の進捗状況を返します。
+ * 初回起動時にウィザードを自動表示するかどうかの判定と、
+ * ウィザード内の「設定済み」チェック表示に使用します。
+ * @returns {Object} 各設定項目の設定済みフラグ
+ */
+function getSetupStatus() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+
+    // データベースシートに日付行（年間カレンダー）が構築済みかを確認
+    let hasCalendar = false;
+    try {
+      const ss = getSs_();
+      const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+      if (dbSheet && dbSheet.getLastRow() > 1) {
+        const dbCols = getDbColumns();
+        const rowsToCheck = Math.min(30, dbSheet.getLastRow() - 1);
+        const vals = dbSheet.getRange(2, dbCols.DATE, rowsToCheck, 1).getValues();
+        hasCalendar = vals.some(r => r[0] instanceof Date);
+      }
+    } catch (e) {
+      // データベースシート未整備の場合は未構築として扱う
+    }
+
+    return {
+      success: true,
+      wizardDone: props.getProperty(SP_KEY_SETUP_WIZARD_DONE) === 'true',
+      hasApiKey: !!props.getProperty(SP_KEY_GEMINI_API_KEY),
+      hasGrade: !!props.getProperty(SCRIPT_PROP_GRADE),
+      hasPdfFolder: !!props.getProperty(SP_KEY_PDF_FOLDER_ID),
+      hasEventPdfFolder: !!props.getProperty(SP_KEY_EVENT_PDF_FOLDER_ID),
+      hasCourseName: !!props.getProperty(SP_KEY_COURSE_NAME),
+      hasCalendar: hasCalendar
+    };
+  } catch (e) {
+    logError('getSetupStatus', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Web API] 初期設定ウィザードを完了（今後自動表示しない）としてマークします。
+ */
+function markSetupWizardDone() {
+  try {
+    PropertiesService.getScriptProperties().setProperty(SP_KEY_SETUP_WIZARD_DONE, 'true');
+    return { success: true };
+  } catch (e) {
+    logError('markSetupWizardDone', e);
+    return { success: false, error: e.message };
+  }
+}
