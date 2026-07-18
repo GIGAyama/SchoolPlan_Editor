@@ -874,16 +874,29 @@
                                     class="material-symbols-outlined fs-6"
                                     style="vertical-align:text-bottom;">auto_awesome</span>
                                 抽出結果プレビュー（まだ保存されていません）</strong>
-                            <div id="aiTaskPreviewList" style="margin-top: 10px; max-height: 200px; overflow-y: auto;">
+                            <div style="font-size:0.72rem; color:var(--text-sub); margin-top:4px;">
+                                チェックしたタスクだけがリストに追加されます。内容・優先度・期日などは直接修正できます。
+                            </div>
+                            <div id="aiTaskPreviewToolbar"
+                                style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                                <button class="btn btn-outline btn-sm"
+                                    onclick="setAllAiTaskPreviewChecked(true)">全選択</button>
+                                <button class="btn btn-outline btn-sm"
+                                    onclick="setAllAiTaskPreviewChecked(false)">全解除</button>
+                                <span id="aiTaskPreviewCount"
+                                    style="font-size:0.75rem; color:var(--text-sub); margin-left:auto;"></span>
+                            </div>
+                            <div id="aiTaskPreviewList"
+                                style="margin-top: 8px; max-height: 300px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;">
                                 <!-- JSで動的生成 -->
                             </div>
                             <div style="text-align: right; margin-top: 10px;">
                                 <button class="btn btn-outline btn-sm me-2"
                                     onclick="cancelAiTaskPreview()">キャンセル</button>
-                                <button class="btn btn-primary btn-sm" onclick="confirmAiTaskSave()"><span
-                                        class="material-symbols-outlined fs-6"
+                                <button id="aiTaskSaveBtn" class="btn btn-primary btn-sm"
+                                    onclick="confirmAiTaskSave()"><span class="material-symbols-outlined fs-6"
                                         style="vertical-align:text-bottom;">save</span>
-                                    リストに確定・追加する</button>
+                                    チェックしたタスクを追加する</button>
                             </div>
                         </div>
                     </div>

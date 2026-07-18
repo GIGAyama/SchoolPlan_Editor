@@ -638,7 +638,17 @@
 
     function handleAiExtractionResult(res) {
         if (res.success) {
-            STATE.aiPreviewTasks = res.tasks || [];
+            // プレビュー編集用に正規化（checked はデフォルトで全てON）
+            STATE.aiPreviewTasks = (res.tasks || []).map(function (t) {
+                return {
+                    checked: true,
+                    task: t.task || '',
+                    resource: t.resource || '',
+                    dueDate: /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate || '') ? t.dueDate : '',
+                    source: t.source || '',
+                    priority: ['高', '中', '低'].indexOf(t.priority) >= 0 ? t.priority : '中'
+                };
+            });
             showToast('success', 'AIタスク抽出が完了しました！');
             renderAiTaskPreview();
         } else {
@@ -653,22 +663,99 @@
     function renderAiTaskPreview() {
         document.getElementById('aiTaskPreviewArea').style.display = 'block';
         var listEl = document.getElementById('aiTaskPreviewList');
+        var toolbarEl = document.getElementById('aiTaskPreviewToolbar');
+        listEl.innerHTML = '';
 
         if (STATE.aiPreviewTasks.length === 0) {
-            listEl.innerHTML = '<div style="color:var(--text-hint);">抽出されたタスクはありません。</div>';
+            if (toolbarEl) toolbarEl.style.display = 'none';
+            listEl.innerHTML = '<div style="color:var(--text-hint); padding:10px;">抽出されたタスクはありません。</div>';
+            updateAiTaskPreviewCount();
             return;
         }
+        if (toolbarEl) toolbarEl.style.display = 'flex';
 
-        listEl.innerHTML = STATE.aiPreviewTasks.map((t, idx) => `
-            <div style="background:var(--surface); border:1px solid #1a73e8; border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.85rem;">
-                <div style="font-weight:bold; color:var(--text-main); margin-bottom:4px;"><span class="material-symbols-outlined fs-6">task_alt</span> ${taskPriorityBadgeHtml(t.priority)} ${escHtml(t.task)}</div>
-                <div style="color:var(--text-sub); display:flex; gap:10px;">
-                    <span><i class="bi bi-box-seam"></i> ${escHtml(t.resource || '設定なし')}</span>
-                    <span><i class="bi bi-calendar-event"></i> ${t.dueDate || '未設定'}</span>
-                    <span><i class="bi bi-journal-text"></i> ${escHtml(t.source || '不明')}</span>
-                </div>
-            </div>
-        `).join('');
+        STATE.aiPreviewTasks.forEach(function (t) {
+            listEl.appendChild(buildAiTaskPreviewRow_(t));
+        });
+        updateAiTaskPreviewCount();
+    }
+
+    /** プレビュー1件分の行（チェックボックス＋編集可能な入力欄）を生成する */
+    function buildAiTaskPreviewRow_(t) {
+        var row = document.createElement('div');
+        row.className = 'pdf-preview-item' + (t.checked ? '' : ' excluded');
+
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = t.checked;
+        cb.title = 'チェックを外すと追加されません';
+        cb.onchange = function () {
+            t.checked = cb.checked;
+            row.classList.toggle('excluded', !t.checked);
+            updateAiTaskPreviewCount();
+        };
+
+        var prioSelect = document.createElement('select');
+        prioSelect.title = '優先度';
+        ['高', '中', '低'].forEach(function (p) {
+            var o = document.createElement('option');
+            o.value = p;
+            o.textContent = p;
+            prioSelect.appendChild(o);
+        });
+        prioSelect.value = t.priority;
+        prioSelect.onchange = function () { t.priority = prioSelect.value; };
+
+        var contentInput = document.createElement('input');
+        contentInput.type = 'text';
+        contentInput.className = 'pdf-ev-content';
+        contentInput.placeholder = 'タスク内容';
+        contentInput.title = 'タスク内容';
+        contentInput.value = t.task;
+        contentInput.oninput = function () { t.task = contentInput.value; };
+
+        var resourceInput = document.createElement('input');
+        resourceInput.type = 'text';
+        resourceInput.placeholder = '準備物';
+        resourceInput.title = '準備物・リソース';
+        resourceInput.style.width = '120px';
+        resourceInput.value = t.resource;
+        resourceInput.oninput = function () { t.resource = resourceInput.value; };
+
+        var dateInput = document.createElement('input');
+        dateInput.type = 'date';
+        dateInput.title = '期日';
+        dateInput.value = t.dueDate;
+        dateInput.onchange = function () { t.dueDate = dateInput.value; };
+
+        row.appendChild(cb);
+        row.appendChild(prioSelect);
+        row.appendChild(contentInput);
+        row.appendChild(resourceInput);
+        row.appendChild(dateInput);
+
+        if (t.source) {
+            var sourceEl = document.createElement('div');
+            sourceEl.style.cssText = 'font-size:0.66rem; color:var(--text-hint); flex-basis:100%; padding-left:24px;';
+            sourceEl.innerHTML = '<i class="bi bi-journal-text"></i> ';
+            sourceEl.appendChild(document.createTextNode('出典: ' + t.source));
+            row.appendChild(sourceEl);
+        }
+        return row;
+    }
+
+    function setAllAiTaskPreviewChecked(checked) {
+        STATE.aiPreviewTasks.forEach(function (t) { t.checked = checked; });
+        renderAiTaskPreview();
+    }
+
+    function updateAiTaskPreviewCount() {
+        var countEl = document.getElementById('aiTaskPreviewCount');
+        var saveBtn = document.getElementById('aiTaskSaveBtn');
+        var total = STATE.aiPreviewTasks.length;
+        var checked = STATE.aiPreviewTasks.filter(function (t) { return t.checked; }).length;
+        if (countEl) countEl.textContent = '追加対象: ' + checked + ' / ' + total + ' 件';
+        if (saveBtn) saveBtn.disabled = checked === 0;
     }
 
     function cancelAiTaskPreview() {
@@ -679,15 +766,22 @@
     function confirmAiTaskSave() {
         if (!STATE.aiPreviewTasks || STATE.aiPreviewTasks.length === 0) return;
 
-        // 保存用フォーマットに変換
-        var saveTasks = STATE.aiPreviewTasks.map(t => ({
-            content: t.task,
-            resource: t.resource,
-            dueDate: t.dueDate,
-            source: t.source,
-            priority: ['高', '中', '低'].indexOf(t.priority) >= 0 ? t.priority : '中',
-            memo: ''
-        }));
+        // チェック済みかつ内容が空でないものだけを保存用フォーマットに変換
+        var saveTasks = STATE.aiPreviewTasks
+            .filter(function (t) { return t.checked && (t.task || '').trim(); })
+            .map(t => ({
+                content: t.task.trim(),
+                resource: t.resource,
+                dueDate: t.dueDate,
+                source: t.source,
+                priority: t.priority,
+                memo: ''
+            }));
+
+        if (saveTasks.length === 0) {
+            showToast('error', '追加するタスクがありません。チェックと内容を確認してください。');
+            return;
+        }
 
         showToast('info', 'タスクリストに保存中...');
         google.script.run

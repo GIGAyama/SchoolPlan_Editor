@@ -2592,6 +2592,11 @@
         flex-wrap: wrap;
     }
 
+    /* AIタスク抽出プレビュー（枠付きコンテナ内で使うため先頭行の罫線を消す） */
+    #aiTaskPreviewList .pdf-preview-item:first-child {
+        border-top: none;
+    }
+
     .pdf-preview-item.excluded {
         opacity: 0.45;
     }
