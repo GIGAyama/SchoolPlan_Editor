@@ -40,6 +40,9 @@
                     <div class="app-title">週案エディタ</div>
                     <div class="app-subtitle" id="headerSubtitle">読み込み中...</div>
                 </div>
+                <!-- 学級切替（複数学級モード有効時のみ表示） -->
+                <select id="classSwitcher" class="class-switcher" style="display:none;"
+                    title="表示する学級を切り替え" onchange="onClassSwitcherChange(this.value)"></select>
             </div>
             <nav class="header-nav">
                 <button class="nav-btn active" data-view="plan" onclick="switchView('plan')">
@@ -442,6 +445,51 @@
                                     <option value="5">5年生</option>
                                     <option value="6">6年生</option>
                                 </select>
+                            </div>
+                        </div>
+
+                        <!-- 複数学級・専科モード -->
+                        <div
+                            style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">groups</span> 複数学級モード（専科教員向け）</h4>
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                <label class="form-check-label"
+                                    style="font-size:0.85rem; display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                    <input type="checkbox" id="sysMultiClassEnabled" class="form-check-input"
+                                        style="width:18px; height:18px;" onchange="toggleMultiClassMode(this)">
+                                    複数の学級を切り替えて使用する
+                                </label>
+                            </div>
+                            <p style="font-size:0.75rem; color:var(--text-hint); margin-top:6px;">
+                                専科教員や複数学級を担当する場合に有効にすると、学級ごとに専用のデータベースシートを持ち、画面左上の切替メニューで学級を切り替えられます。週案・振り返り・時数・担当学年・標準時数は学級ごとに分かれます（タスク・単元マスタ・学級通信・固定時間割・Classroom連携設定は共通）。<br>
+                                無効に戻しても学級シートやデータは削除されません。
+                            </p>
+                            <!-- 学級一覧・追加（モード有効時のみ表示） -->
+                            <div id="multiClassManager" style="display:none; margin-top:12px;">
+                                <div id="multiClassList" class="mc-class-list">
+                                    <!-- JSで動的に描画 -->
+                                </div>
+                                <div class="mc-add-form">
+                                    <input type="text" id="mcNewClassName" placeholder="学級名（例：3年1組）" maxlength="30"
+                                        style="flex:1; min-width:140px; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                    <select id="mcNewClassGrade"
+                                        style="padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                        <option value="1">1年生</option>
+                                        <option value="2">2年生</option>
+                                        <option value="3" selected>3年生</option>
+                                        <option value="4">4年生</option>
+                                        <option value="5">5年生</option>
+                                        <option value="6">6年生</option>
+                                    </select>
+                                    <button class="btn btn-primary btn-sm" onclick="addMultiClass()">
+                                        <span class="material-symbols-outlined fs-6">add</span> 学級を追加
+                                    </button>
+                                </div>
+                                <p style="font-size:0.75rem; color:var(--text-hint); margin-top:6px;">
+                                    学級を追加すると、既定の「データベース」シートをコピーした専用シート（年間カレンダー付き・入力内容は空）が作成されます。
+                                </p>
                             </div>
                         </div>
 
@@ -1176,7 +1224,21 @@
 
     </div><!-- /app -->
 
-    <?!= include('App_Js'); ?>
+    <!-- フロントエンドJS（機能別に分割。読み込み順を維持するため番号順にinclude） -->
+    <?!= include('App_Js_01_Core'); ?>
+    <?!= include('App_Js_02_Plan'); ?>
+    <?!= include('App_Js_03_Print'); ?>
+    <?!= include('App_Js_04_Reflection'); ?>
+    <?!= include('App_Js_05_Hours'); ?>
+    <?!= include('App_Js_06_Newsletter'); ?>
+    <?!= include('App_Js_07_PdfImport'); ?>
+    <?!= include('App_Js_08_Events'); ?>
+    <?!= include('App_Js_09_Utils'); ?>
+    <?!= include('App_Js_10_Settings'); ?>
+    <?!= include('App_Js_11_Task'); ?>
+    <?!= include('App_Js_12_UnitMaster'); ?>
+    <?!= include('App_Js_13_SystemTools'); ?>
+    <?!= include('App_Js_14_MultiClass'); ?>
 
 </body>
 

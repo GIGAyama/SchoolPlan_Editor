@@ -254,7 +254,7 @@ function getSetupStatus() {
     let hasCalendar = false;
     try {
       const ss = getSs_();
-      const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+      const dbSheet = getDbSheet_(ss);
       if (dbSheet && dbSheet.getLastRow() > 1) {
         const dbCols = getDbColumns();
         const rowsToCheck = Math.min(30, dbSheet.getLastRow() - 1);

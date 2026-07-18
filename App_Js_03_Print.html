@@ -1,0 +1,687 @@
+<script>
+    'use strict';
+    // ===== 週案印刷 (HTMLベース) =====
+    function printWeeklyPlan() {
+        if (!STATE.weekData || !STATE.weekData.days) {
+            showToast('error', '週のデータが読み込まれていません');
+            return;
+        }
+
+        // 前回選択したレイアウトを復元（standard: 従来の2ページ / compact: A4・1ページ）
+        var storedLayout = 'standard';
+        try { storedLayout = localStorage.getItem('weeklyPrintLayout') || 'standard'; } catch (e) { }
+        // 「登校前」列を印刷に含めるかの前回選択を復元（デフォルトは含めない）
+        var storedPreclass = false;
+        try { storedPreclass = localStorage.getItem('weeklyPrintPreclass') === '1'; } catch (e) { }
+        var weekendNote = '土曜: ' + (STATE.showSat ? '含める' : '含めない') + ' ／ 日曜: ' + (STATE.showSun ? '含める' : '含めない');
+
+        Swal.fire({
+            title: '<span class="material-symbols-outlined">print</span> 印刷オプション',
+            html: '<div style="text-align:left;font-size:0.85rem;">'
+                + '<p style="color:var(--text-sub);margin-bottom:8px;">レイアウトを選択してください</p>'
+                + '<label style="display:block;margin-bottom:4px;"><input type="radio" name="po_layout" value="standard"' + (storedLayout !== 'compact' ? ' checked' : '') + '> 標準（A4・2ページ）</label>'
+                + '<label style="display:block;"><input type="radio" name="po_layout" value="compact"' + (storedLayout === 'compact' ? ' checked' : '') + '> コンパクト（A4・1ページ）</label>'
+                + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 0 20px;">※コンパクトは週案画面の土日列の表示設定を反映します（' + weekendNote + '）</div>'
+                + '<hr style="margin:12px 0;">'
+                + '<p style="color:var(--text-sub);margin-bottom:12px;">印刷に含める項目を選択してください</p>'
+                + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">'
+                + '<label><input type="checkbox" id="po_event" checked> 行事</label>'
+                + '<label><input type="checkbox" id="po_preclass"' + (storedPreclass ? ' checked' : '') + '> 登校前</label>'
+                + '<label><input type="checkbox" id="po_morning" checked> 朝学習</label>'
+                + '<label><input type="checkbox" id="po_recess1" checked> 中休み</label>'
+                + '<label><input type="checkbox" id="po_recess2" checked> 昼休み</label>'
+                + '<label><input type="checkbox" id="po_afterschool" checked> 放課後</label>'
+                + '<label><input type="checkbox" id="po_stats" checked> 教科時数表</label>'
+                + '<label><input type="checkbox" id="po_summary" checked> 週のまとめ</label>'
+                + '</div>'
+                + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 0 2px;">※週のまとめは標準ではフリースペース（時数表と検印欄の間）、コンパクトでは週案表の下に印刷されます</div>'
+                + '<hr style="margin:12px 0;">'
+                + '<label style="display:flex;align-items:center;gap:8px;">'
+                + 'フォントサイズ: <input type="range" id="po_fontSize" min="8" max="14" value="10" style="flex:1;">'
+                + '<span id="po_fontLabel">10px</span>'
+                + '</label>'
+                + '</div>',
+            width: 420,
+            confirmButtonText: '印刷する',
+            confirmButtonColor: '#1a73e8',
+            showCancelButton: true,
+            cancelButtonText: 'キャンセル',
+            didOpen: function () {
+                var slider = document.getElementById('po_fontSize');
+                var label = document.getElementById('po_fontLabel');
+                slider.addEventListener('input', function () { label.textContent = slider.value + 'px'; });
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            var layoutEl = document.querySelector('input[name="po_layout"]:checked');
+            var layout = layoutEl ? layoutEl.value : 'standard';
+            try { localStorage.setItem('weeklyPrintLayout', layout); } catch (e) { }
+            var preclassChecked = document.getElementById('po_preclass').checked;
+            try { localStorage.setItem('weeklyPrintPreclass', preclassChecked ? '1' : '0'); } catch (e) { }
+            var opts = {
+                layout: layout,
+                event: document.getElementById('po_event').checked,
+                preclass: preclassChecked,
+                morning: document.getElementById('po_morning').checked,
+                recess1: document.getElementById('po_recess1').checked,
+                recess2: document.getElementById('po_recess2').checked,
+                afterschool: document.getElementById('po_afterschool').checked,
+                stats: document.getElementById('po_stats').checked,
+                summary: document.getElementById('po_summary').checked,
+                fontSize: parseInt(document.getElementById('po_fontSize').value)
+            };
+            printWeeklyPlanExec(opts);
+        });
+    }
+
+    /**
+     * 週案印刷用の <style> 内CSS文字列を生成する純粋関数。
+     * 副作用なし。opts.fontSize のみを参照する（printWeeklyPlanExec から抽出）。
+     */
+    function buildPrintStyles_(opts) {
+        var html = '<style>';
+        html += '@import url("https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap");';
+        html += '@page { size: A4 portrait; margin: 10mm; }';
+        html += 'body { font-family: "Zen Maru Gothic", sans-serif; font-size: ' + opts.fontSize + 'px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
+        html += '.page { width: 100%; height: 277mm; box-sizing: border-box; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; }';
+        html += '.page:last-child { page-break-after: auto; }';
+        // 内容がページ高さを超える場合に比例縮小して全行を収めるためのラッパー
+        html += '.page-fit { width: 100%; height: 100%; transform-origin: top left; }';
+        html += 'table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-bottom: 0; }';
+        html += 'th, td { border: 1px solid #333; padding: 3px; vertical-align: top; word-wrap: break-word; overflow: hidden; }';
+        html += 'th { text-align: center; font-weight: normal; }';
+        // フォントサイズはスライダー(body font-size)に追従するよう em 指定にする（固定px だとスライダーが効かない）
+        html += '.subject { font-weight: bold; font-size: 1em; background-color: #dcedc8; padding: 2px; text-align: left; border-bottom: 1px solid #ccc; margin: -3px -3px 2px -3px; }';
+        html += '.unit { font-size: 0.9em; color: #555; margin-bottom: 2px; }';
+        html += '.content { font-size: 0.9em; line-height: 1.4; }';
+        html += '.row-header { width: 35px; text-align: center; vertical-align: middle; padding: 2px; }';
+        html += '.recess-row td { height: 16px; background-color: #ffe0b2; }';
+        html += '.recess-row td:first-child { text-align: center; font-weight: bold; padding: 0; vertical-align: middle;}';
+
+        // Header specific
+        html += '.doc-title { text-align: center; font-size: 16px; font-weight: bold; margin-bottom: 8px; position: relative; }';
+        html += '.doc-week { position: absolute; right: 0; top: 0; font-size: 12px; font-weight: normal; }';
+
+        // Page 1 specific
+        html += '.grid1 td { height: 50px; }';
+        html += '.event-cell { height: 70px; }';
+        html += '.afterschool-cell { height: 45px; }';
+
+        // Page 2 specific
+        html += '.page2-layout { display: flex; gap: 8px; height: 100%; align-items: stretch; }';
+        html += '.page2-left { flex: 0 0 45%; }';
+        html += '.page2-right { flex: 0 0 53%; display: flex; flex-direction: column; gap: 8px; position: relative; overflow: hidden; }';
+        html += '.sat-col { background-color: #bbdefb; width: 40%; }';
+        html += '.sun-col { background-color: #ffcdd2; width: 40%; }';
+
+        // 祝日: 列ヘッダーを赤系で強調し、祝日名を明示する（印刷でも一目でわかるように）
+        html += '.holiday-print { font-size: 0.82em; font-weight: bold; color: #c62828; margin-top: 1px; line-height: 1.15; }';
+        html += 'th.holiday-head { background-color: #ffd6da; }';
+        html += '.holiday-cell { background-color: #fdecef; }';
+
+        html += '.stats-table th, .stats-table td { font-size: 8px; text-align: center; padding: 2px; border: 1px solid #333; }';
+        html += '.stats-table th { background-color: #e0e0e0; }';
+        html += '.stats-table { width: 100%; border: 1.5px solid #333; }';
+        html += '.fraction-text { font-size: 8px; }';
+
+        // 検印枠（page2-rightの最下部に配置）
+        html += '.seal-table { width: 40%; margin-left: auto; margin-top: auto; border: 1.5px solid #333; background-color: #fff; flex-shrink: 0; }';
+        html += '.seal-table th, .seal-table td { font-size: 8px; text-align: center; padding: 2px; border: 1px solid #333; }';
+        html += '.seal-header { background-color: #dcedc8; }';
+
+        html += '.todo-box { border: 1.5px solid #333; padding: 6px 8px; background-color: #dcedc8; border-radius: 4px; display: flex; flex-direction: column; flex: 0 1 auto; max-height: 45%; overflow: hidden; }';
+        html += '.todo-title { font-weight: bold; margin-bottom: 4px; font-size: 10px; }';
+        html += '.todo-item { border: 1px solid #333; background-color: #fff; margin-bottom: 2px; padding: 2px 3px; font-size: 8px; line-height: 1.3; break-inside: avoid; display: flex; align-items: baseline; gap: 2px; }';
+        html += '.todo-due { margin-left: auto; font-size: 7px; color: #888; white-space: nowrap; flex-shrink: 0; }';
+        html += '.todo-done { color: #4caf50; font-size: 7px; flex-shrink: 0; }';
+        html += '.todo-pending { font-size: 7px; color: #999; flex-shrink: 0; }';
+        html += '.todo-list-wrap { columns: 2; column-gap: 6px; overflow: hidden; }';
+
+        html += '.free-box { flex: 1; display: block; padding-top: 5px; overflow: hidden; border: 1px solid #e0e0e0; border-radius: 4px; min-height: 0; }';
+        html += '.line-row { border-bottom: 1px dashed #ccc; height: 6mm; width: 100%; }';
+
+        // 週のまとめ（フリースペース: 時数表〜検印欄の間に配置）
+        html += '.summary-box { border: 1.5px solid #333; border-radius: 4px; padding: 6px 8px; background-color: #fff; flex: 0 1 auto; overflow: hidden; }';
+        html += '.summary-title { font-weight: bold; font-size: 10px; margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px solid #999; }';
+        html += '.summary-text { font-size: 9px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }';
+
+        // コンパクト（A4・1ページ）レイアウト
+        html += '.compact-grid td { height: 44px; }';
+        html += '.compact-grid .recess-row td { height: 16px; }';
+        html += '.compact-grid .event-cell { height: 55px; }';
+        html += '.compact-grid .afterschool-cell { height: 40px; }';
+        html += '.compact-grid th.sat-head { background-color: #bbdefb; }';
+        html += '.compact-grid th.sun-head { background-color: #ffcdd2; }';
+        html += '.compact-bottom { display: flex; gap: 8px; margin-top: 8px; align-items: stretch; }';
+        html += '.compact-bottom .stats-table { width: auto; flex: 1 1 0; }';
+        html += '.compact-bottom .seal-table { width: 180px; margin: 0 0 0 auto; flex: 0 0 auto; }';
+        html += '.compact-summary { margin-top: 8px; flex: 0 1 auto; }';
+        html += '</style>';
+        return html;
+    }
+
+    /**
+     * コンパクト（A4・1ページ）レイアウトのページHTMLを生成する。
+     * 週案編集画面の土日列の表示設定（STATE.showSat / STATE.showSun）を反映し、
+     * 非表示の列は印刷にも含めない。
+     */
+    function buildCompactPageHtml_(opts, days, weekNum, renderDateHeader, renderPeriod) {
+        var visIdx = [0, 1, 2, 3, 4];
+        if (STATE.showSat) visIdx.push(5);
+        if (STATE.showSun) visIdx.push(6);
+
+        var html = '<div class="page">';
+        html += '<div class="doc-title">週間指導計画簿<div class="doc-week">第' + weekNum + '週</div></div>';
+        html += '<table class="grid1 compact-grid">';
+
+        // ヘッダー行
+        html += '<tr><th class="row-header">日付<br>曜日</th>';
+        visIdx.forEach(function (i) {
+            var classes = [];
+            if (i === 5) classes.push('sat-head');
+            else if (i === 6) classes.push('sun-head');
+            if (days[i] && days[i].holiday) classes.push('holiday-head');
+            var cls = classes.length ? ' class="' + classes.join(' ') + '"' : '';
+            html += '<th' + cls + '>' + renderDateHeader(days[i]) + '</th>';
+        });
+        html += '</tr>';
+
+        var textRow = function (key, label, cellClass) {
+            var isRecess = (key === 'recess1' || key === 'recess2');
+            var h = '<tr' + (isRecess ? ' class="recess-row"' : '') + '><td class="row-header">' + label + '</td>';
+            visIdx.forEach(function (i) {
+                var v = (days[i] && days[i][key]) ? escHtml(days[i][key]).replace(/\n/g, '<br>') : '';
+                h += '<td' + (cellClass ? ' class="' + cellClass + '"' : '') + '>' + v + '</td>';
+            });
+            return h + '</tr>';
+        };
+        var periodRow = function (pIdx, label) {
+            var h = '<tr><td class="row-header">' + label + '</td>';
+            visIdx.forEach(function (i) {
+                h += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[pIdx]) : '') + '</td>';
+            });
+            return h + '</tr>';
+        };
+
+        if (opts.event) html += textRow('event', '時程<br>行事', 'event-cell');
+        if (opts.preclass) html += textRow('preclass', '登校前');
+        if (opts.morning) html += textRow('morning', '朝学習');
+        html += periodRow(0, '1校時');
+        html += periodRow(1, '2校時');
+        if (opts.recess1) html += textRow('recess1', '中休');
+        html += periodRow(2, '3校時');
+        html += periodRow(3, '4校時');
+        if (opts.recess2) html += textRow('recess2', '昼休');
+        html += periodRow(4, '5校時');
+        html += periodRow(5, '6校時');
+        if (opts.afterschool) html += textRow('afterschool', '放課後');
+        html += '</table>';
+
+        // 週のまとめ（表と下段（時数表・検印枠）の間に全幅で印刷）
+        var weekSummaryText = (STATE.weekData && STATE.weekData.weekSummary) ? STATE.weekData.weekSummary : '';
+        if (opts.summary && weekSummaryText) {
+            html += '<div class="summary-box compact-summary">';
+            html += '<div class="summary-title">今週のまとめ（報告）</div>';
+            html += '<div class="summary-text">' + escHtml(weekSummaryText) + '</div>';
+            html += '</div>';
+        }
+
+        // 下段: 教科時数表（選択時） + 検印枠
+        html += '<div class="compact-bottom">';
+        if (opts.stats) {
+            var summary = STATE.hoursSummaryData || [];
+            var activeSubjects = summary.filter(function (s) { return s && s.subject; });
+            var minRows = activeSubjects.length > 0 ? 0 : 5;
+            var half = Math.max(Math.ceil(activeSubjects.length / 2), minRows);
+            var total = activeSubjects.length > 0 ? activeSubjects.length : half * 2;
+            var buildStats = function (from, to) {
+                var t = '<table class="stats-table"><tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
+                for (var i = from; i < to; i++) {
+                    var s = activeSubjects[i] || { subject: ' ', weekly: '', cumulative: '', percent: '' };
+                    t += '<tr>';
+                    t += '<td style="background-color:#dcedc8;">' + (escHtml(s.subject) || ' ') + '</td>';
+                    t += '<td>' + formatFraction(s.weekly) + '</td>';
+                    t += '<td>' + formatFraction(s.cumulative) + '</td>';
+                    t += '<td>' + (s.percent !== undefined && s.percent !== '' ? s.percent + '%' : '&nbsp;') + '</td>';
+                    t += '</tr>';
+                }
+                return t + '</table>';
+            };
+            html += buildStats(0, half);
+            html += buildStats(half, total);
+        }
+        // 検印枠
+        html += '<table class="seal-table">';
+        html += '<tr><td rowspan="2" class="seal-header" style="width:20px; font-weight:bold; vertical-align:middle; font-size:12px;">検<br><br>印</td><td class="seal-header">校長</td><td class="seal-header">副校長</td><td class="seal-header">担当者</td></tr>';
+        html += '<tr><td style="height:40px;"></td><td></td><td></td></tr>';
+        html += '</table>';
+        html += '</div>'; // end compact-bottom
+
+        html += '</div>'; // end page
+        return html;
+    }
+
+    function printWeeklyPlanExec(opts) {
+        var btn = document.getElementById('printBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 準備中...';
+        }
+
+        var printFrame = document.getElementById('printFrame');
+        if (!printFrame) {
+            printFrame = document.createElement('iframe');
+            printFrame.id = 'printFrame';
+            document.body.appendChild(printFrame);
+        }
+        // display:none だと要素がレイアウトを持たず高さ測定(scrollHeight)が0になり自動縮小が効かない。
+        // オフスクリーンに配置してレイアウトを保ちつつ画面外に隠す。横幅は印刷可能領域(A4縦, 左右10mm余白)に合わせる。
+        printFrame.style.display = 'block';
+        printFrame.style.position = 'fixed';
+        printFrame.style.left = '-9999px';
+        printFrame.style.top = '0';
+        printFrame.style.width = '190mm';
+        printFrame.style.height = '600mm';
+        printFrame.style.border = '0';
+
+        var doc = printFrame.contentWindow.document;
+        doc.open();
+
+        var weekNum = STATE.weekData.weekNum !== undefined && STATE.weekData.weekNum !== null ? STATE.weekData.weekNum : '?';
+        var days = STATE.weekData.days || [];
+
+        var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>週案_第' + weekNum + '週</title>';
+        html += buildPrintStyles_(opts);
+        html += '</head><body>';
+
+        var renderDateHeader = function (d) {
+            if (!d) return "";
+            var p = d.date.split("/");
+            var html = p[1] + "/" + p[2] + "<br>" + d.dayLabel;
+            if (d.holiday) {
+                html += '<div class="holiday-print">' + escHtml(d.holiday) + '</div>';
+            }
+            return html;
+        };
+
+        var renderPeriod = function (p) {
+            var content = "";
+            if (p.subject) content += '<div class="subject">' + escHtml(p.subject) + '</div>';
+            if (p.unit) content += '<div class="unit">' + escHtml(p.unit) + '</div>';
+            if (p.content) content += '<div class="content">' + escHtml(p.content).replace(/\n/g, '<br>') + '</div>';
+            return content;
+        };
+
+        if (opts.layout === 'compact') {
+            // ====== コンパクト（A4・1ページ）レイアウト ======
+            html += buildCompactPageHtml_(opts, days, weekNum, renderDateHeader, renderPeriod);
+        } else {
+
+        // ====== 1ページ目 ======
+        html += '<div class="page">';
+        html += '<div class="doc-title">週間指導計画簿<div class="doc-week">第' + weekNum + '週</div></div>';
+        html += '<table class="grid1">';
+
+        // ヘッダー行
+        html += '<tr><th class="row-header">日付<br>曜日</th>';
+        for (var i = 0; i < 5; i++) {
+            var thCls = (days[i] && days[i].holiday) ? ' class="holiday-head"' : '';
+            html += '<th' + thCls + '>' + renderDateHeader(days[i]) + '</th>';
+        }
+        html += '</tr>';
+
+        // 行事
+        if (opts.event) {
+            html += '<tr><td class="row-header">時程<br>行事</td>';
+            for (var i = 0; i < 5; i++) {
+                var evtCls = 'event-cell' + ((days[i] && days[i].holiday) ? ' holiday-cell' : '');
+                html += '<td class="' + evtCls + '">' + ((days[i] && days[i].event) ? escHtml(days[i].event).replace(/\n/g, '<br>') : '') + '</td>';
+            }
+            html += '</tr>';
+        }
+
+        // 登校前
+        if (opts.preclass) {
+            html += '<tr><td class="row-header">登校前</td>';
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].preclass) ? escHtml(days[i].preclass).replace(/\n/g, '<br>') : '') + '</td>'; }
+            html += '</tr>';
+        }
+
+        // 朝学習
+        if (opts.morning) {
+            html += '<tr><td class="row-header">朝学習</td>';
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].morning) ? escHtml(days[i].morning).replace(/\n/g, '<br>') : '') + '</td>'; }
+            html += '</tr>';
+        }
+
+        // 1校時
+        html += '<tr><td class="row-header">1校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[0]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 2校時
+        html += '<tr><td class="row-header">2校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[1]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 中休み
+        if (opts.recess1) {
+            html += '<tr class="recess-row"><td class="row-header">中休</td>';
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess1) ? escHtml(days[i].recess1).replace(/\n/g, '<br>') : '') + '</td>'; }
+            html += '</tr>';
+        }
+
+        // 3校時
+        html += '<tr><td class="row-header">3校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[2]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 4校時
+        html += '<tr><td class="row-header">4校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[3]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 昼休み
+        if (opts.recess2) {
+            html += '<tr class="recess-row"><td class="row-header">昼休</td>';
+            for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].recess2) ? escHtml(days[i].recess2).replace(/\n/g, '<br>') : '') + '</td>'; }
+            html += '</tr>';
+        }
+
+        // 5校時
+        html += '<tr><td class="row-header">5校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[4]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 6校時
+        html += '<tr><td class="row-header">6校時</td>';
+        for (var i = 0; i < 5; i++) { html += '<td>' + ((days[i] && days[i].periods) ? renderPeriod(days[i].periods[5]) : '') + '</td>'; }
+        html += '</tr>';
+
+        // 放課後
+        if (opts.afterschool) {
+            html += '<tr><td class="row-header">放課後</td>';
+            for (var i = 0; i < 5; i++) { html += '<td class="afterschool-cell">' + ((days[i] && days[i].afterschool) ? escHtml(days[i].afterschool).replace(/\n/g, '<br>') : '') + '</td>'; }
+            html += '</tr>';
+        }
+
+        html += '</table>';
+        html += '</div>';
+
+        // ====== 2ページ目 ======
+        html += '<div class="page">';
+        html += '<div class="page2-layout">';
+
+        // 週末（左ペイン）
+        html += '<div class="page2-left">';
+        html += '<table class="grid1">';
+
+        html += '<tr><th class="row-header">日付<br>曜日</th>';
+        html += '<th class="sat-col">' + renderDateHeader(days[5]) + '</th>';
+        html += '<th class="sun-col">' + renderDateHeader(days[6]) + '</th></tr>';
+
+        var renderWeekendContent = function (key, idx, p_idx) {
+            var d = days[idx] || {};
+            if (p_idx !== undefined) {
+                return d.periods ? renderPeriod(d.periods[p_idx]) : '';
+            }
+            return d[key] ? escHtml(d[key]).replace(/\n/g, '<br>') : '';
+        };
+
+        // 行事
+        if (opts.event) {
+            html += '<tr><td class="row-header">時程<br>行事</td>';
+            html += '<td class="event-cell">' + renderWeekendContent("event", 5) + '</td>';
+            html += '<td class="event-cell">' + renderWeekendContent("event", 6) + '</td>';
+            html += '</tr>';
+        }
+
+        // 登校前
+        if (opts.preclass) {
+            html += '<tr><td class="row-header">登校前</td>';
+            html += '<td>' + renderWeekendContent("preclass", 5) + '</td>';
+            html += '<td>' + renderWeekendContent("preclass", 6) + '</td>';
+            html += '</tr>';
+        }
+
+        // 朝学習
+        if (opts.morning) {
+            html += '<tr><td class="row-header">朝学習</td>';
+            html += '<td>' + renderWeekendContent("morning", 5) + '</td>';
+            html += '<td>' + renderWeekendContent("morning", 6) + '</td>';
+            html += '</tr>';
+        }
+
+        // 1校時
+        html += '<tr><td class="row-header">1校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 0) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 0) + '</td>';
+        html += '</tr>';
+
+        // 2校時
+        html += '<tr><td class="row-header">2校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 1) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 1) + '</td>';
+        html += '</tr>';
+
+        // 中休み
+        if (opts.recess1) { html += '<tr class="recess-row"><td class="row-header">中休</td><td>' + renderWeekendContent("recess1", 5) + '</td><td>' + renderWeekendContent("recess1", 6) + '</td></tr>'; }
+
+        // 3校時
+        html += '<tr><td class="row-header">3校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 2) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 2) + '</td>';
+        html += '</tr>';
+
+        // 4校時
+        html += '<tr><td class="row-header">4校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 3) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 3) + '</td>';
+        html += '</tr>';
+
+        // 昼休み
+        if (opts.recess2) { html += '<tr class="recess-row"><td class="row-header">昼休</td><td>' + renderWeekendContent("recess2", 5) + '</td><td>' + renderWeekendContent("recess2", 6) + '</td></tr>'; }
+
+        // 5校時
+        html += '<tr><td class="row-header">5校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 4) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 4) + '</td>';
+        html += '</tr>';
+
+        // 6校時
+        html += '<tr><td class="row-header">6校時</td>';
+        html += '<td>' + renderWeekendContent("", 5, 5) + '</td>';
+        html += '<td>' + renderWeekendContent("", 6, 5) + '</td>';
+        html += '</tr>';
+
+        // 放課後
+        if (opts.afterschool) {
+            html += '<tr><td class="row-header">放課後</td>';
+            html += '<td class="afterschool-cell">' + renderWeekendContent("afterschool", 5) + '</td>';
+            html += '<td class="afterschool-cell">' + renderWeekendContent("afterschool", 6) + '</td>';
+            html += '</tr>';
+        }
+
+        html += '</table>';
+        html += '</div>';
+
+        // 右ペイン
+        html += '<div class="page2-right">';
+
+        // 時数集計表
+        if (opts.stats) {
+            var summary = STATE.hoursSummaryData || [];
+            // アクティブな教科のみ表示（学年設定に応じた教科数）
+            var activeSubjects = summary.filter(function (s) { return s && s.subject; });
+            // データ未取得時は空行で表の構造を維持（左右各5行）
+            var minRows = activeSubjects.length > 0 ? 0 : 5;
+            var half = Math.max(Math.ceil(activeSubjects.length / 2), minRows);
+            html += '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">';
+
+            // 1列目
+            html += '<table class="stats-table" style="width:48%;">';
+            html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
+            for (var i = 0; i < half; i++) {
+                var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
+                html += '<tr>';
+                html += '<td style="background-color:#dcedc8;">' + (escHtml(s.subject) || " ") + '</td>';
+                html += '<td>' + formatFraction(s.weekly) + '</td>';
+                html += '<td>' + formatFraction(s.cumulative) + '</td>';
+                html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
+                html += '</tr>';
+            }
+            html += '</table>';
+
+            // 2列目
+            var half2 = activeSubjects.length > 0 ? activeSubjects.length : half * 2;
+            html += '<table class="stats-table" style="width:48%;">';
+            html += '<tr><th></th><th>週時数</th><th>累計</th><th>年間進捗</th></tr>';
+            for (var i = half; i < half2; i++) {
+                var s = activeSubjects[i] || { subject: " ", weekly: "", cumulative: "", percent: "" };
+                html += '<tr>';
+                html += '<td style="background-color:#dcedc8;">' + (escHtml(s.subject) || " ") + '</td>';
+                html += '<td>' + formatFraction(s.weekly) + '</td>';
+                html += '<td>' + formatFraction(s.cumulative) + '</td>';
+                html += '<td>' + (s.percent !== undefined && s.percent !== "" ? s.percent + "%" : "&nbsp;") + '</td>';
+                html += '</tr>';
+            }
+            html += '</table>';
+            html += '</div>';
+        } // end if (opts.stats)
+
+        // Todoリスト
+        html += '<div class="todo-box">';
+        html += '<div class="todo-title">Todoリスト</div>';
+        html += '<div class="todo-list-wrap">';
+        var tasks = STATE.tasks || [];
+        // 当該週の次の週末日（日曜日）を算出 → 印刷対象の期日上限
+        var currentSunStr = days[6].date; // "yyyy/MM/dd"
+        var sunParts = currentSunStr.split('/');
+        var nextWeekSun = new Date(+sunParts[0], +sunParts[1] - 1, +sunParts[2]);
+        nextWeekSun.setDate(nextWeekSun.getDate() + 7);
+        var nextWeekEndStr = nextWeekSun.getFullYear() + '-'
+            + String(nextWeekSun.getMonth() + 1).padStart(2, '0') + '-'
+            + String(nextWeekSun.getDate()).padStart(2, '0');
+        // 表示中の週の月曜日を YYYY-MM-DD 形式で取得
+        var monParts = days[0].date.split('/');
+        var mondayIsoStr = monParts[0] + '-' + String(parseInt(monParts[1])).padStart(2, '0') + '-' + String(parseInt(monParts[2])).padStart(2, '0');
+        // フィルタ: 完了タスクは表示中週の月曜日より前の期日なら非表示、それ以外は次週末以前を表示
+        var printTasks = tasks.filter(function (t) {
+            if (!t.dueDate) return true;        // 期日未設定は常に表示
+            // 完了タスクは、期日が表示中週の月曜日より前なら非表示
+            if (t.status === '完了' && t.dueDate < mondayIsoStr) return false;
+            return t.dueDate <= nextWeekEndStr;  // 次週末日以前のタスクを表示
+        });
+        // ソート: 未完了→完了の順、同グループ内は期日昇順（未設定は最後）
+        printTasks.sort(function (a, b) {
+            var aComp = (a.status === '完了') ? 1 : 0;
+            var bComp = (b.status === '完了') ? 1 : 0;
+            if (aComp !== bComp) return aComp - bComp;
+            if (!a.dueDate) return 1;
+            if (!b.dueDate) return -1;
+            return a.dueDate.localeCompare(b.dueDate);
+        });
+        // 表示（2カラムレイアウトで省スペース化、最低3行確保）
+        var displayCount = Math.max(3, printTasks.length);
+        for (var i = 0; i < displayCount; i++) {
+            if (printTasks[i] && printTasks[i].content) {
+                var duePart = '';
+                if (printTasks[i].dueDate) {
+                    var dp = printTasks[i].dueDate.split('-');
+                    duePart = '<span class="todo-due">' + parseInt(dp[1]) + '/' + parseInt(dp[2]) + '</span>';
+                }
+                var statusMark = printTasks[i].status === '完了' ? '<span class="todo-done">✔</span>'
+                    : (printTasks[i].status === '進行中' ? '<span class="todo-pending">◐</span>' : '<span class="todo-pending">□</span>');
+                html += '<div class="todo-item">' + statusMark + ' ' + escHtml(printTasks[i].content) + duePart + '</div>';
+            } else {
+                html += '<div class="todo-item">&nbsp;</div>';
+            }
+        }
+        html += '</div>';
+        html += '</div>';
+
+        // 週のまとめ（時数表と検印欄の間のフリースペースに印刷）
+        var weekSummaryText = (STATE.weekData && STATE.weekData.weekSummary) ? STATE.weekData.weekSummary : '';
+        if (opts.summary && weekSummaryText) {
+            html += '<div class="summary-box">';
+            html += '<div class="summary-title">今週のまとめ（報告）</div>';
+            html += '<div class="summary-text">' + escHtml(weekSummaryText) + '</div>';
+            html += '</div>';
+        }
+
+        // フリー枠（残りスペースを最大限使用）
+        html += '<div class="free-box">';
+        for (var i = 0; i < 30; i++) {
+            html += '<div class="line-row"></div>';
+        }
+        html += '</div>';
+
+        // 検印枠（2ページ目最下部に固定）
+        html += '<table class="seal-table">';
+        html += '<tr><td rowspan="2" class="seal-header" style="width:20px; font-weight:bold; vertical-align:middle; font-size:12px;">検<br><br>印</td><td class="seal-header">校長</td><td class="seal-header">副校長</td><td class="seal-header">担当者</td></tr>';
+        html += '<tr><td style="height:50px;"></td><td></td><td></td></tr>';
+        html += '</table>';
+
+        html += '</div>'; // end page2-right
+        html += '</div>'; // end page2-layout
+        html += '</div>'; // end page
+
+        } // end 標準（2ページ）レイアウト
+
+        html += '</body></html>';
+
+        doc.write(html);
+        doc.close();
+
+        // 各ページの内容をラッパーで包み、ページ高さを超える場合のみ比例縮小して全行を印刷領域に収める
+        var fitPagesToPrintArea = function () {
+            var fdoc = printFrame.contentWindow.document;
+            var pages = fdoc.querySelectorAll('.page');
+            for (var pi = 0; pi < pages.length; pi++) {
+                var page = pages[pi];
+                if (!page.querySelector('.page-fit')) {
+                    var inner = fdoc.createElement('div');
+                    inner.className = 'page-fit';
+                    while (page.firstChild) { inner.appendChild(page.firstChild); }
+                    page.appendChild(inner);
+                }
+                var fit = page.querySelector('.page-fit');
+                // 一旦リセットしてから自然な高さを測定
+                fit.style.transform = '';
+                fit.style.width = '100%';
+                var avail = page.clientHeight;
+                var natural = fit.scrollHeight;
+                if (avail > 0 && natural > avail + 2) {
+                    var scale = avail / natural;
+                    // 縮小で横幅が縮まないよう先に横幅を広げてから比例縮小（横はページ幅いっぱいを維持）
+                    fit.style.width = (100 / scale) + '%';
+                    fit.style.transform = 'scale(' + scale + ')';
+                }
+            }
+        };
+
+        var printed = false;
+        var doPrint = function () {
+            if (printed) return;
+            printed = true;
+            try { fitPagesToPrintArea(); } catch (e) { /* 測定失敗時はそのまま印刷 */ }
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<span class="material-symbols-outlined fs-6">print</span> 印刷';
+            }
+            printFrame.contentWindow.focus();
+            printFrame.contentWindow.print();
+        };
+
+        // フォント読み込み完了後に測定（高さがフォントに依存するため）
+        var fdocReady = printFrame.contentWindow.document;
+        if (fdocReady.fonts && fdocReady.fonts.ready && typeof fdocReady.fonts.ready.then === 'function') {
+            fdocReady.fonts.ready.then(function () { setTimeout(doPrint, 150); });
+            // フォント待ちが解決しない環境向けのフォールバック
+            setTimeout(doPrint, 1500);
+        } else {
+            setTimeout(doPrint, 500);
+        }
+    }
+
+</script>

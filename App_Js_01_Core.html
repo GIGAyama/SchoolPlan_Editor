@@ -1,0 +1,457 @@
+<script>
+    'use strict';
+
+    // ===== グローバル状態 =====
+    const STATE = {
+        view: 'plan',
+        mondayStr: null,
+        weekData: null,
+        masterData: null,
+        editMode: false,
+        editBuffer: null,
+        hoursYear: (new Date().getMonth() + 1 <= 3) ? new Date().getFullYear() - 1 : new Date().getFullYear(),
+        hoursMonth: new Date().getMonth() + 1,
+        hoursSummaryData: null,
+        tasks: null,
+        // UX強化用
+        selectedCell: null,       // {day: number, row: number, key: string}
+        clipboard: null,          // コピーしたセルデータ
+        undoStack: [],            // Undo履歴
+        redoStack: [],            // Redo履歴
+        dragSource: null,         // D&Dソース {day, period}
+        helpModalOpen: false,     // ショートカットヘルプ表示中
+        taskViewMode: 'list',     // タスク表示モード: 'list' or 'card'
+        taskFilter: 'all',        // タスク絞り込み: 'all'/'overdue'/'today'/'week'/'nodate'
+        taskSearchKeyword: '',    // タスク検索キーワード
+        taskSortMode: 'dueDate',  // タスク並び替え: 'dueDate'/'priority'/'created'
+        taskReminderLoaded: false, // リマインダー設定 読込済み
+        grade: 3,                 // 担当学年（デフォルト3）
+        showSat: true,            // 週案グリッドの土曜列 表示/非表示
+        showSun: true,            // 週案グリッドの日曜列 表示/非表示
+        // 各ビューの遅延ロード制御フラグ／キャッシュ（旧・散在グローバルを集約）
+        timetableLoaded: false,        // 固定時間割エディタ 読込済み
+        vacationDatesLoaded: false,    // 長期休業期間設定 読込済み
+        stdHoursLoaded: false,         // 教科別標準時数 読込済み
+        umDataLoaded: false,           // 単元マスタ 読込済み
+        isSystemSettingsLoaded: false, // システム設定 読込済み
+        geminiModelsCache: null,       // Geminiモデル一覧キャッシュ
+        taskDataLoaded: false,         // タスク初期ロード済み
+        taskLoading: false,            // タスク二重呼び出し防止フラグ
+        // 各ビューの作業データ／編集状態（旧・散在グローバルを集約）
+        pickerApiLoaded: false,        // Google Picker API 読込済み
+        currentPickerType: null,       // 現在開いている Picker の種別
+        stdHoursData: [],              // 教科別標準時数の作業データ
+        allTaskData: [],               // タスク一覧の作業データ
+        aiPreviewTasks: [],            // AI抽出タスクのプレビュー
+        umAllRows: [],                 // 単元マスタ 全行データ
+        umEditingRowIndex: null,       // 単元マスタ 編集中の行（シート行番号）
+        // 行事予定（年間行事予定PDF）ビュー
+        eventLibraryLoaded: false,     // 行事予定PDF一覧 読込済み
+        eventLibraryLoading: false,    // 行事予定PDF一覧 読込中（二重呼び出し防止）
+        eventLibraryGroups: [],        // 学校ごとのPDFグループ
+        eventSelectedPdfId: null       // 表示中のPDFファイルID
+    };
+
+    // UX: 行定義（セルナビゲーション用）
+    const GRID_ROWS = [
+        { key: 'event', label: '行事', multi: false },
+        { key: 'preclass', label: '登校前', multi: false },
+        { key: 'morning', label: '朝学習', multi: false },
+        { key: 'period0', label: '1校時', multi: true },
+        { key: 'period1', label: '2校時', multi: true },
+        { key: 'recess1', label: '中休み', multi: false },
+        { key: 'period2', label: '3校時', multi: true },
+        { key: 'period3', label: '4校時', multi: true },
+        { key: 'recess2', label: '昼休み', multi: false },
+        { key: 'period4', label: '5校時', multi: true },
+        { key: 'period5', label: '6校時', multi: true },
+        { key: 'afterschool', label: '放課後', multi: false },
+        { key: 'homework', label: '宿題', multi: false },
+        { key: 'items', label: '持ち物', multi: false },
+    ];
+
+    const DAY_LABELS_JP = ['月', '火', '水', '木', '金', '土', '日'];
+
+    // ===== 初期化 =====
+    window.onload = function () {
+        initWeekendVisibility(); // 土日列の表示設定を復元（グリッド描画前に必要）
+        loadMasterData();
+        goToToday();
+        loadAnnualHoursView();
+        loadSettingsView();
+        loadTasks(); // タスクをページ読み込み時に初期ロード（デフォルトでリスト表示）
+        restoreTaskSidebarState(); // 週案タスクサイドバーの開閉状態を復元（デフォルトは収納）
+        checkAutoReflection(); // 放課後にアプリを開いた場合、今日の振り返りモードを自動起動
+        initPdfImportUI(); // PDF読み込み（ドロップゾーン・ファイル選択）の配線
+        maybeOfferSetupWizard(); // 初回起動時（設定が不十分な場合のみ）に初期設定ウィザードを表示
+        loadMultiClassState(); // 複数学級モードの状態を読込（無効時はUI非表示のまま）
+    };
+
+    // ===== 週案グリッドの土日列 表示/非表示 =====
+    function isDayVisible(dayIdx) {
+        if (dayIdx === 5) return STATE.showSat;
+        if (dayIdx === 6) return STATE.showSun;
+        return true;
+    }
+
+    function initWeekendVisibility() {
+        try {
+            STATE.showSat = localStorage.getItem('weeklyShowSat') !== '0';
+            STATE.showSun = localStorage.getItem('weeklyShowSun') !== '0';
+        } catch (e) {
+            STATE.showSat = true;
+            STATE.showSun = true;
+        }
+        updateWeekendToggleUI();
+    }
+
+    function toggleWeekendDay(which) {
+        if (which === 'sat') STATE.showSat = !STATE.showSat;
+        else if (which === 'sun') STATE.showSun = !STATE.showSun;
+        try {
+            localStorage.setItem('weeklyShowSat', STATE.showSat ? '1' : '0');
+            localStorage.setItem('weeklyShowSun', STATE.showSun ? '1' : '0');
+        } catch (e) { }
+
+        // 選択中セルが非表示列になった場合は選択を解除
+        if (STATE.selectedCell && !isDayVisible(STATE.selectedCell.day)) clearSelection();
+        updateWeekendToggleUI();
+
+        if (STATE.weekData && STATE.weekData.days) {
+            // 編集モード中は入力中の内容を失わないよう、DOMから回収した最新値で再描画する
+            // （STATE.weekData.days は保存済みベースラインなので書き換えない）
+            var daysToRender = STATE.weekData.days;
+            if (STATE.editMode) {
+                var current = collectCurrentEditData();
+                if (current) daysToRender = current;
+            }
+            renderWeekGrid(daysToRender);
+        }
+    }
+
+    function updateWeekendToggleUI() {
+        var satBtn = document.getElementById('toggleSatBtn');
+        var sunBtn = document.getElementById('toggleSunBtn');
+        if (satBtn) {
+            satBtn.classList.toggle('off', !STATE.showSat);
+            satBtn.title = '土曜日の列を' + (STATE.showSat ? '非表示にする' : '表示する');
+        }
+        if (sunBtn) {
+            sunBtn.classList.toggle('off', !STATE.showSun);
+            sunBtn.title = '日曜日の列を' + (STATE.showSun ? '非表示にする' : '表示する');
+        }
+    }
+
+    // ===== 週案タスクサイドバーの展開・収納 =====
+    function toggleTaskSidebar() {
+        var sidebar = document.getElementById('weeklyTaskSidebar');
+        if (!sidebar) return;
+        var collapsed = sidebar.classList.toggle('collapsed');
+        updateTaskSidebarToggleIcon(collapsed);
+        try { localStorage.setItem('weeklyTaskSidebarCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+    }
+
+    function updateTaskSidebarToggleIcon(collapsed) {
+        var icon = document.getElementById('taskSidebarToggleIcon');
+        // 右側のサイドバーなので、収納時は「開く(左向き)」、展開時は「閉じる(右向き)」を表示
+        if (icon) icon.textContent = collapsed ? 'chevron_left' : 'chevron_right';
+    }
+
+    function restoreTaskSidebarState() {
+        var sidebar = document.getElementById('weeklyTaskSidebar');
+        if (!sidebar) return;
+        var stored = null;
+        try { stored = localStorage.getItem('weeklyTaskSidebarCollapsed'); } catch (e) {}
+        // 未設定（初回）の場合は収納をデフォルトとする
+        var collapsed = (stored === null) ? true : (stored === '1');
+        sidebar.classList.toggle('collapsed', collapsed);
+        updateTaskSidebarToggleIcon(collapsed);
+    }
+
+    // ===== ブラウザ閉じ/リロード時の警告 =====
+    window.addEventListener('beforeunload', function (e) {
+        if (hasUnsavedChanges()) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
+    // ===== ビュー切り替え =====
+    function switchView(viewName) {
+        autoSaveAndThen(function () {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('view-' + viewName).classList.add('active');
+            document.querySelector('.nav-btn[data-view="' + viewName + '"]').classList.add('active');
+            STATE.view = viewName;
+            if (viewName === 'newsletter') {
+                NW.init();
+            }
+            if (viewName === 'integration') {
+                checkProcessingStatus();
+            }
+            if (viewName === 'settings' && !STATE.timetableLoaded) {
+                loadTimetableEditor();
+            }
+            if (viewName === 'settings' && !STATE.vacationDatesLoaded) {
+                loadVacationDates();
+            }
+            if (viewName === 'settings' && !STATE.stdHoursLoaded) {
+                loadStandardHours();
+            }
+            if (viewName === 'settings' && !STATE.isSystemSettingsLoaded) {
+                loadSystemSettings();
+            }
+            if (viewName === 'hours') {
+                loadAnnualHoursView();
+                if (STATE.mondayStr) {
+                    loadHoursSummary();
+                }
+            }
+            if (viewName === 'task') {
+                if (!STATE.taskDataLoaded && !STATE.taskLoading) {
+                    loadTasks();
+                } else if (STATE.taskDataLoaded) {
+                    renderTaskList(); // データ読み込み済みの場合は再描画
+                }
+                loadTaskReminderSettings(); // リマインダー設定を初回のみ読込
+            }
+            if (viewName === 'unitmaster' && !STATE.umDataLoaded) {
+                loadUnitMasterData();
+            }
+            if (viewName === 'events' && !STATE.eventLibraryLoaded) {
+                loadEventPdfLibrary();
+            }
+        });
+    }
+
+    // ===== 単元マスタ読み込み =====
+    function loadMasterData() {
+        google.script.run
+            .withSuccessHandler(function (data) {
+                if (data.success) STATE.masterData = data;
+            })
+            .withFailureHandler(_onCommError)
+            .getUnitMasterForSuggest();
+    }
+
+    // ===== 週案ビュー =====
+    function goToToday() {
+        console.log('[DEBUG] goToToday called');
+        google.script.run
+            .withSuccessHandler(function (mondayStr) {
+                console.log('[DEBUG] getTodaysMondayStr success:', mondayStr);
+                STATE.mondayStr = mondayStr;
+                loadWeeklyPlan();
+            })
+            .withFailureHandler(function (e) {
+                console.error('[DEBUG] getTodaysMondayStr FAILED:', e.message);
+                showToast('error', '初期化エラー: ' + e.message);
+            })
+            .getTodaysMondayStr();
+    }
+
+    function navigateWeek(delta) {
+        if (!STATE.mondayStr) return;
+        var parts = STATE.mondayStr.split('/');
+        var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+        d.setDate(d.getDate() + delta * 7);
+        STATE.mondayStr = formatDateLocal(d);
+        loadWeeklyPlan();
+    }
+
+    function jumpToDate(dateStr) {
+        if (!dateStr) return;
+        var parts = dateStr.split('-');
+        var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+        var day = d.getDay();
+        var diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        d.setDate(diff);
+        STATE.mondayStr = formatDateLocal(d);
+        loadWeeklyPlan();
+
+        // 日付入力をリセット（不要な場合はそのまま）
+        document.getElementById('jumpDateInput').value = '';
+    }
+
+    function jumpToWeek(weekNum) {
+        if (!weekNum) return;
+
+        var originalLabel = document.getElementById('weekLabel').textContent;
+        document.getElementById('weekLabel').textContent = '検索中...';
+
+        google.script.run
+            .withSuccessHandler(function (mondayStr) {
+                if (mondayStr) {
+                    STATE.mondayStr = mondayStr;
+                    loadWeeklyPlan();
+                } else {
+                    document.getElementById('weekLabel').textContent = originalLabel;
+                    showToast('error', '指定された週が見つかりませんでした');
+                }
+                document.getElementById('jumpWeekInput').value = '';
+            })
+            .withFailureHandler(function (e) {
+                document.getElementById('weekLabel').textContent = originalLabel;
+                showToast('error', '検索エラー: ' + e.message);
+                document.getElementById('jumpWeekInput').value = '';
+            })
+            .getMondayStrByWeekNumber(weekNum);
+    }
+
+
+    // ===== 週案 全文検索（全ての週を対象にしたキーワード検索） =====
+
+    /** 検索モーダルを開きます。Enterキーまたは検索ボタンで実行します。 */
+    function openPlanSearch() {
+        Swal.fire({
+            title: '週案をまるごと検索',
+            html: '<div style="display:flex;gap:8px;">'
+                + '<input type="text" id="planSearchInput" class="swal2-input" style="flex:1;margin:0;" '
+                + 'placeholder="例: 避難訓練 / 実験 / 分数" maxlength="100">'
+                + '<button type="button" class="btn btn-primary" style="white-space:nowrap;" onclick="runPlanSearch()">検索</button>'
+                + '</div>'
+                + '<div id="planSearchStatus" class="plan-search-status">行事・朝学習・各校時（教科/単元/内容）・宿題・持ち物・振り返りなど、すべての週の入力内容から検索します。</div>'
+                + '<div id="planSearchResults"></div>',
+            width: 640,
+            showConfirmButton: false,
+            showCloseButton: true,
+            didOpen: function (popup) {
+                var input = popup.querySelector('#planSearchInput');
+                if (input) {
+                    input.focus();
+                    input.addEventListener('keydown', function (ev) {
+                        if (ev.key === 'Enter') { ev.preventDefault(); runPlanSearch(); }
+                    });
+                }
+            }
+        });
+    }
+
+    /** 検索を実行し、結果一覧をモーダル内に描画します。 */
+    function runPlanSearch() {
+        var input = document.getElementById('planSearchInput');
+        var statusEl = document.getElementById('planSearchStatus');
+        var resultsEl = document.getElementById('planSearchResults');
+        if (!input || !statusEl || !resultsEl) return;
+
+        var keyword = input.value.trim();
+        if (!keyword) { statusEl.textContent = '検索キーワードを入力してください。'; return; }
+
+        statusEl.textContent = '「' + keyword + '」を検索しています...';
+        resultsEl.innerHTML = '';
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) { statusEl.textContent = '検索エラー: ' + res.error; return; }
+                renderPlanSearchResults(res, statusEl, resultsEl);
+            })
+            .withFailureHandler(function (e) {
+                statusEl.textContent = '通信エラー: ' + e.message;
+            })
+            .searchWeeklyPlans(keyword);
+    }
+
+    /** 検索結果リストを描画します。項目クリックで該当週へジャンプします。 */
+    function renderPlanSearchResults(res, statusEl, resultsEl) {
+        if (!res.results || res.results.length === 0) {
+            statusEl.textContent = '「' + res.keyword + '」に一致する内容は見つかりませんでした。';
+            resultsEl.innerHTML = '';
+            return;
+        }
+
+        statusEl.textContent = '「' + res.keyword + '」の検索結果: ' + res.total + '件'
+            + (res.limited ? '（先頭' + res.results.length + '件を表示）' : '');
+
+        var html = '<div class="plan-search-results">';
+        res.results.forEach(function (r) {
+            html += '<div class="plan-search-item" onclick="jumpToSearchResult(\'' + escAttr(r.date) + '\')">'
+                + '<div class="plan-search-item-head">'
+                + '<span class="plan-search-item-date">' + escHtml(r.date) + '（' + escHtml(r.dayLabel) + '）</span>'
+                + (r.weekNum ? '<span>第' + escHtml(String(r.weekNum)) + '週</span>' : '')
+                + '<span class="plan-search-item-field">' + escHtml(r.field) + '</span>'
+                + '</div>'
+                + '<div class="plan-search-item-snippet">' + highlightKeyword(r.snippet, res.keyword) + '</div>'
+                + '</div>';
+        });
+        html += '</div>';
+        resultsEl.innerHTML = html;
+    }
+
+    /** エスケープ済みテキスト内のキーワードを <mark> で強調します。 */
+    function highlightKeyword(text, keyword) {
+        var escaped = escHtml(text || '');
+        var escapedKw = escHtml(keyword || '');
+        if (!escapedKw) return escaped;
+        // 大文字小文字を区別せずに一致箇所を強調（正規表現の特殊文字はエスケープ）
+        var pattern = escapedKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        try {
+            return escaped.replace(new RegExp('(' + pattern + ')', 'gi'), '<mark>$1</mark>');
+        } catch (e) {
+            return escaped;
+        }
+    }
+
+    /** 検索結果の日付を含む週の週案へジャンプします。 */
+    function jumpToSearchResult(dateStr) {
+        Swal.close();
+        var parts = dateStr.split('/');
+        var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+        var day = d.getDay();
+        var diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        d.setDate(diff);
+        STATE.mondayStr = formatDateLocal(d);
+        if (STATE.view !== 'plan') switchView('plan');
+        loadWeeklyPlan();
+        showToast('info', dateStr + ' の週を表示しました');
+    }
+
+    function loadWeeklyPlan() {
+        if (STATE.editMode) {
+            autoSaveAndThen(function () { doLoadWeeklyPlan(); });
+            return;
+        }
+        doLoadWeeklyPlan();
+    }
+
+    function doLoadWeeklyPlan() {
+        console.log('[DEBUG] loadWeeklyPlan called, mondayStr:', STATE.mondayStr);
+        var grid = document.getElementById('weekGrid');
+        // 前回描画時の inline 幅指定（minWidth / gridTemplateColumns）が残ると、
+        // 空のグリッドが横に広がったまま横スクロールが発生するためリセットする
+        // （ローディング表示自体は position:fixed で常に画面中央に出る）
+        grid.style.minWidth = '';
+        grid.style.gridTemplateColumns = '';
+        grid.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>読み込み中...</p></div>';
+        document.getElementById('weekLabel').textContent = '読み込み中...';
+
+        google.script.run
+            .withSuccessHandler(function (data) {
+                console.log('[DEBUG] getWeeklyPlanData success:', JSON.stringify(data).substring(0, 300));
+                if (!data.success) { showToast('error', 'データ取得エラー: ' + data.error); return; }
+                STATE.weekData = data;
+                renderWeekGrid(data.days);
+                updateWeekHeader(data.days, data.weekNum);
+                loadHoursSummary(); // 週変更時に時数集計も更新
+
+                // 週案表示時にタスクパネルを更新する（loadTasks はwindow.onloadで管理）
+                renderWeeklyTaskPanel();
+            })
+            .withFailureHandler(function (e) {
+                console.error('[DEBUG] getWeeklyPlanData FAILED:', e.message);
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .getWeeklyPlanData(STATE.mondayStr);
+    }
+
+    function updateWeekHeader(days, weekNum) {
+        if (!days || days.length === 0) return;
+        var mon = days[0];
+        var parts = mon.date.split('/');
+        var displayWeek = weekNum !== undefined && weekNum !== null ? weekNum : '?';
+        document.getElementById('weekLabel').textContent = parts[0] + '年 第' + displayWeek + '週';
+        document.getElementById('weekRange').textContent = mon.date + '（月）〜 ' + days[6].date + '（日）';
+        document.getElementById('headerSubtitle').textContent = '第' + displayWeek + '週 表示中';
+    }
+
+</script>

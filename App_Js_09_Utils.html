@@ -1,0 +1,111 @@
+<script>
+    'use strict';
+    // ===== ユーティリティ =====
+    function formatDateLocal(date) {
+        var y = date.getFullYear();
+        var m = String(date.getMonth() + 1).padStart(2, '0');
+        var d = String(date.getDate()).padStart(2, '0');
+        return y + '/' + m + '/' + d;
+    }
+    function escHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function escAttr(str) {
+        if (!str) return '';
+        return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    /**
+     * テキスト中の URL と Markdown 形式リンク [表示テキスト](URL) を
+     * クリック可能な <a> タグに変換する。
+     * escHtml 済みテキストに対して呼ぶこと。
+     */
+    function linkify(escapedHtml) {
+        if (!escapedHtml) return '';
+        // 1) Markdown 形式: [表示テキスト](URL)
+        //    escHtml 後は &quot; は含まないが念のため
+        var md = escapedHtml.replace(
+            /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g,
+            '<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$1<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
+        );
+        // 2) 素の URL（Markdown リンクに変換済みの href="..." 内は除外）
+        //    escHtml 済みテキストでは & は &amp; になっているため、&amp; をURLの一部として
+        //    許可する（除外すると「?a=1&b=2」のようなクエリ付きURLが途中で切れてしまう）
+        md = md.replace(
+            /(^|[^"=])(https?:\/\/(?:&amp;|[^\s<&])+)/g,
+            '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$2<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
+        );
+        return md;
+    }
+
+    /**
+     * リンク挿入ダイアログを開き、対象 textarea にリンクテキストを挿入する。
+     * target: 挿入先 textarea 要素
+     */
+    function openLinkInsertDialog(target) {
+        Swal.fire({
+            title: 'リンクを挿入',
+            html:
+                '<div style="text-align:left;font-size:0.85rem;margin-bottom:8px;color:var(--text-sub);">Google ドライブや外部サイトの URL を埋め込めます</div>'
+                + '<input id="swal-link-url" class="swal2-input" placeholder="https://..." style="font-size:0.85rem;">'
+                + '<input id="swal-link-text" class="swal2-input" placeholder="表示テキスト（省略可）" style="font-size:0.85rem;">',
+            focusConfirm: false,
+            showCancelButton: true,
+            confirmButtonText: '挿入',
+            cancelButtonText: 'キャンセル',
+            preConfirm: function () {
+                var url = document.getElementById('swal-link-url').value.trim();
+                var text = document.getElementById('swal-link-text').value.trim();
+                if (!url) {
+                    Swal.showValidationMessage('URL を入力してください');
+                    return false;
+                }
+                if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+                return { url: url, text: text };
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed || !result.value) return;
+            var url = result.value.url;
+            var text = result.value.text;
+            var insert = text ? '[' + text + '](' + url + ')' : url;
+            // textarea のカーソル位置に挿入
+            var start = target.selectionStart || 0;
+            var end = target.selectionEnd || 0;
+            var before = target.value.substring(0, start);
+            var after = target.value.substring(end);
+            target.value = before + insert + after;
+            target.focus();
+            target.selectionStart = target.selectionEnd = start + insert.length;
+            // 高さ自動調整
+            autoResizeTextarea(target);
+        });
+    }
+
+    // ===== トースト (SweetAlert2 Toast) =====
+    var SwalToast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 3500,
+        timerProgressBar: true,
+        didOpen: function (toast) {
+            toast.addEventListener('mouseenter', Swal.stopTimer);
+            toast.addEventListener('mouseleave', Swal.resumeTimer);
+        }
+    });
+
+    function showToast(type, message) {
+        var iconMap = { success: 'success', error: 'error', info: 'info' };
+        SwalToast.fire({
+            icon: iconMap[type] || 'info',
+            title: message
+        });
+    }
+
+    // google.script.run の共通失敗ハンドラ（「通信エラー」をトースト表示するだけの定型用）
+    function _onCommError(e) {
+        showToast('error', '通信エラー: ' + e.message);
+    }
+
+</script>

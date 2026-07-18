@@ -1,0 +1,259 @@
+<script>
+    'use strict';
+
+    // ===================================================
+    // ===== 複数学級モード（専科教員向け） =====
+    // モード無効時（デフォルト）はUIに一切表示されず、既存動作に影響しません。
+    // ===================================================
+
+    // 実行時にSTATEへ複数学級の状態を追加（無効時は enabled: false のまま）
+    STATE.multiClass = { enabled: false, activeSheet: '', classes: [] };
+
+    /** 複数学級モードの状態をサーバーから取得し、ヘッダーの切替メニューと設定UIを描画します。 */
+    function loadMultiClassState() {
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res || !res.success) return;
+                applyMultiClassState(res);
+            })
+            .withFailureHandler(function () { /* 未設定・通信失敗時は単学級のまま動作 */ })
+            .getMultiClassSettings();
+    }
+
+    /** サーバーから受け取った状態をSTATEへ反映し、関連UIを再描画します。 */
+    function applyMultiClassState(res) {
+        STATE.multiClass = {
+            enabled: !!res.enabled,
+            activeSheet: res.activeSheet || '',
+            classes: res.classes || []
+        };
+        renderClassSwitcher();
+        renderMultiClassSettingsUI();
+    }
+
+    /** ヘッダーの学級切替メニューを描画します（モード有効時のみ表示）。 */
+    function renderClassSwitcher() {
+        var select = document.getElementById('classSwitcher');
+        if (!select) return;
+        var mc = STATE.multiClass;
+        if (!mc.enabled || mc.classes.length === 0) {
+            select.style.display = 'none';
+            return;
+        }
+        select.innerHTML = '';
+        mc.classes.forEach(function (c) {
+            var opt = document.createElement('option');
+            opt.value = c.sheetName;
+            opt.textContent = c.name + '（' + c.grade + '年）';
+            select.appendChild(opt);
+        });
+        select.value = mc.activeSheet;
+        select.style.display = 'inline-block';
+    }
+
+    /** 設定画面の複数学級セクション（トグル・学級一覧）を描画します。 */
+    function renderMultiClassSettingsUI() {
+        var checkbox = document.getElementById('sysMultiClassEnabled');
+        var manager = document.getElementById('multiClassManager');
+        var listEl = document.getElementById('multiClassList');
+        if (!checkbox || !manager || !listEl) return;
+
+        var mc = STATE.multiClass;
+        checkbox.checked = mc.enabled;
+        manager.style.display = mc.enabled ? 'block' : 'none';
+        if (!mc.enabled) return;
+
+        var html = '';
+        mc.classes.forEach(function (c) {
+            var isActive = c.sheetName === mc.activeSheet;
+            html += '<div class="mc-class-row' + (isActive ? ' active' : '') + '">'
+                + '<span class="mc-class-name">' + escHtml(c.name) + '</span>'
+                + '<span class="mc-class-grade">' + escHtml(String(c.grade)) + '年生</span>'
+                + '<span class="mc-class-sheet">シート: ' + escHtml(c.sheetName) + '</span>'
+                + (isActive ? '<span class="mc-active-badge">表示中</span>' : '')
+                + '<span class="mc-row-actions">'
+                + (!isActive
+                    ? '<button class="btn btn-outline btn-sm" onclick="switchMultiClass(\'' + escAttr(c.sheetName) + '\')">この学級を表示</button>'
+                    : '')
+                + '<button class="btn btn-outline btn-sm" onclick="renameMultiClass(\'' + escAttr(c.sheetName) + '\', \'' + escAttr(c.name) + '\')">名前変更</button>'
+                + (!c.isDefault
+                    ? '<button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" '
+                    + 'onclick="deleteMultiClass(\'' + escAttr(c.sheetName) + '\', \'' + escAttr(c.name) + '\')">削除</button>'
+                    : '')
+                + '</span></div>';
+        });
+        listEl.innerHTML = html;
+    }
+
+    /**
+     * 学級の切り替え後に、学級に依存するビュー・キャッシュを再読み込みします。
+     * （週案・時数・標準時数・システム設定・振り返りバッジ）
+     */
+    function afterClassContextChanged() {
+        STATE.weekData = null;
+        STATE.hoursSummaryData = null;
+        STATE.stdHoursLoaded = false;
+        STATE.isSystemSettingsLoaded = false;
+
+        if (STATE.mondayStr) {
+            loadWeeklyPlan();
+        } else {
+            goToToday();
+        }
+        if (STATE.view === 'hours') {
+            loadAnnualHoursView();
+            if (STATE.mondayStr) loadHoursSummary();
+        }
+        if (STATE.view === 'settings') {
+            loadStandardHours();
+            loadSystemSettings();
+        }
+        refreshReflectionBadge();
+    }
+
+    /** ヘッダーの切替メニュー変更時の処理。編集中の週案は先に自動保存してから切り替えます。 */
+    function onClassSwitcherChange(sheetName) {
+        if (!sheetName || sheetName === STATE.multiClass.activeSheet) return;
+        autoSaveAndThen(function () {
+            switchMultiClass(sheetName);
+        });
+    }
+
+    /** アクティブ学級を切り替えます。 */
+    function switchMultiClass(sheetName) {
+        showToast('info', '学級を切り替えています...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) {
+                    showToast('error', '切り替え失敗: ' + res.error);
+                    renderClassSwitcher(); // 選択を元に戻す
+                    return;
+                }
+                applyMultiClassState(res);
+                afterClassContextChanged();
+                var cls = res.classes.filter(function (c) { return c.sheetName === res.activeSheet; })[0];
+                showToast('success', (cls ? '「' + cls.name + '」' : '学級') + 'に切り替えました');
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '通信エラー: ' + e.message);
+                renderClassSwitcher();
+            })
+            .switchActiveClassFromWeb(sheetName);
+    }
+
+    /** 設定画面のトグルで複数学級モードを有効/無効にします。 */
+    async function toggleMultiClassMode(checkbox) {
+        var enable = checkbox.checked;
+        var res = await Swal.fire({
+            icon: 'question',
+            title: enable ? '複数学級モードを有効にしますか？' : '複数学級モードを無効にしますか？',
+            html: enable
+                ? '<div style="text-align:left;font-size:0.85rem;line-height:1.6;">'
+                + '現在の「データベース」シートが1つ目の学級として登録され、画面左上に学級切替メニューが表示されます。<br>'
+                + '学級はこの下の「学級を追加」からいつでも増やせます。</div>'
+                : '<div style="text-align:left;font-size:0.85rem;line-height:1.6;">'
+                + '既定の「データベース」シートの表示に戻ります。<br>'
+                + '追加した学級のシートとデータは削除されず、再度有効にすればそのまま使えます。</div>',
+            showCancelButton: true,
+            confirmButtonText: enable ? '有効にする' : '無効にする',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8'
+        });
+        if (!res.isConfirmed) {
+            checkbox.checked = !enable; // 元に戻す
+            return;
+        }
+
+        // 編集中の週案があれば保存してから切り替える（無効化時にアクティブ学級が変わるため）
+        autoSaveAndThen(function () {
+            showToast('info', enable ? '複数学級モードを有効にしています...' : '複数学級モードを無効にしています...');
+            google.script.run
+                .withSuccessHandler(function (r) {
+                    if (!r.success) {
+                        showToast('error', 'エラー: ' + r.error);
+                        checkbox.checked = !enable;
+                        return;
+                    }
+                    applyMultiClassState(r);
+                    afterClassContextChanged();
+                    showToast('success', enable ? '複数学級モードを有効にしました' : '複数学級モードを無効にしました');
+                })
+                .withFailureHandler(function (e) {
+                    showToast('error', '通信エラー: ' + e.message);
+                    checkbox.checked = !enable;
+                })
+                .setMultiClassEnabledFromWeb(enable);
+        });
+    }
+
+    /** 「学級を追加」ボタン。既定シートをコピーして新しい学級シートを作成します。 */
+    function addMultiClass() {
+        var nameInput = document.getElementById('mcNewClassName');
+        var gradeSelect = document.getElementById('mcNewClassGrade');
+        var name = (nameInput.value || '').trim();
+        if (!name) { showToast('error', '学級名を入力してください'); return; }
+
+        showToast('info', '学級「' + name + '」を作成しています...（数秒かかります）');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) { showToast('error', '追加失敗: ' + res.error); return; }
+                nameInput.value = '';
+                applyMultiClassState(res);
+                showToast('success', '学級「' + name + '」を追加しました。切替メニューから表示できます');
+            })
+            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .addClassFromWeb(name, gradeSelect.value);
+    }
+
+    /** 学級を削除します（学級シートも削除・要確認）。 */
+    async function deleteMultiClass(sheetName, name) {
+        var res = await Swal.fire({
+            icon: 'warning',
+            title: '学級の削除',
+            html: '学級「' + escHtml(name) + '」とそのシート（週案・振り返りのデータを含む）を削除します。<br>'
+                + '<strong>この操作は元に戻せません。</strong>よろしいですか？',
+            showCancelButton: true,
+            confirmButtonText: '削除する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#dc3545'
+        });
+        if (!res.isConfirmed) return;
+
+        var wasActive = sheetName === STATE.multiClass.activeSheet;
+        showToast('info', '学級を削除しています...');
+        google.script.run
+            .withSuccessHandler(function (r) {
+                if (!r.success) { showToast('error', '削除失敗: ' + r.error); return; }
+                applyMultiClassState(r);
+                if (wasActive) afterClassContextChanged();
+                showToast('success', '学級「' + name + '」を削除しました');
+            })
+            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .deleteClassFromWeb(sheetName);
+    }
+
+    /** 学級の表示名を変更します（シート名は変わりません）。 */
+    async function renameMultiClass(sheetName, currentName) {
+        var res = await Swal.fire({
+            title: '学級名の変更',
+            input: 'text',
+            inputValue: currentName,
+            inputAttributes: { maxlength: 30 },
+            showCancelButton: true,
+            confirmButtonText: '変更する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8',
+            inputValidator: function (v) { if (!v || !v.trim()) return '学級名を入力してください'; }
+        });
+        if (!res.isConfirmed) return;
+
+        google.script.run
+            .withSuccessHandler(function (r) {
+                if (!r.success) { showToast('error', '変更失敗: ' + r.error); return; }
+                applyMultiClassState(r);
+                showToast('success', '学級名を変更しました');
+            })
+            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .renameClassFromWeb(sheetName, res.value.trim());
+    }
+</script>

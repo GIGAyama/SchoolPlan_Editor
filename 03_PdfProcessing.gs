@@ -193,7 +193,7 @@ ${items}
     }
 
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
 
     // パフォーマンス改善：DBシートを配列として取得
     const dbCols = getDbColumns();
@@ -910,7 +910,7 @@ ${items}
  */
 function getDatabaseDateSet_() {
   const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-  const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+  const dbSheet = getDbSheet_(ss);
   const dates = new Set();
   if (!dbSheet) return dates;
   const dbCols = getDbColumns();
@@ -942,7 +942,7 @@ function applyExtractedEventsFromWeb(events) {
     today.setHours(0, 0, 0, 0);
 
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
 
     const dbCols = getDbColumns();

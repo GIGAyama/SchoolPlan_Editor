@@ -1,6 +1,43 @@
 # コード最適化 進捗・引き継ぎメモ
 
-## 【最新セッション】使い勝手向上の新機能 4件（branch: claude/app-usability-features-1cdhdc）
+## 【最新セッション追記】中長期の技術改善 2件（branch: claude/app-usability-features-1cdhdc）
+
+### 1. App_Js.html（約46万字・9500行）を機能別13ファイルに分割
+- `App_Js_01_Core` 〜 `App_Js_13_SystemTools` に分割し、App.html から番号順に include。
+- 分割前後で連結内容が完全一致することを diff で機械検証済み（動作変更ゼロの純リファクタリング）。
+- 各ファイルは `<script>` + `'use strict';` で開始。トップレベルの即時実行コード
+  （イベントリスナー登録・`applyTheme(getSavedTheme())`）は同一ファイル内で完結していることを確認済み。
+- 今後の分割ルール: 新機能のJSは対応する番号ファイルへ。読み込み順に依存する
+  トップレベル実行コードを跨ファイルで書かないこと。
+
+### 2. 複数学級モード（専科教員向け・オプトイン）
+- **設定でON/OFF**。OFF（デフォルト）では従来と完全に同一動作・UIにも一切表示されない。
+- **バックエンド**: `00_config.gs` に `resolveDbSheet_()` / `getDbSheet_()` / `isDbSheetName_()` を追加し、
+  全 .gs の `ss.getSheetByName(SHEET_NAME_DATABASE)` を `getDbSheet_(ss)` に置換（約35箇所）。
+  `getDbColumns()` はシート別キャッシュ（`dbColumnsMap_v4::<シート名>`）に変更。
+  ヘッダースキャンを `scanDbHeaderForSheet_(sheet)` として抽出（新規学級シート作成時に使用）。
+- **管理API**: `10_MultiClass.gs`（新規）。`getMultiClassSettings` / `setMultiClassEnabledFromWeb` /
+  `addClassFromWeb`（既定シートをコピー→入力クリア、カレンダー引継ぎ）/ `deleteClassFromWeb` /
+  `switchActiveClassFromWeb` / `renameClassFromWeb`。すべて LockService で直列化。
+- **学級ごとに独立**: DBシート（週案・振り返り）・担当学年・標準時数（切替時にスナップショット/復元、
+  `saveGrade`・`saveStandardHours` にフックあり）。**共通**: タスク・単元マスタ・学級通信・固定時間割・
+  Classroom連携設定・PDFフォルダ。
+- **フロント**: `App_Js_14_MultiClass.html`（新規）。ヘッダー左上に学級切替 select（有効時のみ表示）、
+  設定タブに「複数学級モード」セクション（トグル・学級一覧・追加/名前変更/削除）。
+  切替は `autoSaveAndThen` で編集中データを保存してから実行（別学級への誤保存防止）。
+  切替後は週案/時数/標準時数/システム設定のキャッシュを破棄して再読込（`afterClassContextChanged`）。
+- **onEdit** は `isDbSheetName_()` で学級シートも対象化。シート保護（protectSheets_core_）も学級シートを含む。
+
+### 要GAS/ブラウザ検証（中長期改善分）
+- 分割後のWebアプリが従来どおり起動・全タブ動作するか（includeの読み込み順）。
+- 複数学級モード: OFFのまま従来動作に差異がないか（最重要）。
+- ON→学級追加→切替で週案・時数・標準時数が学級ごとに切り替わるか。学年の異なる学級で標準時数が正しいか。
+- 編集モード中に学級切替→編集内容が元の学級に保存されるか。
+- 学級削除（アクティブ学級削除時のフォールバック）・モードOFF→ONの再有効化。
+
+---
+
+## 【前セッション】使い勝手向上の新機能 4件（branch: claude/app-usability-features-1cdhdc）
 
 全 .gs / .html を node --check 済み。機能追加のみで既存挙動の変更なし。
 

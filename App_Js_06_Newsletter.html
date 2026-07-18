@@ -1,0 +1,2537 @@
+<script>
+    'use strict';
+    // ===== 学級通信ブロックエディタ (NW module) =====
+    var NW_FONTS = [
+        { label: '丸ゴシック', value: "'Zen Maru Gothic', sans-serif" },
+        { label: 'ゴシック', value: "'Noto Sans JP', sans-serif" },
+        { label: '明朝体', value: "'Noto Serif JP', serif" },
+        { label: '教科書体', value: "'Klee One', cursive" },
+        { label: '手書き風', value: "'Yusei Magic', cursive" }
+    ];
+
+    // WordArt: エフェクト自由組み合わせ式のデフォルト色リスト
+    var NW_WA_GRAD_PRESETS = [
+        { c1: '#ff0000', c2: '#0000ff', label: '赤→青' },
+        { c1: '#ff8c00', c2: '#ff006e', label: '橙→桃' },
+        { c1: '#ffd700', c2: '#b8860b', label: 'ゴールド' },
+        { c1: '#00c853', c2: '#0077b6', label: '緑→青' },
+        { c1: '#ff2e7e', c2: '#ffcce0', label: '桜' },
+        { c1: '#240046', c2: '#c77dff', label: '紫' },
+        { c1: '#ff0000', c2: '#9c27b0', label: '虹', extra: ',#ff8c00,#ffd700,#00c853,#2196f3' }
+    ];
+
+    var NW = {
+        blocks: [],
+        nextId: 1,
+        mondayStr: null,
+        dragId: null,
+        scheduleData: null,
+        initialized: false,
+        _saveTimer: null,
+        // Undo/Redo
+        _history: [],
+        _historyIdx: -1,
+        _historyMax: 50,
+        _skipHistory: false
+    };
+
+    NW.init = function () {
+        if (NW.initialized) return;
+        NW.mondayStr = STATE.mondayStr;
+        if (NW.mondayStr) {
+            document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+        }
+        // Event delegation: click to select/deselect blocks
+        document.getElementById('nwEditorPage').addEventListener('click', function (e) {
+            var blockEl = e.target.closest('.nw-block');
+            document.querySelectorAll('.nw-block.nw-block-selected').forEach(function (el) {
+                if (el !== blockEl) el.classList.remove('nw-block-selected');
+            });
+            if (blockEl) blockEl.classList.add('nw-block-selected');
+        });
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function (e) {
+            if (STATE.view !== 'newsletter') return;
+            var mod = e.ctrlKey || e.metaKey;
+            if (!mod) return;
+            var k = e.key.toLowerCase();
+            // Ctrl+Z = undo, Ctrl+Shift+Z / Ctrl+Y = redo
+            if (k === 'z' && !e.shiftKey) { e.preventDefault(); NW.undo(); return; }
+            if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); NW.redo(); return; }
+            if (k === 's') { e.preventDefault(); NW.saveToSheet(); return; }
+            if (k === 'p') { e.preventDefault(); NW.printNewsletter(); return; }
+        });
+        // Restore from localStorage if available
+        if (NW.blocks.length === 0) NW.autoRestore();
+        NW.pushHistory(); // initial state
+        NW.initialized = true;
+    };
+
+    // ---- Undo / Redo ----
+    NW.pushHistory = function () {
+        if (NW._skipHistory) return;
+        NW.saveEditable();
+        var snap = JSON.stringify({ blocks: NW.blocks, nextId: NW.nextId });
+        // Don't push duplicate
+        if (NW._historyIdx >= 0 && NW._history[NW._historyIdx] === snap) return;
+        NW._history = NW._history.slice(0, NW._historyIdx + 1);
+        NW._history.push(snap);
+        if (NW._history.length > NW._historyMax) NW._history.shift();
+        NW._historyIdx = NW._history.length - 1;
+    };
+
+    NW.undo = function () {
+        if (NW._historyIdx <= 0) { showToast('info', '元に戻せません'); return; }
+        NW.saveEditable();
+        NW._historyIdx--;
+        NW._restoreHistory();
+    };
+
+    NW.redo = function () {
+        if (NW._historyIdx >= NW._history.length - 1) { showToast('info', 'やり直せません'); return; }
+        NW._historyIdx++;
+        NW._restoreHistory();
+    };
+
+    NW._restoreHistory = function () {
+        var snap = JSON.parse(NW._history[NW._historyIdx]);
+        NW._skipHistory = true;
+        NW.blocks = snap.blocks;
+        NW.nextId = snap.nextId;
+        NW.render();
+        NW._skipHistory = false;
+    };
+
+    NW.navWeek = function (delta) {
+        var base = NW.mondayStr || STATE.mondayStr;
+        if (!base) return;
+        var parts = base.split('/');
+        var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+        d.setDate(d.getDate() + delta * 7);
+        NW.mondayStr = formatDateLocal(d);
+        document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+    };
+
+    NW.genId = function () { return 'nwb-' + (NW.nextId++); };
+
+    // ---- Block CRUD ----
+    NW.addBlock = function (type, afterId, data) {
+        NW.pushHistory();
+        var block = { id: NW.genId(), type: type };
+        data = data || {};
+        switch (type) {
+            case 'heading':
+                block.content = data.content || '見出し';
+                block.fontSize = data.fontSize || 18;
+                block.align = data.align || 'center';
+                block.bold = data.bold !== undefined ? data.bold : true;
+                block.fontFamily = data.fontFamily || '';
+                block.color = data.color || '';
+                block.bgColor = data.bgColor || '';
+                break;
+            case 'text':
+                block.content = data.content || '';
+                block.fontSize = data.fontSize || 12;
+                block.align = data.align || 'left';
+                block.bold = !!data.bold;
+                block.fontFamily = data.fontFamily || '';
+                block.color = data.color || '';
+                block.bgColor = data.bgColor || '';
+                break;
+            case 'image':
+                block.src = data.src || '';
+                block.width = data.width || 50;
+                block.float = data.float || 'none';
+                block.wrapText = data.wrapText || '';
+                block.wrapAlign = data.wrapAlign || 'left';
+                block.wrapFontSize = data.wrapFontSize || 12;
+                block.wrapFontFamily = data.wrapFontFamily || '';
+                block.wrapBold = !!data.wrapBold;
+                block.wrapColor = data.wrapColor || '';
+                block.caption = data.caption || '';
+                break;
+            case 'gallery':
+                block.images = data.images || [];
+                block.columns = data.columns || 2;
+                break;
+            case 'schedule':
+                block.weekData = data.weekData || null;
+                block.cellOverrides = data.cellOverrides || {};
+                block.options = {
+                    showRecess: true,
+                    showAfterSchool: true,
+                    showHomework: true,
+                    showItems: true,
+                    showSaturday: false,
+                    hiddenPeriods: [],
+                    displayMode: 'subject'
+                };
+                if (data.options) {
+                    for (var k in data.options) block.options[k] = data.options[k];
+                }
+                break;
+            case 'qrcode':
+                block.url = data.url || '';
+                block.qrSize = data.qrSize || 200;
+                block.label = data.label || '';
+                break;
+            case 'divider':
+                break;
+            case 'columns':
+                block.columns = data.columns || 2;
+                block.colData = data.colData || [];
+                // Initialize columns with empty data
+                while (block.colData.length < block.columns) {
+                    block.colData.push({ content: '', src: '', caption: '' });
+                }
+                block.colRatio = data.colRatio || 'equal';
+                break;
+            case 'wordart':
+                block.content = data.content || 'ワードアート';
+                block.fontSize = data.fontSize || 48;
+                block.align = data.align || 'center';
+                block.fontFamily = data.fontFamily || '';
+                block.waColor = data.waColor || '#202124';
+                block.waGradient = data.waGradient || false;
+                block.waGradC1 = data.waGradC1 || '#ff0000';
+                block.waGradC2 = data.waGradC2 || '#0000ff';
+                block.waGradAngle = data.waGradAngle || 135;
+                block.waGradExtra = data.waGradExtra || '';
+                block.waStroke = data.waStroke || false;
+                block.waStrokeColor = data.waStrokeColor || '#1a73e8';
+                block.waStrokeWidth = data.waStrokeWidth || 3;
+                block.waShadow = data.waShadow || false;
+                block.waShadowColor = data.waShadowColor || '#888888';
+                block.waShadowX = data.waShadowX || 3;
+                block.waShadowY = data.waShadowY || 3;
+                block.waShadowBlur = data.waShadowBlur || 6;
+                block.wa3d = data.wa3d || false;
+                block.wa3dColor = data.wa3dColor || '#c0392b';
+                block.wa3dDepth = data.wa3dDepth || 5;
+                block.waBgDark = data.waBgDark || false;
+                block.waSpacing = data.waSpacing || 2;
+                break;
+        }
+        // Block decoration (all block types)
+        block.borderColor = data.borderColor || '';
+        block.borderRadius = data.borderRadius || 0;
+        block.blockBgColor = data.blockBgColor || '';
+        if (afterId) {
+            var idx = NW.blocks.findIndex(function (b) { return b.id === afterId; });
+            NW.blocks.splice(idx + 1, 0, block);
+        } else {
+            NW.blocks.push(block);
+        }
+        NW.render();
+        return block;
+    };
+
+    NW.removeBlock = function (id) {
+        NW.pushHistory();
+        NW.blocks = NW.blocks.filter(function (b) { return b.id !== id; });
+        NW.render();
+    };
+
+    NW.moveBlock = function (id, dir) {
+        var idx = NW.blocks.findIndex(function (b) { return b.id === id; });
+        if (idx < 0) return;
+        var newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= NW.blocks.length) return;
+        NW.pushHistory();
+        NW.saveEditable();
+        var tmp = NW.blocks[idx];
+        NW.blocks[idx] = NW.blocks[newIdx];
+        NW.blocks[newIdx] = tmp;
+        NW.render();
+    };
+
+    NW.duplicateBlock = function (id) {
+        var orig = NW.blocks.find(function (b) { return b.id === id; });
+        if (!orig) return;
+        NW.pushHistory();
+        NW.saveEditable();
+        var clone = JSON.parse(JSON.stringify(orig));
+        clone.id = NW.genId();
+        var idx = NW.blocks.findIndex(function (b) { return b.id === id; });
+        NW.blocks.splice(idx + 1, 0, clone);
+        NW.render();
+    };
+
+    // ---- Save contenteditable before re-render ----
+    NW.saveEditable = function () {
+        NW.blocks.forEach(function (block) {
+            if (block.type === 'heading' || block.type === 'text') {
+                var el = document.querySelector('[data-block-id="' + block.id + '"] [contenteditable]');
+                if (el) block.content = el.innerHTML;
+            }
+            if (block.type === 'image' && block.float !== 'none') {
+                var wt = document.querySelector('[data-block-id="' + block.id + '"] .nw-float-text-side');
+                if (wt) block.wrapText = wt.innerHTML;
+            }
+            if (block.type === 'gallery') {
+                var cells = document.querySelectorAll('[data-block-id="' + block.id + '"] .nw-gallery-caption');
+                cells.forEach(function (cap, i) {
+                    if (block.images[i]) block.images[i].caption = cap.innerHTML;
+                });
+            }
+            if (block.type === 'qrcode') {
+                var ql = document.querySelector('[data-block-id="' + block.id + '"] .nw-qrcode-label');
+                if (ql) block.label = ql.innerHTML;
+            }
+            if (block.type === 'image') {
+                var capEl = document.querySelector('[data-block-id="' + block.id + '"] .nw-image-caption');
+                if (capEl) block.caption = capEl.innerHTML;
+            }
+            if (block.type === 'columns') {
+                var colCells = document.querySelectorAll('[data-block-id="' + block.id + '"] .nw-col-text');
+                colCells.forEach(function (cell, i) {
+                    if (block.colData[i]) block.colData[i].content = cell.innerHTML;
+                });
+            }
+        });
+    };
+
+    // ---- Rendering ----
+    NW.render = function () {
+        NW.saveEditable();
+        var page = document.getElementById('nwEditorPage');
+        if (NW.blocks.length === 0) {
+            page.innerHTML = '<div class="nw-empty-editor" id="nwEmptyState">'
+                + '<span class="material-symbols-outlined" style="font-size:48px;opacity:0.3;display:block;margin-bottom:12px;">newspaper</span>'
+                + '<p style="margin-bottom:16px;">ブロックを追加して学級通信を作成しましょう</p>'
+                + '<div class="nw-quickstart">'
+                + '<button class="nw-quickstart-btn" onclick="NW.quickStart(\'basic\')">'
+                + '<span class="material-symbols-outlined">article</span><span>基本レイアウト</span>'
+                + '<small>見出し+テキスト+区切り線</small></button>'
+                + '<button class="nw-quickstart-btn" onclick="NW.quickStart(\'schedule\')">'
+                + '<span class="material-symbols-outlined">calendar_month</span><span>時間割付き</span>'
+                + '<small>見出し+時間割+テキスト</small></button>'
+                + '<button class="nw-quickstart-btn" onclick="NW.quickStart(\'photo\')">'
+                + '<span class="material-symbols-outlined">photo_library</span><span>写真レイアウト</span>'
+                + '<small>見出し+段組み+ギャラリー</small></button>'
+                + '<button class="nw-quickstart-btn nw-quickstart-ai" onclick="NW.generateFullNewsletter()">'
+                + '<span class="material-symbols-outlined">auto_awesome</span><span>AIで一括生成</span>'
+                + '<small>AIが通信全体を自動作成</small></button>'
+                + '</div></div>';
+            NW.autoSave();
+            return;
+        }
+        page.innerHTML = '';
+        // Insert button at the top
+        page.appendChild(NW._createInsertBtn(null));
+        NW.blocks.forEach(function (block) {
+            page.appendChild(NW.renderBlock(block));
+            // Insert button after each block
+            page.appendChild(NW._createInsertBtn(block.id));
+        });
+        NW.autoSave();
+        // Render A4 page break markers
+        NW.renderPageBreaks();
+    };
+
+    // ---- Insert button between blocks ----
+    NW._createInsertBtn = function (afterId) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'nw-insert-row';
+        var btn = document.createElement('button');
+        btn.className = 'nw-insert-btn';
+        btn.innerHTML = '<span class="material-symbols-outlined">add</span>';
+        btn.title = 'ブロックを挿入';
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            NW._showInsertMenu(afterId, btn);
+        });
+        wrapper.appendChild(btn);
+        return wrapper;
+    };
+
+    NW._showInsertMenu = function (afterId, anchorEl) {
+        var items = [
+            { type: 'heading', icon: 'title', label: '見出し' },
+            { type: 'text', icon: 'notes', label: 'テキスト' },
+            { type: 'image', icon: 'image', label: '画像' },
+            { type: 'columns', icon: 'view_column', label: '段組み' },
+            { type: 'gallery', icon: 'auto_awesome_mosaic', label: 'ギャラリー' },
+            { type: 'schedule', icon: 'calendar_month', label: '時間割' },
+            { type: 'divider', icon: 'horizontal_rule', label: '区切り線' },
+            { type: 'qrcode', icon: 'qr_code_2', label: 'QRコード' },
+            { type: 'wordart', icon: 'title', label: 'ワードアート' }
+        ];
+        var html = '<div class="nw-insert-menu-grid">';
+        items.forEach(function (it) {
+            html += '<button class="nw-insert-menu-item" data-type="' + it.type + '">'
+                + '<span class="material-symbols-outlined">' + it.icon + '</span>' + it.label + '</button>';
+        });
+        html += '</div>';
+        Swal.fire({
+            html: html,
+            showConfirmButton: false,
+            showCloseButton: true,
+            width: 340,
+            customClass: { popup: 'nw-insert-popup' },
+            didOpen: function (popup) {
+                popup.querySelectorAll('.nw-insert-menu-item').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        Swal.close();
+                        NW.addBlock(btn.getAttribute('data-type'), afterId);
+                    });
+                });
+            }
+        });
+    };
+
+    // ---- Quick-start layouts ----
+    NW.quickStart = function (preset) {
+        NW.blocks = [];
+        NW.nextId = 1;
+        switch (preset) {
+            case 'basic':
+                NW.addBlock('heading', null, { content: '学級通信', fontSize: 20, align: 'center' });
+                NW.addBlock('text', null, { content: '', fontSize: 11, align: 'center' });
+                NW.addBlock('divider');
+                NW.addBlock('text', null, { content: '', fontSize: 12 });
+                NW.addBlock('divider');
+                NW.addBlock('text', null, { content: '', fontSize: 12 });
+                break;
+            case 'schedule':
+                NW.addBlock('heading', null, { content: '学級通信', fontSize: 20, align: 'center' });
+                NW.addBlock('text', null, { content: '', fontSize: 11, align: 'center' });
+                NW.addBlock('divider');
+                NW.addBlock('text', null, { content: '', fontSize: 12 });
+                NW.addBlock('divider');
+                NW.addBlock('schedule');
+                NW.addBlock('divider');
+                NW.addBlock('text', null, { content: '', fontSize: 12 });
+                break;
+            case 'photo':
+                NW.addBlock('heading', null, { content: '学級通信', fontSize: 20, align: 'center' });
+                NW.addBlock('text', null, { content: '', fontSize: 11, align: 'center' });
+                NW.addBlock('divider');
+                NW.addBlock('columns', null, { columns: 2 });
+                NW.addBlock('divider');
+                NW.addBlock('gallery', null, { columns: 3 });
+                NW.addBlock('divider');
+                NW.addBlock('text', null, { content: '', fontSize: 12 });
+                break;
+        }
+        NW._history = [];
+        NW._historyIdx = -1;
+        NW.pushHistory();
+        showToast('success', 'レイアウトを作成しました');
+    };
+
+    NW.renderPageBreaks = function () {
+        var page = document.getElementById('nwEditorPage');
+        page.querySelectorAll('.nw-page-break-marker').forEach(function (el) { el.remove(); });
+        // Derive px-per-mm from the known CSS padding-top (15mm)
+        var cs = window.getComputedStyle(page);
+        var paddingTopPx = parseFloat(cs.paddingTop);
+        if (!paddingTopPx || paddingTopPx <= 0) return;
+        var mmToPx = paddingTopPx / 15; // padding-top = 15mm
+        // Print uses @page{margin:15mm 18mm}, printable height = 267mm per page
+        var pageContentH = 267 * mmToPx;
+        var totalH = page.scrollHeight;
+        // First break at paddingTop + 267mm; subsequent every 267mm
+        for (var i = 1; ; i++) {
+            var y = paddingTopPx + pageContentH * i;
+            if (y >= totalH - 10) break;
+            var marker = document.createElement('div');
+            marker.className = 'nw-page-break-marker';
+            marker.style.top = y + 'px';
+            marker.setAttribute('data-page', 'ページ ' + i + ' / ' + (i + 1));
+            page.appendChild(marker);
+        }
+    };
+
+    /**
+     * ブロック種別ごとの「書式設定ツールバー」HTML文字列を生成する純粋関数群。
+     * いずれも block を読むだけで副作用なし。該当しない場合は空文字を返す。
+     * （NW.renderBlock から機械的に抽出。出力は抽出前と完全一致することをNodeで検証済み）
+     */
+    NW.buildTextToolbar_ = function (block) {
+        if (block.type !== 'heading' && block.type !== 'text') return '';
+        var fmt = '<div class="nw-fmt-toolbar">'
+            + '<select onchange="NW.setFontFamily(\'' + block.id + '\',this.value)" title="フォント">';
+        fmt += '<option value=""' + (!block.fontFamily ? ' selected' : '') + '>標準</option>';
+        NW_FONTS.forEach(function (f) {
+            fmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
+        });
+        fmt += '</select>'
+            + '<select onchange="NW.setFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
+        [9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72].forEach(function (s) {
+            fmt += '<option value="' + s + '"' + (s === block.fontSize ? ' selected' : '') + '>' + s + '</option>';
+        });
+        fmt += '</select>'
+            + '<button title="太字" onclick="NW.toggleBold(\'' + block.id + '\')" class="' + (block.bold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
+            + '<button title="左揃え" onclick="NW.setAlign(\'' + block.id + '\',\'left\')" class="' + (block.align === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
+            + '<button title="中央" onclick="NW.setAlign(\'' + block.id + '\',\'center\')" class="' + (block.align === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
+            + '<button title="右揃え" onclick="NW.setAlign(\'' + block.id + '\',\'right\')" class="' + (block.align === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button title="文字色" onclick="NW.pickColor(\'' + block.id + '\',\'color\')" style="position:relative;"><span class="material-symbols-outlined">format_color_text</span><span class="nw-color-dot" style="background:' + (block.color || '#202124') + ';"></span></button>'
+            + '<button title="背景色" onclick="NW.pickColor(\'' + block.id + '\',\'bgColor\')" style="position:relative;"><span class="material-symbols-outlined">format_color_fill</span><span class="nw-color-dot" style="background:' + (block.bgColor || 'transparent') + ';border:1px solid #ccc;"></span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button title="AIでリライト" onclick="NW.aiRewriteBlock(\'' + block.id + '\')" class="nw-ai-btn"><span class="material-symbols-outlined">auto_awesome</span></button>'
+            + '</div><div class="nw-act-sep"></div>';
+        return fmt;
+    };
+
+    NW.buildWordartToolbar_ = function (block) {
+        if (block.type !== 'wordart') return '';
+        var bid = block.id;
+        var waFmt = '<div class="nw-fmt-toolbar">'
+            + '<select onchange="NW.waSet(\'' + bid + '\',\'fontFamily\',this.value)" title="フォント">';
+        waFmt += '<option value=""' + (!block.fontFamily ? ' selected' : '') + '>標準</option>';
+        NW_FONTS.forEach(function (f) {
+            waFmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + '>' + f.label + '</option>';
+        });
+        waFmt += '</select>'
+            + '<select onchange="NW.waSet(\'' + bid + '\',\'fontSize\',this.value)" title="サイズ">';
+        [28, 32, 36, 40, 48, 56, 64, 72, 96].forEach(function (s) {
+            waFmt += '<option value="' + s + '"' + (s === (block.fontSize || 48) ? ' selected' : '') + '>' + s + '</option>';
+        });
+        waFmt += '</select>'
+            + '<button title="左揃え" onclick="NW.waSet(\'' + bid + '\',\'align\',\'left\')" class="' + (block.align === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
+            + '<button title="中央" onclick="NW.waSet(\'' + bid + '\',\'align\',\'center\')" class="' + (block.align === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
+            + '<button title="右揃え" onclick="NW.waSet(\'' + bid + '\',\'align\',\'right\')" class="' + (block.align === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button title="グラデーション" onclick="NW.waToggle(\'' + bid + '\',\'waGradient\')" class="nw-wa-fx-btn' + (block.waGradient ? ' nw-active' : '') + '"><span class="material-symbols-outlined">gradient</span></button>'
+            + '<button title="アウトライン" onclick="NW.waToggle(\'' + bid + '\',\'waStroke\')" class="nw-wa-fx-btn' + (block.waStroke ? ' nw-active' : '') + '"><span class="material-symbols-outlined">border_color</span></button>'
+            + '<button title="影" onclick="NW.waToggle(\'' + bid + '\',\'waShadow\')" class="nw-wa-fx-btn' + (block.waShadow ? ' nw-active' : '') + '"><span class="material-symbols-outlined">blur_on</span></button>'
+            + '<button title="3D立体" onclick="NW.waToggle(\'' + bid + '\',\'wa3d\')" class="nw-wa-fx-btn' + (block.wa3d ? ' nw-active' : '') + '"><span class="material-symbols-outlined">view_in_ar</span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button onclick="NW.openWordArtSettings(\'' + bid + '\')" title="スタイル詳細設定"><span class="material-symbols-outlined">tune</span></button>'
+            + '<button onclick="NW.editWordArt(\'' + bid + '\')" title="テキスト編集"><span class="material-symbols-outlined">edit</span></button>'
+            + '</div><div class="nw-act-sep"></div>';
+        return waFmt;
+    };
+
+    NW.buildColumnsToolbar_ = function (block) {
+        if (block.type !== 'columns') return '';
+        var colFmt = '<div class="nw-fmt-toolbar">'
+            + '<select onchange="NW.setColumnsCount(\'' + block.id + '\',this.value)" title="列数">';
+        [2, 3].forEach(function (c) {
+            colFmt += '<option value="' + c + '"' + (c === block.columns ? ' selected' : '') + '>' + c + '列</option>';
+        });
+        colFmt += '</select>'
+            + '<select onchange="NW.setColRatio(\'' + block.id + '\',this.value)" title="比率">';
+        var ratioOpts = [
+            { v: 'equal', l: '均等' },
+            { v: '1:2', l: '1:2' },
+            { v: '2:1', l: '2:1' },
+            { v: '1:3', l: '1:3' },
+            { v: '3:1', l: '3:1' }
+        ];
+        ratioOpts.forEach(function (r) {
+            colFmt += '<option value="' + r.v + '"' + (block.colRatio === r.v ? ' selected' : '') + '>' + r.l + '</option>';
+        });
+        colFmt += '</select></div><div class="nw-act-sep"></div>';
+        return colFmt;
+    };
+
+    NW.buildGalleryToolbar_ = function (block) {
+        if (block.type !== 'gallery') return '';
+        var galFmt = '<div class="nw-fmt-toolbar"><select onchange="NW.setGalleryColumns(\'' + block.id + '\',this.value)" title="列数">';
+        [2, 3, 4].forEach(function (c) {
+            galFmt += '<option value="' + c + '"' + (c === block.columns ? ' selected' : '') + '>' + c + '列</option>';
+        });
+        galFmt += '</select></div><div class="nw-act-sep"></div>';
+        return galFmt;
+    };
+
+    NW.buildImageToolbar_ = function (block) {
+        if (!(block.type === 'image' && block.src)) return '';
+        var imgFmt = '<div class="nw-fmt-toolbar">'
+            + '<button title="回り込みなし" onclick="NW.setFloat(\'' + block.id + '\',\'none\')" class="' + (block.float === 'none' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">crop_free</span></button>'
+            + '<button title="左に画像" onclick="NW.setFloat(\'' + block.id + '\',\'left\')" class="' + (block.float === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_image_left</span></button>'
+            + '<button title="右に画像" onclick="NW.setFloat(\'' + block.id + '\',\'right\')" class="' + (block.float === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_image_right</span></button>'
+            + '<select onchange="NW.setImageWidth(\'' + block.id + '\',this.value)" title="画像幅">';
+        [25, 30, 40, 50, 60, 75, 100].forEach(function (w) {
+            imgFmt += '<option value="' + w + '"' + (w === block.width ? ' selected' : '') + '>' + w + '%</option>';
+        });
+        imgFmt += '</select></div>';
+        // Text formatting toolbar for wrap text (only when float is active)
+        if (block.float !== 'none') {
+            imgFmt += '<div class="nw-fmt-toolbar">'
+                + '<select onchange="NW.setWrapFontFamily(\'' + block.id + '\',this.value)" title="フォント">';
+            imgFmt += '<option value=""' + (!block.wrapFontFamily ? ' selected' : '') + '>標準</option>';
+            NW_FONTS.forEach(function (f) {
+                imgFmt += '<option value="' + f.value + '"' + (block.wrapFontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
+            });
+            imgFmt += '</select>'
+                + '<select onchange="NW.setWrapFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
+            [9, 10, 11, 12, 14, 16, 18, 20, 24].forEach(function (s) {
+                imgFmt += '<option value="' + s + '"' + (s === (block.wrapFontSize || 12) ? ' selected' : '') + '>' + s + '</option>';
+            });
+            imgFmt += '</select>'
+                + '<button title="太字" onclick="NW.toggleWrapBold(\'' + block.id + '\')" class="' + (block.wrapBold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
+                + '<button title="左揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'left\')" class="' + (block.wrapAlign === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
+                + '<button title="中央" onclick="NW.setWrapAlign(\'' + block.id + '\',\'center\')" class="' + (block.wrapAlign === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
+                + '<button title="右揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'right\')" class="' + (block.wrapAlign === 'right' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_right</span></button>'
+                + '<div class="nw-act-sep"></div>'
+                + '<button title="文字色" onclick="NW.pickColor(\'' + block.id + '\',\'wrapColor\')" style="position:relative;"><span class="material-symbols-outlined">format_color_text</span><span class="nw-color-dot" style="background:' + (block.wrapColor || '#202124') + ';"></span></button>'
+                + '</div>';
+        }
+        imgFmt += '<div class="nw-act-sep"></div>';
+        return imgFmt;
+    };
+
+    NW.buildQrcodeToolbar_ = function (block) {
+        if (!(block.type === 'qrcode' && block.url)) return '';
+        return '<div class="nw-fmt-toolbar">'
+            + '<button title="QRコード編集" onclick="NW.editQrCode(\'' + block.id + '\')"><span class="material-symbols-outlined">edit</span></button>'
+            + '</div><div class="nw-act-sep"></div>';
+    };
+
+    /** ブロック種別に応じた書式ツールバーHTMLをまとめて返す（該当1種のみ非空）。 */
+    NW.buildBlockToolbar_ = function (block) {
+        return NW.buildTextToolbar_(block)
+            + NW.buildWordartToolbar_(block)
+            + NW.buildColumnsToolbar_(block)
+            + NW.buildGalleryToolbar_(block)
+            + NW.buildImageToolbar_(block)
+            + NW.buildQrcodeToolbar_(block);
+    };
+
+    NW.renderBlock = function (block) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'nw-block';
+        wrapper.setAttribute('data-block-id', block.id);
+        wrapper.setAttribute('draggable', 'true');
+
+        // Drag handle
+        var handle = document.createElement('span');
+        handle.className = 'nw-block-handle material-symbols-outlined';
+        handle.textContent = 'drag_indicator';
+        wrapper.appendChild(handle);
+
+        // Action bar
+        var actions = document.createElement('div');
+        actions.className = 'nw-block-actions';
+
+        // ブロック種別ごとの書式ツールバー（純粋関数で生成・該当種別のみ非空）
+        var toolbarHtml = NW.buildBlockToolbar_(block);
+        if (toolbarHtml) actions.insertAdjacentHTML('beforeend', toolbarHtml);
+
+        // Common action buttons: decoration, up, down, duplicate, delete
+        actions.insertAdjacentHTML('beforeend',
+            '<button title="装飾" onclick="NW.openDecoration(\'' + block.id + '\')"><span class="material-symbols-outlined">palette</span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button title="上へ" onclick="NW.moveBlock(\'' + block.id + '\',-1)"><span class="material-symbols-outlined">arrow_upward</span></button>'
+            + '<button title="下へ" onclick="NW.moveBlock(\'' + block.id + '\',1)"><span class="material-symbols-outlined">arrow_downward</span></button>'
+            + '<button title="複製" onclick="NW.duplicateBlock(\'' + block.id + '\')"><span class="material-symbols-outlined">content_copy</span></button>'
+            + '<button title="削除" onclick="NW.removeBlock(\'' + block.id + '\')"><span class="material-symbols-outlined">delete</span></button>');
+        wrapper.appendChild(actions);
+
+        // Apply block decoration via CSS custom properties (to avoid overriding hover/selected)
+        if (block.blockBgColor) wrapper.style.background = block.blockBgColor;
+        if (block.borderColor) {
+            wrapper.setAttribute('data-deco-border', block.borderColor);
+            wrapper.style.setProperty('--deco-border', block.borderColor);
+        }
+        if (block.borderRadius) wrapper.style.borderRadius = block.borderRadius + 'px';
+
+        // Content area
+        wrapper.appendChild(NW.renderContent(block));
+
+        // Drag & drop events
+        wrapper.addEventListener('dragstart', function (e) {
+            NW.dragId = block.id;
+            e.dataTransfer.effectAllowed = 'move';
+            wrapper.style.opacity = '0.4';
+        });
+        wrapper.addEventListener('dragend', function () {
+            wrapper.style.opacity = '1';
+            NW.dragId = null;
+            document.querySelectorAll('.nw-drag-over').forEach(function (el) { el.classList.remove('nw-drag-over'); });
+        });
+        wrapper.addEventListener('dragover', function (e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            wrapper.classList.add('nw-drag-over');
+        });
+        wrapper.addEventListener('dragleave', function () {
+            wrapper.classList.remove('nw-drag-over');
+        });
+        wrapper.addEventListener('drop', function (e) {
+            e.preventDefault();
+            wrapper.classList.remove('nw-drag-over');
+            if (!NW.dragId || NW.dragId === block.id) return;
+            NW.pushHistory();
+            NW.saveEditable();
+            var fromIdx = NW.blocks.findIndex(function (b) { return b.id === NW.dragId; });
+            var toIdx = NW.blocks.findIndex(function (b) { return b.id === block.id; });
+            if (fromIdx < 0 || toIdx < 0) return;
+            var moved = NW.blocks.splice(fromIdx, 1)[0];
+            NW.blocks.splice(toIdx, 0, moved);
+            NW._skipHistory = true;
+            NW.render();
+            NW._skipHistory = false;
+        });
+
+        return wrapper;
+    };
+
+    NW.renderContent = function (block) {
+        var div = document.createElement('div');
+        switch (block.type) {
+            case 'heading':
+                div.className = 'nw-heading-content';
+                div.contentEditable = 'true';
+                div.innerHTML = block.content;
+                div.style.fontSize = block.fontSize + 'px';
+                div.style.textAlign = block.align;
+                if (block.bold) div.style.fontWeight = '700';
+                if (block.fontFamily) div.style.fontFamily = block.fontFamily;
+                if (block.color) div.style.color = block.color;
+                if (block.bgColor) div.style.backgroundColor = block.bgColor;
+                div.setAttribute('data-placeholder', '見出しを入力...');
+                div.addEventListener('blur', function () { block.content = div.innerHTML; });
+                break;
+
+            case 'text':
+                div.className = 'nw-text-content';
+                div.contentEditable = 'true';
+                div.innerHTML = block.content;
+                div.style.fontSize = block.fontSize + 'px';
+                div.style.textAlign = block.align;
+                if (block.bold) div.style.fontWeight = '700';
+                if (block.fontFamily) div.style.fontFamily = block.fontFamily;
+                if (block.color) div.style.color = block.color;
+                if (block.bgColor) div.style.backgroundColor = block.bgColor;
+                div.setAttribute('data-placeholder', 'テキストを入力...');
+                div.addEventListener('blur', function () { block.content = div.innerHTML; });
+                // Enter key → new text block below
+                div.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        block.content = div.innerHTML;
+                        var newBlock = NW.addBlock('text', block.id);
+                        setTimeout(function () {
+                            var newEl = document.querySelector('[data-block-id="' + newBlock.id + '"] [contenteditable]');
+                            if (newEl) newEl.focus();
+                        }, 50);
+                    }
+                    // Backspace on empty → delete block
+                    if (e.key === 'Backspace' && !div.textContent.trim() && !div.innerHTML.includes('<img')) {
+                        e.preventDefault();
+                        NW.removeBlock(block.id);
+                    }
+                });
+                break;
+
+            case 'image':
+                div.className = 'nw-image-block';
+                if (block.src) {
+                    if (block.float !== 'none') {
+                        // Float layout: image + text side by side
+                        var floatDiv = document.createElement('div');
+                        floatDiv.className = 'nw-float-wrapper' + (block.float === 'right' ? ' nw-float-right' : '');
+                        var imgSide = document.createElement('div');
+                        imgSide.className = 'nw-float-img-side';
+                        imgSide.style.width = block.width + '%';
+                        var img = document.createElement('img');
+                        img.src = block.src;
+                        img.style.width = '100%';
+                        imgSide.appendChild(img);
+                        var textSide = document.createElement('div');
+                        textSide.className = 'nw-float-text-side';
+                        textSide.contentEditable = 'true';
+                        textSide.style.textAlign = block.wrapAlign || 'left';
+                        textSide.style.fontSize = (block.wrapFontSize || 12) + 'px';
+                        if (block.wrapFontFamily) textSide.style.fontFamily = block.wrapFontFamily;
+                        if (block.wrapBold) textSide.style.fontWeight = '700';
+                        if (block.wrapColor) textSide.style.color = block.wrapColor;
+                        textSide.innerHTML = block.wrapText;
+                        textSide.addEventListener('blur', function () { block.wrapText = textSide.innerHTML; });
+                        floatDiv.appendChild(imgSide);
+                        floatDiv.appendChild(textSide);
+                        div.appendChild(floatDiv);
+                    } else {
+                        // Centered image, no wrapping
+                        var imgEl = document.createElement('img');
+                        imgEl.src = block.src;
+                        imgEl.style.width = block.width + '%';
+                        div.appendChild(imgEl);
+                        // Image caption
+                        var imgCap = document.createElement('div');
+                        imgCap.className = 'nw-image-caption';
+                        imgCap.contentEditable = 'true';
+                        imgCap.innerHTML = block.caption || '';
+                        imgCap.setAttribute('data-placeholder', 'キャプションを入力...');
+                        imgCap.addEventListener('blur', function () { block.caption = imgCap.innerHTML; });
+                        div.appendChild(imgCap);
+                    }
+                } else {
+                    var ph = document.createElement('div');
+                    ph.className = 'nw-image-placeholder';
+                    ph.innerHTML = '<span class="material-symbols-outlined" style="font-size:32px;display:block;">add_photo_alternate</span>クリックして画像をアップロード';
+                    ph.addEventListener('click', function () { NW.uploadImage(block.id); });
+                    div.appendChild(ph);
+                }
+                break;
+
+            case 'gallery':
+                div.className = 'nw-gallery-grid';
+                div.style.gridTemplateColumns = 'repeat(' + block.columns + ', 1fr)';
+                block.images.forEach(function (img, i) {
+                    var cell = document.createElement('div');
+                    cell.className = 'nw-gallery-cell';
+                    if (img.src) {
+                        var imgEl = document.createElement('img');
+                        imgEl.src = img.src;
+                        cell.appendChild(imgEl);
+                        var rmBtn = document.createElement('button');
+                        rmBtn.className = 'nw-gallery-remove';
+                        rmBtn.innerHTML = '&times;';
+                        (function (idx) {
+                            rmBtn.addEventListener('click', function (e) {
+                                e.stopPropagation();
+                                NW.removeGalleryImage(block.id, idx);
+                            });
+                        })(i);
+                        cell.appendChild(rmBtn);
+                    }
+                    var cap = document.createElement('div');
+                    cap.className = 'nw-gallery-caption';
+                    cap.contentEditable = 'true';
+                    cap.innerHTML = img.caption || '';
+                    cap.addEventListener('blur', function () { img.caption = cap.innerHTML; });
+                    cell.appendChild(cap);
+                    div.appendChild(cell);
+                });
+                var addCell = document.createElement('div');
+                addCell.className = 'nw-gallery-add';
+                addCell.innerHTML = '<span class="material-symbols-outlined" style="font-size:28px;">add_photo_alternate</span>';
+                addCell.addEventListener('click', function () { NW.addGalleryImage(block.id); });
+                div.appendChild(addCell);
+                break;
+
+            case 'columns':
+                div.className = 'nw-columns-block';
+                var colGrid = document.createElement('div');
+                colGrid.className = 'nw-columns-grid';
+                // Calculate column widths based on ratio
+                var colTemplate = 'repeat(' + block.columns + ', 1fr)';
+                if (block.columns === 2) {
+                    if (block.colRatio === '1:2') colTemplate = '1fr 2fr';
+                    else if (block.colRatio === '2:1') colTemplate = '2fr 1fr';
+                    else if (block.colRatio === '1:3') colTemplate = '1fr 3fr';
+                    else if (block.colRatio === '3:1') colTemplate = '3fr 1fr';
+                }
+                colGrid.style.gridTemplateColumns = colTemplate;
+                for (var ci = 0; ci < block.columns; ci++) {
+                    var colCell = document.createElement('div');
+                    colCell.className = 'nw-col-cell';
+                    var colData = block.colData[ci] || { content: '', src: '', caption: '' };
+                    // Image area
+                    if (colData.src) {
+                        var colImg = document.createElement('img');
+                        colImg.src = colData.src;
+                        colImg.className = 'nw-col-img';
+                        colCell.appendChild(colImg);
+                        var colImgRm = document.createElement('button');
+                        colImgRm.className = 'nw-col-img-remove';
+                        colImgRm.innerHTML = '&times;';
+                        (function (idx) {
+                            colImgRm.addEventListener('click', function (e) {
+                                e.stopPropagation();
+                                NW.pushHistory();
+                                block.colData[idx].src = '';
+                                NW.render();
+                            });
+                        })(ci);
+                        colCell.appendChild(colImgRm);
+                    } else {
+                        var colImgPh = document.createElement('div');
+                        colImgPh.className = 'nw-col-img-placeholder';
+                        colImgPh.innerHTML = '<span class="material-symbols-outlined" style="font-size:22px;">add_photo_alternate</span>';
+                        (function (idx) {
+                            colImgPh.addEventListener('click', function () { NW.uploadColumnImage(block.id, idx); });
+                        })(ci);
+                        colCell.appendChild(colImgPh);
+                    }
+                    // Text area
+                    var colText = document.createElement('div');
+                    colText.className = 'nw-col-text';
+                    colText.contentEditable = 'true';
+                    colText.innerHTML = colData.content || '';
+                    colText.setAttribute('data-placeholder', 'テキストを入力...');
+                    (function (idx) {
+                        colText.addEventListener('blur', function () {
+                            if (block.colData[idx]) block.colData[idx].content = colText.innerHTML;
+                        });
+                    })(ci);
+                    colCell.appendChild(colText);
+                    colGrid.appendChild(colCell);
+                }
+                div.appendChild(colGrid);
+                break;
+
+            case 'schedule':
+                div.className = 'nw-schedule-block';
+                div.innerHTML = NW.renderScheduleHTML(block);
+                break;
+
+            case 'qrcode':
+                div.className = 'nw-qrcode-block';
+                if (block.url) {
+                    var qrImg = document.createElement('img');
+                    qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=' + block.qrSize + 'x' + block.qrSize + '&data=' + encodeURIComponent(block.url);
+                    qrImg.alt = 'QR Code';
+                    qrImg.style.width = block.qrSize + 'px';
+                    qrImg.style.cursor = 'pointer';
+                    qrImg.title = 'クリックしてQRコードを編集';
+                    (function (bid) { qrImg.addEventListener('click', function () { NW.editQrCode(bid); }); })(block.id);
+                    div.appendChild(qrImg);
+                    var lbl = document.createElement('div');
+                    lbl.className = 'nw-qrcode-label';
+                    lbl.contentEditable = 'true';
+                    lbl.innerHTML = block.label || '';
+                    lbl.addEventListener('blur', function () { block.label = lbl.innerHTML; });
+                    div.appendChild(lbl);
+                } else {
+                    var qrPh = document.createElement('div');
+                    qrPh.className = 'nw-image-placeholder';
+                    qrPh.innerHTML = '<span class="material-symbols-outlined" style="font-size:32px;display:block;">qr_code_2</span>クリックしてURLを入力';
+                    qrPh.addEventListener('click', function () { NW.editQrCode(block.id); });
+                    div.appendChild(qrPh);
+                }
+                break;
+
+            case 'divider':
+                div.innerHTML = '<hr class="nw-divider-content">';
+                break;
+
+            case 'wordart':
+                div.className = 'nw-wordart-block';
+                if (block.waBgDark) { div.style.background = '#1a1a2e'; div.style.borderRadius = '8px'; div.style.padding = '16px 8px'; }
+                var waText = document.createElement('div');
+                waText.className = 'nw-wordart-text';
+                waText.textContent = block.content || 'ワードアート';
+                waText.style.fontSize = (block.fontSize || 48) + 'px';
+                waText.style.textAlign = block.align || 'center';
+                waText.style.fontWeight = '900';
+                waText.style.lineHeight = '1.3';
+                if (block.fontFamily) waText.style.fontFamily = block.fontFamily;
+                if (block.waSpacing) waText.style.letterSpacing = block.waSpacing + 'px';
+                NW._applyWordArtFx(waText, block);
+                waText.style.cursor = 'pointer';
+                waText.title = 'クリックしてテキストを編集';
+                (function (bid) { waText.addEventListener('click', function () { NW.editWordArt(bid); }); })(block.id);
+                div.appendChild(waText);
+                break;
+        }
+        return div;
+    };
+
+    // ---- 1年生用: 教科名ひらがな変換マップ ----
+    var SUBJECT_HIRAGANA_MAP = {
+        '国語': 'こくご',
+        '算数': 'さんすう',
+        '生活': 'せいかつ',
+        '音楽': 'おんがく',
+        '図画工作': 'ずがこうさく',
+        '体育': 'たいいく',
+        '道徳': 'どうとく',
+        '学活': 'がっかつ',
+        '図工': 'ずこう',
+        '図書': 'としょ',
+        '書写': 'しょしゃ',
+        '行事': 'ぎょうじ'
+    };
+
+    /**
+     * 学年が1年の場合、教科名をひらがなに変換します。
+     * 分数付き複数教科（例: "国語1/3　音楽2/3"）は分数を除去し
+     * 各教科をひらがなに変換して"／"で結合します（例: "こくご／おんがく"）。
+     * マップにない教科名はそのまま返します。
+     */
+    function subjectToHiragana(name) {
+        if (STATE.grade !== 1 || !name) return name;
+        // 直接マッチする場合はそのまま返す
+        if (SUBJECT_HIRAGANA_MAP[name]) return SUBJECT_HIRAGANA_MAP[name];
+        // 分数付き複数教科の解析（例: "国語1/3　音楽2/3"）
+        var normalized = name.toString().trim().replace(/　/g, ' ');
+        var regex = /([^\s\d\/\.]+)(?:\s*(?:\d+\/\d+|\d+\.\d+))?/g;
+        var match;
+        var subjects = [];
+        while ((match = regex.exec(normalized)) !== null) {
+            var subj = match[1].trim();
+            if (subj) subjects.push(SUBJECT_HIRAGANA_MAP[subj] || subj);
+        }
+        if (subjects.length > 0) return subjects.join('／');
+        return name;
+    }
+
+    // ---- Schedule table rendering (transposed: days=columns, periods=rows) ----
+    NW.renderScheduleHTML = function (block) {
+        var data = block.weekData || NW.scheduleData;
+        if (!data || !data.days) {
+            return '<div style="color:var(--text-hint);text-align:center;padding:16px;">'
+                + '「予定を読込」をクリックして週案データを読み込んでください</div>';
+        }
+        var opts = block.options;
+        var days = data.days.slice(0, opts.showSaturday ? 6 : 5);
+        var bid = block.id;
+
+        // Helper: render cell content based on displayMode
+        function cellContent(per) {
+            if (!per || !per.subject) return '';
+            var c = escHtml(subjectToHiragana(per.subject));
+            if (opts.displayMode === 'subjectUnit' && per.unit) {
+                c += '<br><span class="nw-sched-sub">' + escHtml(per.unit) + '</span>';
+            } else if (opts.displayMode === 'full') {
+                if (per.unit) c += '<br><span class="nw-sched-sub">' + escHtml(per.unit) + '</span>';
+                if (per.content) c += '<br><span class="nw-sched-detail">' + escHtml(per.content) + '</span>';
+            }
+            return c;
+        }
+
+        // Header row: blank + day columns
+        var html = '<table><thead><tr><th class="nw-sched-label-col"></th>';
+        days.forEach(function (day) {
+            html += '<th>' + escHtml(day.dayLabel) + '<br><span class="nw-sched-date">' + escHtml(day.date.slice(5)) + '</span></th>';
+        });
+        html += '</tr></thead><tbody>';
+
+        var overrides = block.cellOverrides || {};
+        // Helper: get cell content with override support
+        function getCellVal(key, original) {
+            return overrides.hasOwnProperty(key) ? overrides[key] : original;
+        }
+
+        // Event row
+        html += '<tr><td class="nw-sched-label">行事</td>';
+        days.forEach(function (day, di) {
+            var val = getCellVal('event_' + di, day.event || '');
+            var ev = val ? '<span class="nw-sched-event">' + escHtml(val) + '</span>' : '';
+            html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'event\',' + di + ')">' + ev + '</td>';
+        });
+        html += '</tr>';
+
+        // Period rows (1-6), skip hidden
+        var hiddenP = opts.hiddenPeriods || [];
+        for (var p = 0; p < 6; p++) {
+            if (hiddenP.indexOf(p + 1) >= 0) continue;
+            html += '<tr><td class="nw-sched-label">' + (p + 1) + '校時</td>';
+            (function (pp) {
+                days.forEach(function (day, di) {
+                    var per = day.periods[pp];
+                    var key = 'period_' + pp + '_' + di;
+                    if (overrides.hasOwnProperty(key)) {
+                        html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">' + escHtml(overrides[key]) + '</td>';
+                    } else {
+                        html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">' + cellContent(per) + '</td>';
+                    }
+                });
+            })(p);
+            html += '</tr>';
+        }
+
+        // Optional rows
+        if (opts.showRecess) {
+            html += '<tr><td class="nw-sched-label">中休み</td>';
+            days.forEach(function (day, di) {
+                var val = getCellVal('recess1_' + di, day.recess1 || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'recess1\',' + di + ')">' + escHtml(val) + '</td>';
+            });
+            html += '</tr><tr><td class="nw-sched-label">昼休み</td>';
+            days.forEach(function (day, di) {
+                var val = getCellVal('recess2_' + di, day.recess2 || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'recess2\',' + di + ')">' + escHtml(val) + '</td>';
+            });
+            html += '</tr>';
+        }
+        if (opts.showAfterSchool) {
+            html += '<tr><td class="nw-sched-label">放課後</td>';
+            days.forEach(function (day, di) {
+                var val = getCellVal('afterschool_' + di, day.afterschool || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'afterschool\',' + di + ')">' + escHtml(val) + '</td>';
+            });
+            html += '</tr>';
+        }
+        if (opts.showHomework) {
+            html += '<tr><td class="nw-sched-label">宿題</td>';
+            days.forEach(function (day, di) {
+                var val = getCellVal('homework_' + di, day.homework || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'homework\',' + di + ')">' + escHtml(val) + '</td>';
+            });
+            html += '</tr>';
+        }
+        if (opts.showItems) {
+            html += '<tr><td class="nw-sched-label">持ち物</td>';
+            days.forEach(function (day, di) {
+                var val = getCellVal('items_' + di, day.items || '');
+                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'items\',' + di + ')">' + escHtml(val) + '</td>';
+            });
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+
+        // Options panel
+        html += '<div class="nw-schedule-options">';
+        // Period visibility
+        html += '<span style="font-size:0.72rem;font-weight:600;color:var(--text-sub);">校時:</span>';
+        for (var pi = 1; pi <= 6; pi++) {
+            var checked = hiddenP.indexOf(pi) < 0;
+            html += '<label><input type="checkbox"' + (checked ? ' checked' : '') + ' onchange="NW.toggleSchedPeriod(\'' + bid + '\',' + pi + ',this.checked)"> ' + pi + '</label>';
+        }
+        html += '<span style="color:var(--border);">|</span>'
+            + '<label><input type="checkbox"' + (opts.showRecess ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showRecess\',this.checked)"> 休み時間</label>'
+            + '<label><input type="checkbox"' + (opts.showAfterSchool ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showAfterSchool\',this.checked)"> 放課後</label>'
+            + '<label><input type="checkbox"' + (opts.showHomework ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showHomework\',this.checked)"> 宿題</label>'
+            + '<label><input type="checkbox"' + (opts.showItems ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showItems\',this.checked)"> 持ち物</label>'
+            + '<label><input type="checkbox"' + (opts.showSaturday ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showSaturday\',this.checked)"> 土曜日</label>'
+            + '<span style="color:var(--border);">|</span>'
+            + '<label><input type="radio" name="sm_' + bid + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subject\')"> 教科のみ</label>'
+            + '<label><input type="radio" name="sm_' + bid + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subjectUnit\')"> 教科+単元</label>'
+            + '<label><input type="radio" name="sm_' + bid + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'full\')"> 詳細</label>'
+            + '</div>';
+        return html;
+    };
+
+    // ---- Block property setters ----
+    NW.setFontSize = function (id, size) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        block.fontSize = parseInt(size, 10);
+        var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
+        if (el) el.style.fontSize = block.fontSize + 'px';
+    };
+
+    NW.setFontFamily = function (id, family) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        block.fontFamily = family;
+        var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
+        if (el) el.style.fontFamily = family || 'inherit';
+    };
+
+    NW.toggleBold = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        block.bold = !block.bold;
+        NW.saveEditable();
+        NW.render();
+    };
+
+    NW.setAlign = function (id, align) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        block.align = align;
+        var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
+        if (el) el.style.textAlign = align;
+        // Update active state of align buttons
+        var acts = document.querySelector('[data-block-id="' + id + '"] .nw-fmt-toolbar');
+        if (acts) {
+            acts.querySelectorAll('button[title*="揃え"], button[title="中央"]').forEach(function (btn) { btn.classList.remove('nw-active'); });
+            var titles = { left: '左揃え', center: '中央', right: '右揃え' };
+            var activeBtn = acts.querySelector('button[title="' + titles[align] + '"]');
+            if (activeBtn) activeBtn.classList.add('nw-active');
+        }
+    };
+
+    NW.setFloat = function (id, val) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        NW.saveEditable();
+        block.float = val;
+        NW.render();
+    };
+
+    NW.setWrapAlign = function (id, align) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        block.wrapAlign = align;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-float-text-side');
+        if (el) el.style.textAlign = align;
+        // Update active state of buttons
+        var acts = document.querySelector('[data-block-id="' + id + '"] .nw-block-actions');
+        if (acts) {
+            acts.querySelectorAll('.nw-fmt-toolbar:nth-child(2) button').forEach(function (btn) { btn.classList.remove('nw-active'); });
+            var titles = { left: '左揃え', center: '中央', right: '右揃え' };
+            var activeBtn = acts.querySelector('.nw-fmt-toolbar:nth-child(2) button[title="' + titles[align] + '"]');
+            if (activeBtn) activeBtn.classList.add('nw-active');
+        }
+    };
+
+    NW.setWrapFontSize = function (id, size) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        block.wrapFontSize = parseInt(size, 10);
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-float-text-side');
+        if (el) el.style.fontSize = block.wrapFontSize + 'px';
+    };
+
+    NW.setWrapFontFamily = function (id, family) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        block.wrapFontFamily = family;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-float-text-side');
+        if (el) el.style.fontFamily = family || 'inherit';
+    };
+
+    NW.toggleWrapBold = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        NW.saveEditable();
+        block.wrapBold = !block.wrapBold;
+        NW.render();
+    };
+
+    NW.setImageWidth = function (id, w) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'image') return;
+        block.width = parseInt(w, 10);
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-float-img-side');
+        if (el) { el.style.width = block.width + '%'; return; }
+        var img = document.querySelector('[data-block-id="' + id + '"] img');
+        if (img) img.style.width = block.width + '%';
+    };
+
+    NW.toggleSchedOpt = function (id, key, val) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        block.options[key] = val;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    NW.setSchedMode = function (id, mode) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        block.options.displayMode = mode;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    NW.toggleSchedPeriod = function (id, period, show) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        var hp = block.options.hiddenPeriods || [];
+        if (show) {
+            hp = hp.filter(function (p) { return p !== period; });
+        } else {
+            if (hp.indexOf(period) < 0) hp.push(period);
+        }
+        block.options.hiddenPeriods = hp;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    NW.editSchedCell = function (id, rowType, dayIdx, periodIdx) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        var data = block.weekData || NW.scheduleData;
+        if (!data || !data.days) return;
+        var day = data.days[dayIdx];
+        if (!day) return;
+        var overrides = block.cellOverrides || {};
+
+        if (rowType === 'period') {
+            // Period cell: subject, unit, content fields
+            var per = (day.periods && day.periods[periodIdx]) || {};
+            var overKey = 'period_' + periodIdx + '_' + dayIdx;
+            var hasOverride = overrides.hasOwnProperty(overKey);
+            Swal.fire({
+                title: day.dayLabel + ' ' + (periodIdx + 1) + '校時',
+                html: '<div style="text-align:left;">'
+                    + '<label style="font-size:0.85rem;font-weight:600;">教科</label>'
+                    + '<input id="swalSchedSubj" class="swal2-input" value="' + escHtml(per.subject || '') + '" style="margin-top:4px;">'
+                    + '<label style="font-size:0.85rem;font-weight:600;margin-top:8px;display:block;">単元</label>'
+                    + '<input id="swalSchedUnit" class="swal2-input" value="' + escHtml(per.unit || '') + '" style="margin-top:4px;">'
+                    + '<label style="font-size:0.85rem;font-weight:600;margin-top:8px;display:block;">内容</label>'
+                    + '<input id="swalSchedCont" class="swal2-input" value="' + escHtml(per.content || '') + '" style="margin-top:4px;">'
+                    + (hasOverride ? '<label style="font-size:0.8rem;color:var(--text-hint);margin-top:8px;display:block;"><input type="checkbox" id="swalSchedFreeText" checked> 自由テキストで上書き</label>'
+                        + '<input id="swalSchedOverride" class="swal2-input" value="' + escHtml(overrides[overKey] || '') + '" style="margin-top:4px;">'
+                        : '<label style="font-size:0.8rem;color:var(--text-hint);margin-top:8px;display:block;"><input type="checkbox" id="swalSchedFreeText"> 自由テキストで上書き</label>'
+                        + '<input id="swalSchedOverride" class="swal2-input" value="" style="margin-top:4px;display:none;">')
+                    + '</div>',
+                showCancelButton: true,
+                confirmButtonText: '保存',
+                cancelButtonText: 'キャンセル',
+                didOpen: function () {
+                    var cb = document.getElementById('swalSchedFreeText');
+                    var ov = document.getElementById('swalSchedOverride');
+                    var subj = document.getElementById('swalSchedSubj');
+                    var unit = document.getElementById('swalSchedUnit');
+                    var cont = document.getElementById('swalSchedCont');
+                    function toggleMode() {
+                        if (cb.checked) {
+                            ov.style.display = ''; subj.disabled = true; unit.disabled = true; cont.disabled = true;
+                            subj.style.opacity = '0.5'; unit.style.opacity = '0.5'; cont.style.opacity = '0.5';
+                        } else {
+                            ov.style.display = 'none'; subj.disabled = false; unit.disabled = false; cont.disabled = false;
+                            subj.style.opacity = '1'; unit.style.opacity = '1'; cont.style.opacity = '1';
+                        }
+                    }
+                    cb.addEventListener('change', toggleMode);
+                    toggleMode();
+                },
+                preConfirm: function () {
+                    return {
+                        freeText: document.getElementById('swalSchedFreeText').checked,
+                        override: document.getElementById('swalSchedOverride').value,
+                        subject: document.getElementById('swalSchedSubj').value,
+                        unit: document.getElementById('swalSchedUnit').value,
+                        content: document.getElementById('swalSchedCont').value
+                    };
+                }
+            }).then(function (result) {
+                if (!result.isConfirmed) return;
+                NW.pushHistory();
+                var v = result.value;
+                if (v.freeText) {
+                    block.cellOverrides[overKey] = v.override;
+                } else {
+                    delete block.cellOverrides[overKey];
+                    if (!day.periods) day.periods = [];
+                    if (!day.periods[periodIdx]) day.periods[periodIdx] = {};
+                    day.periods[periodIdx].subject = v.subject;
+                    day.periods[periodIdx].unit = v.unit;
+                    day.periods[periodIdx].content = v.content;
+                }
+                var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+                if (el) el.innerHTML = NW.renderScheduleHTML(block);
+            });
+        } else {
+            // Simple text cell (event, recess1, recess2, afterschool, homework, items)
+            var labels = { event: '行事', recess1: '中休み', recess2: '昼休み', afterschool: '放課後', homework: '宿題', items: '持ち物' };
+            var overKey = rowType + '_' + dayIdx;
+            var origVal = day[rowType] || '';
+            var curVal = overrides.hasOwnProperty(overKey) ? overrides[overKey] : origVal;
+            Swal.fire({
+                title: day.dayLabel + ' - ' + (labels[rowType] || rowType),
+                input: 'text',
+                inputValue: curVal,
+                showCancelButton: true,
+                confirmButtonText: '保存',
+                cancelButtonText: 'キャンセル',
+                inputPlaceholder: labels[rowType] + 'を入力...'
+            }).then(function (result) {
+                if (!result.isConfirmed) return;
+                NW.pushHistory();
+                var newVal = result.value;
+                if (newVal === origVal) {
+                    delete block.cellOverrides[overKey];
+                } else {
+                    block.cellOverrides[overKey] = newVal;
+                }
+                var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+                if (el) el.innerHTML = NW.renderScheduleHTML(block);
+            });
+        }
+    };
+
+    // ---- Image upload (FileReader → base64) ----
+    NW.uploadImage = function (blockId) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = function (e) {
+            var file = e.target.files[0];
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function (evt) {
+                var block = NW.blocks.find(function (b) { return b.id === blockId; });
+                if (block) { block.src = evt.target.result; NW.render(); }
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    };
+
+    // ---- Gallery image management ----
+    NW.addGalleryImage = function (blockId) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true;
+        input.onchange = function (e) {
+            var files = Array.from(e.target.files);
+            var block = NW.blocks.find(function (b) { return b.id === blockId; });
+            if (!block) return;
+            var loaded = 0;
+            files.forEach(function (file) {
+                var reader = new FileReader();
+                reader.onload = function (evt) {
+                    block.images.push({ src: evt.target.result, caption: '' });
+                    loaded++;
+                    if (loaded === files.length) NW.render();
+                };
+                reader.readAsDataURL(file);
+            });
+        };
+        input.click();
+    };
+
+    NW.removeGalleryImage = function (blockId, index) {
+        var block = NW.blocks.find(function (b) { return b.id === blockId; });
+        if (!block) return;
+        block.images.splice(index, 1);
+        NW.render();
+    };
+
+    NW.setGalleryColumns = function (id, cols) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        block.columns = parseInt(cols, 10);
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-gallery-grid');
+        if (el) el.style.gridTemplateColumns = 'repeat(' + block.columns + ', 1fr)';
+    };
+
+    // ---- Columns block management ----
+    NW.setColumnsCount = function (id, count) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'columns') return;
+        NW.saveEditable();
+        NW.pushHistory();
+        block.columns = parseInt(count, 10);
+        while (block.colData.length < block.columns) {
+            block.colData.push({ content: '', src: '', caption: '' });
+        }
+        if (block.columns < 3 && block.colRatio && block.colRatio !== 'equal') {
+            // Keep ratio for 2 columns, reset for others
+        }
+        NW.render();
+    };
+
+    NW.setColRatio = function (id, ratio) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || block.type !== 'columns') return;
+        NW.saveEditable();
+        block.colRatio = ratio;
+        NW.render();
+    };
+
+    NW.uploadColumnImage = function (blockId, colIndex) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = function (e) {
+            var file = e.target.files[0];
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function (evt) {
+                var block = NW.blocks.find(function (b) { return b.id === blockId; });
+                if (block && block.colData[colIndex]) {
+                    block.colData[colIndex].src = evt.target.result;
+                    NW.render();
+                }
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    };
+
+    // ---- Color picker ----
+    var NW_COLORS = [
+        '#202124', '#5f6368', '#ffffff', '#d32f2f', '#e65100', '#f9a825',
+        '#2e7d32', '#1565c0', '#1a73e8', '#6a1b9a', '#ad1457', '#00838f',
+        '#ef9a9a', '#ffe082', '#a5d6a7', '#90caf9', '#ce93d8', '#ffab91'
+    ];
+
+    NW.pickColor = function (id, prop) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        var isText = (prop === 'color' || prop === 'wrapColor');
+        var currentVal = block[prop] || '';
+        var html = '<div class="nw-color-grid">';
+        html += '<button class="nw-color-swatch nw-color-none' + (!currentVal ? ' nw-color-selected' : '') + '" data-val="" title="' + (isText ? 'デフォルト' : 'なし') + '">' + (isText ? 'A' : '&times;') + '</button>';
+        NW_COLORS.forEach(function (c) {
+            html += '<button class="nw-color-swatch' + (currentVal === c ? ' nw-color-selected' : '') + '" style="background:' + c + ';" data-val="' + c + '" title="' + c + '"></button>';
+        });
+        html += '</div>';
+        Swal.fire({
+            title: isText ? '文字色' : '背景色',
+            html: html,
+            showConfirmButton: false,
+            showCloseButton: true,
+            didOpen: function (popup) {
+                popup.querySelectorAll('.nw-color-swatch').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        NW.pushHistory();
+                        block[prop] = btn.getAttribute('data-val');
+                        NW.render();
+                        Swal.close();
+                    });
+                });
+            }
+        });
+    };
+
+    // ---- QR Code editor ----
+    NW.editQrCode = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        Swal.fire({
+            title: 'QRコード設定',
+            html: '<div style="text-align:left;">'
+                + '<label style="font-size:0.85rem;font-weight:600;">URL</label>'
+                + '<input id="swalQrUrl" class="swal2-input" placeholder="https://..." value="' + escHtml(block.url || '') + '" style="margin-top:4px;">'
+                + '<label style="font-size:0.85rem;font-weight:600;margin-top:12px;display:block;">ラベル（任意）</label>'
+                + '<input id="swalQrLabel" class="swal2-input" placeholder="ラベルテキスト" value="' + escHtml(block.label || '') + '" style="margin-top:4px;">'
+                + '<label style="font-size:0.85rem;font-weight:600;margin-top:12px;display:block;">サイズ</label>'
+                + '<select id="swalQrSize" class="swal2-select" style="margin-top:4px;width:100%;"><option value="150"' + (block.qrSize === 150 ? ' selected' : '') + '>小 (150px)</option><option value="200"' + (block.qrSize === 200 ? ' selected' : '') + '>中 (200px)</option><option value="300"' + (block.qrSize === 300 ? ' selected' : '') + '>大 (300px)</option></select>'
+                + '</div>',
+            showCancelButton: true,
+            confirmButtonText: '設定',
+            cancelButtonText: 'キャンセル',
+            preConfirm: function () {
+                return {
+                    url: document.getElementById('swalQrUrl').value,
+                    label: document.getElementById('swalQrLabel').value,
+                    qrSize: parseInt(document.getElementById('swalQrSize').value, 10)
+                };
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            NW.pushHistory();
+            block.url = result.value.url;
+            block.label = result.value.label;
+            block.qrSize = result.value.qrSize;
+            NW.render();
+        });
+    };
+
+    // ---- WordArt editor (エフェクト自由組み合わせ式) ----
+    // エフェクト適用ヘルパー
+    NW._applyWordArtFx = function (el, b) {
+        var shadows = [];
+        // グラデーション
+        if (b.waGradient) {
+            var grad = 'linear-gradient(' + (b.waGradAngle || 135) + 'deg,' + (b.waGradC1 || '#ff0000') + (b.waGradExtra || '') + ',' + (b.waGradC2 || '#0000ff') + ')';
+            el.style.background = grad;
+            el.style.webkitBackgroundClip = 'text';
+            el.style.backgroundClip = 'text';
+            el.style.webkitTextFillColor = 'transparent';
+            el.style.color = 'transparent';
+        } else if (b.waStroke && !b.waGradient) {
+            // アウトラインのみの場合、塗りを透明に
+            el.style.webkitTextFillColor = 'transparent';
+            el.style.color = 'transparent';
+        } else {
+            el.style.color = b.waColor || '#202124';
+        }
+        // アウトライン
+        if (b.waStroke) {
+            el.style.webkitTextStroke = (b.waStrokeWidth || 3) + 'px ' + (b.waStrokeColor || '#1a73e8');
+        }
+        // 3D立体 (積み重ねtext-shadow)
+        if (b.wa3d) {
+            var d3c = b.wa3dColor || '#c0392b';
+            for (var d = 1; d <= (b.wa3dDepth || 5); d++) {
+                shadows.push(d + 'px ' + d + 'px 0 ' + d3c);
+            }
+            shadows.push((b.wa3dDepth || 5) + 1 + 'px ' + ((b.wa3dDepth || 5) + 1) + 'px 10px rgba(0,0,0,0.3)');
+        }
+        // 影
+        if (b.waShadow) {
+            shadows.push((b.waShadowX || 3) + 'px ' + (b.waShadowY || 3) + 'px ' + (b.waShadowBlur || 6) + 'px ' + (b.waShadowColor || '#888888'));
+        }
+        if (shadows.length) el.style.textShadow = shadows.join(',');
+    };
+
+    // ツールバー: プロパティ設定
+    NW.waSet = function (id, prop, value) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        if (prop === 'fontSize') value = parseInt(value, 10);
+        block[prop] = value;
+        NW.render();
+    };
+
+    // ツールバー: エフェクトON/OFFトグル
+    NW.waToggle = function (id, prop) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        NW.pushHistory();
+        block[prop] = !block[prop];
+        NW.render();
+    };
+
+    // テキスト編集
+    NW.editWordArt = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        Swal.fire({
+            title: 'ワードアートのテキスト',
+            input: 'text',
+            inputValue: block.content || '',
+            inputPlaceholder: 'テキストを入力...',
+            showCancelButton: true, confirmButtonText: '確定', cancelButtonText: 'キャンセル'
+        }).then(function (result) {
+            if (result.isConfirmed) { NW.pushHistory(); block.content = result.value; NW.render(); }
+        });
+    };
+
+    // 詳細設定ダイアログ
+    NW.openWordArtSettings = function (id) {
+        var b = NW.blocks.find(function (bl) { return bl.id === id; });
+        if (!b) return;
+        // 旧preset形式を変換
+        if (b.preset && b.waGradient === undefined) {
+            b.waColor = '#202124'; b.waGradient = false; b.waStroke = false;
+            b.waShadow = false; b.wa3d = false; b.waBgDark = false; b.waSpacing = 2;
+            b.waGradC1 = '#ff0000'; b.waGradC2 = '#0000ff'; b.waGradAngle = 135;
+            b.waGradExtra = ''; b.waStrokeColor = '#1a73e8'; b.waStrokeWidth = 3;
+            b.waShadowColor = '#888888'; b.waShadowX = 3; b.waShadowY = 3; b.waShadowBlur = 6;
+            b.wa3dColor = '#c0392b'; b.wa3dDepth = 5;
+            delete b.preset;
+        }
+        var html = '<div style="text-align:left;">'
+            + '<div id="waLivePrev" style="background:' + (b.waBgDark ? '#1a1a2e' : '#f8f9fa') + ';border-radius:8px;padding:20px 12px;margin-bottom:12px;text-align:center;overflow:hidden;min-height:60px;">'
+            + '<div id="waLiveText" style="font-weight:900;line-height:1.3;">プレビュー</div></div>'
+            // 文字色・字間
+            + '<div style="display:flex;gap:10px;margin-bottom:10px;align-items:end;">'
+            + '<div style="flex:1;"><label style="font-size:0.8rem;font-weight:600;display:block;">文字色</label>'
+            + '<input type="color" id="waColor" value="' + (b.waColor || '#202124') + '" style="width:100%;height:32px;border:1px solid #dadce0;border-radius:4px;cursor:pointer;"></div>'
+            + '<div style="flex:1;"><label style="font-size:0.8rem;font-weight:600;display:block;">字間 <span id="waSpVal">' + (b.waSpacing || 0) + '</span>px</label>'
+            + '<input type="range" id="waSpacing" min="0" max="20" value="' + (b.waSpacing || 0) + '" style="width:100%;"></div></div>'
+            // グラデーション
+            + '<div class="wa-s-group"><label><input type="checkbox" id="waGradOn"' + (b.waGradient ? ' checked' : '') + '> <strong>グラデーション</strong></label>'
+            + '<div id="waGradP" style="' + (b.waGradient ? '' : 'display:none;') + 'padding:8px;background:#f1f3f4;border-radius:4px;margin-top:4px;">'
+            + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+            + '<input type="color" id="waGC1" value="' + (b.waGradC1 || '#ff0000') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;cursor:pointer;">'
+            + '<span style="font-size:1.2rem;">→</span>'
+            + '<input type="color" id="waGC2" value="' + (b.waGradC2 || '#0000ff') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;cursor:pointer;">'
+            + '<select id="waGA" style="padding:4px;border:1px solid #dadce0;border-radius:4px;">';
+        [0, 45, 90, 135, 180, 225, 270, 315].forEach(function (a) {
+            html += '<option value="' + a + '"' + ((b.waGradAngle || 135) === a ? ' selected' : '') + '>' + a + '°</option>';
+        });
+        html += '</select>'
+            + '<label style="font-size:0.75rem;"><input type="checkbox" id="waGMulti"' + (b.waGradExtra ? ' checked' : '') + '> 多色</label>'
+            + '</div></div></div>'
+            // アウトライン
+            + '<div class="wa-s-group"><label><input type="checkbox" id="waStrokeOn"' + (b.waStroke ? ' checked' : '') + '> <strong>アウトライン</strong></label>'
+            + '<div id="waStrokeP" style="' + (b.waStroke ? '' : 'display:none;') + 'padding:8px;background:#f1f3f4;border-radius:4px;margin-top:4px;">'
+            + '<div style="display:flex;gap:8px;align-items:center;">'
+            + '<input type="color" id="waSC" value="' + (b.waStrokeColor || '#1a73e8') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;">'
+            + '<span style="font-size:0.8rem;">太さ <span id="waSwVal">' + (b.waStrokeWidth || 3) + '</span>px</span>'
+            + '<input type="range" id="waSW" min="1" max="8" value="' + (b.waStrokeWidth || 3) + '" style="flex:1;"></div></div></div>'
+            // 影
+            + '<div class="wa-s-group"><label><input type="checkbox" id="waShadowOn"' + (b.waShadow ? ' checked' : '') + '> <strong>影</strong></label>'
+            + '<div id="waShadowP" style="' + (b.waShadow ? '' : 'display:none;') + 'padding:8px;background:#f1f3f4;border-radius:4px;margin-top:4px;">'
+            + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+            + '<input type="color" id="waShC" value="' + (b.waShadowColor || '#888888') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;">'
+            + '<span style="font-size:0.75rem;">X<span id="waShXv">' + (b.waShadowX || 3) + '</span></span><input type="range" id="waShX" min="0" max="20" value="' + (b.waShadowX || 3) + '" style="width:60px;">'
+            + '<span style="font-size:0.75rem;">Y<span id="waShYv">' + (b.waShadowY || 3) + '</span></span><input type="range" id="waShY" min="0" max="20" value="' + (b.waShadowY || 3) + '" style="width:60px;">'
+            + '<span style="font-size:0.75rem;">ぼかし<span id="waShBv">' + (b.waShadowBlur || 6) + '</span></span><input type="range" id="waShB" min="0" max="30" value="' + (b.waShadowBlur || 6) + '" style="width:60px;">'
+            + '</div></div></div>'
+            // 3D
+            + '<div class="wa-s-group"><label><input type="checkbox" id="wa3dOn"' + (b.wa3d ? ' checked' : '') + '> <strong>3D立体</strong></label>'
+            + '<div id="wa3dP" style="' + (b.wa3d ? '' : 'display:none;') + 'padding:8px;background:#f1f3f4;border-radius:4px;margin-top:4px;">'
+            + '<div style="display:flex;gap:8px;align-items:center;">'
+            + '<input type="color" id="wa3dC" value="' + (b.wa3dColor || '#c0392b') + '" style="width:40px;height:30px;border:1px solid #ccc;border-radius:4px;">'
+            + '<span style="font-size:0.8rem;">奥行き <span id="wa3dDv">' + (b.wa3dDepth || 5) + '</span></span>'
+            + '<input type="range" id="wa3dD" min="1" max="12" value="' + (b.wa3dDepth || 5) + '" style="flex:1;"></div></div></div>'
+            // 暗背景
+            + '<div class="wa-s-group"><label><input type="checkbox" id="waBgDark"' + (b.waBgDark ? ' checked' : '') + '> <strong>暗い背景</strong>（ネオン・発光向け）</label></div>'
+            + '</div>';
+
+        Swal.fire({
+            title: 'ワードアート スタイル設定',
+            html: html,
+            width: 520,
+            showCancelButton: true, confirmButtonText: '適用', cancelButtonText: 'キャンセル',
+            didOpen: function () {
+                var prevEl = document.getElementById('waLiveText');
+                prevEl.textContent = b.content || 'プレビュー';
+                prevEl.style.fontSize = (b.fontSize || 48) + 'px';
+                if (b.fontFamily) prevEl.style.fontFamily = b.fontFamily;
+                function refreshPrev() {
+                    var tmp = {
+                        waColor: document.getElementById('waColor').value,
+                        waGradient: document.getElementById('waGradOn').checked,
+                        waGradC1: document.getElementById('waGC1').value,
+                        waGradC2: document.getElementById('waGC2').value,
+                        waGradAngle: parseInt(document.getElementById('waGA').value, 10),
+                        waGradExtra: document.getElementById('waGMulti').checked ? ',#ff8c00,#ffd700,#00c853,#2196f3' : '',
+                        waStroke: document.getElementById('waStrokeOn').checked,
+                        waStrokeColor: document.getElementById('waSC').value,
+                        waStrokeWidth: parseInt(document.getElementById('waSW').value, 10),
+                        waShadow: document.getElementById('waShadowOn').checked,
+                        waShadowColor: document.getElementById('waShC').value,
+                        waShadowX: parseInt(document.getElementById('waShX').value, 10),
+                        waShadowY: parseInt(document.getElementById('waShY').value, 10),
+                        waShadowBlur: parseInt(document.getElementById('waShB').value, 10),
+                        wa3d: document.getElementById('wa3dOn').checked,
+                        wa3dColor: document.getElementById('wa3dC').value,
+                        wa3dDepth: parseInt(document.getElementById('wa3dD').value, 10)
+                    };
+                    // Reset styles
+                    prevEl.style.cssText = 'font-weight:900;line-height:1.3;font-size:' + (b.fontSize || 48) + 'px;' + (b.fontFamily ? 'font-family:' + b.fontFamily + ';' : '');
+                    prevEl.style.letterSpacing = document.getElementById('waSpacing').value + 'px';
+                    NW._applyWordArtFx(prevEl, tmp);
+                    document.getElementById('waLivePrev').style.background = document.getElementById('waBgDark').checked ? '#1a1a2e' : '#f8f9fa';
+                    // Update value labels
+                    document.getElementById('waSpVal').textContent = document.getElementById('waSpacing').value;
+                    document.getElementById('waSwVal').textContent = document.getElementById('waSW').value;
+                    document.getElementById('waShXv').textContent = document.getElementById('waShX').value;
+                    document.getElementById('waShYv').textContent = document.getElementById('waShY').value;
+                    document.getElementById('waShBv').textContent = document.getElementById('waShB').value;
+                    document.getElementById('wa3dDv').textContent = document.getElementById('wa3dD').value;
+                }
+                // Toggle panels
+                ['waGradOn:waGradP', 'waStrokeOn:waStrokeP', 'waShadowOn:waShadowP', 'wa3dOn:wa3dP'].forEach(function (pair) {
+                    var parts = pair.split(':');
+                    document.getElementById(parts[0]).addEventListener('change', function () {
+                        document.getElementById(parts[1]).style.display = this.checked ? '' : 'none';
+                        refreshPrev();
+                    });
+                });
+                // Bind all inputs to live preview
+                document.querySelectorAll('#waColor,#waSpacing,#waGC1,#waGC2,#waGA,#waGMulti,#waSC,#waSW,#waShC,#waShX,#waShY,#waShB,#wa3dC,#wa3dD,#waBgDark').forEach(function (el) {
+                    el.addEventListener('input', refreshPrev);
+                    el.addEventListener('change', refreshPrev);
+                });
+                refreshPrev();
+            },
+            preConfirm: function () {
+                return {
+                    waColor: document.getElementById('waColor').value,
+                    waSpacing: parseInt(document.getElementById('waSpacing').value, 10),
+                    waGradient: document.getElementById('waGradOn').checked,
+                    waGradC1: document.getElementById('waGC1').value,
+                    waGradC2: document.getElementById('waGC2').value,
+                    waGradAngle: parseInt(document.getElementById('waGA').value, 10),
+                    waGradExtra: document.getElementById('waGMulti').checked ? ',#ff8c00,#ffd700,#00c853,#2196f3' : '',
+                    waStroke: document.getElementById('waStrokeOn').checked,
+                    waStrokeColor: document.getElementById('waSC').value,
+                    waStrokeWidth: parseInt(document.getElementById('waSW').value, 10),
+                    waShadow: document.getElementById('waShadowOn').checked,
+                    waShadowColor: document.getElementById('waShC').value,
+                    waShadowX: parseInt(document.getElementById('waShX').value, 10),
+                    waShadowY: parseInt(document.getElementById('waShY').value, 10),
+                    waShadowBlur: parseInt(document.getElementById('waShB').value, 10),
+                    wa3d: document.getElementById('wa3dOn').checked,
+                    wa3dColor: document.getElementById('wa3dC').value,
+                    wa3dDepth: parseInt(document.getElementById('wa3dD').value, 10),
+                    waBgDark: document.getElementById('waBgDark').checked
+                };
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            NW.pushHistory();
+            var v = result.value;
+            for (var key in v) b[key] = v[key];
+            delete b.preset; // 旧形式プロパティを削除
+            NW.render();
+        });
+    };
+
+    // ---- Block decoration ----
+    NW.openDecoration = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        var decoColors = ['', '#e8f0fe', '#fce8e6', '#fef7e0', '#e6f4ea', '#f3e8fd', '#fce4ec', '#e0f7fa', '#f5f5f5'];
+        var borderColors = ['', '#1a73e8', '#d32f2f', '#e65100', '#2e7d32', '#6a1b9a', '#ad1457', '#5f6368', '#202124'];
+        var html = '<div style="text-align:left;">'
+            + '<label style="font-size:0.85rem;font-weight:600;">ブロック背景色</label>'
+            + '<div class="nw-color-grid" id="swalDecoBg">';
+        decoColors.forEach(function (c) {
+            html += '<button class="nw-color-swatch' + (block.blockBgColor === c ? ' nw-color-selected' : '') + '" style="background:' + (c || '#fff') + ';' + (!c ? 'position:relative;' : '') + '" data-val="' + c + '">' + (!c ? '&times;' : '') + '</button>';
+        });
+        html += '</div><label style="font-size:0.85rem;font-weight:600;margin-top:12px;display:block;">枠線色</label>'
+            + '<div class="nw-color-grid" id="swalDecoBorder">';
+        borderColors.forEach(function (c) {
+            html += '<button class="nw-color-swatch' + (block.borderColor === c ? ' nw-color-selected' : '') + '" style="background:' + (c || '#fff') + ';' + (!c ? 'position:relative;' : '') + '" data-val="' + c + '">' + (!c ? '&times;' : '') + '</button>';
+        });
+        html += '</div><label style="font-size:0.85rem;font-weight:600;margin-top:12px;display:block;">角丸: <span id="swalRadiusVal">' + (block.borderRadius || 0) + '</span>px</label>'
+            + '<input type="range" id="swalDecoRadius" min="0" max="24" value="' + (block.borderRadius || 0) + '" style="width:100%;">'
+            + '</div>';
+
+        Swal.fire({
+            title: 'ブロック装飾',
+            html: html,
+            showConfirmButton: true,
+            confirmButtonText: '適用',
+            showCloseButton: true,
+            didOpen: function (popup) {
+                var _bg = block.blockBgColor || '';
+                var _border = block.borderColor || '';
+                var _radius = block.borderRadius || 0;
+                popup.querySelectorAll('#swalDecoBg .nw-color-swatch').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        _bg = btn.getAttribute('data-val');
+                        popup.querySelectorAll('#swalDecoBg .nw-color-swatch').forEach(function (b) { b.classList.remove('nw-color-selected'); });
+                        btn.classList.add('nw-color-selected');
+                    });
+                });
+                popup.querySelectorAll('#swalDecoBorder .nw-color-swatch').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        _border = btn.getAttribute('data-val');
+                        popup.querySelectorAll('#swalDecoBorder .nw-color-swatch').forEach(function (b) { b.classList.remove('nw-color-selected'); });
+                        btn.classList.add('nw-color-selected');
+                    });
+                });
+                popup.querySelector('#swalDecoRadius').addEventListener('input', function (e) {
+                    _radius = parseInt(e.target.value, 10);
+                    popup.querySelector('#swalRadiusVal').textContent = _radius;
+                });
+                // Store for preConfirm
+                popup._decoVals = function () { return { bg: _bg, border: _border, radius: _radius }; };
+            },
+            preConfirm: function () {
+                return Swal.getPopup()._decoVals();
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            NW.pushHistory();
+            block.blockBgColor = result.value.bg;
+            block.borderColor = result.value.border;
+            block.borderRadius = result.value.radius;
+            NW.render();
+        });
+    };
+
+    // ---- Templates ----
+    NW.saveAsTemplate = function () {
+        NW.saveEditable();
+        if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
+        Swal.fire({
+            title: 'テンプレートとして保存',
+            input: 'text',
+            inputLabel: 'テンプレート名',
+            inputPlaceholder: '例: 基本レイアウト',
+            showCancelButton: true,
+            confirmButtonText: '保存',
+            cancelButtonText: 'キャンセル'
+        }).then(function (result) {
+            if (!result.isConfirmed || !result.value) return;
+            // Strip content but keep structure
+            var tplBlocks = JSON.parse(JSON.stringify(NW.blocks));
+            tplBlocks.forEach(function (b) {
+                if (b.type === 'heading') b.content = b.content.replace(/<[^>]*>/g, '').trim() ? b.content : '見出し';
+                if (b.type === 'text') b.content = '';
+                if (b.type === 'image') { b.src = ''; b.wrapText = ''; b.caption = ''; }
+                if (b.type === 'gallery') { b.images = []; }
+                if (b.type === 'schedule') { b.weekData = null; }
+                if (b.type === 'qrcode') { b.url = ''; b.label = ''; }
+                if (b.type === 'columns') {
+                    b.colData = b.colData.map(function () { return { content: '', src: '', caption: '' }; });
+                }
+            });
+            var templates = JSON.parse(localStorage.getItem('nw_templates') || '[]');
+            templates.push({ name: result.value, blocks: tplBlocks, createdAt: new Date().toISOString() });
+            localStorage.setItem('nw_templates', JSON.stringify(templates));
+            showToast('success', 'テンプレート「' + result.value + '」を保存しました');
+        });
+    };
+
+    NW.openTemplates = function () {
+        var templates = JSON.parse(localStorage.getItem('nw_templates') || '[]');
+        if (templates.length === 0) { showToast('info', 'テンプレートがありません。「テンプレ保存」で作成してください。'); return; }
+        var html = '<div style="max-height:350px;overflow-y:auto;">';
+        templates.forEach(function (tpl, i) {
+            html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 8px;border-bottom:1px solid #f1f3f4;">'
+                + '<div><strong>' + escHtml(tpl.name) + '</strong><br><span style="font-size:0.75rem;color:#5f6368;">ブロック数: ' + tpl.blocks.length + '</span></div>'
+                + '<div style="white-space:nowrap;">'
+                + '<button class="btn btn-primary btn-sm" onclick="NW.applyTemplate(' + i + ');Swal.close();">適用</button> '
+                + '<button class="btn btn-outline btn-sm" style="color:#ea4335;border-color:#ea4335;" onclick="NW.deleteTemplate(' + i + ');Swal.close();">削除</button>'
+                + '</div></div>';
+        });
+        html += '</div>';
+        Swal.fire({ title: 'テンプレート一覧', html: html, showConfirmButton: false, showCloseButton: true, width: 500 });
+    };
+
+    NW.applyTemplate = function (index) {
+        var templates = JSON.parse(localStorage.getItem('nw_templates') || '[]');
+        if (!templates[index]) return;
+        NW.blocks = JSON.parse(JSON.stringify(templates[index].blocks));
+        NW.blocks.forEach(function (b) { b.id = NW.genId(); });
+        NW._history = [];
+        NW._historyIdx = -1;
+        NW.render();
+        NW.pushHistory();
+        showToast('success', 'テンプレートを適用しました');
+    };
+
+    NW.deleteTemplate = function (index) {
+        var templates = JSON.parse(localStorage.getItem('nw_templates') || '[]');
+        templates.splice(index, 1);
+        localStorage.setItem('nw_templates', JSON.stringify(templates));
+        showToast('success', 'テンプレートを削除しました');
+    };
+
+    // ---- Gemini AI text generation ----
+    NW.generateAIText = function () {
+        var mondayStr = NW.mondayStr || STATE.mondayStr;
+        if (!mondayStr) { showToast('error', '週を選択してください'); return; }
+        Swal.fire({
+            title: 'AIで本文を生成',
+            html: '<div style="text-align:left;">'
+                + '<label style="font-size:0.85rem;font-weight:600;">生成したい内容</label>'
+                + '<select id="swalAiType" class="swal2-select" style="width:100%;margin-top:4px;">'
+                + '<option value="intro">今週のあいさつ・はじめの文</option>'
+                + '<option value="event">行事紹介の文章</option>'
+                + '<option value="study">学習の様子の紹介文</option>'
+                + '<option value="notice">保護者へのお知らせ</option>'
+                + '<option value="closing">結びの文</option>'
+                + '<option value="safety">安全に関するお知らせ</option>'
+                + '<option value="praise">キラキラコーナー（褒め）</option>'
+                + '<option value="free">フリー入力</option>'
+                + '</select>'
+                + '<div style="display:flex;gap:8px;margin-top:10px;">'
+                + '<div style="flex:1;"><label style="font-size:0.85rem;font-weight:600;">文体</label>'
+                + '<select id="swalAiTone" class="swal2-select" style="width:100%;margin-top:4px;">'
+                + '<option value="warm">温かい</option>'
+                + '<option value="formal">丁寧・フォーマル</option>'
+                + '<option value="casual">カジュアル</option>'
+                + '<option value="energetic">元気・活発</option>'
+                + '</select></div>'
+                + '<div style="flex:1;"><label style="font-size:0.85rem;font-weight:600;">長さ</label>'
+                + '<select id="swalAiLength" class="swal2-select" style="width:100%;margin-top:4px;">'
+                + '<option value="short">短め（2〜3文）</option>'
+                + '<option value="medium" selected>標準（3〜5文）</option>'
+                + '<option value="long">長め（5〜8文）</option>'
+                + '</select></div></div>'
+                + '<label style="font-size:0.85rem;font-weight:600;margin-top:10px;display:block;">追加の指示（任意）</label>'
+                + '<textarea id="swalAiExtra" class="swal2-textarea" placeholder="例: 運動会について触れてほしい" style="margin-top:4px;min-height:50px;"></textarea>'
+                + '</div>',
+            showCancelButton: true,
+            confirmButtonText: '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:text-bottom;">auto_awesome</span> 生成',
+            cancelButtonText: 'キャンセル',
+            width: 500,
+            preConfirm: function () {
+                return {
+                    type: document.getElementById('swalAiType').value,
+                    extra: document.getElementById('swalAiExtra').value,
+                    tone: document.getElementById('swalAiTone').value,
+                    length: document.getElementById('swalAiLength').value
+                };
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            showToast('info', 'AIが文章を生成しています...');
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (!res.success) { showToast('error', 'AI生成失敗: ' + res.error); return; }
+                    NW.addBlock('text', null, { content: res.text.replace(/\n/g, '<br>'), fontSize: 12 });
+                    showToast('success', 'AI文章を追加しました');
+                })
+                .withFailureHandler(_onCommError)
+                .generateNewsletterAI(mondayStr, result.value.type, result.value.extra,
+                    { tone: result.value.tone, length: result.value.length });
+        });
+    };
+
+    // ---- AI: 学級通信全体の一括自動生成 ----
+    NW.generateFullNewsletter = function () {
+        var mondayStr = NW.mondayStr || STATE.mondayStr;
+        if (!mondayStr) { showToast('error', '週を選択してください'); return; }
+        Swal.fire({
+            title: 'AIで学級通信を一括生成',
+            html: '<div style="text-align:left;">'
+                + '<p style="font-size:0.85rem;color:var(--text-sub);margin-bottom:10px;">AIが見出し・あいさつ文・学習紹介・お知らせ・結びを含む学級通信を自動生成します。</p>'
+                + '<label style="font-size:0.85rem;font-weight:600;">文体</label>'
+                + '<select id="swalFullTone" class="swal2-select" style="width:100%;margin-top:4px;">'
+                + '<option value="warm">温かい</option>'
+                + '<option value="formal">丁寧・フォーマル</option>'
+                + '<option value="casual">カジュアル</option>'
+                + '<option value="energetic">元気・活発</option>'
+                + '</select>'
+                + '<label style="font-size:0.85rem;font-weight:600;margin-top:10px;display:block;">追加の指示（任意）</label>'
+                + '<textarea id="swalFullExtra" class="swal2-textarea" placeholder="例: 遠足のエピソードを入れて" style="margin-top:4px;min-height:50px;"></textarea>'
+                + '</div>',
+            showCancelButton: true,
+            confirmButtonText: '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:text-bottom;">auto_awesome</span> 一括生成',
+            cancelButtonText: 'キャンセル',
+            width: 480
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            var tone = document.getElementById('swalFullTone').value;
+            var extra = document.getElementById('swalFullExtra').value;
+            showToast('info', 'AIが学級通信全体を生成しています... しばらくお待ちください');
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (!res.success) { showToast('error', 'AI生成失敗: ' + res.error); return; }
+                    // 既存ブロックをクリアして新しいブロックを追加
+                    NW.blocks = [];
+                    NW.nextId = 1;
+                    res.sections.forEach(function (sec) {
+                        if (sec.type === 'heading') {
+                            NW.addBlock('heading', null, { content: sec.text, fontSize: 20, align: 'center' });
+                        } else {
+                            NW.addBlock('text', null, { content: sec.text.replace(/\n/g, '<br>'), fontSize: 12 });
+                        }
+                    });
+                    // 時間割ブロックを自動追加
+                    if (NW.scheduleData) {
+                        NW.addBlock('divider');
+                        NW.addBlock('schedule', null, { weekData: NW.scheduleData });
+                    }
+                    NW._history = [];
+                    NW._historyIdx = -1;
+                    NW.pushHistory();
+                    showToast('success', '学級通信を生成しました');
+                })
+                .withFailureHandler(_onCommError)
+                .generateFullNewsletterAI(mondayStr, extra, { tone: tone });
+        });
+    };
+
+    // ---- AI: 既存テキストのリライト ----
+    NW.aiRewriteBlock = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        NW.saveEditable();
+        var plainText = block.content.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
+        if (!plainText.trim()) { showToast('error', 'リライトするテキストがありません'); return; }
+        Swal.fire({
+            title: 'AIでリライト',
+            html: '<div style="text-align:left;">'
+                + '<div style="background:var(--surface-3);padding:10px;border-radius:6px;margin-bottom:10px;font-size:0.82rem;max-height:120px;overflow-y:auto;">' + escHtml(plainText) + '</div>'
+                + '<label style="font-size:0.85rem;font-weight:600;">リライトの指示</label>'
+                + '<select id="swalRewriteType" class="swal2-select" style="width:100%;margin-top:4px;">'
+                + '<option value="">より読みやすく改善</option>'
+                + '<option value="もっと丁寧な文章にしてください">もっと丁寧に</option>'
+                + '<option value="もっと簡潔に短くしてください">もっと短く</option>'
+                + '<option value="もっと具体的で詳しい内容にしてください">もっと詳しく</option>'
+                + '<option value="もっと温かみのある文章にしてください">もっと温かく</option>'
+                + '<option value="もっと元気で明るい文章にしてください">もっと元気に</option>'
+                + '<option value="custom">カスタム指示</option>'
+                + '</select>'
+                + '<textarea id="swalRewriteCustom" class="swal2-textarea" placeholder="自由にリライト指示を入力..." style="margin-top:6px;min-height:40px;display:none;"></textarea>'
+                + '</div>',
+            showCancelButton: true,
+            confirmButtonText: '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:text-bottom;">edit_note</span> リライト',
+            cancelButtonText: 'キャンセル',
+            width: 480,
+            didOpen: function () {
+                document.getElementById('swalRewriteType').addEventListener('change', function () {
+                    document.getElementById('swalRewriteCustom').style.display = this.value === 'custom' ? '' : 'none';
+                });
+            },
+            preConfirm: function () {
+                var type = document.getElementById('swalRewriteType').value;
+                return type === 'custom' ? document.getElementById('swalRewriteCustom').value : type;
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            showToast('info', 'AIがリライトしています...');
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (!res.success) { showToast('error', 'リライト失敗: ' + res.error); return; }
+                    NW.pushHistory();
+                    var newContent = res.text.replace(/\n/g, '<br>');
+                    // Update DOM element first so NW.saveEditable() inside NW.render() picks up new content
+                    var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
+                    if (el) el.innerHTML = newContent;
+                    block.content = newContent;
+                    NW.render();
+                    showToast('success', 'テキストをリライトしました');
+                })
+                .withFailureHandler(_onCommError)
+                .rewriteNewsletterText(plainText, result.value);
+        });
+    };
+
+    // ---- Help dialog ----
+    NW.showHelp = function () {
+        var html = '<div style="text-align:left;font-size:0.88rem;">'
+            + '<table style="width:100%;border-collapse:collapse;">'
+            + '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px;"><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td style="padding:6px;">元に戻す</td></tr>'
+            + '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px;"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td style="padding:6px;">やり直し</td></tr>'
+            + '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px;"><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td style="padding:6px;">保存</td></tr>'
+            + '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px;"><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td style="padding:6px;">印刷</td></tr>'
+            + '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px;"><kbd>Enter</kbd></td><td style="padding:6px;">新しいテキストブロック</td></tr>'
+            + '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px;"><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td style="padding:6px;">同じブロック内で改行</td></tr>'
+            + '<tr><td style="padding:6px;"><kbd>Backspace</kbd></td><td style="padding:6px;">空ブロックを削除</td></tr>'
+            + '</table>'
+            + '<hr style="margin:12px 0;">'
+            + '<p style="font-size:0.8rem;color:#5f6368;">ブロックをクリックして選択すると、上部にツールバーが表示されます。ドラッグ&ドロップで並べ替えもできます。</p>'
+            + '</div>';
+        Swal.fire({ title: 'キーボードショートカット', html: html, confirmButtonText: '閉じる', width: 450 });
+    };
+
+    // ---- localStorage auto-save / restore ----
+    NW.autoSave = function () {
+        clearTimeout(NW._saveTimer);
+        NW._saveTimer = setTimeout(function () {
+            try {
+                var data = { blocks: NW.blocks, nextId: NW.nextId, mondayStr: NW.mondayStr };
+                localStorage.setItem('nw_autosave', JSON.stringify(data));
+            } catch (e) {
+                // Quota exceeded - try without base64 images
+                try {
+                    var stripped = JSON.parse(JSON.stringify(NW.blocks));
+                    stripped.forEach(function (b) {
+                        if (b.src && b.src.length > 1000) b.src = '';
+                        if (b.images) b.images.forEach(function (img) {
+                            if (img.src && img.src.length > 1000) img.src = '';
+                        });
+                    });
+                    localStorage.setItem('nw_autosave', JSON.stringify({
+                        blocks: stripped, nextId: NW.nextId, mondayStr: NW.mondayStr
+                    }));
+                } catch (ignore) { }
+            }
+        }, 800);
+    };
+
+    NW.autoRestore = function () {
+        try {
+            var saved = localStorage.getItem('nw_autosave');
+            if (!saved) return false;
+            var data = JSON.parse(saved);
+            if (data.blocks && data.blocks.length > 0) {
+                NW.blocks = data.blocks;
+                NW.nextId = data.nextId || 1;
+                if (data.mondayStr) {
+                    NW.mondayStr = data.mondayStr;
+                    document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+                }
+                NW.render();
+                return true;
+            }
+        } catch (e) { }
+        return false;
+    };
+
+    // ---- New / Save / Open ----
+    NW.newNewsletter = function () {
+        if (NW.blocks.length === 0) return;
+        Swal.fire({
+            title: '新規作成',
+            text: '現在の編集内容を破棄して新しい学級通信を作成しますか？',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '新規作成',
+            cancelButtonText: 'キャンセル'
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            NW.blocks = [];
+            NW.nextId = 1;
+            NW.scheduleData = null;
+            NW._history = [];
+            NW._historyIdx = -1;
+            localStorage.removeItem('nw_autosave');
+            NW.render();
+            NW.pushHistory();
+        });
+    };
+
+    NW.saveToSheet = function () {
+        NW.saveEditable();
+        if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
+        var titleBlock = NW.blocks.find(function (b) { return b.type === 'heading'; });
+        var defaultTitle = titleBlock ? titleBlock.content.replace(/<[^>]*>/g, '') : '無題';
+        Swal.fire({
+            title: '学級通信を保存',
+            input: 'text',
+            inputLabel: 'タイトル',
+            inputValue: defaultTitle,
+            showCancelButton: true,
+            confirmButtonText: '保存',
+            cancelButtonText: 'キャンセル'
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            showToast('info', '保存中...');
+            var jsonStr = JSON.stringify({
+                blocks: NW.blocks,
+                nextId: NW.nextId,
+                mondayStr: NW.mondayStr,
+                scheduleData: NW.scheduleData
+            });
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (!res) { showToast('error', '保存失敗: サーバーから応答がありません'); return; }
+                    if (res.success) showToast('success', res.message);
+                    else showToast('error', '保存失敗: ' + res.error);
+                })
+                .withFailureHandler(_onCommError)
+                .saveNewsletterData(result.value || defaultTitle, NW.mondayStr || '', jsonStr);
+        });
+    };
+
+    NW.openFromSheet = function () {
+        showToast('info', '保存済み一覧を読み込み中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res) { showToast('error', 'データ取得に失敗しました'); return; }
+                if (!res.success) { showToast('error', '取得失敗: ' + res.error); return; }
+                if (!res.list || res.list.length === 0) { showToast('info', '保存済みの学級通信はありません'); return; }
+                var html = '<div style="max-height:400px;overflow-y:auto;">';
+                html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">';
+                html += '<thead><tr style="border-bottom:2px solid #dadce0;"><th style="text-align:left;padding:8px;">タイトル</th><th style="padding:8px;">対象週</th><th style="padding:8px;">保存日時</th><th style="padding:8px;">操作</th></tr></thead><tbody>';
+                res.list.forEach(function (item) {
+                    html += '<tr style="border-bottom:1px solid #f1f3f4;">'
+                        + '<td style="padding:8px;font-weight:600;">' + escHtml(item.title) + '</td>'
+                        + '<td style="padding:8px;text-align:center;">' + escHtml(item.mondayStr) + '</td>'
+                        + '<td style="padding:8px;text-align:center;font-size:0.78rem;color:#5f6368;">' + escHtml(item.savedAt) + '</td>'
+                        + '<td style="padding:8px;text-align:center;white-space:nowrap;">'
+                        + '<button class="btn btn-primary btn-sm" onclick="NW.doLoadFromSheet(\'' + item.fileId + '\');Swal.close();">開く</button> '
+                        + '<button class="btn btn-outline btn-sm" style="color:#ea4335;border-color:#ea4335;" onclick="NW.doDeleteFromSheet(' + item.rowIndex + ',\'' + item.fileId + '\');Swal.close();">削除</button>'
+                        + '</td></tr>';
+                });
+                html += '</tbody></table></div>';
+                Swal.fire({
+                    title: '保存済み学級通信',
+                    html: html,
+                    width: 700,
+                    showConfirmButton: false,
+                    showCloseButton: true
+                });
+            })
+            .withFailureHandler(_onCommError)
+            .getNewsletterSaveList();
+    };
+
+    NW._applyLoadedData = function (data) {
+        NW.blocks = data.blocks || [];
+        NW.nextId = data.nextId || 1;
+        if (data.mondayStr) {
+            NW.mondayStr = data.mondayStr;
+            document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
+        }
+        if (data.scheduleData) NW.scheduleData = data.scheduleData;
+        NW._history = [];
+        NW._historyIdx = -1;
+        NW.render();
+        NW.pushHistory();
+        showToast('success', '読み込みました');
+    };
+
+    NW.doLoadFromSheet = function (fileId) {
+        if (!fileId) { showToast('error', 'ファイルIDが見つかりません'); return; }
+        showToast('info', '読み込み中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res) { showToast('error', '読込失敗: サーバーから応答がありません'); return; }
+                if (!res.success) { showToast('error', '読込失敗: ' + (res.error || '不明なエラー')); return; }
+                // サーバーが jsonString を返した場合（大きいデータ向け）
+                if (res.jsonString) {
+                    try {
+                        NW._applyLoadedData(JSON.parse(res.jsonString));
+                    } catch (pe) {
+                        showToast('error', '読込失敗: JSONパースエラー');
+                    }
+                    return;
+                }
+                if (!res.data) { showToast('error', '読込失敗: データが空です'); return; }
+                NW._applyLoadedData(res.data);
+            })
+            .withFailureHandler(_onCommError)
+            .loadNewsletterData(fileId);
+    };
+
+    NW.doDeleteFromSheet = function (rowIndex, fileId) {
+        Swal.fire({
+            title: '削除確認',
+            text: 'この学級通信を削除しますか？',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '削除',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#ea4335'
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (!res) { showToast('error', '削除失敗: サーバーから応答がありません'); return; }
+                    if (res.success) {
+                        showToast('success', '削除しました');
+                        NW.openFromSheet();
+                    } else {
+                        showToast('error', '削除失敗: ' + res.error);
+                    }
+                })
+                .withFailureHandler(_onCommError)
+                .deleteNewsletterData(rowIndex, fileId);
+        });
+    };
+
+    // ---- Load schedule data from backend ----
+    NW.loadScheduleData = function () {
+        var mondayStr = NW.mondayStr || STATE.mondayStr;
+        if (!mondayStr) { showToast('error', '週を選択してください'); return; }
+        showToast('info', '週案データを読み込み中...');
+        google.script.run
+            .withSuccessHandler(function (data) {
+                if (!data.success) { showToast('error', 'データ取得失敗: ' + data.error); return; }
+                NW.scheduleData = data;
+                showToast('success', '週案データを読み込みました');
+                var hasSchedule = NW.blocks.some(function (b) { return b.type === 'schedule'; });
+                if (hasSchedule) {
+                    NW.blocks.forEach(function (b) { if (b.type === 'schedule') b.weekData = data; });
+                    NW.render();
+                } else if (NW.blocks.length === 0) {
+                    // Auto-create default layout
+                    NW.addBlock('heading', null, { content: data.title || '学級通信', fontSize: 20 });
+                    NW.addBlock('text', null, { content: data.date + '〜 の予定', fontSize: 11, align: 'center' });
+                    NW.addBlock('divider');
+                    NW.addBlock('schedule', null, { weekData: data });
+                    NW.addBlock('divider');
+                    NW.addBlock('text', null, { content: '', fontSize: 12 });
+                } else {
+                    NW.render();
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .getNewsletterData(mondayStr);
+    };
+
+    // ---- Build print-ready HTML (shared between print and Classroom post) ----
+    NW._PRINT_FONTS = 'https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap';
+    NW._PRINT_CSS = '@page{size:A4 portrait;margin:15mm 18mm;}'
+        + 'body{font-family:"Zen Maru Gothic",sans-serif;font-size:12px;color:#202124;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+        // Block container
+        + '.nw-block{margin:0;}'
+        // Heading / Text
+        + '.nw-heading-content{font-weight:700;line-height:1.4;}'
+        + '.nw-text-content{line-height:1.7;min-height:1.5em;}'
+        // Divider
+        + '.nw-divider-content{border:none;border-top:2px solid #dadce0;margin:8px 0;}'
+        // Generic table / hr / img
+        + 'table{width:100%;border-collapse:collapse;}'
+        + 'hr{border:none;border-top:1px solid #dadce0;margin:8px 0;}img{max-width:100%;}'
+        // Schedule table (matches editor CSS with resolved variables)
+        + '.nw-schedule-block table{width:100%;border-collapse:collapse;font-size:0.78rem;table-layout:fixed;}'
+        + '.nw-schedule-block th{background:#1a73e8;color:#fff;padding:5px 4px;text-align:center;font-weight:600;font-size:0.78rem;vertical-align:middle;}'
+        + '.nw-sched-label-col{width:52px;}'
+        + '.nw-sched-date{font-size:0.65rem;font-weight:400;opacity:0.85;}'
+        + '.nw-schedule-block td{padding:4px;border:1px solid #dadce0;text-align:center;font-size:0.78rem;vertical-align:top;word-break:break-all;}'
+        + '.nw-sched-label{background:#f1f3f4;font-weight:600;font-size:0.72rem;color:#5f6368;text-align:center;white-space:nowrap;}'
+        + '.nw-sched-event{color:#d32f2f;font-size:0.7rem;font-weight:600;}'
+        + '.nw-sched-sub{font-size:0.65rem;color:#5f6368;}'
+        + '.nw-sched-detail{font-size:0.6rem;color:#9aa0a6;}'
+        + '.nw-sched-small{font-size:0.7rem;}'
+        + '.nw-schedule-block tr:nth-child(even) td{background:#f8f9fa;}'
+        + '.nw-schedule-block tr:nth-child(even) .nw-sched-label{background:#f1f3f4;}'
+        // Image
+        + '.nw-image-block{text-align:center;}.nw-image-block img{max-width:100%;border-radius:4px;}'
+        // Float (image + text wrap)
+        + '.nw-float-wrapper{display:flex;gap:12px;align-items:flex-start;}'
+        + '.nw-float-wrapper.nw-float-right{flex-direction:row-reverse;}'
+        + '.nw-float-img-side{flex-shrink:0;}.nw-float-img-side img{display:block;width:100%;border-radius:4px;}'
+        + '.nw-float-text-side{flex:1;min-width:0;line-height:1.7;text-align:left;}'
+        // Gallery
+        + '.nw-gallery-grid{display:grid;gap:8px;}'
+        + '.nw-gallery-cell{position:relative;border:1px solid #dadce0;border-radius:4px;overflow:hidden;}'
+        + '.nw-gallery-cell img{width:100%;display:block;}'
+        + '.nw-gallery-caption{font-size:0.72rem;color:#5f6368;text-align:center;padding:4px 6px;}'
+        // QR code
+        + '.nw-qrcode-block{text-align:center;padding:8px;}.nw-qrcode-block img{display:block;margin:0 auto;border-radius:4px;}'
+        + '.nw-qrcode-label{font-size:0.82rem;color:#5f6368;text-align:center;margin-top:6px;}'
+        // WordArt
+        + '.nw-wordart-block{padding:12px 8px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+        + '.nw-wordart-text{display:block;font-weight:900;line-height:1.3;word-break:break-word;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+        // Columns
+        + '.nw-columns-grid{display:grid;gap:12px;}'
+        + '.nw-col-cell{padding:4px;}'
+        + '.nw-col-img{width:100%;display:block;border-radius:4px;}'
+        + '.nw-col-text{line-height:1.6;font-size:0.85rem;}'
+        // Image caption
+        + '.nw-image-caption{font-size:0.78rem;color:#5f6368;text-align:center;padding:4px 8px;margin-top:4px;}'
+        // Insert rows hidden
+        + '.nw-insert-row{display:none;}';
+
+    NW.buildPrintHTML = function () {
+        NW.saveEditable();
+        var page = document.getElementById('nwEditorPage');
+        var clone = page.cloneNode(true);
+        clone.querySelectorAll('.nw-block-handle,.nw-block-actions,.nw-schedule-options,.nw-empty-editor,.nw-image-placeholder,.nw-gallery-add,.nw-gallery-remove,.nw-page-break-marker,.nw-insert-row,.nw-col-img-placeholder,.nw-col-img-remove').forEach(function (el) { el.remove(); });
+        clone.querySelectorAll('.nw-block').forEach(function (el) {
+            var decoBorder = el.getAttribute('data-deco-border');
+            el.style.border = decoBorder ? ('2px solid ' + decoBorder) : 'none';
+            el.style.padding = '2px';
+        });
+        clone.querySelectorAll('[style*="cursor"]').forEach(function (el) { el.style.cursor = 'default'; });
+        clone.querySelectorAll('[contenteditable]').forEach(function (el) { el.removeAttribute('contenteditable'); });
+        clone.querySelectorAll('[onclick]').forEach(function (el) { el.removeAttribute('onclick'); });
+        return '<!DOCTYPE html><html><head>'
+            + '<meta charset="utf-8">'
+            + '<style>' + NW._PRINT_CSS + '</style>'
+            + '<link href="' + NW._PRINT_FONTS + '" rel="stylesheet">'
+            + '</head><body>' + clone.innerHTML + '</body></html>';
+    };
+
+    // ---- Print via iframe ----
+    NW.printNewsletter = function () {
+        if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
+        var html = NW.buildPrintHTML();
+        var iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:210mm;height:297mm;';
+        document.body.appendChild(iframe);
+        var doc = iframe.contentDocument;
+        doc.open();
+        doc.write(html);
+        doc.close();
+        iframe.onload = function () {
+            setTimeout(function () {
+                iframe.contentWindow.print();
+                setTimeout(function () { document.body.removeChild(iframe); }, 1000);
+            }, 500);
+        };
+    };
+
+    // ---- Google Docs互換HTML生成 (Classroom投稿用) ----
+    // DOM cloneではなく、ブロックデータからシンプルなHTML構造を直接生成
+    NW.buildClassroomHTML = function () {
+        NW.saveEditable();
+        var body = '';
+        // A4 printable area ≈ 174mm ≈ 550px
+        var pageW = 550;
+        NW.blocks.forEach(function (block) {
+            // ブロックデコレーション: 枠線・背景
+            var bdrS = '';
+            if (block.borderColor) bdrS += 'border:2px solid ' + block.borderColor + ';';
+            if (block.blockBgColor) bdrS += 'background-color:' + block.blockBgColor + ';';
+            if (block.borderRadius) bdrS += 'border-radius:' + block.borderRadius + 'px;';
+            if (bdrS) bdrS += 'padding:4px;margin:2px 0;';
+            var wrapOpen = bdrS ? '<div style="' + bdrS + '">' : '';
+            var wrapClose = bdrS ? '</div>' : '';
+
+            switch (block.type) {
+                case 'heading':
+                    var hs = 'font-size:' + block.fontSize + 'px;text-align:' + (block.align || 'center') + ';margin:4px 0;';
+                    if (block.bold) hs += 'font-weight:bold;';
+                    if (block.color) hs += 'color:' + block.color + ';';
+                    if (block.bgColor) hs += 'background-color:' + block.bgColor + ';';
+                    if (block.fontFamily) hs += 'font-family:' + block.fontFamily + ';';
+                    body += wrapOpen + '<p style="' + hs + '">' + (block.content || '') + '</p>' + wrapClose;
+                    break;
+                case 'text':
+                    var ts = 'font-size:' + block.fontSize + 'px;text-align:' + (block.align || 'left') + ';margin:2px 0;line-height:1.7;';
+                    if (block.bold) ts += 'font-weight:bold;';
+                    if (block.color) ts += 'color:' + block.color + ';';
+                    if (block.bgColor) ts += 'background-color:' + block.bgColor + ';';
+                    if (block.fontFamily) ts += 'font-family:' + block.fontFamily + ';';
+                    body += wrapOpen + '<p style="' + ts + '">' + (block.content || '&nbsp;') + '</p>' + wrapClose;
+                    break;
+                case 'image':
+                    if (!block.src) break;
+                    var imgW = Math.round(pageW * (block.width || 50) / 100);
+                    if (block.float !== 'none' && block.wrapText) {
+                        // 回り込み → table化
+                        var imgCell = '<td style="width:' + imgW + 'px;vertical-align:top;padding:4px;"><img src="' + block.src + '" width="' + imgW + '"></td>';
+                        var wts = 'vertical-align:top;padding:4px;font-size:' + (block.wrapFontSize || 12) + 'px;line-height:1.7;';
+                        if (block.wrapFontFamily) wts += 'font-family:' + block.wrapFontFamily + ';';
+                        if (block.wrapBold) wts += 'font-weight:bold;';
+                        if (block.wrapColor) wts += 'color:' + block.wrapColor + ';';
+                        if (block.wrapAlign) wts += 'text-align:' + block.wrapAlign + ';';
+                        var txtCell = '<td style="' + wts + '">' + (block.wrapText || '') + '</td>';
+                        body += wrapOpen + '<table style="width:100%;border:none;"><tr>'
+                            + (block.float === 'right' ? txtCell + imgCell : imgCell + txtCell)
+                            + '</tr></table>' + wrapClose;
+                    } else {
+                        body += wrapOpen + '<p style="text-align:center;margin:4px 0;"><img src="' + block.src + '" width="' + imgW + '"></p>';
+                        if (block.caption) body += '<p style="text-align:center;font-size:10px;color:#5f6368;margin:2px 0;">' + block.caption + '</p>';
+                        body += wrapClose;
+                    }
+                    break;
+                case 'columns':
+                    var cCols = block.columns || 2;
+                    body += wrapOpen + '<table style="width:100%;border:none;border-collapse:collapse;"><tr>';
+                    for (var ci = 0; ci < cCols; ci++) {
+                        var cd = (block.colData && block.colData[ci]) ? block.colData[ci] : {};
+                        var cw = Math.round(100 / cCols);
+                        if (block.colRatio && cCols === 2) {
+                            var parts = block.colRatio.split(':');
+                            if (parts.length === 2) {
+                                var total = parseInt(parts[0]) + parseInt(parts[1]);
+                                cw = Math.round((parseInt(parts[ci]) / total) * 100);
+                            }
+                        }
+                        body += '<td style="width:' + cw + '%;vertical-align:top;padding:6px;border:none;">';
+                        if (cd.src) {
+                            body += '<img src="' + cd.src + '" style="width:100%;display:block;border-radius:4px;margin-bottom:4px;">';
+                        }
+                        if (cd.content) {
+                            body += '<div style="font-size:12px;line-height:1.6;">' + cd.content + '</div>';
+                        }
+                        body += '</td>';
+                    }
+                    body += '</tr></table>' + wrapClose;
+                    break;
+                case 'gallery':
+                    var cols = block.columns || 2;
+                    var gw = Math.round((pageW - cols * 8) / cols);
+                    body += wrapOpen + '<table style="width:100%;border:none;border-collapse:collapse;"><tr>';
+                    (block.images || []).forEach(function (img, i) {
+                        if (img.src) {
+                            body += '<td style="width:' + Math.round(100 / cols) + '%;text-align:center;vertical-align:top;padding:4px;border:none;">'
+                                + '<img src="' + img.src + '" width="' + gw + '" style="display:block;margin:0 auto;">'
+                                + (img.caption ? '<p style="font-size:9px;text-align:center;margin:2px 0;">' + img.caption + '</p>' : '')
+                                + '</td>';
+                            if ((i + 1) % cols === 0 && i < block.images.length - 1) body += '</tr><tr>';
+                        }
+                    });
+                    body += '</tr></table>' + wrapClose;
+                    break;
+                case 'schedule':
+                    var schedHtml = NW.renderScheduleHTML(block);
+                    // Remove options panel and onclick for export
+                    schedHtml = schedHtml.replace(/<div class="nw-schedule-options">[\s\S]*$/, '');
+                    schedHtml = schedHtml.replace(/ onclick="[^"]*"/g, '');
+                    schedHtml = schedHtml.replace(/ class="nw-sched-cell"/g, '');
+                    body += wrapOpen + schedHtml + wrapClose;
+                    break;
+                case 'qrcode':
+                    if (block.url) {
+                        body += wrapOpen + '<p style="text-align:center;margin:4px 0;"><img src="https://api.qrserver.com/v1/create-qr-code/?size='
+                            + (block.qrSize || 200) + 'x' + (block.qrSize || 200)
+                            + '&data=' + encodeURIComponent(block.url) + '" width="' + (block.qrSize || 200) + '"></p>';
+                        if (block.label) body += '<p style="text-align:center;font-size:10px;margin:2px 0;">' + block.label + '</p>';
+                        body += wrapClose;
+                    }
+                    break;
+                case 'divider':
+                    body += '<hr style="border:none;border-top:1px solid #dadce0;margin:6px 0;">';
+                    break;
+                case 'wordart':
+                    // Google DocsはCSSグラデーション非対応 → 太字＋色で代替表現
+                    var wc = block.waColor || '#202124';
+                    if (block.waGradient) wc = block.waGradC1 || '#ff0000';
+                    var ws = 'font-size:' + (block.fontSize || 48) + 'px;text-align:' + (block.align || 'center')
+                        + ';font-weight:900;color:' + wc + ';margin:4px 0;';
+                    if (block.fontFamily) ws += 'font-family:' + block.fontFamily + ';';
+                    if (block.waSpacing) ws += 'letter-spacing:' + block.waSpacing + 'px;';
+                    body += wrapOpen + '<p style="' + ws + '">' + escHtml(block.content || '') + '</p>' + wrapClose;
+                    break;
+            }
+        });
+
+        return '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            + '<style>body{font-family:sans-serif;font-size:12px;color:#202124;margin:8px;padding:0;}'
+            + 'p{margin:4px 0;}table{width:100%;border-collapse:collapse;}'
+            + 'th{background-color:#1a73e8;color:#ffffff;padding:4px 6px;font-size:11px;text-align:center;}'
+            + 'td{padding:3px 5px;border:1px solid #dadce0;text-align:center;font-size:11px;}'
+            + 'img{max-width:100%;}</style></head>'
+            + '<body>' + body + '</body></html>';
+    };
+
+    // ---- Classroom post (Google Docs互換HTMLで投稿) ----
+    NW.postToClassroom = function () {
+        if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
+        Swal.fire({
+            title: 'Classroomに投稿',
+            html: '<div style="text-align:left;">'
+                + '<p style="font-size:0.85rem;color:var(--text-sub);margin-bottom:8px;">学級通信エディタの現在の内容をGoogleドキュメントに変換してClassroomに投稿します。</p>'
+                + '<label style="font-size:0.85rem;font-weight:600;">付加メッセージ（任意）</label>'
+                + '<textarea id="swalCrMsg" class="swal2-textarea" placeholder="Classroomへのメッセージ..." style="margin-top:6px;min-height:80px;"></textarea>'
+                + '</div>',
+            showCancelButton: true,
+            confirmButtonText: '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:text-bottom;">rocket_launch</span> 投稿',
+            cancelButtonText: 'キャンセル',
+            preConfirm: function () {
+                return document.getElementById('swalCrMsg').value;
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            showToast('info', 'Googleドキュメントを作成してClassroomに投稿しています...');
+            var htmlContent = NW.buildClassroomHTML();
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (!res) { showToast('error', '投稿失敗: サーバーから応答がありません'); return; }
+                    if (res.success) showToast('success', res.message);
+                    else showToast('error', '投稿失敗: ' + res.error);
+                })
+                .withFailureHandler(_onCommError)
+                .postNewsletterToClassroomFromWeb(result.value || '学級通信をお届けします。', htmlContent);
+        });
+    };
+
+</script>

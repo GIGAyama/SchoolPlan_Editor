@@ -201,7 +201,7 @@ function determineNextLesson_(lastLesson, masterData, subject) {
 function calculateAutoFillForWebApp(mondayStr, days) {
   try {
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!dbSheet || !masterSheet) throw new Error("必要なシートが見つかりません。");
 
@@ -283,7 +283,7 @@ function calculateAutoFillForWebApp(mondayStr, days) {
 function batchAutoFillFromWeek(baseMondayStr) {
   try {
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!dbSheet || !masterSheet) throw new Error("必要なシートが見つかりません。");
 
@@ -456,7 +456,7 @@ function shiftSubjectLessons(subject, startDateStr, endDateStr, direction, count
     }
 
     const ss = getSs_();
-    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('必要なシートが見つかりません。');
 
     const dbData = dbSheet.getDataRange().getValues();
