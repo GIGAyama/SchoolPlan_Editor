@@ -83,6 +83,7 @@
         restoreTaskSidebarState(); // 週案タスクサイドバーの開閉状態を復元（デフォルトは収納）
         checkAutoReflection(); // 放課後にアプリを開いた場合、今日の振り返りモードを自動起動
         initPdfImportUI(); // PDF読み込み（ドロップゾーン・ファイル選択）の配線
+        maybeOfferSetupWizard(); // 初回起動時（設定が不十分な場合のみ）に初期設定ウィザードを表示
     };
 
     // ===== 週案グリッドの土日列 表示/非表示 =====
@@ -297,6 +298,112 @@
             .getMondayStrByWeekNumber(weekNum);
     }
 
+
+    // ===== 週案 全文検索（全ての週を対象にしたキーワード検索） =====
+
+    /** 検索モーダルを開きます。Enterキーまたは検索ボタンで実行します。 */
+    function openPlanSearch() {
+        Swal.fire({
+            title: '週案をまるごと検索',
+            html: '<div style="display:flex;gap:8px;">'
+                + '<input type="text" id="planSearchInput" class="swal2-input" style="flex:1;margin:0;" '
+                + 'placeholder="例: 避難訓練 / 実験 / 分数" maxlength="100">'
+                + '<button type="button" class="btn btn-primary" style="white-space:nowrap;" onclick="runPlanSearch()">検索</button>'
+                + '</div>'
+                + '<div id="planSearchStatus" class="plan-search-status">行事・朝学習・各校時（教科/単元/内容）・宿題・持ち物・振り返りなど、すべての週の入力内容から検索します。</div>'
+                + '<div id="planSearchResults"></div>',
+            width: 640,
+            showConfirmButton: false,
+            showCloseButton: true,
+            didOpen: function (popup) {
+                var input = popup.querySelector('#planSearchInput');
+                if (input) {
+                    input.focus();
+                    input.addEventListener('keydown', function (ev) {
+                        if (ev.key === 'Enter') { ev.preventDefault(); runPlanSearch(); }
+                    });
+                }
+            }
+        });
+    }
+
+    /** 検索を実行し、結果一覧をモーダル内に描画します。 */
+    function runPlanSearch() {
+        var input = document.getElementById('planSearchInput');
+        var statusEl = document.getElementById('planSearchStatus');
+        var resultsEl = document.getElementById('planSearchResults');
+        if (!input || !statusEl || !resultsEl) return;
+
+        var keyword = input.value.trim();
+        if (!keyword) { statusEl.textContent = '検索キーワードを入力してください。'; return; }
+
+        statusEl.textContent = '「' + keyword + '」を検索しています...';
+        resultsEl.innerHTML = '';
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) { statusEl.textContent = '検索エラー: ' + res.error; return; }
+                renderPlanSearchResults(res, statusEl, resultsEl);
+            })
+            .withFailureHandler(function (e) {
+                statusEl.textContent = '通信エラー: ' + e.message;
+            })
+            .searchWeeklyPlans(keyword);
+    }
+
+    /** 検索結果リストを描画します。項目クリックで該当週へジャンプします。 */
+    function renderPlanSearchResults(res, statusEl, resultsEl) {
+        if (!res.results || res.results.length === 0) {
+            statusEl.textContent = '「' + res.keyword + '」に一致する内容は見つかりませんでした。';
+            resultsEl.innerHTML = '';
+            return;
+        }
+
+        statusEl.textContent = '「' + res.keyword + '」の検索結果: ' + res.total + '件'
+            + (res.limited ? '（先頭' + res.results.length + '件を表示）' : '');
+
+        var html = '<div class="plan-search-results">';
+        res.results.forEach(function (r) {
+            html += '<div class="plan-search-item" onclick="jumpToSearchResult(\'' + escAttr(r.date) + '\')">'
+                + '<div class="plan-search-item-head">'
+                + '<span class="plan-search-item-date">' + escHtml(r.date) + '（' + escHtml(r.dayLabel) + '）</span>'
+                + (r.weekNum ? '<span>第' + escHtml(String(r.weekNum)) + '週</span>' : '')
+                + '<span class="plan-search-item-field">' + escHtml(r.field) + '</span>'
+                + '</div>'
+                + '<div class="plan-search-item-snippet">' + highlightKeyword(r.snippet, res.keyword) + '</div>'
+                + '</div>';
+        });
+        html += '</div>';
+        resultsEl.innerHTML = html;
+    }
+
+    /** エスケープ済みテキスト内のキーワードを <mark> で強調します。 */
+    function highlightKeyword(text, keyword) {
+        var escaped = escHtml(text || '');
+        var escapedKw = escHtml(keyword || '');
+        if (!escapedKw) return escaped;
+        // 大文字小文字を区別せずに一致箇所を強調（正規表現の特殊文字はエスケープ）
+        var pattern = escapedKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        try {
+            return escaped.replace(new RegExp('(' + pattern + ')', 'gi'), '<mark>$1</mark>');
+        } catch (e) {
+            return escaped;
+        }
+    }
+
+    /** 検索結果の日付を含む週の週案へジャンプします。 */
+    function jumpToSearchResult(dateStr) {
+        Swal.close();
+        var parts = dateStr.split('/');
+        var d = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+        var day = d.getDay();
+        var diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        d.setDate(diff);
+        STATE.mondayStr = formatDateLocal(d);
+        if (STATE.view !== 'plan') switchView('plan');
+        loadWeeklyPlan();
+        showToast('info', dateStr + ' の週を表示しました');
+    }
 
     function loadWeeklyPlan() {
         if (STATE.editMode) {
@@ -2821,6 +2928,106 @@
     }
 
     /** 当日の計画（参照用）のコンパクトHTMLを生成します。 */
+    // ===== 音声入力（Web Speech API） =====
+
+    // 音声認識の状態（同時に1つのテキストエリアのみ対象）
+    var SPEECH = { rec: null, targetId: null, base: '', finalText: '' };
+
+    /** このブラウザで音声入力が利用できるかを返します（Chrome/Edge等で対応）。 */
+    function isSpeechSupported() {
+        return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    }
+
+    /** テキストエリアの下に置くマイクボタンのHTMLを返します（非対応ブラウザでは空文字）。 */
+    function speechMicHtml(targetId) {
+        if (!isSpeechSupported()) return '';
+        return '<div style="text-align:left;margin-top:6px;">'
+            + '<button type="button" class="mic-btn" id="micBtn_' + targetId + '" onclick="toggleSpeechInput(\'' + targetId + '\')">'
+            + '<span class="material-symbols-outlined" style="font-size:1rem;">mic</span>'
+            + '<span class="mic-btn-label">音声入力</span></button></div>';
+    }
+
+    /** マイクボタンの表示状態（録音中/待機中）を切り替えます。 */
+    function setMicBtnState(targetId, recording) {
+        var btn = document.getElementById('micBtn_' + targetId);
+        if (!btn) return;
+        btn.classList.toggle('recording', recording);
+        var label = btn.querySelector('.mic-btn-label');
+        if (label) label.textContent = recording ? '認識中...（タップで停止）' : '音声入力';
+    }
+
+    /** 音声入力の開始/停止をトグルします。認識結果はテキストエリアの末尾に追記されます。 */
+    function toggleSpeechInput(targetId) {
+        // 同じ対象で認識中なら停止
+        if (SPEECH.rec && SPEECH.targetId === targetId) { stopSpeechInput(); return; }
+        stopSpeechInput();
+
+        var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { showToast('error', 'このブラウザは音声入力に対応していません（Chrome推奨）'); return; }
+        var ta = document.getElementById(targetId);
+        if (!ta) return;
+
+        var rec = new SR();
+        rec.lang = 'ja-JP';
+        rec.interimResults = true;
+        rec.continuous = true;
+
+        SPEECH.rec = rec;
+        SPEECH.targetId = targetId;
+        // 既存の入力の末尾に追記する（入力済みテキストは保持）
+        SPEECH.base = ta.value;
+        SPEECH.finalText = '';
+
+        rec.onresult = function (ev) {
+            var interim = '';
+            for (var i = ev.resultIndex; i < ev.results.length; i++) {
+                var r = ev.results[i];
+                if (r.isFinal) SPEECH.finalText += r[0].transcript;
+                else interim += r[0].transcript;
+            }
+            var el = document.getElementById(SPEECH.targetId);
+            if (el) {
+                el.value = SPEECH.base + SPEECH.finalText + interim;
+                el.scrollTop = el.scrollHeight;
+            }
+        };
+        rec.onerror = function (ev) {
+            if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+                showToast('error', 'マイクの使用が許可されていません。ブラウザのマイク設定を確認してください。');
+            } else if (ev.error !== 'aborted' && ev.error !== 'no-speech') {
+                showToast('error', '音声認識エラー: ' + ev.error);
+            }
+            stopSpeechInput();
+        };
+        rec.onend = function () {
+            // 無音などで自動終了した場合もボタン表示を戻す
+            if (SPEECH.rec === rec) stopSpeechInput();
+        };
+
+        try {
+            rec.start();
+            setMicBtnState(targetId, true);
+        } catch (e) {
+            showToast('error', '音声入力を開始できませんでした: ' + e.message);
+            stopSpeechInput();
+        }
+    }
+
+    /** 進行中の音声認識を停止し、ボタン表示を待機状態に戻します。 */
+    function stopSpeechInput() {
+        var rec = SPEECH.rec;
+        var targetId = SPEECH.targetId;
+        SPEECH.rec = null;
+        SPEECH.targetId = null;
+        if (rec) {
+            rec.onresult = null;
+            rec.onerror = null;
+            rec.onend = null;
+            try { rec.stop(); } catch (e) { }
+        }
+        if (targetId) setMicBtnState(targetId, false);
+    }
+
     function buildReflectionPlanHtml(ctx) {
         var rows = '';
         if (ctx.event) {
@@ -2882,7 +3089,8 @@
             title: ctx.date.slice(5) + '（' + (ctx.dayLabel || '') + '）の振り返り',
             html: buildReflectionPlanHtml(ctx)
                 + '<textarea id="reflPreview" class="swal2-textarea" style="width:100%;margin:8px 0 0;min-height:200px;font-size:0.85rem;line-height:1.5;">'
-                + escHtml(ctx.reflection) + '</textarea>',
+                + escHtml(ctx.reflection) + '</textarea>'
+                + speechMicHtml('reflPreview'),
             width: 560,
             confirmButtonText: '保存する',
             confirmButtonColor: '#1a73e8',
@@ -2891,6 +3099,7 @@
             denyButtonColor: '#6c757d',
             showCancelButton: true,
             cancelButtonText: '閉じる',
+            willClose: function () { stopSpeechInput(); },
             preConfirm: function () { return document.getElementById('reflPreview').value; }
         });
         if (res.isConfirmed) {
@@ -2920,6 +3129,7 @@
                 html += '<div style="text-align:left;font-size:0.78rem;color:var(--text-sub);margin:8px 0 4px;">' + escHtml(s.hint) + '</div>';
                 html += '<textarea id="reflAnswer" class="swal2-textarea" style="width:100%;margin:0;min-height:90px;font-size:0.9rem;" placeholder="'
                     + escAttr(s.placeholder) + '">' + escHtml(answers[s.key]) + '</textarea>';
+                html += speechMicHtml('reflAnswer');
 
                 var res = await Swal.fire({
                     title: ctx.date.slice(5) + '（' + (ctx.dayLabel || '') + '）の振り返り',
@@ -2937,6 +3147,7 @@
                     allowOutsideClick: false,
                     willClose: (function (key) {
                         return function (popup) {
+                            stopSpeechInput();
                             var ta = popup.querySelector('#reflAnswer');
                             if (ta) answers[key] = ta.value;
                         };
@@ -2957,7 +3168,8 @@
                     html: '<div style="text-align:left;font-size:0.78rem;color:var(--text-sub);margin-bottom:4px;">'
                         + '回答から今日の振り返り（日報）を作成しました。編集して保存できます。</div>'
                         + '<textarea id="reflPreview" class="swal2-textarea" style="width:100%;margin:0;min-height:200px;font-size:0.85rem;line-height:1.5;">'
-                        + escHtml(composed) + '</textarea>',
+                        + escHtml(composed) + '</textarea>'
+                        + speechMicHtml('reflPreview'),
                     width: 560,
                     confirmButtonText: '保存して完了',
                     confirmButtonColor: '#1a73e8',
@@ -2967,6 +3179,7 @@
                     showCancelButton: true,
                     cancelButtonText: opts.auto ? 'あとで書く' : '閉じる',
                     allowOutsideClick: false,
+                    willClose: function () { stopSpeechInput(); },
                     preConfirm: function () { return document.getElementById('reflPreview').value; }
                 });
                 if (pres.isConfirmed) {
@@ -3209,6 +3422,93 @@
                 content.innerHTML = '<div class="hours-empty">通信エラー: ' + (e && e.message ? e.message : '取得に失敗しました') + '</div>';
             })
             .getAnnualHoursData(STATE.hoursYear);
+        loadHoursSimulation();
+    }
+
+    // ===== 時数シミュレーション（年度末着地予測） =====
+
+    /** 年度末の時数過不足シミュレーションを取得して描画します。 */
+    function loadHoursSimulation() {
+        var content = document.getElementById('hoursSimContent');
+        if (!content) return;
+        content.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>シミュレーションを計算しています...</p></div>';
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) {
+                    content.innerHTML = '<p style="font-size:0.82rem;color:var(--text-sub);text-align:center;padding:16px;">'
+                        + escHtml(res.error || 'シミュレーションの計算に失敗しました') + '</p>';
+                    return;
+                }
+                renderHoursSimulation(res);
+            })
+            .withFailureHandler(function (e) {
+                content.innerHTML = '<p style="font-size:0.82rem;color:var(--text-sub);text-align:center;padding:16px;">通信エラー: '
+                    + escHtml(e && e.message ? e.message : '取得に失敗しました') + '</p>';
+            })
+            .getHoursSimulation(STATE.hoursYear);
+    }
+
+    /** シミュレーション結果（警告サマリー＋教科別テーブル）を描画します。 */
+    function renderHoursSimulation(res) {
+        var content = document.getElementById('hoursSimContent');
+        var rows = res.rows || [];
+        if (rows.length === 0) {
+            content.innerHTML = '<p style="font-size:0.82rem;color:var(--text-sub);text-align:center;padding:16px;">標準時数が設定されていません。</p>';
+            return;
+        }
+
+        // 不足見込みの教科を抽出（見込みが標準を下回るもの）
+        var shortages = rows.filter(function (r) { return r.standard > 0 && r.diff < 0; });
+
+        var html = '';
+        if (shortages.length > 0) {
+            var items = shortages.map(function (r) {
+                return '<strong>' + escHtml(r.subject) + '</strong>が約' + formatFraction(Math.abs(r.diff)) + '時間';
+            });
+            html += '<div class="hours-sim-alert">⚠ 現在の年間予定のままだと、年度末に '
+                + items.join('、') + ' 不足する見込みです。';
+            if (res.remainingWeeks > 0) {
+                html += '<br>残り約' + res.remainingWeeks + '週です。下の表の「残り必要ペース」を目安に、今後の週案を調整してください。';
+            }
+            html += '</div>';
+        } else {
+            html += '<div class="hours-sim-ok">✅ 現在の年間予定をすべて実施すれば、全教科が標準時数に到達する見込みです。</div>';
+        }
+
+        html += '<div style="overflow-x:auto;"><table class="hours-sim-table"><thead><tr>'
+            + '<th>教科</th><th>標準</th><th>実施済み<br>(' + escHtml(res.asOf) + 'まで)</th>'
+            + '<th>今後の予定</th><th>年度末見込み</th><th>過不足</th>'
+            + (res.remainingWeeks > 0 ? '<th>残り必要ペース<br>(時間/週)</th>' : '')
+            + '</tr></thead><tbody>';
+
+        rows.forEach(function (r) {
+            var diffHtml;
+            if (r.diff < 0) {
+                diffHtml = '<span class="hours-sim-shortage">−' + formatFraction(Math.abs(r.diff)) + '</span>';
+            } else if (r.diff > 0) {
+                diffHtml = '<span class="hours-sim-surplus">+' + formatFraction(r.diff) + '</span>';
+            } else {
+                diffHtml = '±0';
+            }
+            html += '<tr>'
+                + '<td>' + escHtml(r.subject) + '</td>'
+                + '<td>' + r.standard + '</td>'
+                + '<td>' + formatFraction(r.done) + '</td>'
+                + '<td>' + formatFraction(r.planned) + '</td>'
+                + '<td style="font-weight:600;">' + formatFraction(r.projected) + '</td>'
+                + '<td>' + diffHtml + '</td>'
+                + (res.remainingWeeks > 0
+                    ? '<td>' + (r.neededPerWeek > 0 ? formatFraction(r.neededPerWeek) : '—') + '</td>'
+                    : '')
+                + '</tr>';
+        });
+        html += '</tbody></table></div>';
+
+        html += '<div class="hours-sim-note">※ 「実施済み」は今日までに週案へ入力された時数、「今後の予定」は明日以降に入力済みの時数です。'
+            + '年度末見込み＝実施済み＋今後の予定。まだ週案を入力していない週は予定に含まれないため、'
+            + '「年間一括転記」や「以降を一括自動入力」で先の週まで予定を入れておくと予測の精度が上がります。</div>';
+
+        content.innerHTML = html;
     }
 
     /** 
@@ -8884,6 +9184,317 @@
                 }
             }
         });
+    }
+
+    // ===================================================
+    // ===== 初期設定ウィザード =====
+    // ===================================================
+
+    /**
+     * 初回起動時に、設定が不十分な場合だけ初期設定ウィザードを自動表示します。
+     * （ウィザードを完了済み／「今後表示しない」を選んだ場合は表示しません）
+     */
+    function maybeOfferSetupWizard() {
+        google.script.run
+            .withSuccessHandler(function (status) {
+                if (!status || !status.success) return;
+                if (status.wizardDone) return;
+                // APIキーと年間カレンダーが揃っていれば、セットアップ済みとみなして出さない
+                if (status.hasApiKey && status.hasCalendar) return;
+                // 振り返り自動起動など他のダイアログと衝突しないよう少し待ってから表示
+                setTimeout(function () {
+                    if (typeof Swal !== 'undefined' && Swal.isVisible()) return;
+                    openSetupWizard({ auto: true, status: status });
+                }, 1200);
+            })
+            .withFailureHandler(function () { })
+            .getSetupStatus();
+    }
+
+    /** ウィザード内の入力フィールドHTMLを組み立てるヘルパー。 */
+    function wizFieldHtml(id, label, type, value, placeholder, hint) {
+        return '<div class="setup-wiz-field"><label for="' + id + '">' + escHtml(label) + '</label>'
+            + '<input type="' + type + '" id="' + id + '" value="' + escAttr(value || '') + '" placeholder="' + escAttr(placeholder || '') + '">'
+            + (hint ? '<div class="setup-wiz-hint">' + hint + '</div>' : '')
+            + '</div>';
+    }
+
+    /**
+     * 初期設定ウィザードを開きます。
+     * 学年 → Gemini APIキー → PDFフォルダ → Classroom → 年間カレンダー の順に案内し、
+     * 最後にまとめて保存します。すべての項目は後から設定タブで変更できます。
+     * @param {Object} opts { auto: 初回自動表示, manual: 設定タブから手動起動, status: 取得済みのセットアップ状況 }
+     */
+    async function openSetupWizard(opts) {
+        opts = opts || {};
+
+        // 現在の設定とセットアップ状況を取得（プリフィルと「設定済み」表示に使用）
+        var settings = await new Promise(function (resolve) {
+            google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(function () { resolve(null); })
+                .getAppSettings();
+        });
+        if (!settings) { showToast('error', '設定の読み込みに失敗しました。通信環境を確認してください。'); return; }
+
+        var status = opts.status;
+        if (!status) {
+            status = await new Promise(function (resolve) {
+                google.script.run
+                    .withSuccessHandler(resolve)
+                    .withFailureHandler(function () { resolve({}); })
+                    .getSetupStatus();
+            });
+        }
+
+        // ウィザードで収集する値（既存設定をプリフィル）
+        var wiz = {
+            grade: settings.grade || '3',
+            apiKey: settings.geminiApiKey || '',
+            pdfFolderId: settings.pdfFolderId || '',
+            eventPdfFolderId: settings.eventPdfFolderId || '',
+            courseName: settings.courseName || '',
+            postHour: settings.postHour || '',
+            genCalendar: !status.hasCalendar,
+            calYear: '',
+            calStartMonday: ''
+        };
+
+        // カレンダー生成のデフォルト値（年度＝4月始まり、開始日＝4月の最初の月曜日）
+        var now = new Date();
+        var fiscalYear = (now.getMonth() + 1 <= 3) ? now.getFullYear() - 1 : now.getFullYear();
+        wiz.calYear = String(fiscalYear);
+        var apr1 = new Date(fiscalYear, 3, 1);
+        var aprDay = apr1.getDay();
+        var offset = (aprDay === 1) ? 0 : ((8 - aprDay) % 7);
+        apr1.setDate(apr1.getDate() + offset);
+        wiz.calStartMonday = apr1.getFullYear() + '-'
+            + ('0' + (apr1.getMonth() + 1)).slice(-2) + '-'
+            + ('0' + apr1.getDate()).slice(-2);
+
+        // ---- ようこそ画面（設定状況のチェックリスト） ----
+        var checkRow = function (done, label) {
+            return '<div class="' + (done ? 'setup-wiz-done' : 'setup-wiz-todo') + '">'
+                + '<span class="material-symbols-outlined fs-6">' + (done ? 'check_circle' : 'radio_button_unchecked') + '</span> '
+                + escHtml(label) + (done ? '（設定済み）' : '') + '</div>';
+        };
+        var welcome = await Swal.fire({
+            title: 'School Plan Note へようこそ！',
+            html: '<div style="text-align:left;font-size:0.85rem;line-height:1.6;">'
+                + 'アプリを使い始めるための設定を、順番に案内します。<br>すべて後から「設定」タブで変更できます。</div>'
+                + '<div class="setup-wiz-status">'
+                + checkRow(!!status.hasGrade, '担当学年')
+                + checkRow(!!status.hasApiKey, 'Gemini APIキー（AI機能に必要）')
+                + checkRow(!!status.hasCalendar, '年間カレンダー（データベースの日付）')
+                + checkRow(!!status.hasPdfFolder || !!status.hasEventPdfFolder, 'PDFフォルダ（任意）')
+                + checkRow(!!status.hasCourseName, 'Classroom連携（任意）')
+                + '</div>',
+            width: 560,
+            confirmButtonText: 'はじめる →',
+            confirmButtonColor: '#1a73e8',
+            showDenyButton: !!opts.auto,
+            denyButtonText: '今後表示しない',
+            denyButtonColor: '#6c757d',
+            showCancelButton: true,
+            cancelButtonText: 'あとで'
+        });
+        if (welcome.isDenied) {
+            google.script.run.withSuccessHandler(function () { }).withFailureHandler(function () { }).markSetupWizardDone();
+            showToast('info', '設定タブの「初期設定ウィザード」からいつでも再開できます。');
+            return;
+        }
+        if (!welcome.isConfirmed) return;
+
+        // ---- ステップ定義 ----
+        var steps = [
+            {
+                title: '担当学年',
+                render: function () {
+                    var options = '';
+                    for (var g = 1; g <= 6; g++) {
+                        options += '<option value="' + g + '"' + (String(wiz.grade) === String(g) ? ' selected' : '') + '>' + g + '年生</option>';
+                    }
+                    return '<div class="setup-wiz-field"><label for="wizGrade">時数集計の基準となる学年</label>'
+                        + '<select id="wizGrade">' + options + '</select>'
+                        + '<div class="setup-wiz-hint">学年に応じた標準時数（年間の授業時数の基準）が自動で適用されます。</div></div>';
+                },
+                collect: function (popup) {
+                    var el = popup.querySelector('#wizGrade');
+                    if (el) wiz.grade = el.value;
+                }
+            },
+            {
+                title: 'Gemini APIキー',
+                render: function () {
+                    return wizFieldHtml('wizApiKey', 'Gemini APIキー' + (status.hasApiKey ? '（設定済み・変更する場合のみ入力）' : ''),
+                        'password', wiz.apiKey, 'AIza...',
+                        'PDF自動読み取り・AIタスク抽出・週報の自動生成などのAI機能に必要です。'
+                        + '<a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a> で無料で取得できます。'
+                        + '空欄のままでもAI以外の機能（週案入力・時数集計など）は利用できます。');
+                },
+                collect: function (popup) {
+                    var el = popup.querySelector('#wizApiKey');
+                    if (el) wiz.apiKey = el.value;
+                }
+            },
+            {
+                title: 'PDFフォルダ（任意）',
+                render: function () {
+                    return wizFieldHtml('wizPdfFolder', '指導計画PDF フォルダID', 'text', wiz.pdfFolderId, 'DriveのフォルダURL末尾のID',
+                        '学校配布の指導計画PDFを置くGoogle DriveフォルダのIDです。AIが解析して単元マスタを作成します。')
+                        + wizFieldHtml('wizEventPdfFolder', '行事予定PDF フォルダID', 'text', wiz.eventPdfFolderId, 'DriveのフォルダURL末尾のID',
+                            '年間行事予定PDFを置くフォルダのIDです。「行事予定」タブでの閲覧やAIによる行事の転記に使用します。'
+                            + 'フォルダURLの「folders/」より後ろの文字列がIDです。あとで設定しても構いません。');
+                },
+                collect: function (popup) {
+                    var el1 = popup.querySelector('#wizPdfFolder');
+                    var el2 = popup.querySelector('#wizEventPdfFolder');
+                    if (el1) wiz.pdfFolderId = el1.value.trim();
+                    if (el2) wiz.eventPdfFolderId = el2.value.trim();
+                }
+            },
+            {
+                title: 'Google Classroom連携（任意）',
+                render: function () {
+                    return wizFieldHtml('wizCourseName', '連携クラス名', 'text', wiz.courseName, '例：4年1組 令和7年度',
+                        'Classroomのクラス名を正確に入力します（設定タブでは一覧から選択もできます）。')
+                        + wizFieldHtml('wizPostHour', '「明日の予定」自動投稿時刻（0〜23時・空欄で無効）', 'number', wiz.postHour, '例：16',
+                            '設定すると、毎日この時刻に翌日の時間割・宿題・持ち物をClassroomへ自動投稿します。');
+                },
+                collect: function (popup) {
+                    var el1 = popup.querySelector('#wizCourseName');
+                    var el2 = popup.querySelector('#wizPostHour');
+                    if (el1) wiz.courseName = el1.value.trim();
+                    if (el2) wiz.postHour = el2.value.trim();
+                }
+            },
+            {
+                title: '年間カレンダー',
+                render: function () {
+                    var head;
+                    if (status.hasCalendar) {
+                        head = '<div style="text-align:left;font-size:0.85rem;color:var(--secondary);">✅ データベースには既に日付（年間カレンダー）が構築されています。通常はこのステップはスキップで大丈夫です。</div>';
+                    } else {
+                        head = '<div style="text-align:left;font-size:0.85rem;">週案を使うには、データベースシートに1年分の日付・曜日・週番号を構築する必要があります。</div>';
+                    }
+                    return head
+                        + '<div class="setup-wiz-field" style="margin-top:12px;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;">'
+                        + '<input type="checkbox" id="wizGenCal" style="width:18px;height:18px;"' + (wiz.genCalendar ? ' checked' : '') + '> 年間カレンダーを生成する</label></div>'
+                        + wizFieldHtml('wizCalYear', '対象年度', 'number', wiz.calYear, '例：' + wiz.calYear, '')
+                        + wizFieldHtml('wizCalStartMonday', '第1週目の月曜日', 'date', wiz.calStartMonday, '',
+                            '既存の入力データ（各校時の内容など）は消えません。')
+                },
+                collect: function (popup) {
+                    var chk = popup.querySelector('#wizGenCal');
+                    var y = popup.querySelector('#wizCalYear');
+                    var m = popup.querySelector('#wizCalStartMonday');
+                    if (chk) wiz.genCalendar = chk.checked;
+                    if (y) wiz.calYear = y.value;
+                    if (m) wiz.calStartMonday = m.value;
+                }
+            }
+        ];
+
+        // ---- ステップを順に表示 ----
+        var progressLabels = steps.map(function (_, i) { return String(i + 1); });
+        var step = 0;
+        while (step < steps.length) {
+            var s = steps[step];
+            var res = await Swal.fire({
+                title: '初期設定 (' + (step + 1) + '/' + steps.length + ')：' + s.title,
+                html: s.render(),
+                width: 560,
+                progressSteps: progressLabels,
+                currentProgressStep: step,
+                confirmButtonText: step === steps.length - 1 ? '設定を保存する' : '次へ →',
+                confirmButtonColor: '#1a73e8',
+                showDenyButton: step > 0,
+                denyButtonText: '← 戻る',
+                denyButtonColor: '#6c757d',
+                showCancelButton: true,
+                cancelButtonText: '中断する',
+                allowOutsideClick: false,
+                willClose: (function (cur) {
+                    return function (popup) { cur.collect(popup); };
+                })(s)
+            });
+            if (res.isConfirmed) step++;
+            else if (res.isDenied) step--;
+            else {
+                showToast('info', '設定タブの「初期設定ウィザード」からいつでも再開できます。');
+                return;
+            }
+        }
+
+        // ---- 保存の実行 ----
+        showToast('info', '設定を保存しています...');
+
+        // 1) 担当学年（標準時数の初期化を含む）
+        var gradeResult = await new Promise(function (resolve) {
+            google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(function (e) { resolve({ success: false, error: e.message }); })
+                .saveGrade(wiz.grade);
+        });
+        if (!gradeResult.success) { showToast('error', '学年設定の保存に失敗: ' + gradeResult.error); return; }
+        STATE.grade = parseInt(wiz.grade, 10) || 3;
+
+        // 2) システム設定（APIキーはマスクのままなら既存値が保持される）
+        var settingsResult = await new Promise(function (resolve) {
+            google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(function (e) { resolve({ success: false, error: e.message }); })
+                .saveAppSettings({
+                    courseName: wiz.courseName,
+                    postHour: wiz.postHour,
+                    pdfFolderId: wiz.pdfFolderId,
+                    eventPdfFolderId: wiz.eventPdfFolderId,
+                    geminiApiKey: wiz.apiKey,
+                    geminiModelName: settings.geminiModelName || 'gemini-2.5-flash',
+                    moduleEnabled: !!settings.moduleEnabled
+                });
+        });
+        if (!settingsResult.success) { showToast('error', '設定の保存に失敗: ' + settingsResult.error); return; }
+
+        // 3) 年間カレンダー生成（チェック時のみ）
+        var calendarMessage = '';
+        if (wiz.genCalendar && wiz.calYear && wiz.calStartMonday) {
+            showToast('info', '年間カレンダーを生成しています...（数秒〜十数秒かかります）');
+            var calResult = await new Promise(function (resolve) {
+                google.script.run
+                    .withSuccessHandler(resolve)
+                    .withFailureHandler(function (e) { resolve({ success: false, error: e.message }); })
+                    .generateAnnualCalendar(wiz.calYear, wiz.calStartMonday);
+            });
+            if (calResult.success) {
+                calendarMessage = '<br>年間カレンダーを生成しました。';
+            } else {
+                calendarMessage = '<br>⚠ 年間カレンダーの生成に失敗しました: ' + escHtml(calResult.error || '')
+                    + '<br>設定タブの「年間カレンダー生成機能」から再実行できます。';
+            }
+        }
+
+        // 4) ウィザード完了をマーク（次回から自動表示しない）
+        google.script.run.withSuccessHandler(function () { }).withFailureHandler(function () { }).markSetupWizardDone();
+
+        // 設定タブの表示を最新化
+        STATE.isSystemSettingsLoaded = false;
+        if (STATE.view === 'settings') loadSystemSettings();
+
+        await Swal.fire({
+            icon: 'success',
+            title: '初期設定が完了しました！',
+            html: '<div style="text-align:left;font-size:0.85rem;line-height:1.7;">設定を保存しました。' + calendarMessage
+                + '<br><br>次のステップ:<br>'
+                + '・「週案」タブで今週の予定を入力してみましょう<br>'
+                + '・設定タブの「固定時間割エディタ」で基本時間割を登録すると、一括転記が使えます<br>'
+                + '・PDFフォルダを設定した場合は「PDF読み込み」タブでAI読み取りを試せます</div>',
+            confirmButtonText: '使いはじめる',
+            confirmButtonColor: '#1a73e8'
+        });
+
+        // カレンダーを生成した場合は週案を読み込み直す
+        if (wiz.genCalendar) goToToday();
     }
 
 </script>

@@ -4325,4 +4325,225 @@
             min-height: 300px;
         }
     }
+
+    /* ===== 週案 全文検索 ===== */
+    .plan-search-results {
+        max-height: 340px;
+        overflow-y: auto;
+        text-align: left;
+        margin-top: 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface-2);
+    }
+
+    .plan-search-item {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .plan-search-item:last-child {
+        border-bottom: none;
+    }
+
+    .plan-search-item:hover {
+        background: var(--surface-hover, rgba(26, 115, 232, 0.08));
+    }
+
+    .plan-search-item-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.78rem;
+        color: var(--text-sub);
+        margin-bottom: 2px;
+    }
+
+    .plan-search-item-date {
+        font-weight: 600;
+        color: var(--primary);
+    }
+
+    .plan-search-item-field {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0 8px;
+        font-size: 0.7rem;
+    }
+
+    .plan-search-item-snippet {
+        font-size: 0.85rem;
+        color: var(--text-main);
+        line-height: 1.4;
+        word-break: break-all;
+    }
+
+    .plan-search-item-snippet mark {
+        background: #fff176;
+        color: #333;
+        border-radius: 2px;
+        padding: 0 1px;
+    }
+
+    .plan-search-status {
+        font-size: 0.78rem;
+        color: var(--text-sub);
+        text-align: left;
+        margin-top: 8px;
+    }
+
+    /* ===== 時数シミュレーション ===== */
+    .hours-sim-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.82rem;
+    }
+
+    .hours-sim-table th,
+    .hours-sim-table td {
+        border: 1px solid var(--border);
+        padding: 5px 8px;
+        text-align: center;
+    }
+
+    .hours-sim-table th {
+        background: var(--surface-2);
+        font-weight: 600;
+        color: var(--text-sub);
+        font-size: 0.75rem;
+    }
+
+    .hours-sim-table td:first-child {
+        text-align: left;
+        font-weight: 600;
+    }
+
+    .hours-sim-shortage {
+        color: var(--danger, #dc3545);
+        font-weight: 700;
+    }
+
+    .hours-sim-surplus {
+        color: var(--secondary, #1aa260);
+        font-weight: 600;
+    }
+
+    .hours-sim-alert {
+        border: 1px solid #ffc107;
+        background: rgba(255, 193, 7, 0.12);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 0.82rem;
+        line-height: 1.6;
+        margin-bottom: 12px;
+    }
+
+    .hours-sim-ok {
+        border: 1px solid var(--secondary, #1aa260);
+        background: rgba(26, 162, 96, 0.1);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 0.82rem;
+        margin-bottom: 12px;
+    }
+
+    .hours-sim-note {
+        font-size: 0.72rem;
+        color: var(--text-hint);
+        margin-top: 8px;
+        line-height: 1.5;
+    }
+
+    /* ===== 音声入力（マイクボタン） ===== */
+    .mic-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text-main);
+        border-radius: 16px;
+        padding: 4px 12px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .mic-btn:hover {
+        border-color: var(--primary);
+        color: var(--primary);
+    }
+
+    .mic-btn.recording {
+        background: #dc3545;
+        border-color: #dc3545;
+        color: #fff;
+        animation: micPulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes micPulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.5); }
+        50% { box-shadow: 0 0 0 6px rgba(220, 53, 69, 0); }
+    }
+
+    /* ===== 初期設定ウィザード ===== */
+    .setup-wiz-status {
+        text-align: left;
+        font-size: 0.85rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface-2);
+        padding: 10px 14px;
+        margin-top: 8px;
+    }
+
+    .setup-wiz-status div {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
+    }
+
+    .setup-wiz-done {
+        color: var(--secondary, #1aa260);
+    }
+
+    .setup-wiz-todo {
+        color: var(--text-sub);
+    }
+
+    .setup-wiz-field {
+        text-align: left;
+        margin-top: 10px;
+    }
+
+    .setup-wiz-field label {
+        display: block;
+        font-size: 0.8rem;
+        color: var(--text-sub);
+        margin-bottom: 4px;
+    }
+
+    .setup-wiz-field input,
+    .setup-wiz-field select {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 0.9rem;
+        background: var(--bg-card);
+        color: var(--text-main);
+        box-sizing: border-box;
+    }
+
+    .setup-wiz-hint {
+        text-align: left;
+        font-size: 0.75rem;
+        color: var(--text-hint);
+        margin-top: 6px;
+        line-height: 1.5;
+    }
 </style>

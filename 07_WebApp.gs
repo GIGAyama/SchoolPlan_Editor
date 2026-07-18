@@ -2101,3 +2101,220 @@ function batchUpdateUnitMaster(updates) {
     return { success: false, error: e.message };
   }
 }
+
+// ===================================================
+// ===== 週案 全文検索 API =====
+// ===================================================
+
+/**
+ * [Webアプリ API] データベースシート全体（全週）をキーワード検索します。
+ * 行事・朝学習・各校時（教科/単元/学習内容）・宿題・持ち物・振り返りなどの
+ * テキスト列を対象に部分一致（大文字小文字・全角半角スペースは区別しない）で検索し、
+ * 該当したセルの日付・項目名・内容の抜粋を日付順に返します。
+ * @param {string} keyword 検索キーワード
+ * @returns {Object} { success, keyword, total, limited, results: [{date, dayLabel, weekNum, field, snippet}] }
+ */
+function searchWeeklyPlans(keyword) {
+  try {
+    validateParams_({ keyword }, {
+      keyword: { type: 'string', required: true, maxLength: 100 }
+    });
+    const query = String(keyword).trim().toLowerCase();
+    if (!query) throw new Error('検索キーワードを入力してください。');
+
+    const ss = getSs_();
+    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    if (!dbSheet) throw new Error('データベースシートが見つかりません');
+
+    const dbCols = getDbColumns();
+    const dbData = dbSheet.getDataRange().getValues();
+
+    // 検索対象の列（存在する列のみ）。ラベルは結果表示用。
+    const searchFields = [
+      { key: 'EVENT', label: '行事' },
+      { key: 'PRECLASS', label: '登校前' },
+      { key: 'MORNING', label: '朝学習' }
+    ];
+    for (let n = 1; n <= 6; n++) {
+      searchFields.push({ key: 'PERIOD' + n, label: n + '校時（教科）' });
+      searchFields.push({ key: 'UNIT' + n, label: n + '校時（単元）' });
+      searchFields.push({ key: 'CONTENT' + n, label: n + '校時（内容）' });
+    }
+    searchFields.push(
+      { key: 'RECESS1', label: '中休み' },
+      { key: 'RECESS2', label: '昼休み' },
+      { key: 'AFTERSCHOOL', label: '放課後' },
+      { key: 'HOMEWORK', label: '宿題' },
+      { key: 'ITEMS', label: '持ち物' },
+      { key: 'REFLECTION', label: '振り返り' }
+    );
+    const activeFields = searchFields.filter(f => dbCols[f.key]);
+
+    const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
+    const MAX_RESULTS = 100;
+    const results = [];
+    let total = 0;
+
+    for (let i = 1; i < dbData.length; i++) {
+      const row = dbData[i];
+      const date = row[dbCols.DATE - 1];
+      if (!(date instanceof Date)) continue;
+
+      for (const field of activeFields) {
+        const raw = row[dbCols[field.key] - 1];
+        if (raw === null || raw === undefined || raw === '') continue;
+        const text = String(raw);
+        const idx = text.toLowerCase().indexOf(query);
+        if (idx === -1) continue;
+
+        total++;
+        if (results.length < MAX_RESULTS) {
+          // ヒット位置の前後を含む抜粋（前20文字・後40文字程度）を作る
+          const start = Math.max(0, idx - 20);
+          const end = Math.min(text.length, idx + query.length + 40);
+          let snippet = text.substring(start, end).replace(/\n/g, ' ');
+          if (start > 0) snippet = '…' + snippet;
+          if (end < text.length) snippet += '…';
+
+          results.push({
+            date: formatDate(date),
+            dayLabel: DAY_LABELS[date.getDay()],
+            weekNum: dbCols.WEEK_NUM ? (row[dbCols.WEEK_NUM - 1] || '') : '',
+            field: field.label,
+            snippet: snippet
+          });
+        }
+      }
+    }
+
+    // 日付順（昇順）に整列
+    results.sort((a, b) => a.date < b.date ? -1 : (a.date > b.date ? 1 : 0));
+
+    return { success: true, keyword: keyword, total: total, limited: total > MAX_RESULTS, results: results };
+  } catch (e) {
+    logError('searchWeeklyPlans', e);
+    return { success: false, error: e.message };
+  }
+}
+
+// ===================================================
+// ===== 時数シミュレーション（年度末着地予測） API =====
+// ===================================================
+
+/**
+ * [Webアプリ API] 年度末の時数の過不足を予測します。
+ * 「今日までに実施済みの時数」と「明日以降に入力済みの予定時数」を教科別に集計し、
+ * 現在の年間予定をすべて実施した場合の年度末見込みと標準時数との差を返します。
+ * @param {number} academicYear 対象年度（例: 2025 なら 2025年4月〜2026年3月）
+ * @returns {Object} { success, academicYear, asOf, remainingWeeks, rows }
+ */
+function getHoursSimulation(academicYear) {
+  try {
+    validateParams_({ academicYear }, {
+      academicYear: { type: 'number', required: true, min: 2000, max: 2100 }
+    });
+    const ss = getSs_();
+    const dbSheet = ss.getSheetByName(SHEET_NAME_DATABASE);
+    if (!dbSheet) throw new Error('データベースシートが見つかりません');
+
+    const dbCols = getDbColumns();
+    const dbData = dbSheet.getDataRange().getValues();
+
+    // 標準時数（%と過不足の基準）
+    const stdResult = getStandardHours();
+    const standardHours = (stdResult.success && stdResult.data) ? stdResult.data : [];
+    if (standardHours.length === 0) {
+      return { success: false, error: '標準時数が設定されていません。設定タブの「教科別 年間標準時数」を確認してください。' };
+    }
+
+    // モジュール学習設定（他の時数集計APIと同じルールで朝学習の1/3時間を加算）
+    const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
+    const moduleSubjects = moduleEnabled ? getModuleCountableSubjects_(standardHours) : null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const doneCount = {};     // 今日までの実施済み時数
+    const plannedCount = {};  // 明日以降に入力されている予定時数
+    const futureWeekSet = {}; // 予定が入っている今後の週（月曜日文字列）の集合
+
+    const periodCols = [dbCols.PERIOD1, dbCols.PERIOD2, dbCols.PERIOD3, dbCols.PERIOD4, dbCols.PERIOD5, dbCols.PERIOD6].filter(c => c);
+
+    for (let i = 1; i < dbData.length; i++) {
+      const row = dbData[i];
+      const date = row[dbCols.DATE - 1];
+      if (!(date instanceof Date)) continue;
+
+      const month = date.getMonth() + 1;
+      let rowAcademicYear = date.getFullYear();
+      if (month <= 3) rowAcademicYear -= 1;
+      if (rowAcademicYear !== academicYear) continue;
+
+      const d = new Date(date);
+      d.setHours(0, 0, 0, 0);
+      const isDone = d <= today;
+      const target = isDone ? doneCount : plannedCount;
+      let rowHasLesson = false;
+
+      for (const col of periodCols) {
+        const parsed = parseSubjectHours_(row[col - 1]);
+        for (const { subject, fraction } of parsed) {
+          target[subject] = (target[subject] || 0) + fraction;
+          rowHasLesson = true;
+        }
+      }
+
+      // モジュール学習: 朝学習に教科名（標準時数の教科＋行事のみ）が入っていれば 1/3 時間を加算
+      if (moduleEnabled && dbCols.MORNING) {
+        const morningSubject = getModuleSubjectFromMorningCell_(row[dbCols.MORNING - 1], moduleSubjects);
+        if (morningSubject) {
+          target[morningSubject] = (target[morningSubject] || 0) + 1 / 3;
+          rowHasLesson = true;
+        }
+      }
+
+      if (!isDone && rowHasLesson) {
+        futureWeekSet[formatDate(getMondayOfWeek(d))] = true;
+      }
+    }
+
+    // 表示用の教科名集約: 学活→特活、図書・書写→国語 等（他の集計APIと同一ルール）
+    aggregateSubjectCounts_(doneCount);
+    aggregateSubjectCounts_(plannedCount);
+
+    const remainingWeeks = Object.keys(futureWeekSet).length;
+
+    const rows = standardHours.map(sh => {
+      const key = normalizeSubjectName_(sh.subject);
+      const std = sh.hours || 0;
+      const done = Math.round((doneCount[key] || 0) * 10) / 10;
+      const planned = Math.round((plannedCount[key] || 0) * 10) / 10;
+      const projected = Math.round((done + planned) * 10) / 10;
+      const diff = Math.round((projected - std) * 10) / 10;
+      // 残り必要ペース: 標準時数に到達するために今後1週あたり必要な時数
+      const neededPerWeek = (remainingWeeks > 0 && std > done)
+        ? Math.round((std - done) / remainingWeeks * 10) / 10
+        : 0;
+      return {
+        subject: sh.subject,
+        standard: std,
+        done: done,
+        planned: planned,
+        projected: projected,
+        diff: diff,
+        neededPerWeek: neededPerWeek
+      };
+    });
+
+    return {
+      success: true,
+      academicYear: academicYear,
+      asOf: formatDate(today),
+      remainingWeeks: remainingWeeks,
+      rows: rows
+    };
+  } catch (e) {
+    logError('getHoursSimulation', e);
+    return { success: false, error: e.message };
+  }
+}
