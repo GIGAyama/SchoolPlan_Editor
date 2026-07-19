@@ -124,6 +124,39 @@
     }
 
     /**
+     * エラーメッセージが「DB未設定／無効」を示すか判定します。
+     * セッション中にDBが削除・権限喪失した場合、getSs_()（07_WebApp.gs）が
+     * 定型文を含むエラーを投げるため、その定型文の有無で判定します。
+     * @param {string} msg
+     * @returns {boolean}
+     */
+    function isNoDbError_(msg) {
+        if (!msg) return false;
+        return String(msg).indexOf('使用するスプレッドシート（データベース）が設定されていません') !== -1;
+    }
+
+    /**
+     * DB無効化エラー時に、白画面化させずユーザーへ通知して
+     * 再オンボーディング（作成／紐付け）へ誘導します。多重表示は抑止します。
+     */
+    function handleNoDbError_() {
+        if (window.__noDbHandling) return;
+        window.__noDbHandling = true;
+        Swal.fire({
+            icon: 'warning',
+            title: 'データベースに接続できません',
+            html: '使用中のデータベース（スプレッドシート）が見つからないか、アクセス権がありません。<br>'
+                + '削除・移動された可能性があります。作成／紐付けの画面に戻ります。',
+            confirmButtonColor: '#1a73e8',
+            allowOutsideClick: false,
+            allowEscapeKey: false
+        }).then(function () {
+            window.__noDbHandling = false;
+            reopenOnboarding();
+        });
+    }
+
+    /**
      * オンボーディングの選択画面（新規作成 / 既存紐付け）を表示します。
      * @param {Object} status getTenantStatus() の結果
      */
@@ -529,6 +562,7 @@
             })
             .withFailureHandler(function (e) {
                 console.error('[DEBUG] getTodaysMondayStr FAILED:', e.message);
+                if (isNoDbError_(e && e.message)) { handleNoDbError_(); return; }
                 showToast('error', '初期化エラー: ' + e.message);
             })
             .getTodaysMondayStr();
@@ -722,6 +756,7 @@
             })
             .withFailureHandler(function (e) {
                 console.error('[DEBUG] getWeeklyPlanData FAILED:', e.message);
+                if (isNoDbError_(e && e.message)) { handleNoDbError_(); return; }
                 showToast('error', '通信エラー: ' + e.message);
             })
             .getWeeklyPlanData(STATE.mondayStr);

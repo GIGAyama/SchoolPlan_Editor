@@ -104,8 +104,15 @@
     }
 
     // google.script.run の共通失敗ハンドラ（「通信エラー」をトースト表示するだけの定型用）
+    // セッション中にDBが削除／権限喪失した場合は、白画面化を避けて再オンボーディングへ誘導する。
     function _onCommError(e) {
-        showToast('error', '通信エラー: ' + e.message);
+        var msg = (e && e.message) ? e.message : String(e);
+        if (typeof isNoDbError_ === 'function' && isNoDbError_(msg)
+            && typeof handleNoDbError_ === 'function') {
+            handleNoDbError_();
+            return;
+        }
+        showToast('error', '通信エラー: ' + msg);
     }
 
 </script>
