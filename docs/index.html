@@ -10,6 +10,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="週案エディタ">
@@ -174,6 +175,55 @@
             background: #1b66c8;
         }
 
+        .btn-secondary {
+            display: block;
+            width: 100%;
+            margin-top: 10px;
+            padding: 12px;
+            font-size: 14px;
+            font-weight: 700;
+            color: #1a73e8;
+            background: #fff;
+            border: 1.5px solid #1a73e8;
+            border-radius: 8px;
+            text-align: center;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .btn-secondary:hover {
+            background: #e8f0fe;
+        }
+
+        .btn-text {
+            display: inline-block;
+            margin-top: 14px;
+            padding: 4px 8px;
+            font-size: 12px;
+            color: #5f6368;
+            background: none;
+            border: 0;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        /* ===== 表示できなかったときの案内（組織アカウント等） ===== */
+        #recovery {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: #f6f8fb;
+            z-index: 25;
+            overflow-y: auto;
+        }
+
+        #recovery .setup-card {
+            text-align: center;
+        }
+
         /* ===== フローティングメニュー ===== */
         #menuBtn {
             position: fixed;
@@ -258,9 +308,29 @@
         </div>
     </div>
 
+    <!-- 表示できなかったときの案内（組織アカウント等でiframe内に表示できない場合） -->
+    <div id="recovery">
+        <div class="setup-card">
+            <img src="icons/icon-192.png" alt="週案エディタ">
+            <h1>アプリを表示できませんでした</h1>
+            <p class="lead">
+                組織（学校）アカウントでは、セキュリティ設定により<br>
+                この画面の中にアプリを表示できないことがあります。<br>
+                下のボタンから開き直してください。
+            </p>
+            <button class="btn-primary" id="recoveryOpenBtn">アプリを開く</button>
+            <a class="btn-secondary" id="recoveryNewTabBtn" href="#" target="_blank" rel="noopener">新しいタブで開く</a>
+            <p class="setup-hint">
+                それでも開けないときは、いちどブラウザのタブで直接ログインしてから、もう一度お試しください。
+                複数のGoogleアカウントでログインしている場合は、学校のアカウントに切り替えてください。
+            </p>
+            <button class="btn-text" id="recoveryShowBtn">この画面のまま表示する</button>
+            <button class="btn-text" id="recoveryReloadBtn">再読み込み</button>
+        </div>
+    </div>
+
     <!-- アプリ本体 -->
-    <iframe id="appFrame" title="週案エディタ" allow="clipboard-read; clipboard-write; fullscreen"
-        allowfullscreen></iframe>
+    <iframe id="appFrame" title="週案エディタ" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
 
     <!-- フローティングメニュー -->
     <button id="menuBtn" title="メニュー" aria-label="メニュー">⚙</button>
@@ -278,11 +348,17 @@
             var STORAGE_KEY = 'schoolPlanNote.appUrl';
             var loading = document.getElementById('loading');
             var setup = document.getElementById('setup');
+            var recovery = document.getElementById('recovery');
             var frame = document.getElementById('appFrame');
             var menuBtn = document.getElementById('menuBtn');
             var menuPanel = document.getElementById('menuPanel');
             var installBtn = document.getElementById('installBtn');
             var deferredPrompt = null;
+            // アプリ本体が iframe 内で読み込めたかの状態管理
+            var appReady = false;      // App 側からの ready ハンドシェイクを受信したか
+            var launchTimer = null;    // 一定時間 ready が来なければ案内へ切り替えるタイマー
+            var currentUrl = '';       // 現在起動中の exec URL
+            var LAUNCH_TIMEOUT_MS = 12000;
 
             // GASのWebアプリURLのみ許可（通常アカウント / Google Workspace ドメイン両対応）
             function isValidGasUrl(url) {
@@ -304,8 +380,10 @@
             }
 
             function showSetup(message) {
+                if (launchTimer) { clearTimeout(launchTimer); launchTimer = null; }
                 loading.style.display = 'none';
                 frame.style.display = 'none';
+                recovery.style.display = 'none';
                 menuBtn.style.display = 'none';
                 setup.style.display = 'flex';
                 var err = document.getElementById('setupError');
@@ -317,22 +395,55 @@
                 }
             }
 
-            function launchApp(url) {
+            // アプリ本体（iframe）を表示する
+            function showFrame() {
+                if (launchTimer) { clearTimeout(launchTimer); launchTimer = null; }
+                loading.style.display = 'none';
                 setup.style.display = 'none';
+                recovery.style.display = 'none';
+                frame.style.display = 'block';
+                menuBtn.style.display = 'block';
+            }
+
+            // iframe内に表示できなかったときの案内を表示する。
+            // iframe自体はDOMに残すため、遅れて ready が届けば showFrame() で自動復帰できる。
+            function showRecovery() {
+                loading.style.display = 'none';
+                setup.style.display = 'none';
+                frame.style.display = 'none';
+                menuBtn.style.display = 'none';
+                recovery.style.display = 'flex';
+            }
+
+            // App本体（07_WebApp.gs / App.html）から届く ready ハンドシェイクを受信。
+            // これが届けば、iframe内にアプリ本体が正しく表示できたと判断できる。
+            // 組織アカウント等でGoogleのエラー画面が表示された場合は届かない。
+            window.addEventListener('message', function (e) {
+                var data = e && e.data;
+                if (data && data.type === 'schoolPlanNote:ready') {
+                    appReady = true;
+                    showFrame();
+                }
+            });
+
+            function launchApp(url) {
+                currentUrl = url;
+                appReady = false;
+                setup.style.display = 'none';
+                recovery.style.display = 'none';
+                frame.style.display = 'none';
+                menuBtn.style.display = 'none';
                 loading.style.display = 'flex';
                 document.getElementById('newTabLink').href = url;
+                document.getElementById('recoveryNewTabBtn').href = url;
                 frame.src = url;
-                frame.addEventListener('load', function () {
-                    loading.style.display = 'none';
-                    frame.style.display = 'block';
-                    menuBtn.style.display = 'block';
-                }, { once: true });
-                // ログイン画面などiframe内に表示できないケースに備えたフォールバック
-                setTimeout(function () {
-                    loading.style.display = 'none';
-                    frame.style.display = 'block';
-                    menuBtn.style.display = 'block';
-                }, 20000);
+                // 一定時間内に ready ハンドシェイクが来なければ、iframe内に
+                // 表示できなかった（＝組織アカウント等でエラー画面が出た）とみなし案内へ切り替える。
+                if (launchTimer) clearTimeout(launchTimer);
+                launchTimer = setTimeout(function () {
+                    launchTimer = null;
+                    if (!appReady) showRecovery();
+                }, LAUNCH_TIMEOUT_MS);
             }
 
             // --- セットアップ画面 ---
@@ -371,6 +482,20 @@
                 } else {
                     showSetup();
                 }
+            });
+
+            // --- 表示できなかったときの案内（組織アカウント等）---
+            // 「アプリを開く」：この画面ごと exec URL へ遷移する（トップレベル遷移なので
+            // 組織アカウントでも第一者コンテキストでログイン・表示でき、404にならない）。
+            document.getElementById('recoveryOpenBtn').addEventListener('click', function () {
+                if (currentUrl) window.location.href = currentUrl;
+            });
+            // 「この画面のまま表示する」：万一 ready が届かなかっただけの正常表示に備えた保険。
+            document.getElementById('recoveryShowBtn').addEventListener('click', function () {
+                showFrame();
+            });
+            document.getElementById('recoveryReloadBtn').addEventListener('click', function () {
+                location.reload();
             });
 
             // --- インストールボタン（Chromeのbeforeinstallprompt対応）---

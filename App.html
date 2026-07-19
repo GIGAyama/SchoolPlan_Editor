@@ -6,6 +6,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#1a73e8">
     <title>週案エディタ</title>
+    <!--
+      PWAシェル（GitHub Pages の docs/index.html）へ「アプリ本体を iframe 内に表示できた」ことを
+      通知するハンドシェイク。組織（学校）アカウント等で iframe 内に表示できず、Google の
+      エラー画面（「現在、ファイルを開くことができません」など）が出た場合はこの通知が届かないため、
+      シェル側が「新しいタブで開く」導線へ自動で切り替えられる。iframe 外で直接開いた場合は
+      window.top === window.self となり、何も送信しない（無害）。
+    -->
+    <script>
+        (function () {
+            try {
+                if (window.top && window.top !== window.self) {
+                    var notifyShell = function () {
+                        try { window.top.postMessage({ type: 'schoolPlanNote:ready' }, '*'); } catch (e) { }
+                        try { window.parent.postMessage({ type: 'schoolPlanNote:ready' }, '*'); } catch (e) { }
+                    };
+                    notifyShell();
+                    document.addEventListener('DOMContentLoaded', notifyShell);
+                    window.addEventListener('load', notifyShell);
+                }
+            } catch (e) { }
+        })();
+    </script>
     <!-- GIGA Standard v2: Zen Maru Gothic + Newsletter Fonts -->
     <link
         href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap"
