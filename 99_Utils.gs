@@ -404,8 +404,28 @@ function deleteTriggers_(functionName) {
 // ===== ログ出力関連 =====
 // ============================================================
 
-/** 
- * 「ログ」シートに情報（INFO）を記録します。 
+/**
+ * 認可（権限）不足に起因するエラーかを判定し、機能名を添えた分かりやすい案内文を返します。
+ * Incremental Authorization はGASビルトインでは実現できないため（docs/B4_INCREMENTAL_AUTH.md 参照）、
+ * 重い機能（Classroom / メール）を使う導線で本ヘルパーを用い、未承認時は再認可を促す案内に置き換えます。
+ * 権限起因でなければ元のメッセージをそのまま返します。
+ * @param {Error|string} e 発生したエラー
+ * @param {string} feature 機能名（例: 'Google Classroom 連携'）
+ * @returns {string} ユーザー向けメッセージ
+ */
+function describeAuthError_(e, feature) {
+  const msg = (e && e.message) ? e.message : String(e);
+  const authLike = /authoriz|permission|scope|has not been granted|PERMISSION_DENIED|権限|認可|承認|アクセスが拒否/i.test(msg);
+  if (authLike) {
+    return (feature || 'この機能') + 'の利用に必要な権限が付与されていません。'
+      + 'アプリを開き直して表示される権限リクエストを承認してから、もう一度お試しください。'
+      + '（詳細: ' + msg + '）';
+  }
+  return msg;
+}
+
+/**
+ * 「ログ」シートに情報（INFO）を記録します。
  */
 function logInfo(message) { writeToLog_("INFO", message); }
 

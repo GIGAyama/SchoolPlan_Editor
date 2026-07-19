@@ -36,6 +36,10 @@ function doGet(e) {
   return HtmlService.createTemplateFromFile('App')
     .evaluate()
     .setTitle('週案エディタ')
+    // セキュリティ（B3）: GitHub Pages の PWA シェルが exec URL を <iframe> で埋め込むため、
+    // 埋め込みを許可する必要がある。GAS の XFrameOptionsMode は DEFAULT（google 系のみ許可）か
+    // ALLOWALL（全許可）の2値のみで、特定オリジン（GitHub Pages ドメイン）への限定はできない。
+    // そのため PWA シェル運用では ALLOWALL が必須。詳細と緩和策は docs/B3_TOKEN_IFRAME_HARDENING.md 参照。
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
     .setFaviconUrl('https://drive.google.com/uc?id=1zNSkBUKrzxX4TDeDpcXZ-jKtDtv0c4Yn&.png');
@@ -850,11 +854,12 @@ function generateNewsletterPdf(mondayDateStr) {
       headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() }
     }).getBlob().setName(fileName);
 
-    const folder = DriveApp.getRootFolder();
-    const existing = folder.getFilesByName(fileName);
+    // drive.file 運用: getRootFolder() ではなくトップレベルの DriveApp API を使う
+    // （createFile は My Drive 直下にアプリ所有ファイルを作成、検索はアプリ作成物のみが対象）。
+    const existing = DriveApp.getFilesByName(fileName);
     while (existing.hasNext()) existing.next().setTrashed(true);
 
-    const pdfFile = folder.createFile(blob);
+    const pdfFile = DriveApp.createFile(blob);
     pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
     logInfo(`学級通信PDF生成: ${fileName}`);
@@ -932,7 +937,7 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
     return { success: true, message: `「${courseName}」に学級通信を投稿しました！` };
   } catch (e) {
     logError('postNewsletterToClassroomFromWeb', e);
-    return { success: false, error: e.message };
+    return { success: false, error: describeAuthError_(e, 'Google Classroom 連携') };
   }
 }
 

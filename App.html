@@ -638,7 +638,9 @@
                                 </div>
                             </div>
                             <p style="font-size:0.75rem; color:var(--text-hint); margin-top:6px;">
-                                行事予定PDFフォルダの中に学校名のサブフォルダを作ると、「行事予定」タブで学校ごとにグループ表示されます。
+                                <span style="color:#b26a00;">※ このフォルダID設定は段階的に廃止予定です。</span>
+                                アクセス権を <code>drive.file</code> に最小化したため、指導計画PDFは「Google Driveから選ぶ」（Picker）で追加してください。
+                                行事予定PDFは「行事予定」タブの「PDFを追加」でアプリ専用フォルダに保存され、学校名を入力するとタブ内で学校ごとにグループ表示されます。
                             </p>
                         </div>
 
@@ -1215,8 +1217,6 @@
                             <button class="btn btn-outline btn-sm" onclick="openGooglePicker('unit')"><span
                                     class="material-symbols-outlined fs-6">add_to_drive</span>
                                 Google Driveから選ぶ</button>
-                            <button class="btn btn-outline btn-sm" onclick="addFolderPdfs('unit')"><span
-                                    class="material-symbols-outlined fs-6">folder</span> 設定フォルダから追加</button>
                         </div>
                         <div class="pdf-queue" id="unitQueue" style="display:none;">
                             <div class="pdf-queue-header">
@@ -1268,7 +1268,7 @@
                                     class="material-symbols-outlined fs-6">add_to_drive</span>
                                 Google Driveから選ぶ</button>
                             <button class="btn btn-outline btn-sm" onclick="addFolderPdfs('event')"><span
-                                    class="material-symbols-outlined fs-6">folder</span> 設定フォルダから追加</button>
+                                    class="material-symbols-outlined fs-6">folder</span> ライブラリから追加</button>
                         </div>
                         <div class="pdf-queue" id="eventQueue" style="display:none;">
                             <div class="pdf-queue-header">
