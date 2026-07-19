@@ -97,7 +97,7 @@ const POSTED_SCHEDULE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14日
  */
 function hasRecentlyPostedSchedule_(fingerprint) {
   try {
-    const raw = PropertiesService.getScriptProperties().getProperty(SP_KEY_POSTED_SCHEDULE_LOG);
+    const raw = tGetProp_(SP_KEY_POSTED_SCHEDULE_LOG);
     if (!raw) return false;
     const log = JSON.parse(raw);
     const ts = log[fingerprint];
@@ -113,13 +113,12 @@ function hasRecentlyPostedSchedule_(fingerprint) {
  */
 function recordPostedSchedule_(fingerprint) {
   try {
-    const props = PropertiesService.getScriptProperties();
     let log = {};
-    try { log = JSON.parse(props.getProperty(SP_KEY_POSTED_SCHEDULE_LOG) || '{}'); } catch (e) {}
+    try { log = JSON.parse(tGetProp_(SP_KEY_POSTED_SCHEDULE_LOG) || '{}'); } catch (e) {}
     const now = Date.now();
     log[fingerprint] = now;
     Object.keys(log).forEach(k => { if (now - log[k] >= POSTED_SCHEDULE_TTL_MS) delete log[k]; });
-    props.setProperty(SP_KEY_POSTED_SCHEDULE_LOG, JSON.stringify(log));
+    tSetProp_(SP_KEY_POSTED_SCHEDULE_LOG, JSON.stringify(log));
   } catch (e) {
     logError('recordPostedSchedule_', e);
   }
@@ -229,7 +228,7 @@ function postScheduleToClassroom_core_(options) {
 
     // 担当学年が1年生の場合は、予定部分の漢字をすべてひらがなに自動変換する（子どもが自分で読めるように）。
     // Gemini未設定・変換失敗時は convertTextToHiragana_ が元の文章を返すため、投稿処理は継続する。
-    const grade = parseInt(PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_GRADE), 10);
+    const grade = parseInt(tGetProp_(SCRIPT_PROP_GRADE), 10);
     if (grade === 1 && typeof convertTextToHiragana_ === 'function') {
       postText = convertTextToHiragana_(postText);
     }

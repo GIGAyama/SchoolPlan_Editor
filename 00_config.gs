@@ -38,7 +38,7 @@ const SCRIPT_PROP_ACTIVE_CLASS = 'sp_activeClassSheet'; // アクティブ学級
  * @returns {boolean}
  */
 function isMultiClassEnabled_() {
-  return PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_MULTICLASS_ENABLED) === 'true';
+  return tGetProp_(SCRIPT_PROP_MULTICLASS_ENABLED) === 'true';
 }
 
 /**
@@ -47,7 +47,7 @@ function isMultiClassEnabled_() {
  */
 function getClassList_() {
   try {
-    const json = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_CLASS_LIST);
+    const json = tGetProp_(SCRIPT_PROP_CLASS_LIST);
     const list = json ? JSON.parse(json) : [];
     return Array.isArray(list) ? list : [];
   } catch (e) {
@@ -65,7 +65,7 @@ function getClassList_() {
 function resolveDbSheet_(ss) {
   ss = ss || (typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet());
   if (isMultiClassEnabled_()) {
-    const active = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_ACTIVE_CLASS);
+    const active = tGetProp_(SCRIPT_PROP_ACTIVE_CLASS);
     if (active && active !== SHEET_NAME_DATABASE) {
       const sheet = ss.getSheetByName(active);
       if (sheet) return sheet;

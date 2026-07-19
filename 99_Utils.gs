@@ -551,7 +551,7 @@ function executeServerFunctionForModal(functionName) {
  * 戻り値: [[時程, 朝学習, 1校時, 2校時, 3校時, 4校時, 5校時, 6校時], ...] (月〜金の5行)
  */
 function getTimetableData_() {
-  const savedJson = PropertiesService.getScriptProperties().getProperty('fixedTimetableData');
+  const savedJson = tGetProp_('fixedTimetableData'); // 個人設定（UserProperties→ScriptProperties）
   if (savedJson) {
     try {
       const parsed = JSON.parse(savedJson);

@@ -369,7 +369,7 @@ function processSinglePdf(file) {
   const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
   const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
   const apiKey = getApiKey_();
-  const grade = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_GRADE) || '';
+  const grade = tGetProp_(SCRIPT_PROP_GRADE) || '';
   const gradeContext = grade ? `対象学年は${grade}です。` : '';
   const prompt = buildUnitMasterPrompt_(gradeContext);
   logInfo(`PDF処理中: ${file.getName()}`);
@@ -1004,7 +1004,7 @@ function extractUnitsFromPdfForWeb(fileRef) {
   try {
     const { blob, name } = getPdfBlobFromRef_(fileRef);
     const apiKey = getApiKey_();
-    const grade = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_GRADE) || '';
+    const grade = tGetProp_(SCRIPT_PROP_GRADE) || '';
     const gradeContext = grade ? `対象学年は${grade}です。` : '';
     const prompt = buildUnitMasterPrompt_(gradeContext);
 

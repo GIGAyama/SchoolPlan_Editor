@@ -18,6 +18,59 @@ const SP_KEY_LEGACY_SPREADSHEET_ID = 'SPREADSHEET_ID';
 // ScriptProperties: 新規DB作成時に複製するテンプレートのスプレッドシートID（配布元が設定）
 const SP_KEY_DB_TEMPLATE_ID = 'sp_dbTemplateId';
 
+// ===================================================
+// ===== テナント（ユーザー別）プロパティ・アクセサ =====
+// ===================================================
+// 個人設定は UserProperties（Googleアカウント単位）に保存する。
+// 読み取りは UserProperties を優先し、無ければ ScriptProperties へフォールバックする。
+// これにより従来のバインド型（設定が ScriptProperties にある）から移行しても
+// 設定が失われず、ユーザーが保存し直すと自然に UserProperties へ移る。
+
+/**
+ * ユーザー別プロパティを取得します（UserProperties→ScriptProperties の順、無ければ null）。
+ * PropertiesService.getProperty と同じく、未設定時は null を返します。
+ * @param {string} key
+ * @returns {?string}
+ */
+function tGetProp_(key) {
+  try {
+    const v = PropertiesService.getUserProperties().getProperty(key);
+    if (v !== null && v !== undefined) return v;
+  } catch (e) { /* UserProperties 不可時はフォールバックへ */ }
+  try {
+    return PropertiesService.getScriptProperties().getProperty(key);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * ユーザー別プロパティを1件保存します。
+ * @param {string} key
+ * @param {string} value
+ */
+function tSetProp_(key, value) {
+  PropertiesService.getUserProperties().setProperty(key, value);
+}
+
+/**
+ * ユーザー別プロパティを一括保存します。
+ * @param {Object} obj キー・値のオブジェクト
+ */
+function tSetProps_(obj) {
+  PropertiesService.getUserProperties().setProperties(obj, false);
+}
+
+/**
+ * ユーザー別プロパティを1件削除します（未設定時は無視）。
+ * @param {string} key
+ */
+function tDeleteProp_(key) {
+  try {
+    PropertiesService.getUserProperties().deleteProperty(key);
+  } catch (e) { /* 未設定時は無視 */ }
+}
+
 /**
  * このユーザー個別の対象スプレッドシートIDを取得します（未設定なら空文字）。
  * @returns {string}

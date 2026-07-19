@@ -21,10 +21,9 @@ const SP_KEY_GEMINI_MODEL_NAME  = 'sp_geminiModelName';
  */
 function getAppSettings() {
   try {
-    const props = PropertiesService.getScriptProperties();
-
+    // 個人設定はユーザー別プロパティから読む（tGetProp_: UserProperties→ScriptPropertiesの順）
     const getVal = (spKey) => {
-      return props.getProperty(spKey) || '';
+      return tGetProp_(spKey) || '';
     };
 
     const apiKey = getVal(SP_KEY_GEMINI_API_KEY);
@@ -41,9 +40,9 @@ function getAppSettings() {
             ? apiKey.slice(0, 2) + '••••••••••••••••' + apiKey.slice(-2)
             : '••••••••')
         : '',
-      geminiModelName  : props.getProperty(SP_KEY_GEMINI_MODEL_NAME) || 'gemini-2.5-flash',
-      grade            : props.getProperty(SCRIPT_PROP_GRADE) || '3',
-      moduleEnabled    : props.getProperty('moduleEnabled') === 'true'
+      geminiModelName  : getVal(SP_KEY_GEMINI_MODEL_NAME) || 'gemini-2.5-flash',
+      grade            : getVal(SCRIPT_PROP_GRADE) || '3',
+      moduleEnabled    : tGetProp_('moduleEnabled') === 'true'
     };
   } catch(e) {
     logError('getAppSettings', e);
@@ -69,8 +68,6 @@ function saveAppSettings(settings) {
       }
     }
 
-    const props = PropertiesService.getScriptProperties();
-
     const propsToSave = {
       [SP_KEY_COURSE_NAME]         : settings.courseName       || '',
       [SP_KEY_POST_HOUR]           : settings.postHour         || '',
@@ -84,10 +81,11 @@ function saveAppSettings(settings) {
     if (newApiKey && !newApiKey.includes('•')) {
       propsToSave[SP_KEY_GEMINI_API_KEY] = newApiKey;
     }
-    props.setProperties(propsToSave, false);
+    // 個人設定はユーザー別プロパティへ保存
+    tSetProps_(propsToSave);
 
     // モジュール学習設定
-    props.setProperty('moduleEnabled', settings.moduleEnabled ? 'true' : 'false');
+    tSetProp_('moduleEnabled', settings.moduleEnabled ? 'true' : 'false');
 
     // 自動投稿トリガーを時刻設定に基づいて更新
     const postHour = parseInt(settings.postHour, 10);
@@ -142,8 +140,8 @@ function getCourseListForDashboard() {
  * @returns {string} 設定値
  */
 function getSetting(spKey) {
-  const props = PropertiesService.getScriptProperties();
-  return props.getProperty(spKey) || '';
+  // 個人設定はユーザー別プロパティから読む（UserProperties→ScriptPropertiesの順）
+  return tGetProp_(spKey) || '';
 }
 
 /**
@@ -171,9 +169,7 @@ function getCourseNameSafe_() {
  * @returns {string} モデル名（デフォルト 'gemini-2.5-flash'）
  */
 function getGeminiModelNameSafe_() {
-  const props = PropertiesService.getScriptProperties();
-  const modelName = props.getProperty(SP_KEY_GEMINI_MODEL_NAME);
-  return modelName || 'gemini-2.5-flash';
+  return getSetting(SP_KEY_GEMINI_MODEL_NAME) || 'gemini-2.5-flash';
 }
 
 /**
@@ -248,8 +244,6 @@ const SP_KEY_SETUP_WIZARD_DONE = 'sp_setupWizardDone';
  */
 function getSetupStatus() {
   try {
-    const props = PropertiesService.getScriptProperties();
-
     // データベースシートに日付行（年間カレンダー）が構築済みかを確認
     let hasCalendar = false;
     try {
@@ -267,12 +261,12 @@ function getSetupStatus() {
 
     return {
       success: true,
-      wizardDone: props.getProperty(SP_KEY_SETUP_WIZARD_DONE) === 'true',
-      hasApiKey: !!props.getProperty(SP_KEY_GEMINI_API_KEY),
-      hasGrade: !!props.getProperty(SCRIPT_PROP_GRADE),
-      hasPdfFolder: !!props.getProperty(SP_KEY_PDF_FOLDER_ID),
-      hasEventPdfFolder: !!props.getProperty(SP_KEY_EVENT_PDF_FOLDER_ID),
-      hasCourseName: !!props.getProperty(SP_KEY_COURSE_NAME),
+      wizardDone: tGetProp_(SP_KEY_SETUP_WIZARD_DONE) === 'true',
+      hasApiKey: !!tGetProp_(SP_KEY_GEMINI_API_KEY),
+      hasGrade: !!tGetProp_(SCRIPT_PROP_GRADE),
+      hasPdfFolder: !!tGetProp_(SP_KEY_PDF_FOLDER_ID),
+      hasEventPdfFolder: !!tGetProp_(SP_KEY_EVENT_PDF_FOLDER_ID),
+      hasCourseName: !!tGetProp_(SP_KEY_COURSE_NAME),
       hasCalendar: hasCalendar
     };
   } catch (e) {
@@ -286,7 +280,7 @@ function getSetupStatus() {
  */
 function markSetupWizardDone() {
   try {
-    PropertiesService.getScriptProperties().setProperty(SP_KEY_SETUP_WIZARD_DONE, 'true');
+    tSetProp_(SP_KEY_SETUP_WIZARD_DONE, 'true');
     return { success: true };
   } catch (e) {
     logError('markSetupWizardDone', e);

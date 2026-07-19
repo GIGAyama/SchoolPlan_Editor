@@ -16,7 +16,7 @@
  * @returns {string}
  */
 function getActiveClassSheetName_() {
-  const active = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_ACTIVE_CLASS);
+  const active = tGetProp_(SCRIPT_PROP_ACTIVE_CLASS);
   if (active === SHEET_NAME_DATABASE) return SHEET_NAME_DATABASE;
   if (active && getClassList_().some(c => c.sheetName === active)) return active;
   return SHEET_NAME_DATABASE;
@@ -27,7 +27,7 @@ function getActiveClassSheetName_() {
  * @param {Array} list
  */
 function saveClassList_(list) {
-  PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_CLASS_LIST, JSON.stringify(list));
+  tSetProp_(SCRIPT_PROP_CLASS_LIST, JSON.stringify(list));
 }
 
 /**
@@ -35,12 +35,11 @@ function saveClassList_(list) {
  * @param {Array} list 学級リスト（この配列を直接更新します）
  */
 function snapshotActiveClassSettings_(list) {
-  const props = PropertiesService.getScriptProperties();
   const activeSheet = getActiveClassSheetName_();
   const entry = list.find(c => c.sheetName === activeSheet);
   if (!entry) return;
-  entry.grade = props.getProperty(SCRIPT_PROP_GRADE) || entry.grade || '3';
-  const sh = props.getProperty(SP_KEY_STANDARD_HOURS);
+  entry.grade = tGetProp_(SCRIPT_PROP_GRADE) || entry.grade || '3';
+  const sh = tGetProp_(SP_KEY_STANDARD_HOURS);
   if (sh) {
     try { entry.standardHours = JSON.parse(sh); } catch (e) { /* 破損時は既存値を維持 */ }
   }
@@ -51,13 +50,12 @@ function snapshotActiveClassSettings_(list) {
  * @param {Object} entry 学級エントリ
  */
 function applyClassSettings_(entry) {
-  const props = PropertiesService.getScriptProperties();
   const grade = String(entry.grade || '3');
-  props.setProperty(SCRIPT_PROP_GRADE, grade);
+  tSetProp_(SCRIPT_PROP_GRADE, grade);
   const hours = (entry.standardHours && entry.standardHours.length)
     ? entry.standardHours
     : getStandardHoursMaster(parseInt(grade, 10));
-  props.setProperty(SP_KEY_STANDARD_HOURS, JSON.stringify(hours));
+  tSetProp_(SP_KEY_STANDARD_HOURS, JSON.stringify(hours));
 }
 
 /**
@@ -112,7 +110,6 @@ function setMultiClassEnabledFromWeb(enabled) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(10000);
-    const props = PropertiesService.getScriptProperties();
 
     if (enabled) {
       let list = getClassList_();
@@ -120,20 +117,20 @@ function setMultiClassEnabledFromWeb(enabled) {
         // 既存環境の設定をそのまま1つ目の学級として引き継ぐ
         let standardHours = null;
         try {
-          const sh = props.getProperty(SP_KEY_STANDARD_HOURS);
+          const sh = tGetProp_(SP_KEY_STANDARD_HOURS);
           if (sh) standardHours = JSON.parse(sh);
         } catch (e) { /* 破損時はnullのまま（マスタから補完される） */ }
         list.unshift({
           name: '学級1',
           sheetName: SHEET_NAME_DATABASE,
-          grade: props.getProperty(SCRIPT_PROP_GRADE) || '3',
+          grade: tGetProp_(SCRIPT_PROP_GRADE) || '3',
           standardHours: standardHours
         });
         saveClassList_(list);
       }
-      props.setProperty(SCRIPT_PROP_MULTICLASS_ENABLED, 'true');
-      if (!props.getProperty(SCRIPT_PROP_ACTIVE_CLASS)) {
-        props.setProperty(SCRIPT_PROP_ACTIVE_CLASS, SHEET_NAME_DATABASE);
+      tSetProp_(SCRIPT_PROP_MULTICLASS_ENABLED, 'true');
+      if (!tGetProp_(SCRIPT_PROP_ACTIVE_CLASS)) {
+        tSetProp_(SCRIPT_PROP_ACTIVE_CLASS, SHEET_NAME_DATABASE);
       }
       logInfo('複数学級モードを有効にしました。');
     } else {
@@ -143,8 +140,8 @@ function setMultiClassEnabledFromWeb(enabled) {
       saveClassList_(list);
       const baseEntry = list.find(c => c.sheetName === SHEET_NAME_DATABASE);
       if (baseEntry) applyClassSettings_(baseEntry);
-      props.setProperty(SCRIPT_PROP_ACTIVE_CLASS, SHEET_NAME_DATABASE);
-      props.setProperty(SCRIPT_PROP_MULTICLASS_ENABLED, 'false');
+      tSetProp_(SCRIPT_PROP_ACTIVE_CLASS, SHEET_NAME_DATABASE);
+      tSetProp_(SCRIPT_PROP_MULTICLASS_ENABLED, 'false');
       logInfo('複数学級モードを無効にしました（学級シートは残っています）。');
     }
     return getMultiClassSettings();
@@ -230,12 +227,11 @@ function deleteClassFromWeb(sheetName) {
     const idx = list.findIndex(c => c.sheetName === sheetName);
     if (idx === -1) throw new Error('指定された学級が見つかりません。');
 
-    const props = PropertiesService.getScriptProperties();
     // アクティブ学級を削除する場合は先に既定学級へ切り替える
     if (getActiveClassSheetName_() === sheetName) {
       const baseEntry = list.find(c => c.sheetName === SHEET_NAME_DATABASE);
       if (baseEntry) applyClassSettings_(baseEntry);
-      props.setProperty(SCRIPT_PROP_ACTIVE_CLASS, SHEET_NAME_DATABASE);
+      tSetProp_(SCRIPT_PROP_ACTIVE_CLASS, SHEET_NAME_DATABASE);
     }
 
     const removed = list.splice(idx, 1)[0];
@@ -280,7 +276,7 @@ function switchActiveClassFromWeb(sheetName) {
 
     // 現在の学年・標準時数を切替前の学級へ保存してから、切替先の設定を適用
     snapshotActiveClassSettings_(list);
-    PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_ACTIVE_CLASS, sheetName);
+    tSetProp_(SCRIPT_PROP_ACTIVE_CLASS, sheetName);
     applyClassSettings_(target);
     saveClassList_(list);
 

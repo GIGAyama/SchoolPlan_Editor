@@ -386,7 +386,7 @@ function getMonthlyHoursData(year, month) {
     const dbData = dbSheet.getDataRange().getValues();
 
     // モジュール学習設定（朝学習の1/3時間加算。週・年間の集計と同じルール）
-    const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
+    const moduleEnabled = tGetProp_('moduleEnabled') === 'true';
     const moduleSubjects = moduleEnabled ? getModuleCountableSubjects_() : null;
 
     const hoursBySubject = {};
@@ -439,7 +439,7 @@ function getAnnualHoursData(academicYear) {
     const dbData = dbSheet.getDataRange().getValues();
 
     // モジュール学習設定（朝学習の1/3時間加算。週・月別の集計と同じルール）
-    const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
+    const moduleEnabled = tGetProp_('moduleEnabled') === 'true';
     const moduleSubjects = moduleEnabled ? getModuleCountableSubjects_() : null;
 
     // hoursData: { "国語": { "4": 15.333, "5": 20, ... }, "算数": ... }
@@ -1098,8 +1098,7 @@ const SP_KEY_TIMETABLE = 'fixedTimetableData';
  */
 function getTimetableForEditor() {
   try {
-    const props = PropertiesService.getScriptProperties();
-    const savedJson = props.getProperty(SP_KEY_TIMETABLE);
+    const savedJson = tGetProp_(SP_KEY_TIMETABLE);
 
     if (savedJson) {
       return { success: true, data: JSON.parse(savedJson) };
@@ -1143,7 +1142,7 @@ function saveTimetableFromEditor(timetableData) {
       throw new Error('教科名の入力に誤りがあるため保存できません。\n' + errors.join('\n'));
     }
 
-    PropertiesService.getScriptProperties().setProperty(SP_KEY_TIMETABLE, JSON.stringify(timetableData));
+    tSetProp_(SP_KEY_TIMETABLE, JSON.stringify(timetableData));
 
     return { success: true, message: '固定時間割を保存しました。' };
   } catch (e) {
@@ -1447,12 +1446,11 @@ function getStandardHoursMaster(grade) {
  */
 function saveGrade(gradeNum) {
   try {
-    const props = PropertiesService.getScriptProperties();
-    props.setProperty(SCRIPT_PROP_GRADE, gradeNum.toString());
+    tSetProp_(SCRIPT_PROP_GRADE, gradeNum.toString());
 
     // 学年変更に伴い、標準時数をその学年のマスタで上書きする
     const newStandardHours = getStandardHoursMaster(gradeNum);
-    props.setProperty(SP_KEY_STANDARD_HOURS, JSON.stringify(newStandardHours));
+    tSetProp_(SP_KEY_STANDARD_HOURS, JSON.stringify(newStandardHours));
 
     // 複数学級モードでは、アクティブ学級のエントリにも学年・標準時数を保存する
     if (isMultiClassEnabled_()) {
@@ -1471,8 +1469,7 @@ function saveGrade(gradeNum) {
  */
 function getGrade() {
   try {
-    const props = PropertiesService.getScriptProperties();
-    const grade = props.getProperty(SCRIPT_PROP_GRADE) || "3"; // デフォルト3年
+    const grade = tGetProp_(SCRIPT_PROP_GRADE) || "3"; // デフォルト3年
     return { success: true, grade: parseInt(grade, 10) };
   } catch (e) {
     logError('getGrade', e);
@@ -1485,11 +1482,10 @@ function getGrade() {
  */
 function getStandardHours() {
   try {
-    const props = PropertiesService.getScriptProperties();
-    const saved = props.getProperty(SP_KEY_STANDARD_HOURS);
+    const saved = tGetProp_(SP_KEY_STANDARD_HOURS);
     if (saved) return { success: true, data: JSON.parse(saved) };
 
-    const grade = props.getProperty(SCRIPT_PROP_GRADE) || "3";
+    const grade = tGetProp_(SCRIPT_PROP_GRADE) || "3";
     const defaults = getStandardHoursMaster(grade);
     
     return { success: true, data: defaults };
@@ -1505,7 +1501,7 @@ function getStandardHours() {
 function saveStandardHours(data) {
   try {
     if (!data || !Array.isArray(data)) throw new Error('無効なデータ');
-    PropertiesService.getScriptProperties().setProperty(SP_KEY_STANDARD_HOURS, JSON.stringify(data));
+    tSetProp_(SP_KEY_STANDARD_HOURS, JSON.stringify(data));
 
     // 複数学級モードでは、アクティブ学級のエントリにも標準時数を保存する
     if (isMultiClassEnabled_()) {
@@ -1538,7 +1534,7 @@ function getHoursSummary(mondayStr) {
     const dbData = dbSheet.getDataRange().getValues();
 
     // モジュール学習設定
-    const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
+    const moduleEnabled = tGetProp_('moduleEnabled') === 'true';
 
     // 標準時数を取得（集計結果の表示と、モジュール学習のカウント対象判定に使用）
     const stdResult = getStandardHours();
@@ -1836,11 +1832,10 @@ const SP_KEY_TASK_REMINDER_HOUR    = 'sp_taskReminderHour';
  */
 function getTaskReminderSettings() {
   try {
-    const props = PropertiesService.getScriptProperties();
     return {
       success: true,
-      enabled: props.getProperty(SP_KEY_TASK_REMINDER_ENABLED) === 'true',
-      hour: parseInt(props.getProperty(SP_KEY_TASK_REMINDER_HOUR), 10) || 7
+      enabled: tGetProp_(SP_KEY_TASK_REMINDER_ENABLED) === 'true',
+      hour: parseInt(tGetProp_(SP_KEY_TASK_REMINDER_HOUR), 10) || 7
     };
   } catch (e) {
     logError('getTaskReminderSettings', e);
@@ -1860,9 +1855,8 @@ function saveTaskReminderSettings(enabled, hour) {
     if (isNaN(h) || h < 0 || h > 23) {
       throw new Error('送信時刻は0〜23の整数で指定してください。');
     }
-    const props = PropertiesService.getScriptProperties();
-    props.setProperty(SP_KEY_TASK_REMINDER_ENABLED, enabled ? 'true' : 'false');
-    props.setProperty(SP_KEY_TASK_REMINDER_HOUR, String(h));
+    tSetProp_(SP_KEY_TASK_REMINDER_ENABLED, enabled ? 'true' : 'false');
+    tSetProp_(SP_KEY_TASK_REMINDER_HOUR, String(h));
 
     deleteTriggers_('sendTaskReminderMail');
     if (enabled) {
@@ -2251,7 +2245,7 @@ function getHoursSimulation(academicYear) {
     }
 
     // モジュール学習設定（他の時数集計APIと同じルールで朝学習の1/3時間を加算）
-    const moduleEnabled = PropertiesService.getScriptProperties().getProperty('moduleEnabled') === 'true';
+    const moduleEnabled = tGetProp_('moduleEnabled') === 'true';
     const moduleSubjects = moduleEnabled ? getModuleCountableSubjects_(standardHours) : null;
 
     const today = new Date();
