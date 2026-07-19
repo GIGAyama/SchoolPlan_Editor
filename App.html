@@ -860,6 +860,13 @@
                                     style="vertical-align:text-bottom;">edit_note</span>
                                 フリーテキスト解析（議事録等）
                             </label>
+                            <label
+                                style="font-weight: bold; font-size: 0.85rem; cursor: pointer; color: var(--text-sub);">
+                                <input type="radio" name="aiTaskMode" value="pdf" onchange="toggleAiTaskMode()"> <span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">picture_as_pdf</span>
+                                PDF解析（行事の実施案等）
+                            </label>
                         </div>
 
                         <!-- モード1: 予定解析入力部 -->
@@ -889,6 +896,47 @@
                                         class="material-symbols-outlined fs-6">rocket_launch</span>
                                     AI要約＆抽出を実行</button>
                             </div>
+                        </div>
+
+                        <!-- モード3: PDF解析入力部（行事の実施案等） -->
+                        <div id="aiTaskPdfMode" style="display:none;">
+                            <label
+                                style="font-size:0.85rem; display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
+                                行事の実施案などのPDFファイル（15MBまで）
+                                <input type="file" id="aiTaskPdfFile" class="form-control form-control-sm"
+                                    accept="application/pdf,.pdf">
+                            </label>
+
+                            <!-- 既存ロジックとの組み合わせ（任意） -->
+                            <div
+                                style="margin-top:6px; padding:10px; background: var(--surface-2); border:1px dashed var(--border); border-radius:8px;">
+                                <label style="font-weight:bold; font-size:0.8rem; cursor:pointer; display:block;">
+                                    <input type="checkbox" id="aiTaskPdfCombine" onchange="toggleAiTaskPdfCombine()">
+                                    既存の情報と組み合わせて解析する（任意）
+                                </label>
+                                <div id="aiTaskPdfCombineArea" style="display:none; margin-top:8px;">
+                                    <div
+                                        style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:0.82rem;">
+                                        <span>入力済みの予定を参照:</span>
+                                        <input type="date" id="aiTaskPdfStartDate" class="form-control form-control-sm"
+                                            style="width:auto;">
+                                        <span>〜</span>
+                                        <input type="date" id="aiTaskPdfEndDate" class="form-control form-control-sm"
+                                            style="width:auto;">
+                                    </div>
+                                    <small class="text-muted d-block mt-1 mb-2">※期間を空欄にすると予定は参照しません。</small>
+                                    <textarea id="aiTaskPdfExtraText" class="form-control" rows="2"
+                                        placeholder="補足メモや議事録など、あわせて考慮したいテキスト（任意）"></textarea>
+                                </div>
+                            </div>
+
+                            <div style="text-align: right; margin-top: 8px;">
+                                <button class="btn btn-primary btn-sm d-flex align-items-center gap-1 ms-auto"
+                                    onclick="runAiTaskExtraction('pdf')"><span
+                                        class="material-symbols-outlined fs-6">rocket_launch</span>
+                                    PDFからAI抽出を実行</button>
+                            </div>
+                            <small class="text-muted d-block mt-1">※PDFはアップロード解析され、保存はされません。抽出結果は下のプレビューで確認・修正できます。</small>
                         </div>
 
                         <!-- 抽出結果プレビュー領域 -->

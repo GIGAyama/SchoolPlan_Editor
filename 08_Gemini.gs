@@ -128,6 +128,57 @@ function callGeminiAPI_(prompt) {
 }
 
 /**
+ * 指定期間の週案・行事データを、AI解析用のテキストに整形して返します。
+ * 該当データが1件も無い場合は空文字を返します（呼び出し側で扱いを決めます）。
+ * タスク抽出（週案モード）と、PDFモードで既存の予定を併用する際に共用します。
+ * @param {string} startDateStr "YYYY-MM-DD"
+ * @param {string} endDateStr "YYYY-MM-DD"
+ * @returns {string} 整形済みのスケジュールテキスト
+ */
+function buildScheduleContextText_(startDateStr, endDateStr) {
+  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const dbSheet = getDbSheet_(ss);
+  if (!dbSheet) throw new Error('データベースシートが見つかりません');
+
+  // 指定期間のデータを取得（日付、行事、各教科・活動内容）
+  const dbData = dbSheet.getDataRange().getValues();
+  const cols = getDbColumns();
+  const startDate = new Date(startDateStr);
+  const endDate = new Date(endDateStr);
+  startDate.setHours(0, 0, 0, 0);
+  endDate.setHours(23, 59, 59, 999);
+
+  let scheduleText = "";
+
+  for (let i = 1; i < dbData.length; i++) {
+    const row = dbData[i];
+    const d = row[cols.DATE - 1];
+    if (d instanceof Date && d >= startDate && d <= endDate) {
+      const dateStr = Utilities.formatDate(d, 'JST', 'yyyy-MM-dd');
+      scheduleText += `\n【${dateStr}】\n`;
+      if (row[cols.EVENT - 1]) scheduleText += `- 行事: ${row[cols.EVENT - 1]}\n`;
+      if (cols.MORNING && row[cols.MORNING - 1]) scheduleText += `- 朝学習: ${row[cols.MORNING - 1]}\n`;
+
+      // 1〜6校時（学習内容は列マップから取得し、シートの列順に依存しない）
+      for (let n = 1; n <= 6; n++) {
+        const pCol = cols['PERIOD' + n];
+        const cCol = cols['CONTENT' + n];
+        if (!pCol || !cCol) continue;
+        const subject = row[pCol - 1];
+        const content = row[cCol - 1];
+        if (subject && content) {
+          scheduleText += `- ${n}校時 [${subject}] 内容: ${content}\n`;
+        }
+      }
+
+      if (cols.AFTERSCHOOL && row[cols.AFTERSCHOOL - 1]) scheduleText += `- 放課後: ${row[cols.AFTERSCHOOL - 1]}\n`;
+    }
+  }
+
+  return scheduleText;
+}
+
+/**
  * [Webアプリ API] スケジュール（週案）からタスクを抽出
  * @param {string} startDateStr "YYYY-MM-DD"
  * @param {string} endDateStr "YYYY-MM-DD"
@@ -135,44 +186,7 @@ function callGeminiAPI_(prompt) {
  */
 function extractTasksFromSchedule_WebApp(startDateStr, endDateStr) {
   try {
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
-    const dbSheet = getDbSheet_(ss);
-    if (!dbSheet) throw new Error('データベースシートが見つかりません');
-
-    // 指定期間のデータを取得（日付、行事、各教科・活動内容）
-    const dbData = dbSheet.getDataRange().getValues();
-    const cols = getDbColumns();
-    const startDate = new Date(startDateStr);
-    const endDate = new Date(endDateStr);
-    startDate.setHours(0,0,0,0);
-    endDate.setHours(23,59,59,999);
-
-    let scheduleText = "";
-
-    for (let i = 1; i < dbData.length; i++) {
-      const row = dbData[i];
-      const d = row[cols.DATE - 1];
-      if (d instanceof Date && d >= startDate && d <= endDate) {
-        const dateStr = Utilities.formatDate(d, 'JST', 'yyyy-MM-dd');
-        scheduleText += `\n【${dateStr}】\n`;
-        if (row[cols.EVENT - 1]) scheduleText += `- 行事: ${row[cols.EVENT - 1]}\n`;
-        if (cols.MORNING && row[cols.MORNING - 1]) scheduleText += `- 朝学習: ${row[cols.MORNING - 1]}\n`;
-        
-        // 1〜6校時（学習内容は列マップから取得し、シートの列順に依存しない）
-        for (let n = 1; n <= 6; n++) {
-          const pCol = cols['PERIOD' + n];
-          const cCol = cols['CONTENT' + n];
-          if (!pCol || !cCol) continue;
-          const subject = row[pCol - 1];
-          const content = row[cCol - 1];
-          if (subject && content) {
-            scheduleText += `- ${n}校時 [${subject}] 内容: ${content}\n`;
-          }
-        }
-
-        if (cols.AFTERSCHOOL && row[cols.AFTERSCHOOL - 1]) scheduleText += `- 放課後: ${row[cols.AFTERSCHOOL - 1]}\n`;
-      }
-    }
+    let scheduleText = buildScheduleContextText_(startDateStr, endDateStr);
 
     if (!scheduleText) {
       throw new Error('指定期間のスケジュールデータがありません。');
@@ -511,6 +525,129 @@ ${sanitizedText}
 
   } catch (e) {
     logError('extractTasksFromText', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * PDF（行事の実施案・実施要項等）からタスクを抽出するためのプロンプトを構築します。
+ * PDF解析は callGeminiApiRaw_ を利用し responseSchema を適用しないため、
+ * 出力するJSONの形式をプロンプト内で明示します（週案・フリーテキストの抽出項目と揃えます）。
+ * @param {string} todayDateStr 本日の日付 "yyyy-MM-dd"
+ * @param {string} contextText 併用する既存情報（週案の予定・議事録メモ等）。無ければ空文字
+ * @returns {string}
+ */
+function buildTaskPdfPrompt_(todayDateStr, contextText) {
+  const contextBlock = (contextText && contextText.trim())
+    ? `
+【併せて参照する既存の情報（入力済みの予定や議事録メモなど）】
+以下はユーザーが既に把握している予定・メモです。PDFの内容と照らし合わせ、関連するタスクは期日や準備物をより具体化してください。明らかに重複するタスクは1つにまとめてください。
+${contextText}
+`
+    : '';
+
+  return `あなたは有能な小学校教員のサポートAIです。（本日の日付: ${todayDateStr}）
+添付されたPDFファイルは、学校行事の「実施案」や「実施要項」などの資料です。
+このPDFを丁寧に読み取り、担当教員が事前に準備・対応すべき【タスク（準備・連絡・調整など）】を洗い出してください。
+${contextBlock}
+【抽出の観点】
+- 会場設営、印刷・配布物、保護者への連絡・通知、持ち物や服装の指示、係分担の確認・指示
+- 教材・器具・ICT機器の準備、外部との事前調整、下見、時程・しおりの作成 等
+- 提出物や締切、準備の期限が読み取れる場合は、それを踏まえてタスク化してください。
+
+【期日(dueDate)のルール】
+- PDFや併用情報から具体的な日付が特定できる場合は "YYYY-MM-DD" 形式で設定してください。
+- 「◯日前まで」等の相対的な締切は、行事日から逆算して具体的な日付にしてください。
+- 特定できない場合は空文字にしてください。
+
+【出力形式】
+必ず以下の項目を持つオブジェクトのJSON配列のみを出力してください。前後に説明文やコードブロック(\`\`\`)は付けないでください。
+[
+  {
+    "task": "タスクの具体的な内容",
+    "resource": "必要な準備物・リソース・補足（無ければ空文字）",
+    "dueDate": "YYYY-MM-DD形式の期日（特定できなければ空文字）",
+    "source": "発生源（行事名など。例: 運動会実施案）",
+    "priority": "高・中・低 のいずれか（保護者連絡や大きな行事など影響が大きいものは高）"
+  }
+]`;
+}
+
+/**
+ * [Webアプリ API] PDF（行事の実施案等）からタスクを抽出します。
+ * 既存の週案（スケジュール）やフリーテキストの情報と組み合わせて解析することもできます。
+ * 抽出結果は書き込まず、プレビュー用の配列として返します（週案・テキストモードと同一の形式）。
+ * @param {{fileId?: string, base64?: string, name?: string}} fileRef PDFの参照（Drive fileId またはアップロードbase64）
+ * @param {{scheduleStart?: string, scheduleEnd?: string, extraText?: string}} [options] 併用する既存情報
+ * @returns {Object} { success: boolean, fileName?: string, tasks?: Object[], error?: string }
+ */
+function extractTasksFromPdf_WebApp(fileRef, options) {
+  try {
+    options = options || {};
+    const { blob, name } = getPdfBlobFromRef_(fileRef);
+    const apiKey = getApiKey_();
+    const todayDateStr = Utilities.formatDate(new Date(), 'JST', 'yyyy-MM-dd');
+
+    // ===== 既存ロジック（週案の予定・フリーテキスト）との組み合わせ =====
+    let contextText = '';
+    if (options.scheduleStart && options.scheduleEnd) {
+      try {
+        const scheduleText = buildScheduleContextText_(options.scheduleStart, options.scheduleEnd);
+        if (scheduleText) contextText += `\n[入力済みの予定]\n${scheduleText}`;
+      } catch (ctxErr) {
+        // 予定の取得に失敗してもPDF解析自体は継続する
+        logInfo(`タスクPDF抽出: 予定コンテキストの取得をスキップしました（${ctxErr.message}）`);
+      }
+    }
+    if (options.extraText && String(options.extraText).trim()) {
+      let extra = String(options.extraText).trim();
+      // セキュリティ: 併用テキストの長さを制限
+      if (extra.length > 5000) extra = extra.substring(0, 5000) + '\n...(以降省略)';
+      contextText += `\n[メモ・議事録など]\n${extra}`;
+    }
+    if (contextText.length > 10000) {
+      contextText = contextText.substring(0, 10000) + '\n...(以降省略)';
+    }
+
+    const prompt = buildTaskPdfPrompt_(todayDateStr, contextText);
+
+    const buildContinuation = (collected) => {
+      const items = collected.map(t => `「${t.task}」`).join(', ');
+      return `${prompt}
+
+【重要な追加指示】
+前回のリクエストで出力がトークン上限に達し、途中で切れてしまいました。
+以下の ${collected.length} 件のタスクは既に取得済みです:
+${items}
+
+上記のタスクは絶対に出力しないでください。まだ出力されていない残りのタスクのみを、同じJSON配列形式で出力してください。`;
+    };
+
+    const extracted = callGeminiApiChunked_(prompt, apiKey, [blob], buildContinuation);
+    if (!extracted || !Array.isArray(extracted)) {
+      throw new Error(`PDF「${name}」からタスクを抽出できませんでした。APIレスポンスが不正です。`);
+    }
+
+    // 週案・テキストモードと同じ {task, resource, dueDate, source, priority} 形式に正規化
+    const tasks = [];
+    extracted.forEach(item => {
+      if (!item || !item.task) return;
+      const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate || '') ? item.dueDate : '';
+      const priority = ['高', '中', '低'].indexOf(item.priority) >= 0 ? item.priority : '中';
+      tasks.push({
+        task: String(item.task).trim(),
+        resource: String(item.resource || '').trim(),
+        dueDate: dueDate,
+        source: String(item.source || name).trim(),
+        priority: priority
+      });
+    });
+
+    logInfo(`タスクPDF抽出: PDF「${name}」から ${tasks.length} 件のタスクを抽出しました。`);
+    return { success: true, fileName: name, tasks: tasks };
+
+  } catch (e) {
+    logError('extractTasksFromPdf', e);
     return { success: false, error: e.message };
   }
 }

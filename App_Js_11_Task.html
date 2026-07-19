@@ -11,7 +11,16 @@
         var mode = document.querySelector('input[name="aiTaskMode"]:checked').value;
         document.getElementById('aiTaskScheduleMode').style.display = (mode === 'schedule') ? 'block' : 'none';
         document.getElementById('aiTaskTextMode').style.display = (mode === 'text') ? 'block' : 'none';
+        var pdfMode = document.getElementById('aiTaskPdfMode');
+        if (pdfMode) pdfMode.style.display = (mode === 'pdf') ? 'block' : 'none';
         cancelAiTaskPreview(); // モード切替時はプレビューを隠す
+    }
+
+    /** PDFモードの「既存の情報と組み合わせる」開閉 */
+    function toggleAiTaskPdfCombine() {
+        var chk = document.getElementById('aiTaskPdfCombine');
+        var area = document.getElementById('aiTaskPdfCombineArea');
+        if (area) area.style.display = (chk && chk.checked) ? 'block' : 'none';
     }
 
     // ===== タスクロードと描画 =====
@@ -633,6 +642,50 @@
                 .withSuccessHandler(handleAiExtractionResult)
                 .withFailureHandler(handleAiExtractionError)
                 .extractTasksFromText_WebApp(text);
+        } else if (mode === 'pdf') {
+            runAiTaskPdfExtraction_();
+        }
+    }
+
+    /** PDFモードのAI抽出（ファイル読み込み→既存情報との組み合わせオプション付きでサーバ送信） */
+    async function runAiTaskPdfExtraction_() {
+        var fileInput = document.getElementById('aiTaskPdfFile');
+        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+            showToast('error', '解析するPDFファイルを選択してください。');
+            return;
+        }
+        var file = fileInput.files[0];
+        if (typeof PDF_MAX_FILE_BYTES === 'number' && file.size > PDF_MAX_FILE_BYTES) {
+            showToast('error', '15MBを超えるファイルは解析できません。');
+            return;
+        }
+
+        // 既存ロジックとの組み合わせオプションを収集
+        var options = {};
+        var combine = document.getElementById('aiTaskPdfCombine');
+        if (combine && combine.checked) {
+            var start = document.getElementById('aiTaskPdfStartDate').value;
+            var end = document.getElementById('aiTaskPdfEndDate').value;
+            if (start && end) {
+                if (start > end) {
+                    showToast('error', '参照する予定の開始日は終了日より前にしてください。');
+                    return;
+                }
+                options.scheduleStart = start;
+                options.scheduleEnd = end;
+            }
+            var extra = document.getElementById('aiTaskPdfExtraText').value;
+            if (extra && extra.trim()) options.extraText = extra.trim();
+        }
+
+        try {
+            var base64 = await readFileAsBase64_(file);
+            google.script.run
+                .withSuccessHandler(handleAiExtractionResult)
+                .withFailureHandler(handleAiExtractionError)
+                .extractTasksFromPdf_WebApp({ base64: base64, name: file.name }, options);
+        } catch (e) {
+            showToast('error', 'PDFの読み込みに失敗しました: ' + e.message);
         }
     }
 
