@@ -263,6 +263,8 @@
 
     // ===== 設定ビュー =====
     function loadSettingsView() {
+        // 使用中のデータベース（マルチテナント）の現在状態を表示
+        if (typeof loadTenantInfo === 'function') loadTenantInfo();
         google.script.run
             .withSuccessHandler(function (settings) {
                 if (settings) {

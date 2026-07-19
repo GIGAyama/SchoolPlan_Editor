@@ -443,6 +443,48 @@
                 </button>
             </div>
             <div style="padding: 0 20px 20px;">
+                <!-- 使用中のデータベース（マルチテナント） -->
+                <div class="integration-section" id="tenantDbSection">
+                    <div class="integration-header">
+                        <span class="integration-icon"><span class="material-symbols-outlined fs-6">database</span>
+                        </span>
+                        <span class="integration-title">使用中のデータベース</span>
+                    </div>
+                    <div class="integration-body" style="display:flex; flex-direction:column; gap:16px;">
+                        <div
+                            style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
+                            <div style="display:flex; flex-direction:column; gap:6px; font-size:0.85rem;">
+                                <div><span style="color:var(--text-sub);">データベース名：</span><strong
+                                        id="tenantDbName">読み込み中...</strong></div>
+                                <div style="word-break:break-all;"><span
+                                        style="color:var(--text-sub);">スプレッドシートID：</span><span id="tenantDbId"
+                                        style="font-family:monospace; font-size:0.8rem;">-</span></div>
+                                <div><span style="color:var(--text-sub);">ログイン中：</span><span
+                                        id="tenantDbEmail">-</span></div>
+                                <div id="tenantDbOpenWrap" style="margin-top:4px; display:none;">
+                                    <a id="tenantDbOpenLink" href="#" target="_blank" rel="noopener"
+                                        style="font-size:0.8rem;">スプレッドシートを開く ↗</a>
+                                </div>
+                            </div>
+                            <div
+                                style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:14px;">
+                                <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1"
+                                    onclick="switchMyDatabaseUI()"><span
+                                        class="material-symbols-outlined fs-6">swap_horiz</span> 別のシートに切替</button>
+                                <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1"
+                                    id="tenantCreateBtn" onclick="createMyDatabaseUI()"><span
+                                        class="material-symbols-outlined fs-6">add_circle</span> 新規作成</button>
+                                <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1"
+                                    onclick="unlinkMyDatabaseUI()"
+                                    style="color:var(--danger);border-color:var(--danger);"><span
+                                        class="material-symbols-outlined fs-6">link_off</span> 紐付け解除</button>
+                            </div>
+                            <p style="font-size:0.75rem; color:var(--text-hint); margin-top:10px;">
+                                このアプリはGoogleアカウントごとに専用のデータベース（スプレッドシート）を使用します。別の端末や再ログイン後も同じデータベースが使われます。
+                            </p>
+                        </div>
+                    </div>
+                </div>
                 <div class="integration-section">
                     <div class="integration-header">
                         <span class="integration-icon"><span class="material-symbols-outlined fs-6">settings</span>

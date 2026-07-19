@@ -464,9 +464,8 @@ function cleanupOrphanedTriggers() {
       deletedCount++;
     } else if (handlerName === TRIGGER_FUNCTION_NAME || handlerName === TRIGGER_FUNCTION_NAME_EVENT) {
       // 特定の非同期処理用トリガーが含まれている場合、キューが空なら不要とみなす
-      const props = PropertiesService.getScriptProperties();
-      const isEvtQueueEmpty = !props.getProperty(SCRIPT_PROP_EVENT_PDF_QUEUE);
-      const isPdfQueueEmpty = !props.getProperty(SCRIPT_PROP_PDF_QUEUE);
+      const isEvtQueueEmpty = !tGetProp_(SCRIPT_PROP_EVENT_PDF_QUEUE);
+      const isPdfQueueEmpty = !tGetProp_(SCRIPT_PROP_PDF_QUEUE);
       
       if (handlerName === TRIGGER_FUNCTION_NAME_EVENT && isEvtQueueEmpty) {
         ScriptApp.deleteTrigger(trigger);

@@ -534,4 +534,198 @@
             .generateAnnualCalendar(year, startMondayStr);
     }
 
+    // ===================================================
+    // ===== 使用中のデータベース（マルチテナント設定） =====
+    // ===================================================
+
+    /**
+     * 設定タブの「使用中のデータベース」セクションに現在のテナント状態を表示します。
+     * getTenantStatus()（11_Tenant.gs）の結果を用いてDB名・ID・ログインメールを描画し、
+     * テンプレート未設定時は「新規作成」ボタンを無効化します。
+     */
+    function loadTenantInfo() {
+        google.script.run
+            .withSuccessHandler(function (status) {
+                if (!status || !status.success) {
+                    // 後方互換: getTenantStatus 非対応の旧バックエンドでは何も壊さない
+                    var nameEl0 = document.getElementById('tenantDbName');
+                    if (nameEl0) nameEl0.textContent = '（状態を取得できません）';
+                    return;
+                }
+                var nameEl = document.getElementById('tenantDbName');
+                var idEl = document.getElementById('tenantDbId');
+                var emailEl = document.getElementById('tenantDbEmail');
+                var openWrap = document.getElementById('tenantDbOpenWrap');
+                var openLink = document.getElementById('tenantDbOpenLink');
+                var createBtn = document.getElementById('tenantCreateBtn');
+
+                if (nameEl) nameEl.textContent = status.linked ? (status.spreadsheetName || '(名称不明)') : '未紐付け';
+                if (idEl) idEl.textContent = status.spreadsheetId || '-';
+                if (emailEl) emailEl.textContent = status.email || '-';
+
+                if (openWrap && openLink) {
+                    if (status.linked && status.spreadsheetId) {
+                        openLink.href = 'https://docs.google.com/spreadsheets/d/' + status.spreadsheetId + '/edit';
+                        openWrap.style.display = 'block';
+                    } else {
+                        openWrap.style.display = 'none';
+                    }
+                }
+                if (createBtn) {
+                    createBtn.disabled = !status.canCreate;
+                    createBtn.title = status.canCreate ? '' : '配布元がテンプレートを設定するまで新規作成は利用できません';
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .getTenantStatus();
+    }
+
+    /** 別の既存スプレッドシートを自分のDBとして紐付け直します（linkMyDatabase）。 */
+    async function switchMyDatabaseUI() {
+        var input = await Swal.fire({
+            title: '別のシートに切替',
+            input: 'text',
+            inputLabel: '紐付けるスプレッドシートの URL または ID',
+            inputPlaceholder: 'https://docs.google.com/spreadsheets/d/..../edit',
+            width: 560,
+            showCancelButton: true,
+            cancelButtonText: 'キャンセル',
+            confirmButtonText: '切り替える',
+            confirmButtonColor: '#1a73e8',
+            inputValidator: function (v) { if (!v) return 'URL または ID を入力してください。'; }
+        });
+        if (!input.isConfirmed) return;
+
+        Swal.fire({
+            title: '確認中...',
+            html: 'スプレッドシートを確認しています。',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: function () { Swal.showLoading(); }
+        });
+
+        google.script.run
+            .withSuccessHandler(function (r) {
+                if (r && r.success) {
+                    var proceed = function () { location.reload(); };
+                    if (r.warning) {
+                        Swal.fire({
+                            icon: 'warning',
+                            title: '切り替えました（注意）',
+                            html: escHtml(r.warning) + '<br>このまま再読み込みします。',
+                            confirmButtonColor: '#1a73e8',
+                            allowOutsideClick: false
+                        }).then(proceed);
+                    } else {
+                        Swal.fire({
+                            icon: 'success',
+                            title: '切り替えました',
+                            html: '「' + escHtml(r.spreadsheetName || '') + '」に切り替えました。',
+                            confirmButtonColor: '#1a73e8',
+                            allowOutsideClick: false
+                        }).then(proceed);
+                    }
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '切替に失敗しました',
+                        html: escHtml((r && r.error) || '不明なエラーが発生しました。'),
+                        confirmButtonColor: '#1a73e8'
+                    });
+                }
+            })
+            .withFailureHandler(function (e) {
+                Swal.fire({ icon: 'error', title: '通信エラー', html: escHtml(e && e.message ? e.message : String(e)), confirmButtonColor: '#1a73e8' });
+            })
+            .linkMyDatabase(input.value || '');
+    }
+
+    /** テンプレートを複製して自分専用のDBを新規作成し、切り替えます（createMyDatabase）。 */
+    async function createMyDatabaseUI() {
+        var input = await Swal.fire({
+            title: '新しいデータベースを作成',
+            input: 'text',
+            inputLabel: 'ファイル名（空欄なら自動で名前を付けます）',
+            inputPlaceholder: '例）週案データベース 2026',
+            width: 520,
+            showCancelButton: true,
+            cancelButtonText: 'キャンセル',
+            confirmButtonText: '作成して切替',
+            confirmButtonColor: '#1a73e8'
+        });
+        if (!input.isConfirmed) return;
+
+        Swal.fire({
+            title: '作成中...',
+            html: 'あなた専用のデータベースを作成しています。しばらくお待ちください。',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: function () { Swal.showLoading(); }
+        });
+
+        google.script.run
+            .withSuccessHandler(function (r) {
+                if (r && r.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '作成しました',
+                        html: '新しいデータベースを作成し、切り替えました。',
+                        confirmButtonColor: '#1a73e8',
+                        allowOutsideClick: false
+                    }).then(function () { location.reload(); });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '作成に失敗しました',
+                        html: escHtml((r && r.error) || '不明なエラーが発生しました。'),
+                        confirmButtonColor: '#1a73e8'
+                    });
+                }
+            })
+            .withFailureHandler(function (e) {
+                Swal.fire({ icon: 'error', title: '通信エラー', html: escHtml(e && e.message ? e.message : String(e)), confirmButtonColor: '#1a73e8' });
+            })
+            .createMyDatabase(input.value || '');
+    }
+
+    /** 現在のDB紐付けを解除します（スプレッドシート自体は削除しません／unlinkMyDatabase）。 */
+    async function unlinkMyDatabaseUI() {
+        var res = await Swal.fire({
+            title: '紐付けを解除しますか？',
+            html: 'このアプリと現在のデータベースの紐付けを解除します。<br>'
+                + '<strong>スプレッドシート自体（データ）は削除されません。</strong><br>'
+                + '解除後は初期設定（作成／紐付け）の画面に戻ります。',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '解除する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: 'var(--danger, #d33)'
+        });
+        if (!res.isConfirmed) return;
+
+        google.script.run
+            .withSuccessHandler(function (r) {
+                if (r && r.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '解除しました',
+                        html: '紐付けを解除しました。初期設定の画面に戻ります。',
+                        confirmButtonColor: '#1a73e8',
+                        allowOutsideClick: false
+                    }).then(function () { location.reload(); });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '解除に失敗しました',
+                        html: escHtml((r && r.error) || '不明なエラーが発生しました。'),
+                        confirmButtonColor: '#1a73e8'
+                    });
+                }
+            })
+            .withFailureHandler(function (e) {
+                Swal.fire({ icon: 'error', title: '通信エラー', html: escHtml(e && e.message ? e.message : String(e)), confirmButtonColor: '#1a73e8' });
+            })
+            .unlinkMyDatabase();
+    }
+
 </script>
