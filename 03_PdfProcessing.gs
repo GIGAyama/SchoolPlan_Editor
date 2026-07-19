@@ -509,23 +509,35 @@ function resetAllPdfProcessingFromWeb() {
  */
 function getPdfFileListForWebApp(type) {
   try {
-    const spKey = type === 'unit' ? SP_KEY_PDF_FOLDER_ID : SP_KEY_EVENT_PDF_FOLDER_ID;
-    const folderId = getSetting(spKey);
-    if (!folderId) {
-      throw new Error(`フォルダIDが未設定です。ダッシュボードの「Google Drive フォルダ設定」をご確認ください。`);
+    const result = [];
+    const pushPdfs = (folder) => {
+      const files = folder.getFilesByType(MimeType.PDF);
+      while (files.hasNext()) {
+        const f = files.next();
+        result.push({ id: f.getId(), name: f.getName(), dateCreated: f.getDateCreated().getTime() });
+      }
+    };
+
+    if (type === 'event') {
+      // drive.file 運用: 行事予定PDFはアプリ管理フォルダ（ルート＋学校サブフォルダ）から集約する
+      const root = getEventPdfRootFolder_();
+      pushPdfs(root);
+      const subs = root.getFolders();
+      while (subs.hasNext()) pushPdfs(subs.next());
+    } else {
+      // 指導計画PDF（unit）: 従来のフォルダID運用は drive.file では任意フォルダを列挙できない。
+      // フル drive スコープの環境でのみ後方互換として動作し、drive.file では Picker 選択に誘導する。
+      const folderId = getSetting(SP_KEY_PDF_FOLDER_ID);
+      if (!folderId) {
+        throw new Error('指導計画PDFは「Driveから選択」（Picker）でファイルを選んで追加してください。');
+      }
+      try {
+        pushPdfs(DriveApp.getFolderById(folderId));
+      } catch (folderErr) {
+        throw new Error('フォルダを開けませんでした。drive.file 運用では任意フォルダの一覧は取得できません。「Driveから選択」（Picker）でPDFを選んで追加してください。');
+      }
     }
 
-    const folder = DriveApp.getFolderById(folderId);
-    const files = folder.getFilesByType(MimeType.PDF);
-    const result = [];
-    while (files.hasNext()) {
-      const f = files.next();
-      result.push({
-        id: f.getId(),
-        name: f.getName(),
-        dateCreated: f.getDateCreated().getTime()
-      });
-    }
     // 作成日の新しい順にソート
     result.sort((a, b) => b.dateCreated - a.dateCreated);
     return { success: true, files: result };
@@ -542,17 +554,32 @@ function getPdfFileListForWebApp(type) {
  * サブフォルダはPDFが0件でも返します（アップロード先の選択肢として使うため）。
  * @returns {{success: boolean, folderName?: string, groups?: Array<{school: string, files: Array<{id: string, name: string, updatedAt: number, size: number}>}>, error?: string, notConfigured?: boolean}}
  */
+/**
+ * drive.file 運用: 行事予定PDFの「アプリ管理ルートフォルダ」を取得します（なければ作成）。
+ * 優先順位:
+ *  1. UserProperties に記録済みのアプリ管理フォルダ（drive.file で作成・列挙可能）
+ *  2. 後方互換: 従来のユーザー設定フォルダID（フル drive スコープ時のみ開ける）
+ *  3. 無ければアプリ管理フォルダを新規作成して記録
+ * @returns {GoogleAppsScript.Drive.Folder}
+ */
+function getEventPdfRootFolder_() {
+  const appId = tGetProp_(UP_KEY_EVENT_PDF_ROOT);
+  if (appId) {
+    try { return DriveApp.getFolderById(appId); } catch (e) { /* 失われていたら作り直す */ }
+  }
+  // 後方互換: 従来のフォルダID設定が開ける環境（フル drive スコープ）ではそれを使う
+  const legacyId = getSetting(SP_KEY_EVENT_PDF_FOLDER_ID);
+  if (legacyId) {
+    try { return DriveApp.getFolderById(legacyId); } catch (e) { /* drive.file では開けない → 新規作成へ */ }
+  }
+  const folder = DriveApp.createFolder(APP_EVENT_PDF_FOLDER_NAME);
+  tSetProp_(UP_KEY_EVENT_PDF_ROOT, folder.getId());
+  logInfo('行事予定PDFのアプリ管理フォルダを作成しました: ' + folder.getId());
+  return folder;
+}
+
 function getEventPdfLibraryForWebApp() {
   try {
-    const folderId = getSetting(SP_KEY_EVENT_PDF_FOLDER_ID);
-    if (!folderId) {
-      return {
-        success: false,
-        notConfigured: true,
-        error: '行事予定PDFフォルダIDが未設定です。「設定」タブの「PDF格納フォルダID」で設定してください。'
-      };
-    }
-
     const collectPdfs = (folder) => {
       const files = folder.getFilesByType(MimeType.PDF);
       const list = [];
@@ -569,7 +596,7 @@ function getEventPdfLibraryForWebApp() {
       return list;
     };
 
-    const rootFolder = DriveApp.getFolderById(folderId);
+    const rootFolder = getEventPdfRootFolder_();
     const groups = [];
 
     // フォルダ直下のPDF（学校フォルダに分けていない運用）
@@ -605,16 +632,12 @@ function getEventPdfLibraryForWebApp() {
  */
 function uploadEventSchedulePdf(fileName, base64Data, schoolName) {
   try {
-    const folderId = getSetting(SP_KEY_EVENT_PDF_FOLDER_ID);
-    if (!folderId) {
-      throw new Error('行事予定PDFフォルダIDが未設定です。「設定」タブの「PDF格納フォルダID」で設定してください。');
-    }
     if (!fileName || !base64Data) throw new Error('ファイルデータが不正です。');
 
     const bytes = Utilities.base64Decode(base64Data);
     if (bytes.length > 15 * 1024 * 1024) throw new Error('ファイルサイズが15MBを超えています。');
 
-    const rootFolder = DriveApp.getFolderById(folderId);
+    const rootFolder = getEventPdfRootFolder_();
     let targetFolder = rootFolder;
     const school = String(schoolName || '').trim();
     if (school) {

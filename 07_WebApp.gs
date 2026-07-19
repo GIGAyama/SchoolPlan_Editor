@@ -850,11 +850,12 @@ function generateNewsletterPdf(mondayDateStr) {
       headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() }
     }).getBlob().setName(fileName);
 
-    const folder = DriveApp.getRootFolder();
-    const existing = folder.getFilesByName(fileName);
+    // drive.file 運用: getRootFolder() ではなくトップレベルの DriveApp API を使う
+    // （createFile は My Drive 直下にアプリ所有ファイルを作成、検索はアプリ作成物のみが対象）。
+    const existing = DriveApp.getFilesByName(fileName);
     while (existing.hasNext()) existing.next().setTrashed(true);
 
-    const pdfFile = folder.createFile(blob);
+    const pdfFile = DriveApp.createFile(blob);
     pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
     logInfo(`学級通信PDF生成: ${fileName}`);

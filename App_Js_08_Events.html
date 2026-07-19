@@ -79,7 +79,7 @@
                     + '<p>「' + escHtml(rawKeyword) + '」に一致するPDFはありません。</p></div>';
             } else if (!html) {
                 html = '<div class="events-list-message"><span class="material-symbols-outlined">picture_as_pdf</span>'
-                    + '<p>行事予定PDFフォルダにPDFがありません。<br>「PDFを追加」からアップロードするか、Driveのフォルダに直接保存してください。</p></div>';
+                    + '<p>行事予定PDFがまだありません。<br>「PDFを追加」からアップロードしてください（アプリ専用フォルダに保存されます）。</p></div>';
             }
         }
         listEl.innerHTML = html;
