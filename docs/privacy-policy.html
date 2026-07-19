@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>プライバシーポリシー | 週案エディタ</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+      line-height: 1.8; max-width: 760px; margin: 0 auto; padding: 24px; color: #1f2933; background: #fff; }
+    @media (prefers-color-scheme: dark) { body { color: #e4e7eb; background: #16191d; } a { color: #6ab0ff; } code { background:#2a2f36; } }
+    h1 { font-size: 1.5rem; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; }
+    h2 { font-size: 1.15rem; margin-top: 2em; color: #1a73e8; }
+    code { background: #f0f2f5; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+    .note { font-size: 0.85rem; color: #7b8794; }
+    .placeholder { background: #fff3cd; color: #7a5b00; padding: 0 4px; border-radius: 3px; }
+    ul { padding-left: 1.4em; }
+    footer { margin-top: 3em; font-size: 0.8rem; color: #7b8794; border-top: 1px solid #d3d8de; padding-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>プライバシーポリシー</h1>
+  <p class="note">最終更新日: <span class="placeholder">{{YYYY-MM-DD}}</span>　運用者: <span class="placeholder">{{運用者名}}</span></p>
+
+  <p>本ポリシーは、週案作成支援アプリ「週案エディタ」（以下「本アプリ」）における利用者情報の取り扱いを定めるものです。運用者は <span class="placeholder">{{運用者名}}</span>（連絡先: <span class="placeholder">{{連絡先メール}}</span>）です。</p>
+
+  <h2>1. 基本方針：利用者データは利用者本人の Google Drive にのみ保存されます</h2>
+  <p>本アプリは Google Apps Script 上で「アクセスしているユーザーとして」動作します。週案・単元マスタ・タスク・学級通信・行事予定PDF などの入力データは、<strong>利用者本人の Google アカウント（Google ドライブ／スプレッドシート）内にのみ保存</strong>されます。運用者は、これらのデータを運用者側のサーバーやデータベースに<strong>収集・保存・閲覧しません</strong>。</p>
+
+  <h2>2. 取得する情報とアクセス範囲（OAuth スコープ）</h2>
+  <p>本アプリは機能提供のために、Google の認可（OAuth）で以下の範囲にアクセスします。いずれも利用者本人の資産に対する操作であり、運用者への送信・保管は行いません。</p>
+  <ul>
+    <li><code>userinfo.email</code>: ログイン中の利用者を識別し、各自のデータベースを分離するため。</li>
+    <li><code>spreadsheets</code>: 利用者本人のスプレッドシート（週案データベース）の読み書き。</li>
+    <li><code>drive.file</code>: <strong>本アプリが作成した、または利用者が選択したファイルのみ</strong>を対象とする Drive 操作（PDF の取り込み・出力・行事予定PDFの保存）。利用者の Drive 全体にはアクセスしません。</li>
+    <li><code>script.send_mail</code>: 利用者が有効化した場合のみ、タスクのリマインダーメールを<strong>利用者本人宛</strong>に送信するため。</li>
+    <li><code>classroom.courses.readonly</code> / <code>classroom.announcements</code>: 利用者が Google Classroom 連携を使う場合のみ、連携クラスの一覧取得と、利用者自身のクラスへのお知らせ投稿を行うため。</li>
+  </ul>
+
+  <h2>3. 第三者サービスの利用</h2>
+  <ul>
+    <li><strong>Google（Workspace / Drive / Sheets / Classroom）</strong>: データの保存・処理は Google の基盤上で行われます。Google のプライバシーポリシーが適用されます。</li>
+    <li><strong>生成AI（Gemini API 等）</strong>: PDF 解析やタスク抽出のため、利用者が設定した API キーを用いて、対象の PDF/テキストを AI サービスへ送信する場合があります。送信内容・API キーは利用者の設定に基づくもので、運用者は保持しません。AI 提供者の利用規約・プライバシーポリシーが適用されます。</li>
+  </ul>
+
+  <h2>4. Google ユーザーデータの取り扱い（Limited Use）</h2>
+  <p>本アプリによる Google ユーザーデータの利用は、Google API サービスのユーザーデータに関するポリシー（<a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Limited Use 要件</a>を含む）に準拠します。取得したデータは、上記の機能提供の目的にのみ利用し、広告目的での利用や、無関係な第三者への譲渡は行いません。</p>
+
+  <h2>5. データの削除・撤回</h2>
+  <ul>
+    <li>入力データは利用者の Drive 上にあるため、利用者がスプレッドシートを削除すれば消去されます。</li>
+    <li>本アプリへのアクセス許可は、利用者の <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google アカウントのセキュリティ設定</a>からいつでも取り消せます。</li>
+  </ul>
+
+  <h2>6. お問い合わせ</h2>
+  <p>本ポリシーに関するお問い合わせは <span class="placeholder">{{連絡先メール}}</span> までご連絡ください。</p>
+
+  <h2>7. 改定</h2>
+  <p>本ポリシーは必要に応じて改定されることがあります。重要な変更がある場合は本ページで告知します。</p>
+
+  <footer>
+    ※ <span class="placeholder">{{ }}</span> の箇所は運用者が実際の情報に置き換えてください（運用者名・連絡先・最終更新日）。<br>
+    週案エディタ（Google Apps Script アプリ）
+  </footer>
+</body>
+</html>
