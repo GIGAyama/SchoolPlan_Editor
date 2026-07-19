@@ -6,5 +6,5 @@
  * 空文字のままの場合は、初回起動時に画面上でURLを入力できます（ブラウザごとに保存されます）。
  */
 window.SCHOOL_PLAN_NOTE_CONFIG = {
-  appUrl: ""
+  appUrl: "https://script.google.com/macros/s/AKfycbx-nqCLfO2tiFWGs-qV_XofalbPwjmE7usrC0EAKZud-84I2JQLnIi6XowONOAprOdH-Q/exec"
 };
