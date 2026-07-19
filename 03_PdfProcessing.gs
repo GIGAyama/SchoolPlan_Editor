@@ -63,10 +63,9 @@ function importEventsFromFolder_UI() {
 
     resetEventPdfProcessing(); 
 
-    const properties = PropertiesService.getScriptProperties();
-    properties.setProperty(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(processingQueue));
-    properties.setProperty(SCRIPT_PROP_EVENT_PDF_TOTAL, processingQueue.length);
-    properties.setProperty(SCRIPT_PROP_EVENT_PDF_YEAR, fiscalYear.toString());
+    tSetProp_(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(processingQueue));
+    tSetProp_(SCRIPT_PROP_EVENT_PDF_TOTAL, processingQueue.length);
+    tSetProp_(SCRIPT_PROP_EVENT_PDF_YEAR, fiscalYear.toString());
 
     SpreadsheetApp.getActiveSpreadsheet().toast(`行事予定PDFの読み込みを開始しました。(0/${processingQueue.length})`, '処理開始', -1);
     
@@ -91,10 +90,9 @@ function processNextEventPdf() {
 
   try {
   const startTime = new Date();
-  const properties = PropertiesService.getScriptProperties();
 
-  const queueJson = properties.getProperty(SCRIPT_PROP_EVENT_PDF_QUEUE);
-  const year = properties.getProperty(SCRIPT_PROP_EVENT_PDF_YEAR);
+  const queueJson = tGetProp_(SCRIPT_PROP_EVENT_PDF_QUEUE);
+  const year = tGetProp_(SCRIPT_PROP_EVENT_PDF_YEAR);
 
   if (!queueJson || !year) {
     SpreadsheetApp.getActiveSpreadsheet().toast("行事予定PDFの読み込みがすべて完了しました。", "処理完了", 10);
@@ -114,7 +112,7 @@ function processNextEventPdf() {
   const task = queue.shift(); 
   const file = DriveApp.getFileById(task.fileId);
   
-  const totalTasks = parseInt(properties.getProperty(SCRIPT_PROP_EVENT_PDF_TOTAL), 10);
+  const totalTasks = parseInt(tGetProp_(SCRIPT_PROP_EVENT_PDF_TOTAL), 10);
   const processedCount = totalTasks - queue.length;
   SpreadsheetApp.getActiveSpreadsheet().toast(`行事予定PDF 処理中... (${processedCount}/${totalTasks})\nファイル名: ${file.getName()} (${task.month}月)`, `処理中`, -1);
 
@@ -125,7 +123,7 @@ function processNextEventPdf() {
     SpreadsheetApp.getActiveSpreadsheet().toast(`⚠ エラー: ${file.getName()} (${task.month}月) - ${e.message}`, 'PDF処理エラー', 15);
   }
 
-  properties.setProperty(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(queue));
+  tSetProp_(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(queue));
 
   if (queue.length > 0) {
     rescheduleQueueTrigger_(TRIGGER_FUNCTION_NAME_EVENT, startTime,
@@ -290,9 +288,8 @@ function createUnitMasterFromPdfs_UI() {
       return;
     }
     
-    const properties = PropertiesService.getScriptProperties();
-    properties.setProperty(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
-    properties.setProperty(SCRIPT_PROP_PDF_TOTAL, fileIds.length);
+    tSetProp_(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
+    tSetProp_(SCRIPT_PROP_PDF_TOTAL, fileIds.length);
     
     let masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!masterSheet) {
@@ -318,8 +315,7 @@ function createUnitMasterFromPdfs() {
 
   try {
     const startTime = new Date();
-    const properties = PropertiesService.getScriptProperties();
-    const queueJson = properties.getProperty(SCRIPT_PROP_PDF_QUEUE);
+    const queueJson = tGetProp_(SCRIPT_PROP_PDF_QUEUE);
 
     if (!queueJson) {
       logInfo("すべてのPDF処理が完了しました。");
@@ -335,7 +331,7 @@ function createUnitMasterFromPdfs() {
       return;
     }
 
-    const totalFiles = parseInt(properties.getProperty(SCRIPT_PROP_PDF_TOTAL), 10);
+    const totalFiles = parseInt(tGetProp_(SCRIPT_PROP_PDF_TOTAL), 10);
     const fileId = fileIds.shift();
     const file = DriveApp.getFileById(fileId);
     const processedCount = totalFiles - fileIds.length;
@@ -347,7 +343,7 @@ function createUnitMasterFromPdfs() {
       logError(`PDF処理中に致命的なエラーが発生しました: ${file.getName()}`, e);
       SpreadsheetApp.getActiveSpreadsheet().toast(`⚠ エラー: ${file.getName()} - ${e.message}`, 'PDF処理エラー', 15);
     }
-    properties.setProperty(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
+    tSetProp_(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
 
     if (fileIds.length > 0) {
       rescheduleQueueTrigger_(TRIGGER_FUNCTION_NAME, startTime,
@@ -474,17 +470,16 @@ function resetAllPdfProcessing_UI() {
 }
 
 function resetUnitMasterProcessing() {
-  PropertiesService.getScriptProperties().deleteProperty(SCRIPT_PROP_PDF_QUEUE);
-  PropertiesService.getScriptProperties().deleteProperty(SCRIPT_PROP_PDF_TOTAL);
+  tDeleteProp_(SCRIPT_PROP_PDF_QUEUE);
+  tDeleteProp_(SCRIPT_PROP_PDF_TOTAL);
   deleteTriggers_(TRIGGER_FUNCTION_NAME);
   logInfo("指導計画PDF処理のキューとトリガーをリセットしました。");
 }
 
 function resetEventPdfProcessing() {
-  const properties = PropertiesService.getScriptProperties();
-  properties.deleteProperty(SCRIPT_PROP_EVENT_PDF_QUEUE);
-  properties.deleteProperty(SCRIPT_PROP_EVENT_PDF_TOTAL);
-  properties.deleteProperty(SCRIPT_PROP_EVENT_PDF_YEAR);
+  tDeleteProp_(SCRIPT_PROP_EVENT_PDF_QUEUE);
+  tDeleteProp_(SCRIPT_PROP_EVENT_PDF_TOTAL);
+  tDeleteProp_(SCRIPT_PROP_EVENT_PDF_YEAR);
   deleteTriggers_(TRIGGER_FUNCTION_NAME_EVENT);
   logInfo("行事予定PDF処理のキューとトリガーをリセットしました。");
 }
@@ -671,10 +666,9 @@ function startEventPdfProcessingFromWebApp(fileIds, fiscalYear) {
       });
     });
 
-    const properties = PropertiesService.getScriptProperties();
-    properties.setProperty(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(processingQueue));
-    properties.setProperty(SCRIPT_PROP_EVENT_PDF_TOTAL, processingQueue.length.toString());
-    properties.setProperty(SCRIPT_PROP_EVENT_PDF_YEAR, fiscalYear.toString());
+    tSetProp_(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(processingQueue));
+    tSetProp_(SCRIPT_PROP_EVENT_PDF_TOTAL, processingQueue.length.toString());
+    tSetProp_(SCRIPT_PROP_EVENT_PDF_YEAR, fiscalYear.toString());
 
     ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME_EVENT)
       .timeBased()
@@ -700,9 +694,8 @@ function startUnitMasterProcessingFromWebApp(fileIds) {
 
     resetUnitMasterProcessing();
 
-    const properties = PropertiesService.getScriptProperties();
-    properties.setProperty(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
-    properties.setProperty(SCRIPT_PROP_PDF_TOTAL, fileIds.length.toString());
+    tSetProp_(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
+    tSetProp_(SCRIPT_PROP_PDF_TOTAL, fileIds.length.toString());
 
     const ss = getSs_();
     let masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
@@ -731,10 +724,9 @@ function startUnitMasterProcessingFromWebApp(fileIds) {
  */
 function getPdfProcessingStatusForWebApp() {
   try {
-    const props = PropertiesService.getScriptProperties();
     
-    const eventQueueStr = props.getProperty(SCRIPT_PROP_EVENT_PDF_QUEUE);
-    const eventTotalStr = props.getProperty(SCRIPT_PROP_EVENT_PDF_TOTAL);
+    const eventQueueStr = tGetProp_(SCRIPT_PROP_EVENT_PDF_QUEUE);
+    const eventTotalStr = tGetProp_(SCRIPT_PROP_EVENT_PDF_TOTAL);
     let eventStatus = { isRunning: false, remaining: 0, total: 0 };
     if (eventQueueStr) {
       const q = JSON.parse(eventQueueStr);
@@ -743,8 +735,8 @@ function getPdfProcessingStatusForWebApp() {
       eventStatus.total = parseInt(eventTotalStr || '0', 10);
     }
 
-    const unitQueueStr = props.getProperty(SCRIPT_PROP_PDF_QUEUE);
-    const unitTotalStr = props.getProperty(SCRIPT_PROP_PDF_TOTAL);
+    const unitQueueStr = tGetProp_(SCRIPT_PROP_PDF_QUEUE);
+    const unitTotalStr = tGetProp_(SCRIPT_PROP_PDF_TOTAL);
     let unitStatus = { isRunning: false, remaining: 0, total: 0 };
     if (unitQueueStr) {
       const q = JSON.parse(unitQueueStr);
