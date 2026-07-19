@@ -75,6 +75,23 @@
     // ===== 初期化 =====
     window.onload = function () {
         initWeekendVisibility(); // 土日列の表示設定を復元（グリッド描画前に必要）
+        // マルチテナント: まず自分のDB（スプレッドシート）が紐付いているか確認する。
+        // 未紐付けならオンボーディングを表示し、通常のデータ読込は行わない。
+        // 状態取得に失敗した場合（旧バックエンド・バインド型など）は既存動作を妨げず通常起動する。
+        google.script.run
+            .withSuccessHandler(function (status) {
+                if (status && status.success && status.linked === false) {
+                    showOnboardingChoice(status);
+                } else {
+                    startAppInit();
+                }
+            })
+            .withFailureHandler(function () { startAppInit(); })
+            .getTenantStatus();
+    };
+
+    /** アプリ本体の初期化（DB紐付け済みのときに実行）。 */
+    function startAppInit() {
         loadMasterData();
         goToToday();
         loadAnnualHoursView();
@@ -85,7 +102,190 @@
         initPdfImportUI(); // PDF読み込み（ドロップゾーン・ファイル選択）の配線
         maybeOfferSetupWizard(); // 初回起動時（設定が不十分な場合のみ）に初期設定ウィザードを表示
         loadMultiClassState(); // 複数学級モードの状態を読込（無効時はUI非表示のまま）
-    };
+    }
+
+    // ===================================================
+    // ===== オンボーディング（自分のDBの作成／紐付け） =====
+    // ===================================================
+
+    /** getTenantStatus() を取り直してオンボーディングの選択画面を再表示します（「戻る」用）。 */
+    function reopenOnboarding() {
+        google.script.run
+            .withSuccessHandler(function (status) {
+                if (status && status.success && status.linked === false) {
+                    showOnboardingChoice(status);
+                } else {
+                    // すでに紐付いた／取得できた場合はアプリを開始
+                    location.reload();
+                }
+            })
+            .withFailureHandler(function () { location.reload(); })
+            .getTenantStatus();
+    }
+
+    /**
+     * オンボーディングの選択画面（新規作成 / 既存紐付け）を表示します。
+     * @param {Object} status getTenantStatus() の結果
+     */
+    async function showOnboardingChoice(status) {
+        status = status || {};
+        var email = status.email || '';
+        var canCreate = !!status.canCreate;
+
+        var html = '<div style="text-align:left;font-size:0.9rem;line-height:1.7;">'
+            + 'このアプリを使うには、あなた専用のデータベース（Googleスプレッドシート）が必要です。'
+            + '下のいずれかを選んで、はじめましょう。'
+            + (email ? ('<div style="margin-top:8px;color:var(--secondary);font-size:0.8rem;">ログイン中: ' + escHtml(email) + '</div>') : '')
+            + (canCreate ? '' : '<div style="margin-top:8px;color:#b26a00;font-size:0.8rem;">※ 新規作成は配布元の設定待ちのため、いまは「既存のシートを紐付け」のみ利用できます。</div>')
+            + '</div>';
+
+        var res = await Swal.fire({
+            title: 'ようこそ！はじめの設定',
+            html: html,
+            width: 560,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            showConfirmButton: canCreate,
+            confirmButtonText: '新しく作成する',
+            confirmButtonColor: '#1a73e8',
+            showDenyButton: true,
+            denyButtonText: '既存のシートを紐付け',
+            denyButtonColor: '#34a853'
+        });
+
+        if (res.isConfirmed) {
+            onboardingCreate();
+        } else if (res.isDenied) {
+            onboardingLink();
+        } else {
+            // 閉じられた場合は再表示（この画面は完了するまで必須）
+            showOnboardingChoice(status);
+        }
+    }
+
+    /** 新規作成フロー: 名前を入力してテンプレートから自分専用DBを作成します。 */
+    async function onboardingCreate() {
+        var input = await Swal.fire({
+            title: '新しいデータベースを作成',
+            input: 'text',
+            inputLabel: 'ファイル名（空欄なら自動で名前を付けます）',
+            inputPlaceholder: '例）週案データベース 2026',
+            width: 520,
+            allowOutsideClick: false,
+            showCancelButton: true,
+            cancelButtonText: '戻る',
+            confirmButtonText: '作成する',
+            confirmButtonColor: '#1a73e8'
+        });
+        if (!input.isConfirmed) { reopenOnboarding(); return; }
+
+        Swal.fire({
+            title: '作成中...',
+            html: 'あなた専用のデータベースを作成しています。しばらくお待ちください。',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: function () { Swal.showLoading(); }
+        });
+
+        google.script.run
+            .withSuccessHandler(function (r) {
+                if (r && r.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '作成しました',
+                        html: 'あなた専用のデータベースを作成しました。アプリを開始します。',
+                        confirmButtonColor: '#1a73e8',
+                        allowOutsideClick: false
+                    }).then(function () { location.reload(); });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '作成に失敗しました',
+                        html: escHtml((r && r.error) || '不明なエラーが発生しました。'),
+                        confirmButtonColor: '#1a73e8',
+                        allowOutsideClick: false
+                    }).then(function () { reopenOnboarding(); });
+                }
+            })
+            .withFailureHandler(function (e) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '通信エラー',
+                    html: escHtml(e && e.message ? e.message : String(e)),
+                    confirmButtonColor: '#1a73e8',
+                    allowOutsideClick: false
+                }).then(function () { reopenOnboarding(); });
+            })
+            .createMyDatabase(input.value || '');
+    }
+
+    /** 既存紐付けフロー: スプレッドシートのURL/IDを入力して自分のDBとして紐付けます。 */
+    async function onboardingLink() {
+        var input = await Swal.fire({
+            title: '既存のシートを紐付け',
+            input: 'text',
+            inputLabel: 'スプレッドシートの URL または ID',
+            inputPlaceholder: 'https://docs.google.com/spreadsheets/d/..../edit',
+            width: 560,
+            allowOutsideClick: false,
+            showCancelButton: true,
+            cancelButtonText: '戻る',
+            confirmButtonText: '紐付ける',
+            confirmButtonColor: '#34a853',
+            inputValidator: function (v) { if (!v) return 'URL または ID を入力してください。'; }
+        });
+        if (!input.isConfirmed) { reopenOnboarding(); return; }
+
+        Swal.fire({
+            title: '確認中...',
+            html: 'スプレッドシートを確認しています。',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: function () { Swal.showLoading(); }
+        });
+
+        google.script.run
+            .withSuccessHandler(function (r) {
+                if (r && r.success) {
+                    var proceed = function () { location.reload(); };
+                    if (r.warning) {
+                        Swal.fire({
+                            icon: 'warning',
+                            title: '紐付けました（注意）',
+                            html: escHtml(r.warning) + '<br>このまま開始しますが、必要ならシートを確認してください。',
+                            confirmButtonColor: '#1a73e8',
+                            allowOutsideClick: false
+                        }).then(proceed);
+                    } else {
+                        Swal.fire({
+                            icon: 'success',
+                            title: '紐付けました',
+                            html: '「' + escHtml(r.spreadsheetName || '') + '」を紐付けました。アプリを開始します。',
+                            confirmButtonColor: '#1a73e8',
+                            allowOutsideClick: false
+                        }).then(proceed);
+                    }
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '紐付けに失敗しました',
+                        html: escHtml((r && r.error) || '不明なエラーが発生しました。'),
+                        confirmButtonColor: '#1a73e8',
+                        allowOutsideClick: false
+                    }).then(function () { reopenOnboarding(); });
+                }
+            })
+            .withFailureHandler(function (e) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '通信エラー',
+                    html: escHtml(e && e.message ? e.message : String(e)),
+                    confirmButtonColor: '#1a73e8',
+                    allowOutsideClick: false
+                }).then(function () { reopenOnboarding(); });
+            })
+            .linkMyDatabase(input.value || '');
+    }
 
     // ===== 週案グリッドの土日列 表示/非表示 =====
     function isDayVisible(dayIdx) {
