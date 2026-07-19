@@ -1215,10 +1215,14 @@ function applyExtractedUnitsFromWeb(units, options) {
 }
 
 /**
- * [Webアプリ API] Google Picker を使用するための認証情報（OAuthトークン、必要ならAPIキー）を返します。
- * OAuth 2.0 クライアントのAPIキーまたは設定シート上の情報を利用可能にすることもできます。
- * ここでは最もシンプルに OAuthToken のみを渡し、フロントから Developer Key なし（トークンのみ）で Picker を開く構成を推奨します。
- * （※API Keyなしでも動作する場合があります）
+ * [Webアプリ API] Google Picker を使用するための認証情報（OAuthトークン）を返します。
+ *
+ * セキュリティ（B3）:
+ *  - Google Picker はクライアント側で `setOAuthToken()` にトークンを要求するため、トークンのフロント返却は避けられない。
+ *  - ただし B2 でスコープを `drive.file` に最小化したため、このトークンで到達できるのは
+ *    「アプリが作成・ユーザーが Picker で選択したファイル」のみ。フル `drive` 時代に比べ露出範囲は大幅に縮小されている。
+ *  - トークンは短命（`ScriptApp.getOAuthToken()` の有効期限内）で、Picker を開くその場でのみ使用する（保存しない）。
+ *  - 返すのはトークンのみ（Developer Key 等は付与しない）で、最小限の情報に留める。
  */
 function getPickerAuthInfo() {
   try {
