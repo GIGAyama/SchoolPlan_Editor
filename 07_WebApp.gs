@@ -9,10 +9,11 @@
 function getSs_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (ss) return ss;
-  // Webアプリコンテキスト: スクリプトがバインドされたスプレッドシートを PropertiesService 経由で取得
-  const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  // Webアプリコンテキスト: このユーザーの対象スプレッドシートを解決する。
+  // 優先: ユーザー個別(UserProperties) → 従来のグローバル(ScriptProperties)。詳細は 11_Tenant.gs 参照。
+  const id = resolveSpreadsheetId_();
   if (id) return SpreadsheetApp.openById(id);
-  throw new Error('スプレッドシートが取得できません。設定ダッシュボードから SPREADSHEET_ID を設定してください。');
+  throw new Error('使用するスプレッドシート（データベース）が設定されていません。ログイン後の初期設定でデータベースを作成または紐付けしてください。');
 }
 
 /**
@@ -25,6 +26,11 @@ function doGet(e) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (ss) {
       PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
+      // マルチテナント移行の布石: このユーザーが未紐付けなら、バインド先を個別紐付けとして引き継ぐ。
+      // （standalone・実行ユーザー=アクセスユーザー構成へ移行しても同じアカウントで継続利用できる）
+      try {
+        if (!getUserSpreadsheetId_()) setUserSpreadsheetId_(ss.getId());
+      } catch (e2) {}
     }
   } catch(e) {}
   return HtmlService.createTemplateFromFile('App')
