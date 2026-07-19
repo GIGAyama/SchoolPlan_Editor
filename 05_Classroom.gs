@@ -81,7 +81,7 @@ function postScheduleToClassroomFromWeb() {
     return postScheduleToClassroom_core_({ manual: true });
   } catch (error) {
     logError("postScheduleToClassroomFromWeb", error);
-    return { success: false, posted: false, message: error.message };
+    return { success: false, posted: false, message: describeAuthError_(error, 'Google Classroom 連携') };
   }
 }
 

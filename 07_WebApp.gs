@@ -937,7 +937,7 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
     return { success: true, message: `「${courseName}」に学級通信を投稿しました！` };
   } catch (e) {
     logError('postNewsletterToClassroomFromWeb', e);
-    return { success: false, error: e.message };
+    return { success: false, error: describeAuthError_(e, 'Google Classroom 連携') };
   }
 }
 

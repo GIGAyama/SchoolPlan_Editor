@@ -126,7 +126,7 @@ function getCourseListForDashboard() {
     return courses;
   } catch(e) {
     logError('getCourseListForDashboard', e);
-    throw new Error(e.message);
+    throw new Error(describeAuthError_(e, 'Google Classroom 連携'));
   }
 }
 
