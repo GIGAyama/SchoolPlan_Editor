@@ -358,7 +358,10 @@
             var appReady = false;      // App 側からの ready ハンドシェイクを受信したか
             var launchTimer = null;    // 一定時間 ready が来なければ案内へ切り替えるタイマー
             var currentUrl = '';       // 現在起動中の exec URL
-            var LAUNCH_TIMEOUT_MS = 12000;
+            // ready が来なければ「表示できなかった」とみなして案内へ切り替えるまでの待ち時間。
+            // 開けるユーザーは本体HTML読込時に即 ready が届くため通常は発火しないが、
+            // 低速回線やGASのコールドスタートで読込自体が遅い場合の誤発火を避けるため長めに取る。
+            var LAUNCH_TIMEOUT_MS = 20000;
 
             // GASのWebアプリURLのみ許可（通常アカウント / Google Workspace ドメイン両対応）
             function isValidGasUrl(url) {
