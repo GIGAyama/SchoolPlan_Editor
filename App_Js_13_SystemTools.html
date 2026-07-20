@@ -246,8 +246,6 @@
         var wiz = {
             grade: settings.grade || '3',
             apiKey: settings.geminiApiKey || '',
-            pdfFolderId: settings.pdfFolderId || '',
-            eventPdfFolderId: settings.eventPdfFolderId || '',
             courseName: settings.courseName || '',
             postHour: settings.postHour || '',
             genCalendar: !status.hasCalendar,
@@ -281,7 +279,6 @@
                 + checkRow(!!status.hasGrade, '担当学年')
                 + checkRow(!!status.hasApiKey, 'Gemini APIキー（AI機能に必要）')
                 + checkRow(!!status.hasCalendar, '年間カレンダー（データベースの日付）')
-                + checkRow(!!status.hasPdfFolder || !!status.hasEventPdfFolder, 'PDFフォルダ（任意）')
                 + checkRow(!!status.hasCourseName, 'Classroom連携（任意）')
                 + '</div>',
             width: 560,
@@ -330,22 +327,6 @@
                 collect: function (popup) {
                     var el = popup.querySelector('#wizApiKey');
                     if (el) wiz.apiKey = el.value;
-                }
-            },
-            {
-                title: 'PDFフォルダ（任意）',
-                render: function () {
-                    return wizFieldHtml('wizPdfFolder', '指導計画PDF フォルダID', 'text', wiz.pdfFolderId, 'DriveのフォルダURL末尾のID',
-                        '学校配布の指導計画PDFを置くGoogle DriveフォルダのIDです。AIが解析して単元マスタを作成します。')
-                        + wizFieldHtml('wizEventPdfFolder', '行事予定PDF フォルダID', 'text', wiz.eventPdfFolderId, 'DriveのフォルダURL末尾のID',
-                            '年間行事予定PDFを置くフォルダのIDです。「行事予定」タブでの閲覧やAIによる行事の転記に使用します。'
-                            + 'フォルダURLの「folders/」より後ろの文字列がIDです。あとで設定しても構いません。');
-                },
-                collect: function (popup) {
-                    var el1 = popup.querySelector('#wizPdfFolder');
-                    var el2 = popup.querySelector('#wizEventPdfFolder');
-                    if (el1) wiz.pdfFolderId = el1.value.trim();
-                    if (el2) wiz.eventPdfFolderId = el2.value.trim();
                 }
             },
             {
@@ -442,8 +423,6 @@
                 .saveAppSettings({
                     courseName: wiz.courseName,
                     postHour: wiz.postHour,
-                    pdfFolderId: wiz.pdfFolderId,
-                    eventPdfFolderId: wiz.eventPdfFolderId,
                     geminiApiKey: wiz.apiKey,
                     geminiModelName: settings.geminiModelName || 'gemini-2.5-flash',
                     moduleEnabled: !!settings.moduleEnabled

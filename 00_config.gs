@@ -25,11 +25,11 @@ const SCRIPT_PROP_EVENT_PDF_TOTAL = 'eventPdfTotalCount';
 const SCRIPT_PROP_EVENT_PDF_YEAR = 'eventPdfProcessingYear';
 const TRIGGER_FUNCTION_NAME_EVENT = 'processNextEventPdf';
 
-// drive.file 運用: 行事予定PDFはアプリが作成・管理するフォルダに集約する。
-// アプリ作成フォルダはその配下も含めて drive.file スコープで列挙・作成できるため、
-// 任意フォルダIDに依存せず「学校別サブフォルダでグループ表示」を維持できる。
-const UP_KEY_EVENT_PDF_ROOT = 'up_eventPdfRootFolderId'; // UserProperties: アプリ管理ルートフォルダID
-const APP_EVENT_PDF_FOLDER_NAME = '週案アプリ_行事予定PDF';
+// drive.file 運用: 行事予定PDFはDriveフォルダに保存せず、Googleピッカーで選んだ
+// ファイルの「参照（ID・ファイル名・学校名）」のみをプロパティに保存する。
+// フォルダ作成（DriveApp.createFolder）はフル drive スコープを要求するため行わない。
+// 閲覧はユーザー自身のブラウザセッションでDriveプレビューを埋め込んで行う。
+const UP_KEY_EVENT_PDF_REFS = 'up_eventPdfRefs'; // Properties: 行事予定PDF参照リスト(JSON)
 
 
 // === 複数学級モード（専科教員向け・設定でON/OFF） ===

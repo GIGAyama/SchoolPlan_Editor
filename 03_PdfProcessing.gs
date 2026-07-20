@@ -505,117 +505,61 @@ function resetAllPdfProcessingFromWeb() {
 // ===================================================
 
 /**
- * [Webアプリ API] 指定されたタイプ（'unit' または 'event'）のフォルダ内のPDF一覧を取得します。
+ * drive.file 運用: 保存済みの行事予定PDF参照リストを取得します。
+ * 参照は {id, name, school, updatedAt} の配列で、プロパティにJSONで保存されています。
+ * @returns {Array<{id: string, name: string, school: string, updatedAt: number}>}
  */
-function getPdfFileListForWebApp(type) {
+function getEventPdfRefs_() {
+  const raw = tGetProp_(UP_KEY_EVENT_PDF_REFS);
+  if (!raw) return [];
   try {
-    const result = [];
-    const pushPdfs = (folder) => {
-      const files = folder.getFilesByType(MimeType.PDF);
-      while (files.hasNext()) {
-        const f = files.next();
-        result.push({ id: f.getId(), name: f.getName(), dateCreated: f.getDateCreated().getTime() });
-      }
-    };
-
-    if (type === 'event') {
-      // drive.file 運用: 行事予定PDFはアプリ管理フォルダ（ルート＋学校サブフォルダ）から集約する
-      const root = getEventPdfRootFolder_();
-      pushPdfs(root);
-      const subs = root.getFolders();
-      while (subs.hasNext()) pushPdfs(subs.next());
-    } else {
-      // 指導計画PDF（unit）: 従来のフォルダID運用は drive.file では任意フォルダを列挙できない。
-      // フル drive スコープの環境でのみ後方互換として動作し、drive.file では Picker 選択に誘導する。
-      const folderId = getSetting(SP_KEY_PDF_FOLDER_ID);
-      if (!folderId) {
-        throw new Error('指導計画PDFは「Driveから選択」（Picker）でファイルを選んで追加してください。');
-      }
-      try {
-        pushPdfs(DriveApp.getFolderById(folderId));
-      } catch (folderErr) {
-        throw new Error('フォルダを開けませんでした。drive.file 運用では任意フォルダの一覧は取得できません。「Driveから選択」（Picker）でPDFを選んで追加してください。');
-      }
-    }
-
-    // 作成日の新しい順にソート
-    result.sort((a, b) => b.dateCreated - a.dateCreated);
-    return { success: true, files: result };
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
   } catch (e) {
-    logError("getPdfFileListForWebApp", e);
-    return { success: false, error: e.message };
+    logError('getEventPdfRefs_', e);
+    return [];
   }
 }
 
-/**
- * [Webアプリ API] 「行事予定」タブ用: 行事予定PDFフォルダ内のPDFを
- * 学校（サブフォルダ）ごとにグループ化して返します。
- * フォルダ直下のPDFは school が空文字のグループとして返します。
- * サブフォルダはPDFが0件でも返します（アップロード先の選択肢として使うため）。
- * @returns {{success: boolean, folderName?: string, groups?: Array<{school: string, files: Array<{id: string, name: string, updatedAt: number, size: number}>}>, error?: string, notConfigured?: boolean}}
- */
-/**
- * drive.file 運用: 行事予定PDFの「アプリ管理ルートフォルダ」を取得します（なければ作成）。
- * 優先順位:
- *  1. UserProperties に記録済みのアプリ管理フォルダ（drive.file で作成・列挙可能）
- *  2. 後方互換: 従来のユーザー設定フォルダID（フル drive スコープ時のみ開ける）
- *  3. 無ければアプリ管理フォルダを新規作成して記録
- * @returns {GoogleAppsScript.Drive.Folder}
- */
-function getEventPdfRootFolder_() {
-  const appId = tGetProp_(UP_KEY_EVENT_PDF_ROOT);
-  if (appId) {
-    try { return DriveApp.getFolderById(appId); } catch (e) { /* 失われていたら作り直す */ }
-  }
-  // 後方互換: 従来のフォルダID設定が開ける環境（フル drive スコープ）ではそれを使う
-  const legacyId = getSetting(SP_KEY_EVENT_PDF_FOLDER_ID);
-  if (legacyId) {
-    try { return DriveApp.getFolderById(legacyId); } catch (e) { /* drive.file では開けない → 新規作成へ */ }
-  }
-  const folder = DriveApp.createFolder(APP_EVENT_PDF_FOLDER_NAME);
-  tSetProp_(UP_KEY_EVENT_PDF_ROOT, folder.getId());
-  logInfo('行事予定PDFのアプリ管理フォルダを作成しました: ' + folder.getId());
-  return folder;
+function saveEventPdfRefs_(refs) {
+  tSetProp_(UP_KEY_EVENT_PDF_REFS, JSON.stringify(refs || []));
 }
 
+/**
+ * [Webアプリ API] 「行事予定」タブ用: 保存済みのPDF参照を学校ごとにグループ化して返します。
+ * Driveフォルダは使わず、Googleピッカーで選ばれたファイルの参照のみを扱います。
+ * 閲覧はクライアント側でDriveプレビューを埋め込むため、サーバ側でのファイルアクセスは不要です。
+ * @returns {{success: boolean, groups?: Array<{school: string, files: Array<{id: string, name: string, updatedAt: number}>}>, error?: string}}
+ */
 function getEventPdfLibraryForWebApp() {
   try {
-    const collectPdfs = (folder) => {
-      const files = folder.getFilesByType(MimeType.PDF);
-      const list = [];
-      while (files.hasNext()) {
-        const f = files.next();
-        list.push({
-          id: f.getId(),
-          name: f.getName(),
-          updatedAt: f.getLastUpdated().getTime(),
-          size: f.getSize()
-        });
-      }
-      list.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
-      return list;
-    };
+    const refs = getEventPdfRefs_();
 
-    const rootFolder = getEventPdfRootFolder_();
-    const groups = [];
+    // 学校ごとにグループ化（空文字 = 学校未指定）
+    const bySchool = {};
+    refs.forEach(r => {
+      const school = String(r.school || '');
+      if (!bySchool[school]) bySchool[school] = [];
+      bySchool[school].push({
+        id: r.id,
+        name: r.name || '(名称不明のPDF)',
+        updatedAt: r.updatedAt || 0
+      });
+    });
 
-    // フォルダ直下のPDF（学校フォルダに分けていない運用）
-    const rootFiles = collectPdfs(rootFolder);
-    if (rootFiles.length > 0) {
-      groups.push({ school: '', files: rootFiles });
-    }
+    const groups = Object.keys(bySchool).map(school => {
+      const files = bySchool[school];
+      files.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+      return { school: school, files: files };
+    });
+    // 学校未指定（空文字）を先頭、その後は学校名の五十音順
+    groups.sort((a, b) => {
+      if (!a.school) return -1;
+      if (!b.school) return 1;
+      return a.school.localeCompare(b.school, 'ja');
+    });
 
-    // サブフォルダ = 学校ごとのグループ
-    const subFolders = rootFolder.getFolders();
-    const schoolGroups = [];
-    while (subFolders.hasNext()) {
-      const sub = subFolders.next();
-      schoolGroups.push({ school: sub.getName(), files: collectPdfs(sub) });
-    }
-    schoolGroups.sort((a, b) => a.school.localeCompare(b.school, 'ja'));
-    groups.push(...schoolGroups);
-
-    return { success: true, folderName: rootFolder.getName(), groups: groups };
+    return { success: true, groups: groups };
   } catch (e) {
     logError('getEventPdfLibraryForWebApp', e);
     return { success: false, error: e.message };
@@ -623,33 +567,63 @@ function getEventPdfLibraryForWebApp() {
 }
 
 /**
- * [Webアプリ API] 「行事予定」タブ用: PDFを行事予定PDFフォルダに保存します。
- * schoolName が指定された場合は同名のサブフォルダ（なければ作成）に保存します。
- * @param {string} fileName ファイル名
- * @param {string} base64Data PDFのbase64文字列（dataURLヘッダなし）
- * @param {string} schoolName 保存先の学校名（サブフォルダ名）。空ならフォルダ直下
- * @returns {{success: boolean, fileId?: string, message?: string, error?: string}}
+ * [Webアプリ API] 「行事予定」タブ用: Googleピッカーで選択したPDFを一覧に追加します。
+ * ファイルのコピーは作らず、参照（ID・ファイル名・学校名）のみを保存します。
+ * @param {Array<{id: string, name: string}>} files ピッカーで選択されたファイル
+ * @param {string} schoolName 学校名（グループ名）。空なら未指定グループ
+ * @returns {{success: boolean, added?: number, message?: string, error?: string}}
  */
-function uploadEventSchedulePdf(fileName, base64Data, schoolName) {
+function addEventPdfReferences(files, schoolName) {
   try {
-    if (!fileName || !base64Data) throw new Error('ファイルデータが不正です。');
-
-    const bytes = Utilities.base64Decode(base64Data);
-    if (bytes.length > 15 * 1024 * 1024) throw new Error('ファイルサイズが15MBを超えています。');
-
-    const rootFolder = getEventPdfRootFolder_();
-    let targetFolder = rootFolder;
-    const school = String(schoolName || '').trim();
-    if (school) {
-      const existing = rootFolder.getFoldersByName(school);
-      targetFolder = existing.hasNext() ? existing.next() : rootFolder.createFolder(school);
+    if (!Array.isArray(files) || files.length === 0) {
+      throw new Error('追加するファイルがありません。');
     }
+    const school = String(schoolName || '').trim();
+    const refs = getEventPdfRefs_();
+    const existingIds = {};
+    refs.forEach(r => { existingIds[r.id] = true; });
 
-    const file = targetFolder.createFile(Utilities.newBlob(bytes, MimeType.PDF, fileName));
-    logInfo(`行事予定PDFを保存しました: ${fileName}（保存先: ${targetFolder.getName()}）`);
-    return { success: true, fileId: file.getId(), message: `「${fileName}」を保存しました。` };
+    let added = 0;
+    const now = Date.now();
+    files.forEach(f => {
+      if (!f || !f.id || existingIds[f.id]) return;
+      refs.push({
+        id: String(f.id),
+        name: String(f.name || '(名称不明のPDF)'),
+        school: school,
+        updatedAt: f.updatedAt ? Number(f.updatedAt) : now
+      });
+      existingIds[f.id] = true;
+      added++;
+    });
+
+    saveEventPdfRefs_(refs);
+    logInfo(`行事予定PDF参照を ${added} 件追加しました。`);
+    return {
+      success: true,
+      added: added,
+      message: added > 0 ? `${added}件のPDFを一覧に追加しました。` : '選択されたPDFはすでに一覧にあります。'
+    };
   } catch (e) {
-    logError('uploadEventSchedulePdf', e);
+    logError('addEventPdfReferences', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 「行事予定」タブ用: 指定IDの参照を一覧から外します（ファイル自体は削除しません）。
+ * @param {string} fileId 参照を外すファイルID
+ * @returns {{success: boolean, message?: string, error?: string}}
+ */
+function removeEventPdfReference(fileId) {
+  try {
+    if (!fileId) throw new Error('ファイルIDが指定されていません。');
+    const refs = getEventPdfRefs_();
+    const next = refs.filter(r => r.id !== fileId);
+    saveEventPdfRefs_(next);
+    return { success: true, message: '一覧から外しました。' };
+  } catch (e) {
+    logError('removeEventPdfReference', e);
     return { success: false, error: e.message };
   }
 }

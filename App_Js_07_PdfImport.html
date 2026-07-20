@@ -93,23 +93,6 @@
         renderPdfQueue(type);
     }
 
-    function addDrivePdfFile_(type, fileId, name) {
-        var state = PDF_IMPORT[type];
-        var dup = state.files.some(function (item) { return item.fileId === fileId; });
-        if (dup) return false;
-        state.files.push({
-            id: 'f' + (++state.seq),
-            name: name || '(名称不明のPDF)',
-            size: 0,
-            source: 'drive',
-            fileId: fileId,
-            status: 'pending',
-            error: null,
-            items: null
-        });
-        return true;
-    }
-
     function removePdfQueueItem(type, id) {
         var state = PDF_IMPORT[type];
         if (state.running) return;
@@ -296,12 +279,7 @@
                 item.status = 'processing';
                 renderPdfQueue(type);
                 try {
-                    var fileRef;
-                    if (item.source === 'upload') {
-                        fileRef = { base64: await readFileAsBase64_(item.file), name: item.name };
-                    } else {
-                        fileRef = { fileId: item.fileId };
-                    }
+                    var fileRef = { base64: await readFileAsBase64_(item.file), name: item.name };
                     var res;
                     if (type === 'event') {
                         res = await pdfRunServer_('extractEventsFromPdfForWeb', fileRef, fiscalYear);
@@ -795,90 +773,6 @@
     // =====================================================================
     // ===== データ連携 (Drive / フォルダからの追加・従来型バックグラウンド処理) =====
     // =====================================================================
-
-    function openGooglePicker(type) {
-        STATE.currentPickerType = type;
-        showToast('info', 'Google Driveに接続中...');
-        google.script.run
-            .withSuccessHandler(function (res) {
-                if (res.success && res.token) {
-                    if (!STATE.pickerApiLoaded) {
-                        gapi.load('picker', {
-                            callback: function () {
-                                STATE.pickerApiLoaded = true;
-                                createPicker(res.token);
-                            }
-                        });
-                    } else {
-                        createPicker(res.token);
-                    }
-                } else {
-                    showToast('error', '認証情報の取得に失敗しました: ' + (res.error || ''));
-                }
-            })
-            .withFailureHandler(_onCommError)
-            .getPickerAuthInfo();
-    }
-
-    function createPicker(oauthToken) {
-        var view = new google.picker.DocsView(google.picker.ViewId.DOCS);
-        view.setMimeTypes('application/pdf');
-
-        var picker = new google.picker.PickerBuilder()
-            .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-            .addView(view)
-            .setOAuthToken(oauthToken)
-            .setCallback(pickerCallback)
-            .setOrigin('https://script.google.com')
-            .setTitle(STATE.currentPickerType === 'unit' ? '指導計画PDFを選択' : '行事予定PDFを選択')
-            .build();
-
-        picker.setVisible(true);
-    }
-
-    // Picker で選択したファイルは解析キューに追加し、直接アップロードと同じプレビューフローに乗せる
-    function pickerCallback(data) {
-        if (data.action !== google.picker.Action.PICKED) return;
-        var type = STATE.currentPickerType;
-        var added = 0;
-        (data.docs || []).forEach(function (doc) {
-            if (addDrivePdfFile_(type, doc.id, doc.name)) added++;
-        });
-        renderPdfQueue(type);
-        if (added > 0) {
-            showToast('success', added + '件のPDFを追加しました。「AI解析を開始」を押してください。');
-        } else {
-            showToast('info', '選択されたファイルはすでに追加されています。');
-        }
-    }
-
-    // 設定ダッシュボードで指定されたフォルダ内のPDFを解析キューに追加する
-    function addFolderPdfs(type) {
-        showToast('info', 'フォルダ内のPDF一覧を取得中...');
-        google.script.run
-            .withSuccessHandler(function (res) {
-                if (!res.success) {
-                    showToast('error', 'エラー: ' + res.error);
-                    return;
-                }
-                if (!res.files || res.files.length === 0) {
-                    showToast('info', 'フォルダにPDFファイルが見つかりませんでした。');
-                    return;
-                }
-                var added = 0;
-                res.files.forEach(function (f) {
-                    if (addDrivePdfFile_(type, f.id, f.name)) added++;
-                });
-                renderPdfQueue(type);
-                if (added > 0) {
-                    showToast('success', added + '件のPDFを追加しました。不要なファイルは×で外せます。');
-                } else {
-                    showToast('info', 'フォルダ内のPDFはすべて追加済みです。');
-                }
-            })
-            .withFailureHandler(_onCommError)
-            .getPdfFileListForWebApp(type);
-    }
 
     // 従来型（スプレッドシートのメニューから開始した）バックグラウンド処理の状態表示
     function checkProcessingStatus() {

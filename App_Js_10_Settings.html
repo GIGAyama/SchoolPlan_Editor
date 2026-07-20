@@ -393,8 +393,6 @@
             .withSuccessHandler(function (res) {
                 document.getElementById('sysCourseName').value = res.courseName || '';
                 document.getElementById('sysPostHour').value = res.postHour || '';
-                document.getElementById('sysPdfFolderId').value = res.pdfFolderId || '';
-                document.getElementById('sysEventPdfFolderId').value = res.eventPdfFolderId || '';
                 // Geminiモデル名を保留値として保存し、モデル一覧取得後に反映する
                 var modelSelect = document.getElementById('sysGeminiModelName');
                 modelSelect.dataset.pendingValue = res.geminiModelName || 'gemini-2.5-flash';
@@ -443,8 +441,6 @@
         var settings = {
             courseName: document.getElementById('sysCourseName').value,
             postHour: document.getElementById('sysPostHour').value,
-            pdfFolderId: document.getElementById('sysPdfFolderId').value,
-            eventPdfFolderId: document.getElementById('sysEventPdfFolderId').value,
             geminiApiKey: document.getElementById('sysGeminiApiKey').value,
             geminiModelName: document.getElementById('sysGeminiModelName').value,
             moduleEnabled: document.getElementById('sysModuleEnabled').checked
