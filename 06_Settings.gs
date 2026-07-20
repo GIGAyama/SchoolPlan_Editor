@@ -31,8 +31,6 @@ function getAppSettings() {
     return {
       courseName       : getVal(SP_KEY_COURSE_NAME),
       postHour         : getVal(SP_KEY_POST_HOUR),
-      pdfFolderId      : getVal(SP_KEY_PDF_FOLDER_ID),
-      eventPdfFolderId : getVal(SP_KEY_EVENT_PDF_FOLDER_ID),
       // APIキーは先頭2文字＋末尾2文字のみ表示し中央をマスク（肩越しの覗き見対策）。
       // マスク文字「•」を含むため、保存時に既存キーが保持される（saveAppSettings 参照）。
       geminiApiKey     : apiKey
@@ -71,8 +69,6 @@ function saveAppSettings(settings) {
     const propsToSave = {
       [SP_KEY_COURSE_NAME]         : settings.courseName       || '',
       [SP_KEY_POST_HOUR]           : settings.postHour         || '',
-      [SP_KEY_PDF_FOLDER_ID]       : settings.pdfFolderId      || '',
-      [SP_KEY_EVENT_PDF_FOLDER_ID] : settings.eventPdfFolderId || '',
       [SP_KEY_GEMINI_MODEL_NAME]   : settings.geminiModelName  || 'gemini-2.5-flash',
     };
 
@@ -264,8 +260,6 @@ function getSetupStatus() {
       wizardDone: tGetProp_(SP_KEY_SETUP_WIZARD_DONE) === 'true',
       hasApiKey: !!tGetProp_(SP_KEY_GEMINI_API_KEY),
       hasGrade: !!tGetProp_(SCRIPT_PROP_GRADE),
-      hasPdfFolder: !!tGetProp_(SP_KEY_PDF_FOLDER_ID),
-      hasEventPdfFolder: !!tGetProp_(SP_KEY_EVENT_PDF_FOLDER_ID),
       hasCourseName: !!tGetProp_(SP_KEY_COURSE_NAME),
       hasCalendar: hasCalendar
     };

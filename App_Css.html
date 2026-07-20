@@ -4775,4 +4775,66 @@
     .toolbar-actions {
         flex-wrap: wrap;
     }
+
+    /* AIタスク抽出コンソール: 組み合わせ可能なソースカード */
+    .ai-task-source-card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+        background: var(--surface);
+        transition: border-color 0.15s, background 0.15s;
+    }
+
+    .ai-task-source-card.checked {
+        border-color: var(--primary);
+        background: var(--primary-light);
+    }
+
+    .ai-task-source-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: bold;
+        font-size: 0.85rem;
+        cursor: pointer;
+        color: var(--text-sub);
+    }
+
+    .ai-task-source-card.checked > .ai-task-source-toggle {
+        color: var(--text-main);
+    }
+
+    .ai-task-source-body {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed var(--border);
+    }
+
+    .ai-task-pdf-file {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8rem;
+        padding: 6px 10px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+    }
+
+    .ai-task-pdf-file .ai-task-pdf-name {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .ai-task-pdf-file .ai-task-pdf-remove {
+        background: none;
+        border: none;
+        color: var(--danger);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        padding: 0;
+    }
 </style>

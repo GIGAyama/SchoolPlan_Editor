@@ -43,7 +43,7 @@
         var shownCount = 0;
 
         groups.forEach(function (group) {
-            var schoolLabel = group.school || '共通・フォルダ直下';
+            var schoolLabel = group.school || '共通・学校未指定';
             var schoolMatched = keyword && schoolLabel.toLowerCase().indexOf(keyword) >= 0;
             var files = (group.files || []).filter(function (f) {
                 if (!keyword || schoolMatched) return true;
@@ -55,9 +55,6 @@
             if (!onlyRootGroup) {
                 html += '<div class="events-school-name"><span class="material-symbols-outlined fs-6">'
                     + (group.school ? 'school' : 'folder') + '</span>' + escHtml(schoolLabel) + '</div>';
-            }
-            if (files.length === 0) {
-                html += '<div class="events-file-empty">PDFがありません</div>';
             }
             files.forEach(function (f) {
                 shownCount++;
@@ -79,7 +76,7 @@
                     + '<p>「' + escHtml(rawKeyword) + '」に一致するPDFはありません。</p></div>';
             } else if (!html) {
                 html = '<div class="events-list-message"><span class="material-symbols-outlined">picture_as_pdf</span>'
-                    + '<p>行事予定PDFがまだありません。<br>「PDFを追加」からアップロードしてください（アプリ専用フォルダに保存されます）。</p></div>';
+                    + '<p>行事予定PDFがまだありません。<br>「PDFを追加」からGoogleドライブのPDFを選んで登録してください。</p></div>';
             }
         }
         listEl.innerHTML = html;
@@ -116,64 +113,132 @@
             + ' allow="autoplay"></iframe>';
     }
 
-    async function showEventPdfUploadDialog() {
-        var schools = (STATE.eventLibraryGroups || [])
+    // ===== PDFを一覧に追加（Googleピッカーで選択して参照を保存） =====
+    // Driveにコピーを作らず、選んだファイルの参照（ID・名前・学校名）だけを保存する。
+    // 閲覧はユーザー自身のブラウザセッションでDriveプレビューを埋め込むため、権限拡張は不要。
+    function addEventPdfFromPicker() {
+        showToast('info', 'Google ドライブに接続中...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res || !res.success || !res.token) {
+                    showToast('error', '認証情報の取得に失敗しました: ' + ((res && res.error) || ''));
+                    return;
+                }
+                if (!STATE.pickerApiLoaded) {
+                    gapi.load('picker', {
+                        callback: function () {
+                            STATE.pickerApiLoaded = true;
+                            createEventPdfPicker_(res.token);
+                        }
+                    });
+                } else {
+                    createEventPdfPicker_(res.token);
+                }
+            })
+            .withFailureHandler(_onCommError)
+            .getPickerAuthInfo();
+    }
+
+    function createEventPdfPicker_(oauthToken) {
+        var view = new google.picker.DocsView(google.picker.ViewId.DOCS);
+        view.setMimeTypes('application/pdf');
+        var picker = new google.picker.PickerBuilder()
+            .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+            .addView(view)
+            .setOAuthToken(oauthToken)
+            .setCallback(eventPdfPickerCallback_)
+            .setOrigin('https://script.google.com')
+            .setTitle('行事予定PDFを選択（複数可）')
+            .build();
+        picker.setVisible(true);
+    }
+
+    async function eventPdfPickerCallback_(data) {
+        if (data.action !== google.picker.Action.PICKED) return;
+        var docs = (data.docs || []).map(function (doc) {
+            return { id: doc.id, name: doc.name, updatedAt: doc.lastEditedUtc || Date.now() };
+        });
+        if (docs.length === 0) return;
+
+        // 学校名（グループ名）を任意で入力してもらう
+        var existing = (STATE.eventLibraryGroups || [])
             .map(function (g) { return g.school; })
             .filter(function (s) { return !!s; });
-        var optionsHtml = '<option value="">（フォルダ直下に保存）</option>'
-            + schools.map(function (s) {
+        var optionsHtml = '<option value="">（学校を指定しない）</option>'
+            + existing.map(function (s) {
                 return '<option value="' + escAttr(s) + '">' + escHtml(s) + '</option>';
             }).join('');
 
         var result = await Swal.fire({
-            title: '行事予定PDFを追加',
+            title: docs.length + '件のPDFを一覧に追加',
             html: '<div style="text-align:left; display:flex; flex-direction:column; gap:10px;">'
-                + '<label style="font-size:0.85rem; display:flex; flex-direction:column; gap:4px;">保存先の学校フォルダ'
+                + '<div style="font-size:0.8rem; color:var(--text-sub);">学校ごとに分けて表示できます（任意）。</div>'
+                + '<label style="font-size:0.85rem; display:flex; flex-direction:column; gap:4px;">既存の学校グループ'
                 + '<select id="swalEventPdfSchool" class="form-select form-select-sm">' + optionsHtml + '</select></label>'
-                + '<label style="font-size:0.85rem; display:flex; flex-direction:column; gap:4px;">新しい学校名（新規フォルダを作る場合）'
+                + '<label style="font-size:0.85rem; display:flex; flex-direction:column; gap:4px;">新しい学校名（新しいグループを作る場合）'
                 + '<input id="swalEventPdfNewSchool" class="form-control form-control-sm" placeholder="例: ○○小学校"></label>'
-                + '<label style="font-size:0.85rem; display:flex; flex-direction:column; gap:4px;">PDFファイル（15MBまで）'
-                + '<input type="file" id="swalEventPdfFile" class="form-control form-control-sm" accept="application/pdf,.pdf"></label>'
                 + '</div>',
             showCancelButton: true,
-            confirmButtonText: 'アップロード',
+            confirmButtonText: '一覧に追加',
             cancelButtonText: 'キャンセル',
             preConfirm: function () {
-                var fileInput = document.getElementById('swalEventPdfFile');
-                if (!fileInput.files || fileInput.files.length === 0) {
-                    Swal.showValidationMessage('PDFファイルを選択してください。');
-                    return false;
-                }
-                var file = fileInput.files[0];
-                if (file.size > PDF_MAX_FILE_BYTES) {
-                    Swal.showValidationMessage('15MBを超えるファイルはアップロードできません。');
-                    return false;
-                }
                 var school = document.getElementById('swalEventPdfNewSchool').value.trim()
                     || document.getElementById('swalEventPdfSchool').value;
-                return { file: file, school: school };
+                return { school: school };
             }
         });
         if (!result.isConfirmed || !result.value) return;
 
-        var file = result.value.file;
-        showToast('info', '「' + file.name + '」をアップロード中...');
-        try {
-            var base64 = await readFileAsBase64_(file);
-            google.script.run
-                .withSuccessHandler(function (res) {
-                    if (!res.success) {
-                        showToast('error', 'エラー: ' + res.error);
-                        return;
-                    }
-                    showToast('success', res.message);
-                    loadEventPdfLibrary();
-                })
-                .withFailureHandler(_onCommError)
-                .uploadEventSchedulePdf(file.name, base64, result.value.school);
-        } catch (e) {
-            showToast('error', 'ファイルの読み込みに失敗しました: ' + e.message);
-        }
+        showToast('info', 'PDFを一覧に追加しています...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) {
+                    showToast('error', 'エラー: ' + res.error);
+                    return;
+                }
+                showToast('success', res.message);
+                loadEventPdfLibrary();
+            })
+            .withFailureHandler(_onCommError)
+            .addEventPdfReferences(docs, result.value.school);
+    }
+
+    // 表示中のPDFを一覧から外す（Drive上のファイル自体は削除しない）
+    async function removeSelectedEventPdf() {
+        var fileId = STATE.eventSelectedPdfId;
+        if (!fileId) return;
+        var confirm = await Swal.fire({
+            title: '一覧から外しますか？',
+            text: 'この行事予定PDFを一覧から外します。Google ドライブ上のファイル自体は削除されません。',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '外す',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#d33'
+        });
+        if (!confirm.isConfirmed) return;
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res.success) {
+                    showToast('error', 'エラー: ' + res.error);
+                    return;
+                }
+                showToast('success', res.message);
+                // ビューアをリセットして一覧を再読込
+                STATE.eventSelectedPdfId = null;
+                var toolbar = document.getElementById('eventPdfViewerToolbar');
+                if (toolbar) toolbar.style.display = 'none';
+                var body = document.getElementById('eventPdfViewerBody');
+                if (body) {
+                    body.innerHTML = '<div class="events-viewer-placeholder">'
+                        + '<span class="material-symbols-outlined">picture_as_pdf</span>'
+                        + '<p>左の一覧からPDFを選択すると、ここに表示されます。</p></div>';
+                }
+                loadEventPdfLibrary();
+            })
+            .withFailureHandler(_onCommError)
+            .removeEventPdfReference(fileId);
     }
 
 </script>

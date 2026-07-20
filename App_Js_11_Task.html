@@ -7,20 +7,102 @@
     // ===== 初期リロード制御 =====
 
     // ===== UI切替関連 =====
-    function toggleAiTaskMode() {
-        var mode = document.querySelector('input[name="aiTaskMode"]:checked').value;
-        document.getElementById('aiTaskScheduleMode').style.display = (mode === 'schedule') ? 'block' : 'none';
-        document.getElementById('aiTaskTextMode').style.display = (mode === 'text') ? 'block' : 'none';
-        var pdfMode = document.getElementById('aiTaskPdfMode');
-        if (pdfMode) pdfMode.style.display = (mode === 'pdf') ? 'block' : 'none';
-        cancelAiTaskPreview(); // モード切替時はプレビューを隠す
+    // タスク抽出コンソールで選択中のPDFファイル（複数可）
+    var AI_TASK_PDF_FILES = [];
+    var aiTaskPdfSeq = 0;
+
+    /** チェックされたソースの入力欄を開閉し、カードの選択スタイルを更新する */
+    function updateAiTaskSourceUI() {
+        [
+            ['aiTaskUseSchedule', 'aiTaskScheduleBody'],
+            ['aiTaskUseText', 'aiTaskTextBody'],
+            ['aiTaskUsePdf', 'aiTaskPdfBody']
+        ].forEach(function (pair) {
+            var chk = document.getElementById(pair[0]);
+            var body = document.getElementById(pair[1]);
+            if (!chk || !body) return;
+            body.style.display = chk.checked ? 'block' : 'none';
+            var card = chk.closest('.ai-task-source-card');
+            if (card) card.classList.toggle('checked', chk.checked);
+        });
     }
 
-    /** PDFモードの「既存の情報と組み合わせる」開閉 */
-    function toggleAiTaskPdfCombine() {
-        var chk = document.getElementById('aiTaskPdfCombine');
-        var area = document.getElementById('aiTaskPdfCombineArea');
-        if (area) area.style.display = (chk && chk.checked) ? 'block' : 'none';
+    /** PDFドロップゾーン・ファイル入力を初期化する（初回表示時に一度だけ配線） */
+    function initAiTaskPdfUI() {
+        if (STATE.aiTaskPdfUIReady) return;
+        var zone = document.getElementById('aiTaskPdfDropZone');
+        var input = document.getElementById('aiTaskPdfFile');
+        if (!zone || !input) return;
+        zone.addEventListener('click', function () { input.click(); });
+        zone.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+        });
+        zone.addEventListener('dragover', function (e) { e.preventDefault(); zone.classList.add('dragover'); });
+        zone.addEventListener('dragleave', function () { zone.classList.remove('dragover'); });
+        zone.addEventListener('drop', function (e) {
+            e.preventDefault();
+            zone.classList.remove('dragover');
+            if (e.dataTransfer && e.dataTransfer.files) addAiTaskPdfFiles(e.dataTransfer.files);
+        });
+        input.addEventListener('change', function () {
+            addAiTaskPdfFiles(input.files);
+            input.value = '';
+        });
+        STATE.aiTaskPdfUIReady = true;
+    }
+
+    function addAiTaskPdfFiles(fileList) {
+        var added = 0, rejected = [];
+        Array.prototype.forEach.call(fileList, function (f) {
+            var isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+            if (!isPdf) { rejected.push(f.name + '（PDFではありません）'); return; }
+            if (typeof PDF_MAX_FILE_BYTES === 'number' && f.size > PDF_MAX_FILE_BYTES) {
+                rejected.push(f.name + '（15MBを超えています）'); return;
+            }
+            var dup = AI_TASK_PDF_FILES.some(function (item) { return item.name === f.name && item.file.size === f.size; });
+            if (dup) { rejected.push(f.name + '（追加済み）'); return; }
+            AI_TASK_PDF_FILES.push({ id: 'atp' + (++aiTaskPdfSeq), name: f.name, file: f });
+            added++;
+        });
+        if (added > 0) showToast('success', added + '件のPDFを追加しました。');
+        if (rejected.length > 0) showToast('error', '追加できないファイル: ' + rejected.join(' / '));
+        renderAiTaskPdfList();
+    }
+
+    function removeAiTaskPdfFile(id) {
+        AI_TASK_PDF_FILES = AI_TASK_PDF_FILES.filter(function (item) { return item.id !== id; });
+        renderAiTaskPdfList();
+    }
+
+    function renderAiTaskPdfList() {
+        var listEl = document.getElementById('aiTaskPdfFileList');
+        if (!listEl) return;
+        listEl.innerHTML = '';
+        AI_TASK_PDF_FILES.forEach(function (item) {
+            var row = document.createElement('div');
+            row.className = 'ai-task-pdf-file';
+
+            var icon = document.createElement('span');
+            icon.className = 'material-symbols-outlined fs-6';
+            icon.textContent = 'picture_as_pdf';
+
+            var name = document.createElement('span');
+            name.className = 'ai-task-pdf-name';
+            name.title = item.name;
+            name.textContent = item.name;
+
+            var rm = document.createElement('button');
+            rm.type = 'button';
+            rm.className = 'ai-task-pdf-remove';
+            rm.title = '外す';
+            rm.innerHTML = '<span class="material-symbols-outlined fs-6">close</span>';
+            rm.onclick = function () { removeAiTaskPdfFile(item.id); };
+
+            row.appendChild(icon);
+            row.appendChild(name);
+            row.appendChild(rm);
+            listEl.appendChild(row);
+        });
     }
 
     // ===== タスクロードと描画 =====
@@ -614,79 +696,74 @@
 
     // ===== AI抽出とプレビュー操作 =====
 
-    function runAiTaskExtraction(mode) {
-        var statusMsg = 'AI抽出を実行中...（数秒〜十数秒かかります）';
-        showToast('info', statusMsg);
+    /** チェックされた情報源（予定・テキスト・PDF）をまとめてAIに送りタスクを抽出する */
+    async function runAiTaskExtraction() {
+        var useSchedule = document.getElementById('aiTaskUseSchedule').checked;
+        var useText = document.getElementById('aiTaskUseText').checked;
+        var usePdf = document.getElementById('aiTaskUsePdf').checked;
 
-        // 既存のプレビューをクリア
-        cancelAiTaskPreview();
+        if (!useSchedule && !useText && !usePdf) {
+            showToast('error', '情報源を1つ以上選んでください（予定・テキスト・PDF）。');
+            return;
+        }
 
-        if (mode === 'schedule') {
+        var params = {};
+
+        // 予定
+        if (useSchedule) {
             var start = document.getElementById('aiTaskStartDate').value;
             var end = document.getElementById('aiTaskEndDate').value;
             if (!start || !end) {
-                showToast('error', '抽出期間の開始日と終了日を指定してください。');
+                showToast('error', '「予定から抽出」の開始日と終了日を指定してください。');
                 return;
             }
-            google.script.run
-                .withSuccessHandler(handleAiExtractionResult)
-                .withFailureHandler(handleAiExtractionError)
-                .extractTasksFromSchedule_WebApp(start, end);
-        } else if (mode === 'text') {
+            if (start > end) {
+                showToast('error', '抽出期間の開始日は終了日より前にしてください。');
+                return;
+            }
+            params.scheduleStart = start;
+            params.scheduleEnd = end;
+        }
+
+        // テキスト
+        if (useText) {
             var text = document.getElementById('aiTaskTextInput').value;
             if (!text || text.trim() === '') {
-                showToast('error', '解析するテキストを入力またはペーストしてください。');
+                showToast('error', '「テキストから抽出」に解析するテキストを入力してください。');
                 return;
             }
-            google.script.run
-                .withSuccessHandler(handleAiExtractionResult)
-                .withFailureHandler(handleAiExtractionError)
-                .extractTasksFromText_WebApp(text);
-        } else if (mode === 'pdf') {
-            runAiTaskPdfExtraction_();
-        }
-    }
-
-    /** PDFモードのAI抽出（ファイル読み込み→既存情報との組み合わせオプション付きでサーバ送信） */
-    async function runAiTaskPdfExtraction_() {
-        var fileInput = document.getElementById('aiTaskPdfFile');
-        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
-            showToast('error', '解析するPDFファイルを選択してください。');
-            return;
-        }
-        var file = fileInput.files[0];
-        if (typeof PDF_MAX_FILE_BYTES === 'number' && file.size > PDF_MAX_FILE_BYTES) {
-            showToast('error', '15MBを超えるファイルは解析できません。');
-            return;
+            params.freeText = text.trim();
         }
 
-        // 既存ロジックとの組み合わせオプションを収集
-        var options = {};
-        var combine = document.getElementById('aiTaskPdfCombine');
-        if (combine && combine.checked) {
-            var start = document.getElementById('aiTaskPdfStartDate').value;
-            var end = document.getElementById('aiTaskPdfEndDate').value;
-            if (start && end) {
-                if (start > end) {
-                    showToast('error', '参照する予定の開始日は終了日より前にしてください。');
-                    return;
-                }
-                options.scheduleStart = start;
-                options.scheduleEnd = end;
+        // PDF（複数）
+        if (usePdf) {
+            if (AI_TASK_PDF_FILES.length === 0) {
+                showToast('error', '「PDFから抽出」に解析するPDFを追加してください。');
+                return;
             }
-            var extra = document.getElementById('aiTaskPdfExtraText').value;
-            if (extra && extra.trim()) options.extraText = extra.trim();
         }
+
+        showToast('info', 'AI抽出を実行中...（数秒〜十数秒かかります）');
+        cancelAiTaskPreview(); // 既存のプレビューをクリア
 
         try {
-            var base64 = await readFileAsBase64_(file);
-            google.script.run
-                .withSuccessHandler(handleAiExtractionResult)
-                .withFailureHandler(handleAiExtractionError)
-                .extractTasksFromPdf_WebApp({ base64: base64, name: file.name }, options);
+            if (usePdf) {
+                params.pdfs = [];
+                for (var i = 0; i < AI_TASK_PDF_FILES.length; i++) {
+                    var item = AI_TASK_PDF_FILES[i];
+                    var base64 = await readFileAsBase64_(item.file);
+                    params.pdfs.push({ base64: base64, name: item.name });
+                }
+            }
         } catch (e) {
             showToast('error', 'PDFの読み込みに失敗しました: ' + e.message);
+            return;
         }
+
+        google.script.run
+            .withSuccessHandler(handleAiExtractionResult)
+            .withFailureHandler(handleAiExtractionError)
+            .extractTasksCombined_WebApp(params);
     }
 
     function handleAiExtractionResult(res) {

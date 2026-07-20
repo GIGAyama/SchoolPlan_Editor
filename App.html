@@ -251,8 +251,8 @@
                         <span class="material-symbols-outlined fs-6">refresh</span> 更新
                     </button>
                     <button class="btn btn-primary btn-sm d-flex align-items-center gap-1"
-                        onclick="showEventPdfUploadDialog()">
-                        <span class="material-symbols-outlined fs-6">upload_file</span> PDFを追加
+                        onclick="addEventPdfFromPicker()">
+                        <span class="material-symbols-outlined fs-6">add_to_drive</span> PDFを追加
                     </button>
                 </div>
             </div>
@@ -278,6 +278,11 @@
                             class="btn btn-outline btn-sm d-flex align-items-center gap-1">
                             <span class="material-symbols-outlined fs-6">open_in_new</span> 新しいタブで開く
                         </a>
+                        <button id="eventPdfViewerRemoveBtn" onclick="removeSelectedEventPdf()"
+                            class="btn btn-outline btn-sm d-flex align-items-center gap-1"
+                            style="border-color: var(--danger); color: var(--danger);">
+                            <span class="material-symbols-outlined fs-6">playlist_remove</span> 一覧から外す
+                        </button>
                     </div>
                     <div id="eventPdfViewerBody" class="events-viewer-body">
                         <div class="events-viewer-placeholder">
@@ -638,34 +643,6 @@
                             </div>
                         </div>
 
-                        <!-- フォルダ設定 -->
-                        <div
-                            style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
-                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
-                                    class="material-symbols-outlined fs-6">folder</span> PDF格納フォルダID</h4>
-                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-                                <div>
-                                    <label
-                                        style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">指導計画PDF
-                                        フォルダID</label>
-                                    <input type="text" id="sysPdfFolderId" placeholder="DriveのフォルダURL末尾のID"
-                                        style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
-                                </div>
-                                <div>
-                                    <label
-                                        style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">行事予定PDF
-                                        フォルダID</label>
-                                    <input type="text" id="sysEventPdfFolderId" placeholder="DriveのフォルダURL末尾のID"
-                                        style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
-                                </div>
-                            </div>
-                            <p style="font-size:0.75rem; color:var(--text-hint); margin-top:6px;">
-                                <span style="color:#b26a00;">※ このフォルダID設定は段階的に廃止予定です。</span>
-                                アクセス権を <code>drive.file</code> に最小化したため、指導計画PDFは「Google Driveから選ぶ」（Picker）で追加してください。
-                                行事予定PDFは「行事予定」タブの「PDFを追加」でアプリ専用フォルダに保存され、学校名を入力するとタブ内で学校ごとにグループ表示されます。
-                            </p>
-                        </div>
-
                         <!-- Gemini設定 -->
                         <div class="settings-card">
                             <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"
@@ -911,98 +888,78 @@
                             授業予定や会議録から、必要な準備物・事前タスクをAIが自動で洗い出し、リスト化します。
                         </p>
 
-                        <!-- モード切替タブ（簡易） -->
-                        <div
-                            style="display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px;">
-                            <label style="font-weight: bold; font-size: 0.85rem; cursor: pointer;">
-                                <input type="radio" name="aiTaskMode" value="schedule" checked
-                                    onchange="toggleAiTaskMode()"> <span class="material-symbols-outlined fs-6"
-                                    style="vertical-align:text-bottom;">event</span> 予定解析（先読み）
-                            </label>
-                            <label
-                                style="font-weight: bold; font-size: 0.85rem; cursor: pointer; color: var(--text-sub);">
-                                <input type="radio" name="aiTaskMode" value="text" onchange="toggleAiTaskMode()"> <span
-                                    class="material-symbols-outlined fs-6"
-                                    style="vertical-align:text-bottom;">edit_note</span>
-                                フリーテキスト解析（議事録等）
-                            </label>
-                            <label
-                                style="font-weight: bold; font-size: 0.85rem; cursor: pointer; color: var(--text-sub);">
-                                <input type="radio" name="aiTaskMode" value="pdf" onchange="toggleAiTaskMode()"> <span
-                                    class="material-symbols-outlined fs-6"
-                                    style="vertical-align:text-bottom;">picture_as_pdf</span>
-                                PDF解析（行事の実施案等）
-                            </label>
-                        </div>
+                        <!-- 抽出ソース（チェックで自由に組み合わせ可能） -->
+                        <p style="font-size:0.78rem; color:var(--text-hint); margin-bottom:10px;">
+                            使いたい情報源にチェックを入れてください。<strong>予定・テキスト・PDFは自由に組み合わせて</strong>まとめて解析できます。
+                        </p>
 
-                        <!-- モード1: 予定解析入力部 -->
-                        <div id="aiTaskScheduleMode">
-                            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:0.85rem;">
-                                <span>抽出期間:</span>
-                                <input type="date" id="aiTaskStartDate" class="form-control form-control-sm"
-                                    style="width: auto;">
-                                <span>〜</span>
-                                <input type="date" id="aiTaskEndDate" class="form-control form-control-sm"
-                                    style="width: auto;">
-                                <button class="btn btn-primary btn-sm d-flex align-items-center gap-1"
-                                    onclick="runAiTaskExtraction('schedule')"><span
-                                        class="material-symbols-outlined fs-6">rocket_launch</span>
-                                    AI抽出を実行</button>
-                            </div>
-                            <small class="text-muted d-block mt-1">※指定期間の週案データと行事予定を横断して読み込みます。</small>
-                        </div>
+                        <div style="display:flex; flex-direction:column; gap:10px;">
 
-                        <!-- モード2: テキスト解析入力部 -->
-                        <div id="aiTaskTextMode" style="display:none;">
-                            <textarea id="aiTaskTextInput" class="form-control" rows="3"
-                                placeholder="会議の議事録や打ち合わせメモをここにペースト..."></textarea>
-                            <div style="text-align: right; margin-top: 8px;">
-                                <button class="btn btn-primary btn-sm d-flex align-items-center gap-1"
-                                    onclick="runAiTaskExtraction('text')"><span
-                                        class="material-symbols-outlined fs-6">rocket_launch</span>
-                                    AI要約＆抽出を実行</button>
-                            </div>
-                        </div>
-
-                        <!-- モード3: PDF解析入力部（行事の実施案等） -->
-                        <div id="aiTaskPdfMode" style="display:none;">
-                            <label
-                                style="font-size:0.85rem; display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
-                                行事の実施案などのPDFファイル（15MBまで）
-                                <input type="file" id="aiTaskPdfFile" class="form-control form-control-sm"
-                                    accept="application/pdf,.pdf">
-                            </label>
-
-                            <!-- 既存ロジックとの組み合わせ（任意） -->
-                            <div
-                                style="margin-top:6px; padding:10px; background: var(--surface-2); border:1px dashed var(--border); border-radius:8px;">
-                                <label style="font-weight:bold; font-size:0.8rem; cursor:pointer; display:block;">
-                                    <input type="checkbox" id="aiTaskPdfCombine" onchange="toggleAiTaskPdfCombine()">
-                                    既存の情報と組み合わせて解析する（任意）
+                            <!-- ソース: 予定から -->
+                            <div class="ai-task-source-card">
+                                <label class="ai-task-source-toggle">
+                                    <input type="checkbox" id="aiTaskUseSchedule" onchange="updateAiTaskSourceUI()">
+                                    <span class="material-symbols-outlined fs-6"
+                                        style="vertical-align:text-bottom;">event</span>
+                                    予定から抽出（週案・行事予定）
                                 </label>
-                                <div id="aiTaskPdfCombineArea" style="display:none; margin-top:8px;">
+                                <div id="aiTaskScheduleBody" class="ai-task-source-body" style="display:none;">
                                     <div
-                                        style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:0.82rem;">
-                                        <span>入力済みの予定を参照:</span>
-                                        <input type="date" id="aiTaskPdfStartDate" class="form-control form-control-sm"
-                                            style="width:auto;">
+                                        style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:0.85rem;">
+                                        <span>抽出期間:</span>
+                                        <input type="date" id="aiTaskStartDate" class="form-control form-control-sm"
+                                            style="width: auto;">
                                         <span>〜</span>
-                                        <input type="date" id="aiTaskPdfEndDate" class="form-control form-control-sm"
-                                            style="width:auto;">
+                                        <input type="date" id="aiTaskEndDate" class="form-control form-control-sm"
+                                            style="width: auto;">
                                     </div>
-                                    <small class="text-muted d-block mt-1 mb-2">※期間を空欄にすると予定は参照しません。</small>
-                                    <textarea id="aiTaskPdfExtraText" class="form-control" rows="2"
-                                        placeholder="補足メモや議事録など、あわせて考慮したいテキスト（任意）"></textarea>
+                                    <small class="text-muted d-block mt-1">※指定期間の週案データと行事予定を横断して読み込みます。</small>
                                 </div>
                             </div>
 
-                            <div style="text-align: right; margin-top: 8px;">
-                                <button class="btn btn-primary btn-sm d-flex align-items-center gap-1 ms-auto"
-                                    onclick="runAiTaskExtraction('pdf')"><span
-                                        class="material-symbols-outlined fs-6">rocket_launch</span>
-                                    PDFからAI抽出を実行</button>
+                            <!-- ソース: テキストから -->
+                            <div class="ai-task-source-card">
+                                <label class="ai-task-source-toggle">
+                                    <input type="checkbox" id="aiTaskUseText" onchange="updateAiTaskSourceUI()">
+                                    <span class="material-symbols-outlined fs-6"
+                                        style="vertical-align:text-bottom;">edit_note</span>
+                                    テキストから抽出（議事録・メモ等）
+                                </label>
+                                <div id="aiTaskTextBody" class="ai-task-source-body" style="display:none;">
+                                    <textarea id="aiTaskTextInput" class="form-control" rows="3"
+                                        placeholder="会議の議事録や打ち合わせメモをここにペースト..."></textarea>
+                                </div>
                             </div>
-                            <small class="text-muted d-block mt-1">※PDFはアップロード解析され、保存はされません。抽出結果は下のプレビューで確認・修正できます。</small>
+
+                            <!-- ソース: PDFから（複数可） -->
+                            <div class="ai-task-source-card">
+                                <label class="ai-task-source-toggle">
+                                    <input type="checkbox" id="aiTaskUsePdf" onchange="updateAiTaskSourceUI()">
+                                    <span class="material-symbols-outlined fs-6"
+                                        style="vertical-align:text-bottom;">picture_as_pdf</span>
+                                    PDFから抽出（行事の実施案等・複数可）
+                                </label>
+                                <div id="aiTaskPdfBody" class="ai-task-source-body" style="display:none;">
+                                    <div class="pdf-drop-zone" id="aiTaskPdfDropZone" tabindex="0" role="button"
+                                        aria-label="PDFを選択">
+                                        <span class="material-symbols-outlined pdf-drop-icon">upload_file</span>
+                                        <div class="pdf-drop-main">ここにPDFをドラッグ＆ドロップ<span
+                                                class="pdf-drop-or">または</span>クリックして選択</div>
+                                        <div class="pdf-drop-sub">複数ファイル可 / 1ファイル15MBまで</div>
+                                    </div>
+                                    <input type="file" id="aiTaskPdfFile" accept="application/pdf,.pdf" multiple
+                                        style="display:none;">
+                                    <div id="aiTaskPdfFileList" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+                                    <small class="text-muted d-block mt-1">※PDFはアップロード解析され、保存はされません。</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+                            <button class="btn btn-primary btn-sm d-flex align-items-center gap-1"
+                                onclick="runAiTaskExtraction()"><span
+                                    class="material-symbols-outlined fs-6">rocket_launch</span>
+                                AI抽出を実行</button>
                         </div>
 
                         <!-- 抽出結果プレビュー領域 -->
@@ -1234,12 +1191,6 @@
                         </div>
                         <input type="file" id="unitFileInput" accept="application/pdf,.pdf" multiple
                             style="display:none;">
-                        <div class="pdf-source-row">
-                            <span style="font-size:0.75rem;color:var(--text-hint);">その他の追加方法:</span>
-                            <button class="btn btn-outline btn-sm" onclick="openGooglePicker('unit')"><span
-                                    class="material-symbols-outlined fs-6">add_to_drive</span>
-                                Google Driveから選ぶ</button>
-                        </div>
                         <div class="pdf-queue" id="unitQueue" style="display:none;">
                             <div class="pdf-queue-header">
                                 <span class="pdf-queue-summary" id="unitQueueSummary"></span>
@@ -1284,14 +1235,6 @@
                         </div>
                         <input type="file" id="eventFileInput" accept="application/pdf,.pdf" multiple
                             style="display:none;">
-                        <div class="pdf-source-row">
-                            <span style="font-size:0.75rem;color:var(--text-hint);">その他の追加方法:</span>
-                            <button class="btn btn-outline btn-sm" onclick="openGooglePicker('event')"><span
-                                    class="material-symbols-outlined fs-6">add_to_drive</span>
-                                Google Driveから選ぶ</button>
-                            <button class="btn btn-outline btn-sm" onclick="addFolderPdfs('event')"><span
-                                    class="material-symbols-outlined fs-6">folder</span> ライブラリから追加</button>
-                        </div>
                         <div class="pdf-queue" id="eventQueue" style="display:none;">
                             <div class="pdf-queue-header">
                                 <span class="pdf-queue-summary" id="eventQueueSummary"></span>
