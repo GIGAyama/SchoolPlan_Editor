@@ -139,6 +139,29 @@
             .getPickerAuthInfo();
     }
 
+    // Googleピッカーに渡す origin を解決する。
+    // このアプリは GitHub Pages（gigayama.github.io）の PWA が GAS Webアプリを
+    // iframe で埋め込み、その中でユーザーコードが googleusercontent のサンドボックス
+    // iframe として動く多重ネスト構成。ピッカーは自身の「最上位ウィンドウのorigin」と
+    // setOrigin の値が一致するかを厳格に検証するため、埋め込み時は最上位である
+    // gigayama.github.io を渡す必要がある（'https://script.google.com' 固定だと
+    // 「Incorrect origin value」エラーで開けない）。ancestorOrigins の末尾＝最上位origin。
+    // 直接 exec URL で開いた場合は最上位が script.google.com になり従来通り動く。
+    function resolvePickerOrigin_() {
+        try {
+            var ancestors = window.location.ancestorOrigins;
+            if (ancestors && ancestors.length) {
+                return ancestors[ancestors.length - 1];
+            }
+        } catch (e) { /* ancestorOrigins 非対応ブラウザは下のフォールバックへ */ }
+        try {
+            if (google.script && google.script.host && google.script.host.origin) {
+                return google.script.host.origin;
+            }
+        } catch (e) { /* noop */ }
+        return 'https://script.google.com';
+    }
+
     function createEventPdfPicker_(oauthToken) {
         var view = new google.picker.DocsView(google.picker.ViewId.DOCS);
         view.setMimeTypes('application/pdf');
@@ -147,7 +170,7 @@
             .addView(view)
             .setOAuthToken(oauthToken)
             .setCallback(eventPdfPickerCallback_)
-            .setOrigin('https://script.google.com')
+            .setOrigin(resolvePickerOrigin_())
             .setTitle('行事予定PDFを選択（複数可）')
             .build();
         picker.setVisible(true);
