@@ -224,6 +224,34 @@
             text-align: center;
         }
 
+        /* ===== 初回起動時のログイン案内 ===== */
+        #welcome {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: #f6f8fb;
+            z-index: 24;
+            overflow-y: auto;
+        }
+
+        #welcome .setup-card {
+            text-align: center;
+        }
+
+        #welcome .welcome-steps {
+            text-align: left;
+            font-size: 13px;
+            color: #3c4043;
+            line-height: 1.8;
+            margin: 4px 0 20px;
+            padding: 14px 16px 14px 32px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
         /* ===== フローティングメニュー ===== */
         #menuBtn {
             position: fixed;
@@ -329,6 +357,30 @@
         </div>
     </div>
 
+    <!-- 初回起動時のログイン案内（まだ一度も表示できていない端末向け） -->
+    <div id="welcome">
+        <div class="setup-card">
+            <img src="icons/icon-192.png" alt="週案エディタ">
+            <h1>ようこそ！はじめる前に</h1>
+            <p class="lead">
+                このアプリはGoogleアカウントでログインして使います。<br>
+                はじめての方は、まず下のボタンからログイン・許可を行ってください。
+            </p>
+            <ol class="welcome-steps">
+                <li>「Googleでログインして始める」を押すと別のタブが開きます。</li>
+                <li>そのタブでGoogleにログインし、アクセスを許可します。</li>
+                <li>このタブに戻ると、自動で週案が表示されます。</li>
+            </ol>
+            <button class="btn-primary" id="welcomeLoginBtn">Googleでログインして始める</button>
+            <button class="btn-secondary" id="welcomeContinueBtn">ログインが済んだので開く</button>
+            <p class="setup-hint">
+                複数のGoogleアカウントでログインしている場合は、学校で使うアカウントに切り替えてください。
+                うまくいかないときは、いちど新しいタブでログインしてからお試しください。
+            </p>
+            <button class="btn-text" id="welcomeShowBtn">それでも表示されないとき</button>
+        </div>
+    </div>
+
     <!-- アプリ本体 -->
     <iframe id="appFrame" title="週案エディタ" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
 
@@ -346,9 +398,13 @@
             'use strict';
 
             var STORAGE_KEY = 'schoolPlanNote.appUrl';
+            // このブラウザで一度でもアプリ本体を iframe 内に表示できたかを記録するキー。
+            // 初回（＝未ログイン・未認可の可能性が高い）と再訪を区別し、案内を出し分けるために使う。
+            var EVER_READY_KEY = 'schoolPlanNote.everReady';
             var loading = document.getElementById('loading');
             var setup = document.getElementById('setup');
             var recovery = document.getElementById('recovery');
+            var welcome = document.getElementById('welcome');
             var frame = document.getElementById('appFrame');
             var menuBtn = document.getElementById('menuBtn');
             var menuPanel = document.getElementById('menuPanel');
@@ -358,10 +414,17 @@
             var appReady = false;      // App 側からの ready ハンドシェイクを受信したか
             var launchTimer = null;    // 一定時間 ready が来なければ案内へ切り替えるタイマー
             var currentUrl = '';       // 現在起動中の exec URL
-            // ready が来なければ「表示できなかった」とみなして案内へ切り替えるまでの待ち時間。
+            // このブラウザで過去に一度でも表示できたか（初回ログイン導線を出すか判断する）。
+            var everReady = false;
+            try { everReady = localStorage.getItem(EVER_READY_KEY) === '1'; } catch (e) { }
+            // 再訪ユーザー: ready が来なければ「表示できなかった」とみなして案内へ切り替えるまでの待ち時間。
             // 開けるユーザーは本体HTML読込時に即 ready が届くため通常は発火しないが、
             // 低速回線やGASのコールドスタートで読込自体が遅い場合の誤発火を避けるため長めに取る。
             var LAUNCH_TIMEOUT_MS = 20000;
+            // 初回ユーザー: 未ログインだと Google のログイン画面が iframe 内に表示できず空白のままになる。
+            // 20秒も空白で待たせず、早めに親切なログイン案内（#welcome）へ切り替える。
+            // 既にログイン済みの初回ユーザーは ready が即届くため、この案内は表示されない。
+            var FIRST_RUN_HINT_MS = 4000;
 
             // GASのWebアプリURLのみ許可（通常アカウント / Google Workspace ドメイン両対応）
             function isValidGasUrl(url) {
@@ -387,6 +450,7 @@
                 loading.style.display = 'none';
                 frame.style.display = 'none';
                 recovery.style.display = 'none';
+                welcome.style.display = 'none';
                 menuBtn.style.display = 'none';
                 setup.style.display = 'flex';
                 var err = document.getElementById('setupError');
@@ -404,6 +468,7 @@
                 loading.style.display = 'none';
                 setup.style.display = 'none';
                 recovery.style.display = 'none';
+                welcome.style.display = 'none';
                 frame.style.display = 'block';
                 menuBtn.style.display = 'block';
             }
@@ -413,9 +478,22 @@
             function showRecovery() {
                 loading.style.display = 'none';
                 setup.style.display = 'none';
+                welcome.style.display = 'none';
                 frame.style.display = 'none';
                 menuBtn.style.display = 'none';
                 recovery.style.display = 'flex';
+            }
+
+            // 初回ユーザー向けのログイン案内を表示する。
+            // iframe自体はDOMに残すため、ログイン後に ready が届けば showFrame() で自動復帰できる。
+            function showWelcome() {
+                if (launchTimer) { clearTimeout(launchTimer); launchTimer = null; }
+                loading.style.display = 'none';
+                setup.style.display = 'none';
+                recovery.style.display = 'none';
+                frame.style.display = 'none';
+                menuBtn.style.display = 'none';
+                welcome.style.display = 'flex';
             }
 
             // App本体（07_WebApp.gs / App.html）から届く ready ハンドシェイクを受信。
@@ -423,9 +501,23 @@
             // 組織アカウント等でGoogleのエラー画面が表示された場合は届かない。
             window.addEventListener('message', function (e) {
                 var data = e && e.data;
-                if (data && data.type === 'schoolPlanNote:ready') {
+                if (!data) return;
+                if (data.type === 'schoolPlanNote:ready') {
                     appReady = true;
+                    // このブラウザで表示できたことを記録し、次回以降は初回ログイン案内を出さない。
+                    everReady = true;
+                    try { localStorage.setItem(EVER_READY_KEY, '1'); } catch (e2) { }
+                    // アプリ本体へ「PWAシェル内で動作している」ことを伝える。
+                    // これを受けた App 側は、再読み込み時に location.reload()（GASサンドボックス内では
+                    // 白画面化する）ではなく、シェルへ reload を依頼できるようになる。
+                    try {
+                        if (e.source) e.source.postMessage({ type: 'schoolPlanNote:shellAck' }, '*');
+                    } catch (e2) { }
                     showFrame();
+                } else if (data.type === 'schoolPlanNote:reload') {
+                    // アプリ本体からの再読み込み依頼。iframe を貼り直すことで、
+                    // GASサンドボックス内 location.reload() による白画面化を回避する。
+                    if (currentUrl) launchApp(currentUrl);
                 }
             });
 
@@ -434,19 +526,24 @@
                 appReady = false;
                 setup.style.display = 'none';
                 recovery.style.display = 'none';
+                welcome.style.display = 'none';
                 frame.style.display = 'none';
                 menuBtn.style.display = 'none';
                 loading.style.display = 'flex';
                 document.getElementById('newTabLink').href = url;
                 document.getElementById('recoveryNewTabBtn').href = url;
                 frame.src = url;
-                // 一定時間内に ready ハンドシェイクが来なければ、iframe内に
-                // 表示できなかった（＝組織アカウント等でエラー画面が出た）とみなし案内へ切り替える。
+                // 一定時間内に ready ハンドシェイクが来なければ、iframe内に表示できなかったとみなし案内へ切り替える。
+                // - 初回（everReady=false）: 未ログインの可能性が高いので、早めに親切なログイン案内へ。
+                // - 再訪（everReady=true）: 通常は即表示できるため、コールドスタート等の誤発火を避けて長めに待ち、
+                //   それでも来なければ（組織アカウントのiframeブロック等）復旧案内へ。
                 if (launchTimer) clearTimeout(launchTimer);
                 launchTimer = setTimeout(function () {
                     launchTimer = null;
-                    if (!appReady) showRecovery();
-                }, LAUNCH_TIMEOUT_MS);
+                    if (appReady) return;
+                    if (everReady) showRecovery();
+                    else showWelcome();
+                }, everReady ? LAUNCH_TIMEOUT_MS : FIRST_RUN_HINT_MS);
             }
 
             // --- セットアップ画面 ---
@@ -499,6 +596,31 @@
             });
             document.getElementById('recoveryReloadBtn').addEventListener('click', function () {
                 location.reload();
+            });
+
+            // --- 初回起動時のログイン案内 ---
+            // 「Googleでログインして始める」：新しいタブで exec URL を開く（トップレベル遷移なので
+            // 組織アカウントでも第一者コンテキストでログイン・認可でき、iframe内の空白を回避できる）。
+            // このタブは iframe を読み込んだまま残し、タブに戻ってきた時点で自動的に再試行する。
+            document.getElementById('welcomeLoginBtn').addEventListener('click', function () {
+                if (currentUrl) window.open(currentUrl, '_blank', 'noopener');
+            });
+            // 「ログインが済んだので開く」：iframe を貼り直して再表示を試みる。
+            document.getElementById('welcomeContinueBtn').addEventListener('click', function () {
+                if (currentUrl) launchApp(currentUrl);
+            });
+            // 「それでも表示されないとき」：従来の復旧案内（新しいタブで開く等）へ。
+            document.getElementById('welcomeShowBtn').addEventListener('click', function () {
+                showRecovery();
+            });
+
+            // ログイン用の別タブから戻ってきたら、まだ表示できていなければ自動で再試行する。
+            // これにより「ログイン → タブに戻る → 自動で週案が表示される」という流れになる。
+            document.addEventListener('visibilitychange', function () {
+                if (document.visibilityState === 'visible' &&
+                    !appReady && welcome.style.display === 'flex' && currentUrl) {
+                    launchApp(currentUrl);
+                }
             });
 
             // --- インストールボタン（Chromeのbeforeinstallprompt対応）---
