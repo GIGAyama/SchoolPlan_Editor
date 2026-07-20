@@ -1014,6 +1014,18 @@
         animation: loadingFadeIn 0.25s ease both;
     }
 
+    /* 時数タブは「集計中」と「シミュレーション計算中」の2つのローディング表示が
+       同時に出る。.loading-state はデフォルトで position:fixed の全画面中央オーバーレイ
+       のため、そのままだと両方が画面中央で重なって表示されてしまう。
+       各セクション内に収めるよう、時数タブ内では通常フローに戻す。 */
+    #hoursContent .loading-state,
+    #hoursSimContent .loading-state {
+        position: static;
+        inset: auto;
+        z-index: auto;
+        min-height: 160px;
+    }
+
     @keyframes loadingFadeIn {
         from {
             opacity: 0;
