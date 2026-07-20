@@ -24,6 +24,13 @@
                     notifyShell();
                     document.addEventListener('DOMContentLoaded', notifyShell);
                     window.addEventListener('load', notifyShell);
+                    // シェル（docs/index.html）から届く応答。これを受信できた場合、アプリは
+                    // PWAシェルの iframe 内で動作しており、再読み込みは location.reload()（GASの
+                    // サンドボックス内では白画面化する）ではなくシェルへ依頼すべきと判断できる。
+                    window.addEventListener('message', function (e) {
+                        var d = e && e.data;
+                        if (d && d.type === 'schoolPlanNote:shellAck') { window.__hasPwaShell = true; }
+                    });
                 }
             } catch (e) { }
         })();

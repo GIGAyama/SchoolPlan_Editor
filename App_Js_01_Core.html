@@ -110,6 +110,25 @@
     // ===== オンボーディング（自分のDBの作成／紐付け） =====
     // ===================================================
 
+    /**
+     * アプリを再読み込みします。
+     * このアプリ本体（App.html）はGASのサンドボックスiframe内で動作しているため、
+     * 素の location.reload() は一時URLを再読込しようとして白画面化することがあります
+     * （特にGitHub PagesのPWAシェル内で顕著）。シェル内で動作している場合は、シェルへ
+     * 再読み込みを依頼して iframe を貼り直してもらうことで白画面化を回避します。
+     * シェル外（GASのexec URLを直接開いた場合）は従来どおり location.reload() します。
+     */
+    function reloadApp() {
+        if (window.__hasPwaShell) {
+            try {
+                window.parent.postMessage({ type: 'schoolPlanNote:reload' }, '*');
+                window.top.postMessage({ type: 'schoolPlanNote:reload' }, '*');
+                return;
+            } catch (e) { /* 失敗時は下の通常リロードにフォールバック */ }
+        }
+        try { location.reload(); } catch (e) { }
+    }
+
     /** getTenantStatus() を取り直してオンボーディングの選択画面を再表示します（「戻る」用）。 */
     function reopenOnboarding() {
         google.script.run
@@ -117,11 +136,11 @@
                 if (status && status.success && status.linked === false) {
                     showOnboardingChoice(status);
                 } else {
-                    // すでに紐付いた／取得できた場合はアプリを開始
-                    location.reload();
+                    // すでに紐付いた／取得できた場合はアプリを開始（在ページのまま初期化）
+                    startAppInit();
                 }
             })
-            .withFailureHandler(function () { location.reload(); })
+            .withFailureHandler(function () { reloadApp(); })
             .getTenantStatus();
     }
 
@@ -231,7 +250,7 @@
                         html: 'あなた専用のデータベースを作成しました。アプリを開始します。',
                         confirmButtonColor: '#1a73e8',
                         allowOutsideClick: false
-                    }).then(function () { location.reload(); });
+                    }).then(function () { startAppInit(); });
                 } else {
                     Swal.fire({
                         icon: 'error',
@@ -282,7 +301,7 @@
         google.script.run
             .withSuccessHandler(function (r) {
                 if (r && r.success) {
-                    var proceed = function () { location.reload(); };
+                    var proceed = function () { startAppInit(); };
                     if (r.warning) {
                         Swal.fire({
                             icon: 'warning',

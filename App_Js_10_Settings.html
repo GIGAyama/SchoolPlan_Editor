@@ -603,7 +603,7 @@
         google.script.run
             .withSuccessHandler(function (r) {
                 if (r && r.success) {
-                    var proceed = function () { location.reload(); };
+                    var proceed = function () { reloadApp(); };
                     if (r.warning) {
                         Swal.fire({
                             icon: 'warning',
@@ -668,7 +668,7 @@
                         html: '新しいデータベースを作成し、切り替えました。',
                         confirmButtonColor: '#1a73e8',
                         allowOutsideClick: false
-                    }).then(function () { location.reload(); });
+                    }).then(function () { reloadApp(); });
                 } else {
                     Swal.fire({
                         icon: 'error',
@@ -708,7 +708,7 @@
                         html: '紐付けを解除しました。初期設定の画面に戻ります。',
                         confirmButtonColor: '#1a73e8',
                         allowOutsideClick: false
-                    }).then(function () { location.reload(); });
+                    }).then(function () { reloadApp(); });
                 } else {
                     Swal.fire({
                         icon: 'error',
