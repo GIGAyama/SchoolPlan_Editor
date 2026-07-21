@@ -1,0 +1,128 @@
+<script>
+    function p3InstallProtectedOverrides() {
+        window.autoSaveAndThen = function (callback) {
+            if (!STATE.editMode || !hasUnsavedChanges()) {
+                if (STATE.editMode) { STATE.editMode = false; updateEditUI(); }
+                callback(); return;
+            }
+            if (_autoSaving) return;
+            _autoSaving = true;
+            var days = collectCurrentEditData();
+            if (!days) { _autoSaving = false; callback(); return; }
+            var errors = validateDaysSubjects(days);
+            if (errors.length) { _autoSaving = false; showToast('error', '教科名の入力に誤りがあるため自動保存できません: ' + errors[0]); return; }
+            showToast('info', '自動保存中...');
+            google.script.run.withSuccessHandler(function (result) {
+                _autoSaving = false;
+                if (result.success) {
+                    STATE.weekData.days = days; STATE.weekData.revision = result.revision;
+                    STATE.editMode = false; updateEditUI();
+                    if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
+                    showToast('success', '自動保存しました'); callback();
+                } else if (result.conflict) handleSaveConflict();
+                else showToast('error', '自動保存失敗: ' + result.error + ' 手動で保存してください。');
+            }).withFailureHandler(function (e) { _autoSaving = false; showToast('error', '自動保存エラー: ' + e.message); })
+                .saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, 'auto-save');
+        };
+
+        window.saveWeeklyPlan = function () {
+            var days = collectCurrentEditData();
+            if (!days) return;
+            var errors = validateDaysSubjects(days);
+            if (errors.length) { showToast('error', '教科名の入力に誤りがあります: ' + errors[0]); return; }
+            var btn = document.getElementById('saveBtn');
+            btn.disabled = true; btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 保存中...';
+            showToast('info', '保存中...');
+            google.script.run.withSuccessHandler(function (result) {
+                btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
+                if (result.success) {
+                    STATE.weekData.days = days; STATE.weekData.revision = result.revision;
+                    if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
+                    cancelEdit(); showToast('success', result.message);
+                } else if (result.conflict) handleSaveConflict();
+                else showToast('error', '保存失敗: ' + result.error);
+            }).withFailureHandler(function (e) {
+                btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
+                showToast('error', '通信エラー: ' + e.message);
+            }).saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, 'manual-save');
+        };
+
+        window.persistViewMutation = function () {
+            if (STATE.editMode || !STATE.weekData || !STATE.mondayStr) return;
+            var weekData = STATE.weekData;
+            var mondayStr = STATE.mondayStr;
+            clearTimeout(_viewSaveTimer);
+            _viewSaveTimer = setTimeout(function () {
+                google.script.run.withSuccessHandler(function (result) {
+                    if (result.success) {
+                        weekData.revision = result.revision;
+                        if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
+                    } else if (result.conflict) handleSaveConflict();
+                    else showToast('error', '変更の保存に失敗: ' + result.error);
+                }).withFailureHandler(function (e) { showToast('error', '変更の保存に失敗: ' + e.message); })
+                    .saveWeeklyPlanDataProtected(mondayStr, weekData.days, weekData.revision, 'view-mutation');
+            }, 450);
+        };
+
+        window.deleteTaskById = async function (taskId) {
+            var result = await Swal.fire({ title: 'タスクをごみ箱へ移動', text: '30日以内なら設定画面から復元できます。', icon: 'warning', showCancelButton: true, confirmButtonText: 'ごみ箱へ移動', cancelButtonText: 'キャンセル', confirmButtonColor: '#ea4335' });
+            if (!result.isConfirmed) return;
+            STATE.allTaskData = STATE.allTaskData.filter(function (t) { return t.id !== taskId; });
+            STATE.tasks = STATE.allTaskData; refreshTaskViews();
+            google.script.run.withSuccessHandler(function (res) {
+                if (!res.success) { showToast('error', '削除エラー: ' + res.error); loadTasks(); }
+                else showToast('success', res.message);
+            }).withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); loadTasks(); })
+                .trashTaskFromWebApp(taskId);
+        };
+
+        window.deleteUmRow = async function (rowIndex) {
+            var targetRow = STATE.umAllRows.find(function (r) { return r.rowIndex === rowIndex; });
+            var msg = targetRow ? (targetRow.subject + ' / ' + targetRow.unitName + ' (' + targetRow.hourNum + '時間目)') : '行 ' + rowIndex;
+            var result = await Swal.fire({ title: '行をごみ箱へ移動', text: '「' + msg + '」を移動します。30日以内は復元できます。', icon: 'warning', showCancelButton: true, confirmButtonText: 'ごみ箱へ移動', cancelButtonText: 'キャンセル', confirmButtonColor: '#ea4335' });
+            if (!result.isConfirmed) return;
+            showToast('info', 'ごみ箱へ移動中...');
+            google.script.run.withSuccessHandler(function (res) {
+                if (res.success) { showToast('success', res.message); loadUnitMasterData(); }
+                else showToast('error', '削除エラー: ' + res.error);
+            }).withFailureHandler(_onCommError).trashUnitMasterRowFromWeb(rowIndex);
+        };
+
+        window.clearDatabaseWeb = function (btn) {
+            Swal.fire({ icon: 'warning', title: 'データベースをクリア', html: '実行前に完全バックアップを自動作成します。<br><strong>週案入力内容をクリアしますか？</strong>', showCancelButton: true, confirmButtonText: 'バックアップしてクリア', cancelButtonText: 'キャンセル', confirmButtonColor: '#d93025' })
+                .then(function (answer) {
+                    if (!answer.isConfirmed) return;
+                    p3SetBusy(btn, true, '保護してクリア中...');
+                    p3CallServer('clearDatabaseDataProtectedFromWeb').then(function (res) {
+                        p3SetBusy(btn, false);
+                        if (!res || !res.success) { showToast('error', (res && (res.error || res.message)) || '失敗'); return; }
+                        showToast('success', res.message);
+                        if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
+                        doLoadWeeklyPlan(); p3LoadProtectionStatus(false);
+                    }).catch(function (e) { p3SetBusy(btn, false); _onCommError(e); });
+                });
+        };
+
+        window.deleteMultiClass = async function (sheetName, name) {
+            var res = await Swal.fire({ icon: 'warning', title: '学級の削除', html: '学級「' + escHtml(name) + '」を削除します。<br>実行直前に完全バックアップを自動作成します。', showCancelButton: true, confirmButtonText: 'バックアップして削除', cancelButtonText: 'キャンセル', confirmButtonColor: '#dc3545' });
+            if (!res.isConfirmed) return;
+            var wasActive = sheetName === STATE.multiClass.activeSheet;
+            showToast('info', 'バックアップして学級を削除しています...');
+            google.script.run.withSuccessHandler(function (r) {
+                if (!r.success) { showToast('error', '削除失敗: ' + r.error); return; }
+                applyMultiClassState(r); if (wasActive) afterClassContextChanged();
+                showToast('success', '学級「' + name + '」を削除しました（バックアップ済み）');
+                p3LoadProtectionStatus(false);
+            }).withFailureHandler(_onCommError).deleteClassProtectedFromWeb(sheetName);
+        };
+    }
+
+    function p3InstallDataProtection() {
+        p3InjectProtectionCard();
+        p3InstallProtectedOverrides();
+        setTimeout(function () { p3LoadProtectionStatus(true); }, 1800);
+    }
+
+    // このモジュールは初期画面描画後に遅延取得されるため、読み込み直後に安全に導入できる。
+    setTimeout(p3InstallDataProtection, 0);
+</script>
