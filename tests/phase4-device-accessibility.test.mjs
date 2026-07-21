@@ -124,7 +124,7 @@ test('tablet task panel becomes a non-destructive overlay drawer', () => {
 
 test('custom dialogs, toolbar menus and view shortcuts are keyboard accessible', () => {
   assert.match(core, /function p4TrapCustomModal/);
-  assert.match(core, /Alt\+1/);
+  assert.match(core, /event\.altKey/);
   assert.match(core, /var map = \{ '1': 'plan'/);
   assert.match(mobile, /p4EnhanceToolbarMenus/);
   assert.match(mobile, /ArrowDown/);
