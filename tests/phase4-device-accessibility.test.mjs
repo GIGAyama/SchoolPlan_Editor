@@ -75,10 +75,10 @@ test('contrast, reduced motion and forced-colors modes are implemented', () => {
   includesAll(css, [
     'data-p4-contrast="high"',
     'data-p4-motion="reduce"',
-    'prefers-reduced-motion: reduce',
     'prefers-contrast: more',
     'forced-colors: active'
   ]);
+  includesAll(core, ['prefers-reduced-motion: reduce']);
 });
 
 test('weekly plan is exposed as an ARIA grid with row and column semantics', () => {
@@ -116,7 +116,7 @@ test('mobile navigation exposes primary destinations and a focus-trapped more di
     'data-view="plan"', 'data-view="task"', 'data-view="hours"', 'data-view="settings"',
     "setAttribute('aria-modal', 'true')",
     'function p4MoreSheetKeydown',
-    "event.key === 'Tab'", "event.key === 'Escape'"
+    "event.key !== 'Tab'", "event.key === 'Escape'"
   ]);
 });
 
