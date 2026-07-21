@@ -1,0 +1,39 @@
+name: 改善・機能提案
+description: 教員の業務や学習環境を改善する提案です
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したい課題
+      description: 現在どのような場面で困っているかを記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: users
+    attributes:
+      label: 主な利用者と利用場面
+      placeholder: 学級担任が毎週金曜日に翌週の週案を作成するとき
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案する解決方法
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 現在の代替手段
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: 設計上の希望
+      options:
+        - label: 現在のUI・操作感を大きく変えずに実現したい
+        - label: スマートフォン・タブレットでも快適に使いたい
+        - label: AIの提案は適用前に確認できるようにしたい
+        - label: 既存データとの後方互換性を維持したい

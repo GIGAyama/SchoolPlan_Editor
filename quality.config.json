@@ -1,0 +1,35 @@
+{
+  "entryHtml": "App.html",
+  "requiredFiles": [
+    "appsscript.json",
+    "App.html",
+    "App_Css.html"
+  ],
+  "ignoreDirectories": [
+    ".git",
+    ".clasp",
+    "node_modules",
+    "coverage",
+    "dist"
+  ],
+  "manifest": {
+    "forbiddenOauthScopes": [
+      "https://www.googleapis.com/auth/drive",
+      "https://mail.google.com/"
+    ]
+  },
+  "securityExceptions": {
+    "wildcardPostMessage": [
+      "App.html",
+      "App_Js_01_Core.html",
+      "docs/index.html"
+    ],
+    "xFrameAllowAll": [
+      "07_WebApp.gs"
+    ]
+  },
+  "maintainability": {
+    "warningLineCount": 5000,
+    "warningByteCount": 400000
+  }
+}
