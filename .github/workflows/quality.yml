@@ -58,9 +58,9 @@ jobs:
           path: quality-report.json
           retention-days: 14
 
+      - name: Run checker regression tests
+        run: npm test
+
       - name: Enforce static analysis
         if: steps.static-analysis.outputs.exit_code != '0'
         run: exit 1
-
-      - name: Run checker regression tests
-        run: npm test
