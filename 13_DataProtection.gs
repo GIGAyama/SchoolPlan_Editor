@@ -77,7 +77,6 @@ function p3EnsureSheet_(ss, name, headers) {
   if (isEmpty) {
     sheet.getRange(1, 1, 1, requiredWidth).setValues([headers]);
   } else {
-    // 内部シートの列追加は末尾のみ。既存列を並べ替えず後方互換を守る。
     const currentHeaders = sheet.getRange(1, 1, 1, Math.max(requiredWidth, sheet.getLastColumn()))
       .getDisplayValues()[0];
     headers.forEach((header, index) => {
@@ -211,9 +210,7 @@ function p3RunMigrations_(ss) {
     locked = true;
     let version = p3GetSchemaVersion_(ss);
     if (version > P3_SCHEMA_VERSION_) {
-      throw new Error(
-        'このデータベースは現在のアプリより新しいスキーマです。アプリを最新版へ更新してください。'
-      );
+      throw new Error('このデータベースは現在のアプリより新しいスキーマです。アプリを最新版へ更新してください。');
     }
 
     const migrations = [
@@ -233,13 +230,9 @@ function p3RunMigrations_(ss) {
 
     if (applied.length > 0) {
       p3RecordAudit_(
-        'SCHEMA_MIGRATION',
-        'database',
-        ss.getId(),
+        'SCHEMA_MIGRATION', 'database', ss.getId(),
         'データ保全スキーマを更新: ' + applied.join(' / '),
-        null,
-        { version, applied },
-        'mig_' + Utilities.getUuid()
+        null, { version, applied }, 'mig_' + Utilities.getUuid()
       );
     }
     return { success: true, version, applied };
@@ -267,5 +260,9 @@ function runDataMigrationsFromWeb() {
 
 /** Phase 3 client moduleを遅延取得するための内部API。 */
 function getDataProtectionClientModule() {
-  return HtmlService.createHtmlOutputFromFile('App_Js_15_DataProtection').getContent();
+  return [
+    'App_Js_15_DataProtection_Core',
+    'App_Js_15_DataProtection_Manage',
+    'App_Js_15_DataProtection_Overrides'
+  ].map(name => HtmlService.createHtmlOutputFromFile(name).getContent());
 }
