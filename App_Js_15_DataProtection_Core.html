@@ -1,0 +1,198 @@
+<script>
+    'use strict';
+    // =========================================================
+    // ===== Phase 3: データ保全・復元 UI / 保護付き操作     =====
+    // =========================================================
+
+    function p3CallServer(method) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return new Promise(function (resolve, reject) {
+            var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+            runner[method].apply(runner, args);
+        });
+    }
+
+    function p3FormatDateTime(value) {
+        if (!value) return '未実施';
+        try {
+            var d = new Date(value);
+            if (isNaN(d.getTime())) return String(value);
+            return d.toLocaleString('ja-JP');
+        } catch (e) { return String(value); }
+    }
+
+    function p3InjectProtectionCard() {
+        if (document.getElementById('p3ProtectionCard')) return;
+        var maintenanceToast = document.getElementById('maintenanceToast');
+        if (!maintenanceToast) return;
+        var section = maintenanceToast.closest('.integration-section');
+        var outer = section && section.parentElement;
+        if (!outer || !outer.parentElement) return;
+
+        var wrap = document.createElement('div');
+        wrap.style.padding = '0 20px 20px';
+        wrap.id = 'p3ProtectionCard';
+        wrap.innerHTML = '<div class="integration-section">'
+            + '<div class="integration-header" style="background:linear-gradient(135deg,#1565c0,#283593);">'
+            + '<span class="integration-icon"><span class="material-symbols-outlined fs-6">shield</span></span>'
+            + '<span class="integration-title">データ保全・復元</span></div>'
+            + '<div class="integration-body">'
+            + '<p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:12px;">'
+            + '週案保存前の復元ポイント、1日1回の完全バックアップ、30日間のごみ箱、監査ログでデータを保護します。既存シートの列順は変更しません。</p>'
+            + '<div id="p3ProtectionStatus" style="padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);font-size:0.8rem;line-height:1.7;">状態を確認中...</div>'
+            + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px;">'
+            + '<button class="btn btn-primary d-flex align-items-center justify-content-center gap-1" onclick="p3CreateBackupUI(this)"><span class="material-symbols-outlined fs-6">backup</span> 今すぐ完全バックアップ</button>'
+            + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3CreateWeekRestorePointUI(this)"><span class="material-symbols-outlined fs-6">restore_page</span> 今週の復元ポイント</button>'
+            + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3ShowBackupsUI()"><span class="material-symbols-outlined fs-6">folder_copy</span> バックアップ一覧</button>'
+            + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3ShowRestorePointsUI()"><span class="material-symbols-outlined fs-6">history</span> 復元ポイント一覧</button>'
+            + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3ShowTrashUI()"><span class="material-symbols-outlined fs-6">delete_restore</span> ごみ箱</button>'
+            + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3ShowAuditUI()"><span class="material-symbols-outlined fs-6">fact_check</span> 監査ログ</button>'
+            + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3RunIntegrityCheckUI(this)"><span class="material-symbols-outlined fs-6">health_and_safety</span> 健全性を診断</button>'
+            + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3RunMigrationsUI(this)"><span class="material-symbols-outlined fs-6">upgrade</span> 保全基盤を更新</button>'
+            + '</div></div></div>';
+        outer.parentElement.insertBefore(wrap, outer);
+    }
+
+    function p3RenderProtectionStatus(res) {
+        var el = document.getElementById('p3ProtectionStatus');
+        if (!el) return;
+        if (!res || !res.success) {
+            el.innerHTML = '<strong style="color:var(--danger);">状態取得エラー:</strong> ' + escHtml((res && res.error) || '不明');
+            return;
+        }
+        var counts = res.counts || {};
+        var warnings = res.warnings || [];
+        var badge = warnings.length
+            ? '<span style="color:#b26a00;font-weight:700;">要確認</span>'
+            : '<span style="color:#188038;font-weight:700;">正常</span>';
+        el.innerHTML = '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">'
+            + '<strong>保全状態: ' + badge + '</strong>'
+            + '<span>スキーマ v' + escHtml(String(res.schemaVersion || 0)) + '</span>'
+            + '<span>最終バックアップ: ' + escHtml(p3FormatDateTime(res.lastBackupAt)) + '</span>'
+            + '</div>'
+            + '<div style="margin-top:6px;display:flex;gap:14px;flex-wrap:wrap;color:var(--text-sub);">'
+            + '<span>完全バックアップ ' + (counts.backup || 0) + '件</span>'
+            + '<span>復元ポイント ' + (counts.restorePoints || 0) + '件</span>'
+            + '<span>ごみ箱 ' + (counts.trash || 0) + '件</span>'
+            + '<span>監査記録 ' + (counts.audit || 0) + '件</span></div>'
+            + (warnings.length ? '<div style="margin-top:6px;color:#b26a00;">⚠ ' + warnings.map(escHtml).join('<br>⚠ ') + '</div>' : '');
+    }
+
+    function p3LoadProtectionStatus(runDailyBackup) {
+        return p3CallServer('getDataProtectionStatusFromWeb', !!runDailyBackup)
+            .then(function (res) {
+                p3RenderProtectionStatus(res);
+                if (res && res.dailyBackup && res.dailyBackup.created) {
+                    showToast('success', '本日分の自動バックアップを作成しました');
+                }
+                return res;
+            })
+            .catch(function (e) {
+                p3RenderProtectionStatus({ success: false, error: e && e.message ? e.message : e });
+            });
+    }
+
+    function p3SetBusy(btn, busy, label) {
+        if (!btn) return;
+        if (busy) {
+            btn.dataset.p3Original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> ' + (label || '処理中...');
+        } else {
+            btn.disabled = false;
+            if (btn.dataset.p3Original) btn.innerHTML = btn.dataset.p3Original;
+        }
+    }
+
+    function p3CreateBackupUI(btn) {
+        p3SetBusy(btn, true, 'バックアップ中...');
+        p3CallServer('createFullBackupFromWeb', '設定画面から手動作成')
+            .then(function (res) {
+                p3SetBusy(btn, false);
+                if (!res || !res.success) { showToast('error', (res && res.error) || 'バックアップ失敗'); return; }
+                showToast('success', res.message || 'バックアップを作成しました');
+                p3LoadProtectionStatus(false);
+            })
+            .catch(function (e) { p3SetBusy(btn, false); _onCommError(e); });
+    }
+
+    function p3CreateWeekRestorePointUI(btn) {
+        if (!STATE.mondayStr) { showToast('error', '表示中の週がありません'); return; }
+        p3SetBusy(btn, true, '保存中...');
+        p3CallServer('createWeekRestorePointFromWeb', STATE.mondayStr, '手動: 設定画面から作成')
+            .then(function (res) {
+                p3SetBusy(btn, false);
+                if (!res || !res.success) { showToast('error', (res && res.error) || '作成失敗'); return; }
+                showToast('success', res.message);
+                p3LoadProtectionStatus(false);
+            })
+            .catch(function (e) { p3SetBusy(btn, false); _onCommError(e); });
+    }
+
+    function p3ShowBackupsUI() {
+        p3CallServer('listBackupsFromWeb').then(function (res) {
+            if (!res || !res.success) { showToast('error', (res && res.error) || '取得失敗'); return; }
+            var items = res.items || [];
+            var html = items.length ? items.map(function (item) {
+                return '<div style="padding:9px 0;border-bottom:1px solid var(--border);text-align:left;">'
+                    + '<a href="' + escAttr(item.url || '#') + '" target="_blank" rel="noopener noreferrer"><strong>' + escHtml(item.name) + '</strong></a>'
+                    + '<div style="font-size:0.75rem;color:var(--text-sub);">' + escHtml(p3FormatDateTime(item.createdAt)) + ' / ' + escHtml(item.reason || '') + '</div></div>';
+            }).join('') : '<p>バックアップはまだありません。</p>';
+            Swal.fire({ title: '完全バックアップ', html: '<div style="max-height:420px;overflow:auto;">' + html + '</div>', width: 700, confirmButtonText: '閉じる' });
+        }).catch(_onCommError);
+    }
+
+    function p3ShowRestorePointsUI() {
+        p3CallServer('listRestorePointsFromWeb', 100).then(function (res) {
+            if (!res || !res.success) { showToast('error', (res && res.error) || '取得失敗'); return; }
+            var items = res.items || [];
+            var html = items.length ? items.map(function (item) {
+                return '<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;text-align:left;">'
+                    + '<div style="flex:1;"><strong>' + escHtml(item.scope) + '</strong> ' + escHtml(item.label) + '<div style="font-size:0.72rem;color:var(--text-sub);">' + escHtml(item.createdAt) + ' / 保持期限 ' + escHtml(item.expiresAt) + '</div></div>'
+                    + '<button class="btn btn-outline btn-sm" onclick="p3RestoreWeekUI(\'' + escAttr(item.id) + '\')">復元</button></div>';
+            }).join('') : '<p>復元ポイントはまだありません。</p>';
+            Swal.fire({ title: '週案の復元ポイント', html: '<div style="max-height:440px;overflow:auto;">' + html + '</div>', width: 760, showConfirmButton: false, showCloseButton: true });
+        }).catch(_onCommError);
+    }
+
+    function p3RestoreWeekUI(snapshotId) {
+        Swal.fire({ title: '復元内容を比較中...', allowOutsideClick: false, didOpen: function () { Swal.showLoading(); } });
+        p3CallServer('previewWeekSnapshotFromWeb', snapshotId).then(function (preview) {
+            if (!preview || !preview.success) { Swal.fire('比較失敗', (preview && preview.error) || '不明', 'error'); return; }
+            var changes = preview.changes || [];
+            var diffHtml = changes.length
+                ? '<div style="max-height:260px;overflow:auto;text-align:left;border:1px solid var(--border);border-radius:6px;padding:8px;">'
+                    + changes.map(function (change) {
+                        return '<div style="padding:5px 0;border-bottom:1px solid var(--border);"><strong>'
+                            + escHtml(change.date) + (change.dayLabel ? '（' + escHtml(change.dayLabel) + '）' : '')
+                            + '</strong><br><span style="font-size:0.76rem;color:var(--text-sub);">変更対象: '
+                            + change.fields.map(escHtml).join('、') + '</span></div>';
+                    }).join('') + '</div>'
+                : '<p>現在の週案と復元ポイントに差はありません。</p>';
+            Swal.fire({
+                icon: preview.noChanges ? 'info' : 'warning',
+                title: '復元前プレビュー',
+                html: '<p style="font-size:0.82rem;">' + escHtml(preview.mondayDateStr) + '週 / '
+                    + escHtml(preview.label || '') + '<br>' + escHtml(preview.createdAt || '') + '</p>'
+                    + diffHtml
+                    + '<p style="font-size:0.78rem;margin-top:10px;color:var(--text-sub);">復元直前の現在状態も自動保存します。</p>',
+                width: 680, showCancelButton: !preview.noChanges,
+                showConfirmButton: !preview.noChanges, confirmButtonText: 'この内容へ復元',
+                cancelButtonText: 'キャンセル', confirmButtonColor: '#e65100'
+            }).then(function (answer) {
+                if (!answer.isConfirmed) return;
+                Swal.fire({ title: '復元中...', allowOutsideClick: false, didOpen: function () { Swal.showLoading(); } });
+                p3CallServer('restoreWeekSnapshotFromWeb', snapshotId).then(function (res) {
+                    if (!res || !res.success) { Swal.fire('復元失敗', (res && res.error) || '不明', 'error'); return; }
+                    Swal.fire('復元完了', res.message, 'success').then(function () {
+                        if (res.mondayDateStr) STATE.mondayStr = res.mondayDateStr;
+                        if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
+                        doLoadWeeklyPlan();
+                        p3LoadProtectionStatus(false);
+                    });
+                }).catch(function (e) { Swal.fire('通信エラー', e.message || String(e), 'error'); });
+            });
+        }).catch(function (e) { Swal.fire('通信エラー', e.message || String(e), 'error'); });
+    }
+
+</script>

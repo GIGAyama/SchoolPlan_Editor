@@ -23,15 +23,10 @@
      */
     function linkify(escapedHtml) {
         if (!escapedHtml) return '';
-        // 1) Markdown 形式: [表示テキスト](URL)
-        //    escHtml 後は &quot; は含まないが念のため
         var md = escapedHtml.replace(
             /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g,
             '<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$1<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
         );
-        // 2) 素の URL（Markdown リンクに変換済みの href="..." 内は除外）
-        //    escHtml 済みテキストでは & は &amp; になっているため、&amp; をURLの一部として
-        //    許可する（除外すると「?a=1&b=2」のようなクエリ付きURLが途中で切れてしまう）
         md = md.replace(
             /(^|[^"=])(https?:\/\/(?:&amp;|[^\s<&])+)/g,
             '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="cell-link" onclick="event.stopPropagation()">$2<span class="material-symbols-outlined cell-link-icon">open_in_new</span></a>'
@@ -39,10 +34,6 @@
         return md;
     }
 
-    /**
-     * リンク挿入ダイアログを開き、対象 textarea にリンクテキストを挿入する。
-     * target: 挿入先 textarea 要素
-     */
     function openLinkInsertDialog(target) {
         Swal.fire({
             title: 'リンクを挿入',
@@ -69,7 +60,6 @@
             var url = result.value.url;
             var text = result.value.text;
             var insert = text ? '[' + text + '](' + url + ')' : url;
-            // textarea のカーソル位置に挿入
             var start = target.selectionStart || 0;
             var end = target.selectionEnd || 0;
             var before = target.value.substring(0, start);
@@ -77,12 +67,10 @@
             target.value = before + insert + after;
             target.focus();
             target.selectionStart = target.selectionEnd = start + insert.length;
-            // 高さ自動調整
             autoResizeTextarea(target);
         });
     }
 
-    // ===== トースト (SweetAlert2 Toast) =====
     var SwalToast = Swal.mixin({
         toast: true,
         position: 'top-end',
@@ -103,8 +91,6 @@
         });
     }
 
-    // google.script.run の共通失敗ハンドラ（「通信エラー」をトースト表示するだけの定型用）
-    // セッション中にDBが削除／権限喪失した場合は、白画面化を避けて再オンボーディングへ誘導する。
     function _onCommError(e) {
         var msg = (e && e.message) ? e.message : String(e);
         if (typeof isNoDbError_ === 'function' && isNoDbError_(msg)
@@ -115,4 +101,26 @@
         showToast('error', '通信エラー: ' + msg);
     }
 
+</script>
+
+<script>
+    'use strict';
+    // Phase 3は初期描画を妨げないよう、アプリ読込後に独立モジュールとして取得する。
+    window.addEventListener('load', function () {
+        setTimeout(function () {
+            google.script.run
+                .withSuccessHandler(function (modules) {
+                    if (!modules || document.getElementById('p3DataProtectionModule')) return;
+                    (Array.isArray(modules) ? modules : [modules]).forEach(function (html, index) {
+                        var code = String(html || '').replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
+                        var script = document.createElement('script');
+                        script.id = index === 0 ? 'p3DataProtectionModule' : 'p3DataProtectionModule' + index;
+                        script.textContent = code;
+                        document.head.appendChild(script);
+                    });
+                })
+                .withFailureHandler(function () { /* 保全UIの遅延読込失敗は週案表示を妨げない */ })
+                .getDataProtectionClientModule();
+        }, 250);
+    });
 </script>
