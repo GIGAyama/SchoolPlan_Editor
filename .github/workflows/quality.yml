@@ -39,5 +39,28 @@ jobs:
       - name: Install quality tooling
         run: npm ci --ignore-scripts
 
-      - name: Run project quality gate
-        run: npm run quality
+      - name: Generate static analysis report
+        id: static-analysis
+        shell: bash
+        run: |
+          set +e
+          node scripts/check-project.mjs --json > quality-report.json
+          exit_code=$?
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          cat quality-report.json
+          exit 0
+
+      - name: Upload quality report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-report-node-${{ matrix.node-version }}
+          path: quality-report.json
+          retention-days: 14
+
+      - name: Enforce static analysis
+        if: steps.static-analysis.outputs.exit_code != '0'
+        run: exit 1
+
+      - name: Run checker regression tests
+        run: npm test
