@@ -1,0 +1,83 @@
+<script>
+    function p3EntityLabel(type) {
+        return { task: 'タスク', unitMaster: '単元マスタ', newsletter: '学級通信' }[type] || type;
+    }
+
+    function p3ShowTrashUI() {
+        p3CallServer('listTrashFromWeb', 200).then(function (res) {
+            if (!res || !res.success) { showToast('error', (res && res.error) || '取得失敗'); return; }
+            var items = res.items || [];
+            var html = items.length ? items.map(function (item) {
+                return '<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;text-align:left;">'
+                    + '<div style="flex:1;"><strong>[' + escHtml(p3EntityLabel(item.entityType)) + '] ' + escHtml(item.label || item.entityId) + '</strong>'
+                    + '<div style="font-size:0.72rem;color:var(--text-sub);">削除 ' + escHtml(item.deletedAt) + ' / 期限 ' + escHtml(item.expiresAt) + '</div></div>'
+                    + '<button class="btn btn-outline btn-sm" onclick="p3RestoreTrashUI(\'' + escAttr(item.id) + '\')">復元</button>'
+                    + '<button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="p3PurgeTrashUI(\'' + escAttr(item.id) + '\')">完全削除</button></div>';
+            }).join('') : '<p>ごみ箱は空です。</p>';
+            Swal.fire({ title: 'ごみ箱（30日間保持）', html: '<div style="max-height:440px;overflow:auto;">' + html + '</div>', width: 820, showConfirmButton: false, showCloseButton: true });
+        }).catch(_onCommError);
+    }
+
+    function p3RestoreTrashUI(trashId) {
+        p3CallServer('restoreTrashItemFromWeb', trashId).then(function (res) {
+            if (!res || !res.success) { showToast('error', (res && res.error) || '復元失敗'); return; }
+            showToast('success', res.message);
+            Swal.close();
+            if (res.entityType === 'task' && typeof loadTasks === 'function') loadTasks();
+            if (res.entityType === 'unitMaster' && typeof loadUnitMasterData === 'function') loadUnitMasterData();
+            p3LoadProtectionStatus(false);
+        }).catch(_onCommError);
+    }
+
+    function p3PurgeTrashUI(trashId) {
+        Swal.fire({ icon: 'warning', title: '完全に削除しますか？', text: 'この操作は元に戻せません。', showCancelButton: true, confirmButtonText: '完全削除', cancelButtonText: 'キャンセル', confirmButtonColor: '#d93025' })
+            .then(function (answer) {
+                if (!answer.isConfirmed) return;
+                p3CallServer('purgeTrashItemFromWeb', trashId).then(function (res) {
+                    if (!res || !res.success) { showToast('error', (res && res.error) || '削除失敗'); return; }
+                    showToast('success', res.message); Swal.close(); p3LoadProtectionStatus(false);
+                }).catch(_onCommError);
+            });
+    }
+
+    function p3ShowAuditUI() {
+        p3CallServer('listAuditLogFromWeb', 150).then(function (res) {
+            if (!res || !res.success) { showToast('error', (res && res.error) || '取得失敗'); return; }
+            var items = res.items || [];
+            var html = items.length ? items.map(function (item) {
+                return '<div style="padding:8px 0;border-bottom:1px solid var(--border);text-align:left;">'
+                    + '<strong>' + escHtml(item.action) + '</strong> ' + escHtml(item.summary)
+                    + '<div style="font-size:0.72rem;color:var(--text-sub);">' + escHtml(item.at) + ' / ' + escHtml(item.actor || '不明') + ' / ' + escHtml(item.entityType) + '</div></div>';
+            }).join('') : '<p>監査記録はまだありません。</p>';
+            Swal.fire({ title: '監査ログ', html: '<div style="max-height:460px;overflow:auto;">' + html + '</div>', width: 800, confirmButtonText: '閉じる' });
+        }).catch(_onCommError);
+    }
+
+    function p3RunIntegrityCheckUI(btn) {
+        p3SetBusy(btn, true, '診断中...');
+        p3CallServer('runDataIntegrityCheckFromWeb').then(function (res) {
+            p3SetBusy(btn, false);
+            if (!res || !res.success) { showToast('error', (res && res.error) || '診断失敗'); return; }
+            var report = res.report || {};
+            var warnings = report.warnings || [];
+            Swal.fire({
+                icon: report.healthy ? 'success' : 'warning',
+                title: report.healthy ? 'データは正常です' : '確認が必要です',
+                html: warnings.length ? '<div style="text-align:left;">' + warnings.map(function (w) { return '・' + escHtml(w); }).join('<br>') + '</div>' : '列構成・日付・TaskIDに問題は見つかりませんでした。',
+                confirmButtonText: '閉じる'
+            });
+            p3LoadProtectionStatus(false);
+        }).catch(function (e) { p3SetBusy(btn, false); _onCommError(e); });
+    }
+
+    function p3RunMigrationsUI(btn) {
+        p3SetBusy(btn, true, '更新中...');
+        p3CallServer('runDataMigrationsFromWeb').then(function (res) {
+            p3SetBusy(btn, false);
+            if (!res || !res.success) { showToast('error', (res && res.error) || '更新失敗'); return; }
+            showToast('success', (res.applied && res.applied.length) ? '保全基盤を更新しました' : '保全基盤は最新です');
+            p3LoadProtectionStatus(false);
+        }).catch(function (e) { p3SetBusy(btn, false); _onCommError(e); });
+    }
+
+</script>
