@@ -1,0 +1,48 @@
+<script>
+  'use strict';
+
+  // 却下APIが期限切れ等を返した場合に、却下済み表示へ進めず操作可能状態へ戻す。
+  function p5cRejectProposal(proposalId, button) {
+    var card = button && button.closest ? button.closest('.p5-proposal') : null;
+    if (button) button.disabled = true;
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (!res || !res.success) {
+          if (button) button.disabled = false;
+          if (typeof showToast === 'function') {
+            showToast('error', (res && res.error) || '提案を却下できませんでした');
+          }
+          return;
+        }
+        if (card) {
+          card.classList.add('rejected');
+          card.querySelectorAll('button').forEach(function (item) { item.disabled = true; });
+          var actions = card.querySelector('.p5-proposal-actions');
+          if (actions) actions.innerHTML = '<span style="color:var(--text-sub);font-size:0.75rem;">却下済み</span>';
+        }
+        if (typeof p4Announce === 'function') p4Announce('AI提案を却下しました');
+      })
+      .withFailureHandler(function (error) {
+        if (button) button.disabled = false;
+        if (typeof showToast === 'function') {
+          showToast('error', error && error.message ? error.message : String(error));
+        }
+      })
+      .rejectTeacherCopilotProposal(proposalId);
+  }
+
+  // コパイロット表示中だけスキップリンクの移動先を会話領域へ切り替える。
+  (function () {
+    var skip = document.getElementById('p4SkipLink');
+    if (!skip || skip.__p5CopilotEnhanced) return;
+    skip.__p5CopilotEnhanced = true;
+    skip.addEventListener('click', function (event) {
+      if (typeof STATE === 'undefined' || STATE.view !== 'copilot') return;
+      event.preventDefault();
+      var target = document.getElementById('p5Conversation') || document.getElementById('view-copilot');
+      if (!target) return;
+      if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+      target.focus({ preventScroll: false });
+    }, true);
+  })();
+</script>
