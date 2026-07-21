@@ -4,7 +4,8 @@ function getTeacherCopilotClientModule() {
     css: HtmlService.createHtmlOutputFromFile('App_Css_05_TeacherCopilot').getContent(),
     modules: [
       'App_Js_17_TeacherCopilot_Core',
-      'App_Js_17_TeacherCopilot_UI'
+      'App_Js_17_TeacherCopilot_UI',
+      'App_Js_17_TeacherCopilot_Fixes'
     ].map(name => HtmlService.createHtmlOutputFromFile(name).getContent())
   };
 }
