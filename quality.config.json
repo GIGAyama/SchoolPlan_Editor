@@ -21,6 +21,7 @@
   "securityExceptions": {
     "wildcardPostMessage": [
       "App.html",
+      "App_Js_01_Core.html",
       "docs/index.html"
     ],
     "xFrameAllowAll": [
