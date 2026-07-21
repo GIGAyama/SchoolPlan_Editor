@@ -124,3 +124,33 @@
         }, 250);
     });
 </script>
+
+<script>
+    'use strict';
+    // Phase 4も初期週案描画後に読み込み、端末最適化が起動時間へ影響しないようにする。
+    window.addEventListener('load', function () {
+        setTimeout(function () {
+            google.script.run
+                .withSuccessHandler(function (payload) {
+                    if (!payload || document.getElementById('p4AccessibilityModule')) return;
+                    if (payload.css) {
+                        var css = String(payload.css).replace(/^\s*<style>/, '').replace(/<\/style>\s*$/, '');
+                        var style = document.createElement('style');
+                        style.id = 'p4AccessibilityStyles';
+                        style.textContent = css;
+                        document.head.appendChild(style);
+                    }
+                    var modules = Array.isArray(payload.modules) ? payload.modules : [];
+                    modules.forEach(function (html, index) {
+                        var code = String(html || '').replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
+                        var script = document.createElement('script');
+                        script.id = index === 0 ? 'p4AccessibilityModule' : 'p4AccessibilityModule' + index;
+                        script.textContent = code;
+                        document.head.appendChild(script);
+                    });
+                })
+                .withFailureHandler(function () { /* 表示最適化の読込失敗は既存アプリ操作を妨げない */ })
+                .getDeviceAccessibilityClientModule();
+        }, 350);
+    });
+</script>
