@@ -1,0 +1,46 @@
+<style>
+    /* Phase 4 レイアウト補正: ボトムナビ分だけアプリ本体を確実に縮める */
+    .p4-mobile-nav {
+        background: var(--surface);
+    }
+
+    @supports (background: color-mix(in srgb, white 90%, transparent)) {
+        .p4-mobile-nav {
+            background: color-mix(in srgb, var(--surface) 94%, transparent);
+        }
+    }
+
+    @media (max-width: 768px) {
+        body {
+            padding-bottom: 0;
+        }
+
+        #app {
+            height: calc(100dvh - var(--p4-mobile-nav-h) - var(--p4-safe-bottom));
+        }
+
+        body.p4-focus-mode #app {
+            height: 100dvh;
+        }
+
+        #view-plan.active,
+        #view-task.active,
+        #view-hours.active,
+        #view-events.active,
+        #view-unitmaster.active,
+        #view-newsletter.active,
+        #view-integration.active,
+        #view-settings.active {
+            min-height: 0;
+        }
+
+        .weekly-task-sidebar {
+            top: var(--header-h);
+            bottom: calc(var(--p4-mobile-nav-h) + var(--p4-safe-bottom));
+        }
+
+        body.p4-focus-mode .weekly-task-sidebar {
+            bottom: 0;
+        }
+    }
+</style>
