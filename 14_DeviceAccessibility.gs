@@ -4,7 +4,10 @@
  */
 function getDeviceAccessibilityClientModule() {
   return {
-    css: HtmlService.createHtmlOutputFromFile('App_Css_04_DeviceAccessibility').getContent(),
+    css: [
+      'App_Css_04_DeviceAccessibility',
+      'App_Css_04_DeviceAccessibility_Fixes'
+    ].map(name => HtmlService.createHtmlOutputFromFile(name).getContent()).join('\n'),
     modules: [
       'App_Js_16_Accessibility_Core',
       'App_Js_16_Accessibility_Grid',
