@@ -6,21 +6,18 @@
     // モード無効時（デフォルト）はUIに一切表示されず、既存動作に影響しません。
     // ===================================================
 
-    // 実行時にSTATEへ複数学級の状態を追加（無効時は enabled: false のまま）
     STATE.multiClass = { enabled: false, activeSheet: '', classes: [] };
 
-    /** 複数学級モードの状態をサーバーから取得し、ヘッダーの切替メニューと設定UIを描画します。 */
     function loadMultiClassState() {
         google.script.run
             .withSuccessHandler(function (res) {
                 if (!res || !res.success) return;
                 applyMultiClassState(res);
             })
-            .withFailureHandler(function () { /* 未設定・通信失敗時は単学級のまま動作 */ })
+            .withFailureHandler(function () { })
             .getMultiClassSettings();
     }
 
-    /** サーバーから受け取った状態をSTATEへ反映し、関連UIを再描画します。 */
     function applyMultiClassState(res) {
         STATE.multiClass = {
             enabled: !!res.enabled,
@@ -31,7 +28,6 @@
         renderMultiClassSettingsUI();
     }
 
-    /** ヘッダーの学級切替メニューを描画します（モード有効時のみ表示）。 */
     function renderClassSwitcher() {
         var select = document.getElementById('classSwitcher');
         if (!select) return;
@@ -51,7 +47,6 @@
         select.style.display = 'inline-block';
     }
 
-    /** 設定画面の複数学級セクション（トグル・学級一覧）を描画します。 */
     function renderMultiClassSettingsUI() {
         var checkbox = document.getElementById('sysMultiClassEnabled');
         var manager = document.getElementById('multiClassManager');
@@ -85,21 +80,15 @@
         listEl.innerHTML = html;
     }
 
-    /**
-     * 学級の切り替え後に、学級に依存するビュー・キャッシュを再読み込みします。
-     * （週案・時数・標準時数・システム設定・振り返りバッジ）
-     */
     function afterClassContextChanged() {
         STATE.weekData = null;
         STATE.hoursSummaryData = null;
         STATE.stdHoursLoaded = false;
         STATE.isSystemSettingsLoaded = false;
+        if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
 
-        if (STATE.mondayStr) {
-            loadWeeklyPlan();
-        } else {
-            goToToday();
-        }
+        if (STATE.mondayStr) loadWeeklyPlan();
+        else goToToday();
         if (STATE.view === 'hours') {
             loadAnnualHoursView();
             if (STATE.mondayStr) loadHoursSummary();
@@ -111,22 +100,18 @@
         refreshReflectionBadge();
     }
 
-    /** ヘッダーの切替メニュー変更時の処理。編集中の週案は先に自動保存してから切り替えます。 */
     function onClassSwitcherChange(sheetName) {
         if (!sheetName || sheetName === STATE.multiClass.activeSheet) return;
-        autoSaveAndThen(function () {
-            switchMultiClass(sheetName);
-        });
+        autoSaveAndThen(function () { switchMultiClass(sheetName); });
     }
 
-    /** アクティブ学級を切り替えます。 */
     function switchMultiClass(sheetName) {
         showToast('info', '学級を切り替えています...');
         google.script.run
             .withSuccessHandler(function (res) {
                 if (!res.success) {
                     showToast('error', '切り替え失敗: ' + res.error);
-                    renderClassSwitcher(); // 選択を元に戻す
+                    renderClassSwitcher();
                     return;
                 }
                 applyMultiClassState(res);
@@ -141,30 +126,24 @@
             .switchActiveClassFromWeb(sheetName);
     }
 
-    /** 設定画面のトグルで複数学級モードを有効/無効にします。 */
     async function toggleMultiClassMode(checkbox) {
         var enable = checkbox.checked;
         var res = await Swal.fire({
             icon: 'question',
             title: enable ? '複数学級モードを有効にしますか？' : '複数学級モードを無効にしますか？',
             html: enable
-                ? '<div style="text-align:left;font-size:0.85rem;line-height:1.6;">'
-                + '現在の「データベース」シートが1つ目の学級として登録され、画面左上に学級切替メニューが表示されます。<br>'
-                + '学級はこの下の「学級を追加」からいつでも増やせます。</div>'
-                : '<div style="text-align:left;font-size:0.85rem;line-height:1.6;">'
-                + '既定の「データベース」シートの表示に戻ります。<br>'
-                + '追加した学級のシートとデータは削除されず、再度有効にすればそのまま使えます。</div>',
+                ? '<div style="text-align:left;font-size:0.85rem;line-height:1.6;">現在の「データベース」シートが1つ目の学級として登録され、画面左上に学級切替メニューが表示されます。<br>学級はこの下の「学級を追加」からいつでも増やせます。</div>'
+                : '<div style="text-align:left;font-size:0.85rem;line-height:1.6;">既定の「データベース」シートの表示に戻ります。<br>追加した学級のシートとデータは削除されず、再度有効にすればそのまま使えます。</div>',
             showCancelButton: true,
             confirmButtonText: enable ? '有効にする' : '無効にする',
             cancelButtonText: 'キャンセル',
             confirmButtonColor: '#1a73e8'
         });
         if (!res.isConfirmed) {
-            checkbox.checked = !enable; // 元に戻す
+            checkbox.checked = !enable;
             return;
         }
 
-        // 編集中の週案があれば保存してから切り替える（無効化時にアクティブ学級が変わるため）
         autoSaveAndThen(function () {
             showToast('info', enable ? '複数学級モードを有効にしています...' : '複数学級モードを無効にしています...');
             google.script.run
@@ -186,7 +165,6 @@
         });
     }
 
-    /** 「学級を追加」ボタン。既定シートをコピーして新しい学級シートを作成します。 */
     function addMultiClass() {
         var nameInput = document.getElementById('mcNewClassName');
         var gradeSelect = document.getElementById('mcNewClassGrade');
@@ -205,13 +183,11 @@
             .addClassFromWeb(name, gradeSelect.value);
     }
 
-    /** 学級を削除します（学級シートも削除・要確認）。 */
     async function deleteMultiClass(sheetName, name) {
         var res = await Swal.fire({
             icon: 'warning',
             title: '学級の削除',
-            html: '学級「' + escHtml(name) + '」とそのシート（週案・振り返りのデータを含む）を削除します。<br>'
-                + '<strong>この操作は元に戻せません。</strong>よろしいですか？',
+            html: '学級「' + escHtml(name) + '」とそのシート（週案・振り返りのデータを含む）を削除します。<br><strong>この操作は元に戻せません。</strong>よろしいですか？',
             showCancelButton: true,
             confirmButtonText: '削除する',
             cancelButtonText: 'キャンセル',
@@ -232,7 +208,6 @@
             .deleteClassFromWeb(sheetName);
     }
 
-    /** 学級の表示名を変更します（シート名は変わりません）。 */
     async function renameMultiClass(sheetName, currentName) {
         var res = await Swal.fire({
             title: '学級名の変更',
@@ -255,5 +230,310 @@
             })
             .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
             .renameClassFromWeb(sheetName, res.value.trim());
+    }
+</script>
+
+<script>
+    'use strict';
+
+    // ===================================================
+    // ===== Phase 2: 起動・通信・表示性能レイヤー =====
+    // ===================================================
+
+    STATE.performance = {
+        bootstrapStartedAt: 0,
+        weekRequestSeq: 0,
+        weekCache: {},
+        masterLoading: false,
+        deferredLoaded: false
+    };
+
+    function p2RunIdle(callback, delay) {
+        var invoke = function () {
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(callback, { timeout: 1800 });
+            } else {
+                setTimeout(callback, 0);
+            }
+        };
+        setTimeout(invoke, delay || 0);
+    }
+
+    function p2WeekCacheKey(mondayStr) {
+        var activeSheet = STATE.multiClass && STATE.multiClass.activeSheet ? STATE.multiClass.activeSheet : 'default';
+        return activeSheet + '::' + mondayStr;
+    }
+
+    function p2CacheWeek(data) {
+        if (!data || !data.success || !data.mondayDateStr) return;
+        STATE.performance.weekCache[p2WeekCacheKey(data.mondayDateStr)] = {
+            data: JSON.parse(JSON.stringify(data)),
+            savedAt: Date.now()
+        };
+    }
+
+    function p2GetCachedWeek(mondayStr) {
+        var entry = STATE.performance.weekCache[p2WeekCacheKey(mondayStr)];
+        if (!entry) return null;
+        if (Date.now() - entry.savedAt > 5 * 60 * 1000) {
+            delete STATE.performance.weekCache[p2WeekCacheKey(mondayStr)];
+            return null;
+        }
+        return JSON.parse(JSON.stringify(entry.data));
+    }
+
+    function p2ApplyWeekData(data) {
+        if (!data || !data.success) return false;
+        STATE.weekData = data;
+        renderWeekGrid(data.days);
+        updateWeekHeader(data.days, data.weekNum);
+        renderWeeklyTaskPanel();
+        p2CacheWeek(data);
+        p2RunIdle(function () {
+            if (STATE.mondayStr === data.mondayDateStr && typeof loadHoursSummary === 'function') loadHoursSummary();
+        }, 120);
+        return true;
+    }
+
+    function p2ShowWeekLoading() {
+        var grid = document.getElementById('weekGrid');
+        if (!grid) return;
+        grid.style.minWidth = '';
+        grid.style.gridTemplateColumns = '';
+        grid.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>読み込み中...</p></div>';
+        var label = document.getElementById('weekLabel');
+        if (label) label.textContent = '読み込み中...';
+    }
+
+    function p2LoadDeferredBootstrap() {
+        if (STATE.performance.deferredLoaded) return;
+        STATE.performance.deferredLoaded = true;
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res || !res.success) return;
+
+                if (res.tasks && res.tasks.success) {
+                    STATE.allTaskData = res.tasks.tasks || [];
+                    STATE.tasks = STATE.allTaskData;
+                    STATE.taskDataLoaded = true;
+                    STATE.taskLoading = false;
+                    if (typeof refreshTaskViews === 'function') refreshTaskViews();
+                    else {
+                        if (typeof renderTaskList === 'function') renderTaskList();
+                        if (typeof renderWeeklyTaskPanel === 'function') renderWeeklyTaskPanel();
+                    }
+                }
+
+                if (res.reflection && res.reflection.success) {
+                    updateReflectionBadge(res.reflection.pendingCount || 0);
+                    var afterSchool = new Date().getHours() >= REFLECTION_AFTERSCHOOL_HOUR;
+                    if (afterSchool && res.reflection.hasLessons && res.reflection.status === '') {
+                        setTimeout(function () {
+                            if (typeof Swal !== 'undefined' && Swal.isVisible()) return;
+                            openReflectionWizard(res.reflection.today, { auto: true });
+                        }, 250);
+                    }
+                }
+
+                if (res.setup && res.setup.success && !res.setup.wizardDone
+                    && !(res.setup.hasApiKey && res.setup.hasCalendar)) {
+                    setTimeout(function () {
+                        if (typeof Swal !== 'undefined' && Swal.isVisible()) return;
+                        openSetupWizard({ auto: true, status: res.setup });
+                    }, 1700);
+                }
+            })
+            .withFailureHandler(function () {
+                STATE.performance.deferredLoaded = false;
+            })
+            .getDeferredBootstrapV2();
+    }
+
+    var p2LegacyOnload = window.onload;
+    window.onload = function () {
+        STATE.performance.bootstrapStartedAt = Date.now();
+        initWeekendVisibility();
+        restoreTaskSidebarState();
+        initPdfImportUI();
+        initAiTaskPdfUI();
+        p2ShowWeekLoading();
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res || !res.success) {
+                    if (typeof p2LegacyOnload === 'function') p2LegacyOnload();
+                    return;
+                }
+                if (res.linked === false || (res.tenant && res.tenant.linked === false)) {
+                    showOnboardingChoice(res.tenant || res);
+                    return;
+                }
+
+                if (res.masterData && res.masterData.success) STATE.masterData = res.masterData;
+                if (res.multiClass && res.multiClass.success) applyMultiClassState(res.multiClass);
+                STATE.mondayStr = res.mondayStr;
+
+                if (!p2ApplyWeekData(res.weeklyPlan)) {
+                    doLoadWeeklyPlan();
+                }
+                p2RunIdle(p2LoadDeferredBootstrap, 80);
+            })
+            .withFailureHandler(function () {
+                if (typeof p2LegacyOnload === 'function') p2LegacyOnload();
+            })
+            .getAppBootstrapV2();
+    };
+
+    function loadMasterData() {
+        if (STATE.masterData || STATE.performance.masterLoading) return;
+        STATE.performance.masterLoading = true;
+        google.script.run
+            .withSuccessHandler(function (data) {
+                STATE.performance.masterLoading = false;
+                if (data && data.success) STATE.masterData = data;
+            })
+            .withFailureHandler(function (e) {
+                STATE.performance.masterLoading = false;
+                _onCommError(e);
+            })
+            .getUnitMasterForSuggest();
+    }
+
+    function doLoadWeeklyPlan() {
+        var mondayStr = STATE.mondayStr;
+        if (!mondayStr) return;
+        var requestSeq = ++STATE.performance.weekRequestSeq;
+        var cached = p2GetCachedWeek(mondayStr);
+        if (cached) p2ApplyWeekData(cached);
+        else p2ShowWeekLoading();
+
+        google.script.run
+            .withSuccessHandler(function (data) {
+                if (requestSeq !== STATE.performance.weekRequestSeq || STATE.mondayStr !== mondayStr) return;
+                if (!data || !data.success) {
+                    if (!cached) showToast('error', 'データ取得エラー: ' + (data && data.error ? data.error : '取得できませんでした'));
+                    return;
+                }
+                p2ApplyWeekData(data);
+            })
+            .withFailureHandler(function (e) {
+                if (requestSeq !== STATE.performance.weekRequestSeq || STATE.mondayStr !== mondayStr) return;
+                if (isNoDbError_(e && e.message)) { handleNoDbError_(); return; }
+                if (!cached) showToast('error', '通信エラー: ' + e.message);
+            })
+            .getWeeklyPlanDataV2(mondayStr);
+    }
+
+    function p2UpdateCurrentWeekCache() {
+        if (!STATE.weekData || !STATE.mondayStr) return;
+        STATE.weekData.mondayDateStr = STATE.mondayStr;
+        p2CacheWeek(STATE.weekData);
+    }
+
+    function autoSaveAndThen(callback) {
+        if (!STATE.editMode || !hasUnsavedChanges()) {
+            if (STATE.editMode) { STATE.editMode = false; updateEditUI(); }
+            callback();
+            return;
+        }
+        if (_autoSaving) return;
+        _autoSaving = true;
+        var days = collectCurrentEditData();
+        if (!days) { _autoSaving = false; callback(); return; }
+
+        var subjectErrors = validateDaysSubjects(days);
+        if (subjectErrors.length > 0) {
+            _autoSaving = false;
+            showToast('error', '教科名の入力に誤りがあるため自動保存できません: ' + subjectErrors[0]
+                + (subjectErrors.length > 1 ? '（他' + (subjectErrors.length - 1) + '件）' : ''));
+            return;
+        }
+
+        showToast('info', '自動保存中...');
+        google.script.run
+            .withSuccessHandler(function (result) {
+                _autoSaving = false;
+                if (result.success) {
+                    STATE.weekData.days = days;
+                    STATE.weekData.revision = result.revision;
+                    STATE.editMode = false;
+                    updateEditUI();
+                    p2UpdateCurrentWeekCache();
+                    showToast('success', '自動保存しました');
+                    callback();
+                } else if (result.conflict) {
+                    handleSaveConflict();
+                } else {
+                    showToast('error', '自動保存失敗: ' + result.error + ' 手動で保存してください。');
+                }
+            })
+            .withFailureHandler(function (e) {
+                _autoSaving = false;
+                showToast('error', '自動保存エラー: ' + e.message + ' 手動で保存してください。');
+            })
+            .saveWeeklyPlanDataV2(STATE.mondayStr, days, STATE.weekData.revision);
+    }
+
+    function saveWeeklyPlan() {
+        var days = collectCurrentEditData();
+        if (!days) return;
+        var subjectErrors = validateDaysSubjects(days);
+        if (subjectErrors.length > 0) {
+            showToast('error', '教科名の入力に誤りがあります: ' + subjectErrors[0]
+                + (subjectErrors.length > 1 ? '（他' + (subjectErrors.length - 1) + '件）' : ''));
+            return;
+        }
+
+        var btn = document.getElementById('saveBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 保存中...';
+        showToast('info', '保存中...');
+
+        google.script.run
+            .withSuccessHandler(function (result) {
+                btn.disabled = false;
+                btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
+                if (result.success) {
+                    STATE.weekData.days = days;
+                    STATE.weekData.revision = result.revision;
+                    p2UpdateCurrentWeekCache();
+                    cancelEdit();
+                    showToast('success', result.message);
+                } else if (result.conflict) {
+                    handleSaveConflict();
+                } else {
+                    showToast('error', '保存失敗: ' + result.error);
+                }
+            })
+            .withFailureHandler(function (e) {
+                btn.disabled = false;
+                btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .saveWeeklyPlanDataV2(STATE.mondayStr, days, STATE.weekData.revision);
+    }
+
+    function persistViewMutation() {
+        if (STATE.editMode || !STATE.weekData || !STATE.mondayStr) return;
+        var weekData = STATE.weekData;
+        var mondayStr = STATE.mondayStr;
+        clearTimeout(_viewSaveTimer);
+        _viewSaveTimer = setTimeout(function () {
+            google.script.run
+                .withSuccessHandler(function (result) {
+                    if (result.success) {
+                        weekData.revision = result.revision;
+                        p2UpdateCurrentWeekCache();
+                    } else if (result.conflict) {
+                        handleSaveConflict();
+                    } else {
+                        showToast('error', '変更の保存に失敗: ' + result.error);
+                    }
+                })
+                .withFailureHandler(function (e) {
+                    showToast('error', '変更の保存に失敗（通信エラー）: ' + e.message);
+                })
+                .saveWeeklyPlanDataV2(mondayStr, weekData.days, weekData.revision);
+        }, 450);
     }
 </script>

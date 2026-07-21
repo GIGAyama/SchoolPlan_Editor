@@ -103,86 +103,114 @@ function isDbSheetName_(sheetName) {
   return getClassList_().some(c => c.sheetName === sheetName);
 }
 
+// データベースの見出しは、旧版・学校ごとの既存シートで表記や列順が異なる。
+// NFKC正規化後の見出しを論理キーへ変換し、物理列順から完全に独立させる。
+const DB_HEADER_KEY_MAP_ = {
+  '第何週': 'WEEK_NUM', '週番号': 'WEEK_NUM',
+  '日付': 'DATE', '曜日': 'DAY_OF_WEEK', '時程': 'TIME',
+  '行事': 'EVENT',
+  '登校前タスク': 'PRECLASS', '登校前': 'PRECLASS', '始業前': 'PRECLASS',
+  '登校前業務': 'PRECLASS', '出勤後タスク': 'PRECLASS',
+  '朝学習': 'MORNING',
+  '宿題': 'HOMEWORK', '課題': 'HOMEWORK', '持ち物': 'ITEMS',
+  '中休み': 'RECESS1', '昼休み': 'RECESS2', '放課後': 'AFTERSCHOOL',
+  '振り返り': 'REFLECTION', 'ふり返り': 'REFLECTION', '振返り': 'REFLECTION',
+  '振り返り状態': 'REFLECTION_STATUS'
+};
+
+for (let n = 1; n <= 6; n++) {
+  DB_HEADER_KEY_MAP_[n + '校時'] = 'PERIOD' + n;
+  DB_HEADER_KEY_MAP_[n + '時間目'] = 'PERIOD' + n;
+  DB_HEADER_KEY_MAP_['単元' + n] = 'UNIT' + n;
+  DB_HEADER_KEY_MAP_['単元名' + n] = 'UNIT' + n;
+  DB_HEADER_KEY_MAP_[n + '校時単元'] = 'UNIT' + n;
+  DB_HEADER_KEY_MAP_[n + '時間目単元'] = 'UNIT' + n;
+  DB_HEADER_KEY_MAP_['学習内容' + n] = 'CONTENT' + n;
+  DB_HEADER_KEY_MAP_['内容' + n] = 'CONTENT' + n;
+  DB_HEADER_KEY_MAP_[n + '校時内容'] = 'CONTENT' + n;
+  DB_HEADER_KEY_MAP_[n + '時間目内容'] = 'CONTENT' + n;
+}
+
 /**
- * データベースシートの列インデックスを動的に取得します（ヘッダー行に基づく）。
- * 戻り値は1始まりの列インデックスのオブジェクトです。
- * 複数学級モードではアクティブ学級のシートを対象とし、キャッシュはシート別に保持します。
+ * ヘッダー表記を比較用に正規化します。
+ * 全角数字・全角空白・余分な空白を吸収します。
+ * @param {*} header
+ * @returns {string}
+ */
+function normalizeDbHeader_(header) {
+  const raw = header === null || header === undefined ? '' : String(header);
+  return raw.normalize('NFKC').replace(/\s+/g, '').trim();
+}
+
+/**
+ * ヘッダー配列から1始まりの列マップを構築する純粋関数です。
+ * 同じ論理項目の見出しが複数ある場合は、既存互換のため左側を採用します。
+ * @param {Array<*>} headers
+ * @param {string} [sheetName]
+ * @returns {Object}
+ */
+function buildDbColumnMapFromHeaders_(headers, sheetName) {
+  const colMap = {};
+  (headers || []).forEach((header, index) => {
+    const cleanHeader = normalizeDbHeader_(header);
+    const key = DB_HEADER_KEY_MAP_[cleanHeader];
+    if (key && !colMap[key]) colMap[key] = index + 1;
+  });
+
+  if (!colMap.DATE) {
+    throw new Error(`シート「${sheetName || SHEET_NAME_DATABASE}」に「日付」という名前のヘッダー列が見つかりません。`);
+  }
+  return colMap;
+}
+
+/**
+ * データベースシートの列インデックスを、現在のヘッダー行から毎回取得します。
+ *
+ * 以前は ScriptCache をシート名だけで共有していたため、マルチテナント環境で
+ * 列順の異なる別ユーザーの「データベース」シートの列マップが混入し、週案が
+ * 別の欄へ表示・保存される可能性がありました。ヘッダー1行の読取は軽量なため、
+ * 正確性を優先してキャッシュせず、その実シートの見出しを唯一の情報源とします。
+ * @returns {Object} 1始まりの列インデックスのマップ
  */
 function getDbColumns() {
   const dbSheet = resolveDbSheet_();
   if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
-
-  const cacheKey = 'dbColumnsMap_v4::' + dbSheet.getName();
-  const cache = CacheService.getScriptCache();
-  const cachedCols = cache.get(cacheKey);
-  if (cachedCols) {
-    return JSON.parse(cachedCols);
-  }
-
-  const colMap = scanDbHeaderForSheet_(dbSheet);
-
-  cache.put(cacheKey, JSON.stringify(colMap), 3600);
-  return colMap;
+  return scanDbHeaderForSheet_(dbSheet);
 }
 
 /**
- * 指定したデータベースシートのヘッダー行から列マップを構築します（キャッシュなし）。
- * getDbColumns() の実体で、複数学級モードの学級シート作成時にも直接使用します。
+ * 指定したデータベースシートのヘッダー行から列マップを構築します。
  * @param {GoogleAppsScript.Spreadsheet.Sheet} dbSheet 対象シート
  * @returns {Object} 1始まりの列インデックスのマップ
  */
 function scanDbHeaderForSheet_(dbSheet) {
-  const headers = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
-  const colMap = {};
-
-  const headerKeys = {
-    "第何週": "WEEK_NUM", "週番号": "WEEK_NUM",
-    "日付": "DATE", "曜日": "DAY_OF_WEEK", "時程": "TIME", 
-    "行事": "EVENT",
-    "登校前タスク": "PRECLASS", "登校前": "PRECLASS", "始業前": "PRECLASS", "登校前業務": "PRECLASS", "出勤後タスク": "PRECLASS",
-    "朝学習": "MORNING",
-    "1校時": "PERIOD1", "単元1": "UNIT1", "単元名1": "UNIT1", "学習内容1": "CONTENT1", "内容1": "CONTENT1", 
-    "2校時": "PERIOD2", "単元2": "UNIT2", "単元名2": "UNIT2", "学習内容2": "CONTENT2", "内容2": "CONTENT2", 
-    "3校時": "PERIOD3", "単元3": "UNIT3", "単元名3": "UNIT3", "学習内容3": "CONTENT3", "内容3": "CONTENT3", 
-    "4校時": "PERIOD4", "単元4": "UNIT4", "単元名4": "UNIT4", "学習内容4": "CONTENT4", "内容4": "CONTENT4", 
-    "5校時": "PERIOD5", "単元5": "UNIT5", "単元名5": "UNIT5", "学習内容5": "CONTENT5", "内容5": "CONTENT5", "内容５": "CONTENT5", 
-    "6校時": "PERIOD6", "単元6": "UNIT6", "単元名6": "UNIT6", "学習内容6": "CONTENT6", "内容6": "CONTENT6", 
-    "宿題": "HOMEWORK", "課題": "HOMEWORK", "持ち物": "ITEMS", "中休み": "RECESS1",
-    "昼休み": "RECESS2", "放課後": "AFTERSCHOOL",
-    "振り返り": "REFLECTION", "ふり返り": "REFLECTION", "振返り": "REFLECTION",
-    "振り返り状態": "REFLECTION_STATUS"
-  };
-
-  headers.forEach((header, index) => {
-    const cleanHeader = header.toString().trim();
-    const key = headerKeys[cleanHeader];
-    if (key && !colMap[key]) {
-      colMap[key] = index + 1;
-    }
-  });
-
-  if (!colMap.DATE) throw new Error(`シート「${dbSheet.getName()}」に「日付」という名前のヘッダー列が見つかりません。`);
-
-  return colMap;
+  const lastColumn = Math.max(1, dbSheet.getLastColumn());
+  const headers = dbSheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
+  return buildDbColumnMapFromHeaders_(headers, dbSheet.getName());
 }
 
 /**
- * データベースの列構成を変更した際にキャッシュをクリアする関数です。
- * 複数学級モードでは全学級シート分のキャッシュをクリアします。
+ * 旧版が作成した列マップキャッシュを削除します。
+ * 現行版は列マップをキャッシュしませんが、アップデート直後に誤った旧キャッシュを
+ * 残さないため、メンテナンス操作との後方互換として維持します。
  */
 function clearDbColumnsCache() {
-  const cache = CacheService.getScriptCache();
   const names = [SHEET_NAME_DATABASE].concat(getClassList_().map(c => c.sheetName));
-  cache.removeAll(names.map(n => 'dbColumnsMap_v4::' + n));
-  cache.remove('dbColumnsMap_v4'); // 旧形式キーの掃除（後方互換）
-  logInfo("データベースの列構成キャッシュをクリアしました。");
+  const keys = [];
+  ['v1', 'v2', 'v3', 'v4', 'v5'].forEach(version => {
+    names.forEach(name => keys.push('dbColumnsMap_' + version + '::' + name));
+  });
+  keys.push('dbColumnsMap_v4');
+  try { CacheService.getScriptCache().removeAll(keys); } catch (e) {}
+  try { CacheService.getUserCache().removeAll(keys); } catch (e) {}
+  logInfo('データベースの列構成キャッシュをクリアしました。');
 }
 
 
 
 // --- 単元マスタシート列定義 (1始まり) ---
-const MASTER_COL_SUBJECT = 1; 
-const MASTER_COL_UNIT_NAME = 2; 
-const MASTER_COL_TOTAL_HOURS = 3; 
-const MASTER_COL_HOUR_NUM = 4; 
+const MASTER_COL_SUBJECT = 1;
+const MASTER_COL_UNIT_NAME = 2;
+const MASTER_COL_TOTAL_HOURS = 3;
+const MASTER_COL_HOUR_NUM = 4;
 const MASTER_COL_ACTIVITY = 5;
