@@ -11,7 +11,8 @@ function getDeviceAccessibilityClientModule() {
     modules: [
       'App_Js_16_Accessibility_Core',
       'App_Js_16_Accessibility_Grid',
-      'App_Js_16_Accessibility_Mobile'
+      'App_Js_16_Accessibility_Mobile',
+      'App_Js_16_Accessibility_Fixes'
     ].map(name => HtmlService.createHtmlOutputFromFile(name).getContent())
   };
 }
