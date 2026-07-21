@@ -22,11 +22,12 @@ function p5ReadProposalBefore_(week, dateStr, field, period) {
 function p5CanonicalizeProposal_(item, context) {
   if (!item || !item.actionType || item.actionType === 'none') return null;
   const actionType = String(item.actionType);
+  const confidenceRaw = Number(item.confidence);
   const base = {
     actionType,
     title: p5CleanUserText_(item.title, 180) || 'AIからの提案',
     reason: p5CleanUserText_(item.reason, 800),
-    confidence: Math.max(0, Math.min(1, Number(item.confidence || 0))),
+    confidence: isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : 0,
     contextFingerprint: context.fingerprint,
     createdAt: new Date().toISOString()
   };
@@ -157,7 +158,11 @@ function p5ApplyTaskProposal_(proposal) {
   if (duplicate) throw new Error('同じ内容・期日の未完了タスクが既にあります。');
   const result = saveTasksFromWebApp([task]);
   if (!result || !result.success) throw new Error((result && result.error) || 'タスクを追加できませんでした。');
-  return { message: 'タスクを追加しました。', refresh: ['tasks'], result: { savedCount: (result.savedTasks || []).length } };
+  return {
+    message: 'タスクを追加しました。',
+    refresh: ['tasks'],
+    result: { savedCount: (result.savedTasks || []).length }
+  };
 }
 
 function p5ApplyWeeklyPatchProposal_(proposal) {
@@ -173,15 +178,26 @@ function p5ApplyWeeklyPatchProposal_(proposal) {
   if (currentValue !== String(payload.expectedBefore || '')) {
     throw new Error('対象セルの内容が提案時から変わっています。上書きせず処理を停止しました。');
   }
+
   const patched = p5ApplyPatchToDays_(current.days, payload);
-  const saved = typeof saveWeeklyPlanDataV2 === 'function'
-    ? saveWeeklyPlanDataV2(payload.mondayDateStr, patched, current.revision)
-    : saveWeeklyPlanData(payload.mondayDateStr, patched, current.revision);
+  let saved;
+  if (typeof saveWeeklyPlanDataProtected === 'function') {
+    saved = saveWeeklyPlanDataProtected(payload.mondayDateStr, patched, current.revision);
+  } else if (typeof saveWeeklyPlanDataV2 === 'function') {
+    saved = saveWeeklyPlanDataV2(payload.mondayDateStr, patched, current.revision);
+  } else {
+    saved = saveWeeklyPlanData(payload.mondayDateStr, patched, current.revision);
+  }
+
   if (!saved || !saved.success) {
     if (saved && saved.conflict) throw new Error('保存直前に別の更新がありました。最新データで相談し直してください。');
     throw new Error((saved && saved.error) || '週案へ反映できませんでした。');
   }
-  return { message: '週案の提案を1件反映しました。', refresh: ['weeklyPlan'], result: { revision: saved.revision || '' } };
+  return {
+    message: '週案の提案を1件反映しました。',
+    refresh: ['weeklyPlan'],
+    result: { revision: saved.revision || '' }
+  };
 }
 
 function applyTeacherCopilotProposal(proposalId, confirmation) {
@@ -190,12 +206,22 @@ function applyTeacherCopilotProposal(proposalId, confirmation) {
     if (!confirmation || confirmation.confirmed !== true) throw new Error('教師による明示確認が必要です。');
     const proposal = p5LoadProposal_(proposalId);
     let applied;
-    if (proposal.actionType === 'task.create') applied = p5ApplyTaskProposal_(proposal);
-    else if (proposal.actionType === 'weeklyPlan.patch') applied = p5ApplyWeeklyPatchProposal_(proposal);
-    else if (proposal.actionType === 'reflection.draft') {
-      applied = { message: '振り返りの下書きを準備しました。内容を確認してから利用してください。', refresh: [], clientAction: { type: 'draft', target: 'reflection', data: proposal.payload } };
+    if (proposal.actionType === 'task.create') {
+      applied = p5ApplyTaskProposal_(proposal);
+    } else if (proposal.actionType === 'weeklyPlan.patch') {
+      applied = p5ApplyWeeklyPatchProposal_(proposal);
+    } else if (proposal.actionType === 'reflection.draft') {
+      applied = {
+        message: '振り返りの下書きを準備しました。内容を確認してから利用してください。',
+        refresh: [],
+        clientAction: { type: 'draft', target: 'reflection', data: proposal.payload }
+      };
     } else if (proposal.actionType === 'newsletter.draft') {
-      applied = { message: '学級通信の下書きを準備しました。内容を確認してから利用してください。', refresh: [], clientAction: { type: 'draft', target: 'newsletter', data: proposal.payload } };
+      applied = {
+        message: '学級通信の下書きを準備しました。内容を確認してから利用してください。',
+        refresh: [],
+        clientAction: { type: 'draft', target: 'newsletter', data: proposal.payload }
+      };
     } else {
       throw new Error('この提案形式には対応していません。');
     }
@@ -203,18 +229,36 @@ function applyTeacherCopilotProposal(proposalId, confirmation) {
     CacheService.getUserCache().remove('p5:proposal:' + proposalId);
     if (typeof p3RecordAudit_ === 'function') {
       p3RecordAudit_(
-        'AI_PROPOSAL_APPLY', 'ai_proposal', proposalId,
+        'AI_PROPOSAL_APPLY',
+        'ai_proposal',
+        proposalId,
         'AI提案を教師の明示確認後に適用',
         null,
         { actionType: proposal.actionType, target: proposal.preview && proposal.preview.target },
         correlationId
       );
     }
-    return { success: true, proposalId, actionType: proposal.actionType, message: applied.message, refresh: applied.refresh || [], clientAction: applied.clientAction || null, result: applied.result || null };
+    return {
+      success: true,
+      proposalId,
+      actionType: proposal.actionType,
+      message: applied.message,
+      refresh: applied.refresh || [],
+      clientAction: applied.clientAction || null,
+      result: applied.result || null
+    };
   } catch (e) {
     logError('applyTeacherCopilotProposal', e);
     if (typeof p3RecordAudit_ === 'function') {
-      p3RecordAudit_('AI_PROPOSAL_APPLY_ERROR', 'ai_proposal', String(proposalId || ''), 'AI提案の適用を停止', null, { errorType: e.name || 'Error' }, correlationId);
+      p3RecordAudit_(
+        'AI_PROPOSAL_APPLY_ERROR',
+        'ai_proposal',
+        String(proposalId || ''),
+        'AI提案の適用を停止',
+        null,
+        { errorType: e.name || 'Error' },
+        correlationId
+      );
     }
     return { success: false, error: e.message, proposalId };
   }
@@ -225,7 +269,15 @@ function rejectTeacherCopilotProposal(proposalId) {
     const proposal = p5LoadProposal_(proposalId);
     CacheService.getUserCache().remove('p5:proposal:' + proposalId);
     if (typeof p3RecordAudit_ === 'function') {
-      p3RecordAudit_('AI_PROPOSAL_REJECT', 'ai_proposal', proposalId, 'AI提案を教師が却下', null, { actionType: proposal.actionType }, proposal.sessionId || '');
+      p3RecordAudit_(
+        'AI_PROPOSAL_REJECT',
+        'ai_proposal',
+        proposalId,
+        'AI提案を教師が却下',
+        null,
+        { actionType: proposal.actionType },
+        proposal.sessionId || ''
+      );
     }
     return { success: true, proposalId };
   } catch (e) {
