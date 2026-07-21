@@ -88,6 +88,34 @@
             }).withFailureHandler(_onCommError).trashUnitMasterRowFromWeb(rowIndex);
         };
 
+        if (window.NW) {
+            NW.doDeleteFromSheet = function (rowIndex, fileId) {
+                Swal.fire({
+                    title: '学級通信をごみ箱へ移動',
+                    text: '30日以内なら設定画面から復元できます。',
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'ごみ箱へ移動',
+                    cancelButtonText: 'キャンセル',
+                    confirmButtonColor: '#ea4335'
+                }).then(function (result) {
+                    if (!result.isConfirmed) return;
+                    google.script.run
+                        .withSuccessHandler(function (res) {
+                            if (!res || !res.success) {
+                                showToast('error', '削除失敗: ' + ((res && res.error) || '不明なエラー'));
+                                return;
+                            }
+                            showToast('success', res.message || 'ごみ箱へ移動しました');
+                            NW.openFromSheet();
+                            p3LoadProtectionStatus(false);
+                        })
+                        .withFailureHandler(_onCommError)
+                        .trashNewsletterDataFromWeb(rowIndex, fileId);
+                });
+            };
+        }
+
         window.clearDatabaseWeb = function (btn) {
             Swal.fire({ icon: 'warning', title: 'データベースをクリア', html: '実行前に完全バックアップを自動作成します。<br><strong>週案入力内容をクリアしますか？</strong>', showCancelButton: true, confirmButtonText: 'バックアップしてクリア', cancelButtonText: 'キャンセル', confirmButtonColor: '#d93025' })
                 .then(function (answer) {
