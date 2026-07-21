@@ -1,0 +1,341 @@
+<script>
+  'use strict';
+
+  window.P5C = window.P5C || {
+    installed: false,
+    configured: false,
+    loading: false,
+    bootstrap: null,
+    mode: 'dailyBrief',
+    scope: {
+      currentWeek: true,
+      nextWeek: true,
+      tasks: true,
+      hours: true,
+      unitMaster: false,
+      reflections: false
+    },
+    messages: [],
+    lastSources: [],
+    contextOpen: false,
+    lastContextFocus: null
+  };
+
+  function p5cEsc(value) {
+    if (typeof escHtml === 'function') return escHtml(String(value || ''));
+    return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function p5cNl(value) {
+    return p5cEsc(value).replace(/\n/g, '<br>');
+  }
+
+  function p5cMode() {
+    var list = P5C.bootstrap && P5C.bootstrap.modes ? P5C.bootstrap.modes : [];
+    return list.find(function (item) { return item.id === P5C.mode; }) || list[0] || { id: 'dailyBrief', label: '今日のブリーフ', description: '' };
+  }
+
+  function p5cCurrentMonday() {
+    return (typeof STATE !== 'undefined' && STATE.mondayStr) || (P5C.bootstrap && P5C.bootstrap.mondayDateStr) || '';
+  }
+
+  function p5cBuildConversationPayload() {
+    return P5C.messages.slice(0, -1).slice(-6).map(function (item) {
+      var text = item.role === 'assistant'
+        ? ((item.response && item.response.overview ? item.response.overview + '\n' : '') + (item.response && item.response.answer ? item.response.answer : ''))
+        : item.text;
+      return { role: item.role, text: String(text || '').slice(0, 1800) };
+    });
+  }
+
+  function p5cSetLoading(loading) {
+    P5C.loading = !!loading;
+    var send = document.getElementById('p5SendButton');
+    var input = document.getElementById('p5PromptInput');
+    if (send) {
+      send.disabled = P5C.loading;
+      send.innerHTML = P5C.loading
+        ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>'
+        : '<span class="material-symbols-outlined" aria-hidden="true">arrow_upward</span>';
+      send.setAttribute('aria-label', P5C.loading ? 'AIが回答を作成中' : 'AIへ送信');
+    }
+    if (input) input.disabled = P5C.loading;
+  }
+
+  function p5cAutoResize(input) {
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+  }
+
+  function p5cSelectMode(modeId) {
+    P5C.mode = modeId;
+    document.querySelectorAll('.p5-mode-button').forEach(function (button) {
+      var active = button.dataset.mode === modeId;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    var mode = p5cMode();
+    var title = document.getElementById('p5ActiveModeLabel');
+    var desc = document.getElementById('p5ActiveModeDescription');
+    if (title) title.textContent = mode.label || '';
+    if (desc) desc.textContent = mode.description || '';
+    var input = document.getElementById('p5PromptInput');
+    if (input) input.placeholder = p5cPromptPlaceholder(modeId);
+  }
+
+  function p5cPromptPlaceholder(modeId) {
+    var map = {
+      dailyBrief: '例：今日、最優先で確認すべきことを3つに整理して',
+      weeklyPlan: '例：今週の週案に抜けや準備不足がないか点検して',
+      lessonDesign: '例：この単元で児童が主体的に考える問いを提案して',
+      workload: '例：未完了タスクを今日・今週・後回しに整理して',
+      reflectionCoach: '例：今週の振り返りから成果と次の一手をまとめて',
+      communication: '例：来週の持ち物を保護者へ伝える文章を作って',
+      report: '例：学年会で共有する今週の報告を簡潔にまとめて',
+      riskCheck: '例：行事・期限・安全面の見落とし候補を点検して'
+    };
+    return map[modeId] || '教師の仕事について相談してください';
+  }
+
+  function p5cAskExample(text) {
+    var input = document.getElementById('p5PromptInput');
+    if (!input) return;
+    input.value = text;
+    p5cAutoResize(input);
+    input.focus();
+  }
+
+  function p5cSubmit() {
+    if (P5C.loading) return;
+    var input = document.getElementById('p5PromptInput');
+    var question = input ? input.value.trim() : '';
+    if (!question) {
+      if (typeof showToast === 'function') showToast('error', '相談内容を入力してください');
+      return;
+    }
+    if (!P5C.configured) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Gemini APIキーが必要です',
+        text: '設定画面でGemini APIキーを登録してから利用してください。',
+        confirmButtonText: '設定を開く',
+        showCancelButton: true,
+        cancelButtonText: '閉じる'
+      }).then(function (result) { if (result.isConfirmed) switchView('settings'); });
+      return;
+    }
+
+    P5C.messages.push({ role: 'user', text: question, at: new Date().toISOString() });
+    input.value = '';
+    p5cAutoResize(input);
+    p5cRenderConversation();
+    p5cSetLoading(true);
+    p5cAppendLoadingMessage();
+
+    google.script.run
+      .withSuccessHandler(function (result) {
+        p5cSetLoading(false);
+        p5cRemoveLoadingMessage();
+        if (!result || !result.success) {
+          var message = result && result.error ? result.error : 'AIから回答を取得できませんでした。';
+          P5C.messages.push({ role: 'error', text: message, at: new Date().toISOString() });
+          p5cRenderConversation();
+          if (typeof p4Announce === 'function') p4Announce(message, true);
+          return;
+        }
+        P5C.lastSources = result.sources || [];
+        P5C.messages.push({
+          role: 'assistant',
+          response: result.response || {},
+          sources: result.sources || [],
+          privacyWarnings: result.privacyWarnings || [],
+          durationMs: result.durationMs || 0,
+          sessionId: result.sessionId,
+          at: new Date().toISOString()
+        });
+        p5cRenderConversation();
+        if (typeof p4Announce === 'function') p4Announce('AIコパイロットの回答を表示しました');
+      })
+      .withFailureHandler(function (error) {
+        p5cSetLoading(false);
+        p5cRemoveLoadingMessage();
+        var message = error && error.message ? error.message : String(error);
+        P5C.messages.push({ role: 'error', text: '通信エラー: ' + message, at: new Date().toISOString() });
+        p5cRenderConversation();
+      })
+      .runTeacherCopilot({
+        question: question,
+        mode: P5C.mode,
+        mondayDateStr: p5cCurrentMonday(),
+        scope: P5C.scope,
+        conversation: p5cBuildConversationPayload()
+      });
+  }
+
+  function p5cComposerKeydown(event) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      p5cSubmit();
+    }
+  }
+
+  function p5cClearConversation() {
+    if (!P5C.messages.length) return;
+    Swal.fire({
+      icon: 'question',
+      title: '会話をクリアしますか？',
+      text: '会話はこの画面内だけに保持されています。クリアすると元に戻せません。',
+      showCancelButton: true,
+      confirmButtonText: 'クリアする',
+      cancelButtonText: 'キャンセル'
+    }).then(function (result) {
+      if (!result.isConfirmed) return;
+      P5C.messages = [];
+      P5C.lastSources = [];
+      p5cRenderConversation();
+    });
+  }
+
+  function p5cOpenContext() {
+    var drawer = document.getElementById('p5ContextDrawer');
+    if (!drawer) return;
+    P5C.lastContextFocus = document.activeElement;
+    P5C.contextOpen = true;
+    drawer.classList.add('open');
+    drawer.setAttribute('aria-hidden', 'false');
+    var first = drawer.querySelector('input, button');
+    if (first) first.focus();
+  }
+
+  function p5cCloseContext(restoreFocus) {
+    var drawer = document.getElementById('p5ContextDrawer');
+    if (!drawer) return;
+    P5C.contextOpen = false;
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+    if (restoreFocus && P5C.lastContextFocus && P5C.lastContextFocus.focus) P5C.lastContextFocus.focus();
+  }
+
+  function p5cContextKeydown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      p5cCloseContext(true);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    var panel = document.querySelector('#p5ContextDrawer .p5-context-panel');
+    var items = panel ? Array.prototype.filter.call(panel.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])'), function (el) { return el.offsetParent !== null; }) : [];
+    if (!items.length) return;
+    var first = items[0], last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
+
+  function p5cSetScope(name, checked) {
+    if (!Object.prototype.hasOwnProperty.call(P5C.scope, name)) return;
+    P5C.scope[name] = !!checked;
+    p5cUpdateContextSummary();
+  }
+
+  function p5cUpdateContextSummary() {
+    var labels = {
+      currentWeek: '表示中の週案', nextWeek: '翌週', tasks: 'タスク', hours: '時数', unitMaster: '単元', reflections: '振り返り'
+    };
+    var selected = Object.keys(P5C.scope).filter(function (key) { return P5C.scope[key]; }).map(function (key) { return labels[key]; });
+    var summary = document.getElementById('p5ContextSummary');
+    if (summary) summary.textContent = selected.length ? selected.join('・') : '相談内容のみ';
+  }
+
+  function p5cShowDraft(clientAction) {
+    var data = clientAction && clientAction.data ? clientAction.data : {};
+    var text = String(data.draftText || '');
+    var targetLabel = clientAction.target === 'newsletter' ? '学級通信' : '振り返り';
+    Swal.fire({
+      title: targetLabel + 'の下書き',
+      html: '<textarea id="p5DraftText" class="form-control" rows="12" style="font-family:inherit;resize:vertical;">' + p5cEsc(text) + '</textarea>'
+        + '<p style="font-size:0.72rem;color:var(--text-sub);margin-top:8px;text-align:left;">AIの下書きです。事実関係と個人情報を教師が確認してから利用してください。</p>',
+      width: 720,
+      showCancelButton: true,
+      confirmButtonText: 'コピーする',
+      cancelButtonText: '閉じる',
+      preConfirm: function () { return document.getElementById('p5DraftText').value; }
+    }).then(function (result) {
+      if (!result.isConfirmed) return;
+      var value = result.value || '';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(value).then(function () { showToast('success', '下書きをコピーしました'); });
+      } else {
+        var textarea = document.createElement('textarea');
+        textarea.value = value;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+        showToast('success', '下書きをコピーしました');
+      }
+    });
+  }
+
+  function p5cApplyProposal(proposalId, button) {
+    var card = button && button.closest ? button.closest('.p5-proposal') : null;
+    var target = card ? card.querySelector('.p5-proposal-target') : null;
+    var after = card ? card.querySelector('[data-diff="after"]') : null;
+    Swal.fire({
+      icon: 'question',
+      title: 'このAI提案を適用しますか？',
+      html: '<div style="text-align:left;font-size:0.82rem;line-height:1.6;">'
+        + (target ? '<strong>対象:</strong> ' + target.textContent + '<br>' : '')
+        + (after ? '<strong>反映内容:</strong><div style="margin-top:6px;padding:8px;border:1px solid var(--border);border-radius:6px;white-space:pre-wrap;max-height:180px;overflow:auto;">' + p5cEsc(after.textContent) + '</div>' : '')
+        + '<p style="margin-top:10px;color:var(--text-sub);">AIの提案内容を教師が確認したものとして反映します。</p></div>',
+      showCancelButton: true,
+      confirmButtonText: '確認して適用',
+      cancelButtonText: 'キャンセル',
+      confirmButtonColor: '#6f42c1'
+    }).then(function (result) {
+      if (!result.isConfirmed) return;
+      if (button) button.disabled = true;
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (button) button.disabled = false;
+          if (!res || !res.success) {
+            showToast('error', (res && res.error) || '提案を適用できませんでした');
+            return;
+          }
+          if (card) {
+            card.classList.add('applied');
+            card.querySelectorAll('button').forEach(function (item) { item.disabled = true; });
+            var actions = card.querySelector('.p5-proposal-actions');
+            if (actions) actions.innerHTML = '<span style="color:var(--secondary);font-size:0.75rem;font-weight:700;">適用済み</span>';
+          }
+          (res.refresh || []).forEach(function (key) {
+            if (key === 'weeklyPlan' && typeof doLoadWeeklyPlan === 'function') doLoadWeeklyPlan();
+            if (key === 'tasks' && typeof loadTasks === 'function') loadTasks();
+          });
+          if (res.clientAction) p5cShowDraft(res.clientAction);
+          showToast('success', res.message || '提案を適用しました');
+        })
+        .withFailureHandler(function (error) {
+          if (button) button.disabled = false;
+          showToast('error', error && error.message ? error.message : String(error));
+        })
+        .applyTeacherCopilotProposal(proposalId, { confirmed: true });
+    });
+  }
+
+  function p5cRejectProposal(proposalId, button) {
+    var card = button && button.closest ? button.closest('.p5-proposal') : null;
+    if (button) button.disabled = true;
+    google.script.run
+      .withSuccessHandler(function () {
+        if (card) {
+          card.classList.add('rejected');
+          card.querySelectorAll('button').forEach(function (item) { item.disabled = true; });
+          var actions = card.querySelector('.p5-proposal-actions');
+          if (actions) actions.innerHTML = '<span style="color:var(--text-sub);font-size:0.75rem;">却下済み</span>';
+        }
+      })
+      .withFailureHandler(function () { if (button) button.disabled = false; })
+      .rejectTeacherCopilotProposal(proposalId);
+  }
+</script>
