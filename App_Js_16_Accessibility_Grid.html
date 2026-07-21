@@ -1,0 +1,294 @@
+<script>
+    'use strict';
+
+    function p4VisibleDayIndexes() {
+        var result = [];
+        for (var i = 0; i < 7; i++) if (typeof isDayVisible !== 'function' || isDayVisible(i)) result.push(i);
+        return result;
+    }
+
+    function p4CellValueText(day, rowDef) {
+        if (!day || !rowDef) return '';
+        if (rowDef.multi) {
+            var pIdx = parseInt(rowDef.key.replace('period', ''), 10);
+            var p = day.periods && day.periods[pIdx] ? day.periods[pIdx] : {};
+            return [p.subject, p.unit, p.content].filter(Boolean).join('、');
+        }
+        return String(day[rowDef.key] || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function p4DayAccessibleLabel(day) {
+        if (!day) return '';
+        var label = (day.dayLabel || '') + '曜日 ' + (day.date || '');
+        if (day.holiday) label += ' ' + day.holiday;
+        return label;
+    }
+
+    function p4EnhanceEditFields(grid, days) {
+        grid.querySelectorAll('input[data-day], textarea[data-day]').forEach(function (field) {
+            var dayIndex = parseInt(field.dataset.day, 10);
+            var day = days && days[dayIndex];
+            var fieldName = field.dataset.field || '';
+            var label = '';
+            if (fieldName === 'subject' || fieldName === 'unit' || fieldName === 'content') {
+                var period = parseInt(field.dataset.period, 10);
+                var suffix = { subject: '教科', unit: '単元', content: '学習内容' }[fieldName] || fieldName;
+                label = p4DayAccessibleLabel(day) + ' ' + (period + 1) + '校時 ' + suffix;
+            } else {
+                var row = GRID_ROWS.filter(function (item) { return item.key === fieldName; })[0];
+                label = p4DayAccessibleLabel(day) + ' ' + (row ? row.label : fieldName);
+            }
+            if (label) field.setAttribute('aria-label', label);
+            if (field.classList.contains('subject-input-invalid')) field.setAttribute('aria-invalid', 'true');
+            else field.removeAttribute('aria-invalid');
+        });
+        grid.querySelectorAll('.suggest-box').forEach(function (box) {
+            box.setAttribute('role', 'listbox');
+            box.setAttribute('aria-label', '教科候補');
+        });
+        grid.querySelectorAll('.suggest-item').forEach(function (item) {
+            item.setAttribute('role', 'option');
+            item.setAttribute('tabindex', '-1');
+        });
+    }
+
+    function p4EnhanceWeekGrid(days) {
+        var grid = document.getElementById('weekGrid');
+        if (!grid || !days || !days.length) return;
+        var visibleDays = p4VisibleDayIndexes();
+        grid.setAttribute('role', 'grid');
+        grid.setAttribute('aria-label', '週案。矢印キーでセルを移動し、EnterまたはF2で編集します。');
+        grid.setAttribute('aria-rowcount', String(GRID_ROWS.length + 1));
+        grid.setAttribute('aria-colcount', String(visibleDays.length + 1));
+        grid.setAttribute('aria-multiselectable', 'false');
+
+        var children = Array.prototype.slice.call(grid.children);
+        var headerCount = visibleDays.length + 1;
+        if (!children.length || children.length < headerCount) return;
+
+        var corner = children[0];
+        corner.setAttribute('role', 'columnheader');
+        corner.setAttribute('aria-label', '項目');
+        corner.setAttribute('aria-rowindex', '1');
+        corner.setAttribute('aria-colindex', '1');
+
+        visibleDays.forEach(function (dayIndex, visibleIndex) {
+            var header = children[visibleIndex + 1];
+            if (!header) return;
+            header.id = 'p4WeekCol-' + dayIndex;
+            header.dataset.p4Day = String(dayIndex);
+            header.setAttribute('role', 'columnheader');
+            header.setAttribute('aria-rowindex', '1');
+            header.setAttribute('aria-colindex', String(visibleIndex + 2));
+            header.setAttribute('aria-label', p4DayAccessibleLabel(days[dayIndex]));
+        });
+
+        GRID_ROWS.forEach(function (rowDef, rowIndex) {
+            var base = headerCount + rowIndex * (visibleDays.length + 1);
+            var rowHeader = children[base];
+            if (rowHeader) {
+                rowHeader.id = 'p4WeekRow-' + rowIndex;
+                rowHeader.setAttribute('role', 'rowheader');
+                rowHeader.setAttribute('aria-rowindex', String(rowIndex + 2));
+                rowHeader.setAttribute('aria-colindex', '1');
+                rowHeader.setAttribute('aria-label', rowDef.label);
+            }
+            visibleDays.forEach(function (dayIndex, visibleIndex) {
+                var cell = children[base + visibleIndex + 1];
+                if (!cell || !cell.classList.contains('grid-cell')) return;
+                var day = days[dayIndex];
+                var value = p4CellValueText(day, rowDef);
+                var label = p4DayAccessibleLabel(day) + '、' + rowDef.label + '、' + (value || '入力なし');
+                if (!STATE.editMode) label += '。EnterまたはF2で編集';
+                cell.dataset.p4Day = String(dayIndex);
+                cell.setAttribute('role', 'gridcell');
+                cell.setAttribute('aria-rowindex', String(rowIndex + 2));
+                cell.setAttribute('aria-colindex', String(visibleIndex + 2));
+                cell.setAttribute('aria-label', label);
+                var selected = !!(STATE.selectedCell && STATE.selectedCell.day === dayIndex && STATE.selectedCell.row === rowIndex);
+                cell.setAttribute('aria-selected', selected ? 'true' : 'false');
+                cell.tabIndex = selected ? 0 : -1;
+                if (rowDef.multi) {
+                    cell.setAttribute('aria-roledescription', '移動可能な校時セル');
+                    cell.setAttribute('aria-keyshortcuts', 'Enter F2 Shift+F10');
+                } else {
+                    cell.setAttribute('aria-keyshortcuts', 'Enter F2');
+                }
+                if (!cell.__p4KeyInstalled) {
+                    cell.__p4KeyInstalled = true;
+                    cell.addEventListener('keydown', p4GridCellKeydown);
+                    cell.addEventListener('focus', function () {
+                        var d = parseInt(cell.dataset.day, 10);
+                        var r = parseInt(cell.dataset.row, 10);
+                        if (!isNaN(d) && !isNaN(r) && (!STATE.selectedCell || STATE.selectedCell.day !== d || STATE.selectedCell.row !== r)) {
+                            selectCell(d, r, cell.dataset.key || GRID_ROWS[r].key);
+                        }
+                    });
+                }
+            });
+        });
+
+        if (!grid.querySelector('[role="gridcell"][tabindex="0"]')) {
+            var first = grid.querySelector('[role="gridcell"]');
+            if (first) first.tabIndex = 0;
+        }
+        p4EnhanceEditFields(grid, days);
+        p4RenderDaySwitcher(days);
+        p4ApplyGridResponsiveMode();
+    }
+
+    function p4FocusSelectedCell() {
+        if (!STATE.selectedCell) return;
+        var cell = document.querySelector('.grid-cell[data-day="' + STATE.selectedCell.day + '"][data-row="' + STATE.selectedCell.row + '"]');
+        if (!cell) return;
+        document.querySelectorAll('.grid-cell[role="gridcell"]').forEach(function (item) {
+            var selected = item === cell;
+            item.tabIndex = selected ? 0 : -1;
+            item.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
+        if (P4.mobileQuery.matches && P4.prefs.singleDay !== 'scroll') p4SetActiveMobileDay(STATE.selectedCell.day, false);
+        cell.focus({ preventScroll: true });
+        cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
+    function p4SelectBoundary(dayMode, rowMode) {
+        var visible = p4VisibleDayIndexes();
+        if (!visible.length) return;
+        var day = STATE.selectedCell ? STATE.selectedCell.day : visible[0];
+        var row = STATE.selectedCell ? STATE.selectedCell.row : 0;
+        if (dayMode === 'first') day = visible[0];
+        if (dayMode === 'last') day = visible[visible.length - 1];
+        if (rowMode === 'first') row = 0;
+        if (rowMode === 'last') row = GRID_ROWS.length - 1;
+        selectCell(day, row, GRID_ROWS[row].key);
+        window.requestAnimationFrame(p4FocusSelectedCell);
+    }
+
+    function p4GridCellKeydown(event) {
+        if (STATE.editMode || event.target !== event.currentTarget) return;
+        var handled = true;
+        switch (event.key) {
+            case 'ArrowLeft': moveSelection(-1, 0); break;
+            case 'ArrowRight': moveSelection(1, 0); break;
+            case 'ArrowUp': moveSelection(0, -1); break;
+            case 'ArrowDown': moveSelection(0, 1); break;
+            case 'Home': p4SelectBoundary(event.ctrlKey || event.metaKey ? 'first' : 'first', event.ctrlKey || event.metaKey ? 'first' : null); break;
+            case 'End': p4SelectBoundary(event.ctrlKey || event.metaKey ? 'last' : 'last', event.ctrlKey || event.metaKey ? 'last' : null); break;
+            case 'Enter':
+            case 'F2': startEditAtSelectedCell(); break;
+            case ' ':
+                selectCell(parseInt(this.dataset.day, 10), parseInt(this.dataset.row, 10), this.dataset.key);
+                break;
+            case 'F10':
+                if (!event.shiftKey || this.dataset.period === undefined) { handled = false; break; }
+                var rect = this.getBoundingClientRect();
+                showContextMenu({ pageX: rect.left + window.scrollX + 12, pageY: rect.top + window.scrollY + 12 }, parseInt(this.dataset.day, 10), parseInt(this.dataset.period, 10));
+                break;
+            default: handled = false;
+        }
+        if (!handled) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key.indexOf('Arrow') === 0) window.requestAnimationFrame(p4FocusSelectedCell);
+    }
+
+    function p4DefaultMobileDay(days) {
+        var visible = p4VisibleDayIndexes();
+        if (!visible.length) return 0;
+        if (P4.activeMobileDay !== null && visible.indexOf(P4.activeMobileDay) >= 0) return P4.activeMobileDay;
+        if (STATE.selectedCell && visible.indexOf(STATE.selectedCell.day) >= 0) return STATE.selectedCell.day;
+        var today = typeof formatDateLocal === 'function' ? formatDateLocal(new Date()) : '';
+        for (var i = 0; i < visible.length; i++) {
+            if (days[visible[i]] && days[visible[i]].date === today) return visible[i];
+        }
+        return visible[0];
+    }
+
+    function p4RenderDaySwitcher(days) {
+        var nav = document.querySelector('#view-plan .week-nav');
+        if (!nav) return;
+        var switcher = document.getElementById('p4DaySwitcher');
+        if (!switcher) {
+            switcher = document.createElement('div');
+            switcher.id = 'p4DaySwitcher';
+            switcher.className = 'p4-day-switcher';
+            switcher.setAttribute('role', 'tablist');
+            switcher.setAttribute('aria-label', '表示する曜日');
+            nav.appendChild(switcher);
+        }
+        var visible = p4VisibleDayIndexes();
+        P4.activeMobileDay = p4DefaultMobileDay(days);
+        switcher.innerHTML = visible.map(function (dayIndex) {
+            var day = days[dayIndex] || {};
+            var cls = 'p4-day-btn';
+            if (day.date === formatDateLocal(new Date())) cls += ' today';
+            if (day.holiday) cls += ' holiday';
+            var shortDate = day.date ? day.date.slice(5).replace('/', '/') : '';
+            return '<button type="button" role="tab" class="' + cls + '" data-day="' + dayIndex + '" aria-selected="' + (dayIndex === P4.activeMobileDay ? 'true' : 'false') + '" onclick="p4SetActiveMobileDay(' + dayIndex + ',true)">'
+                + '<span>' + escHtml(day.dayLabel || DAY_LABELS_JP[dayIndex]) + '</span><br><small>' + escHtml(shortDate) + '</small></button>';
+        }).join('');
+    }
+
+    function p4SetActiveMobileDay(dayIndex, announce) {
+        var visible = p4VisibleDayIndexes();
+        if (visible.indexOf(dayIndex) < 0) dayIndex = visible[0];
+        if (dayIndex === undefined) return;
+        P4.activeMobileDay = dayIndex;
+        document.querySelectorAll('.p4-day-btn').forEach(function (button) {
+            var active = parseInt(button.dataset.day, 10) === dayIndex;
+            button.setAttribute('aria-selected', active ? 'true' : 'false');
+            button.tabIndex = active ? 0 : -1;
+            if (active) button.scrollIntoView({ block: 'nearest', inline: 'center' });
+        });
+        p4ApplyGridResponsiveMode();
+        if (announce) {
+            var day = STATE.weekData && STATE.weekData.days ? STATE.weekData.days[dayIndex] : null;
+            p4Announce(p4DayAccessibleLabel(day) + 'を表示しました');
+        }
+    }
+
+    function p4ApplyGridResponsiveMode() {
+        var grid = document.getElementById('weekGrid');
+        if (!grid) return;
+        var single = P4.mobileQuery.matches && P4.prefs.singleDay !== 'scroll';
+        grid.classList.toggle('p4-single-day', single);
+        grid.querySelectorAll('[data-p4-day]').forEach(function (element) {
+            var hidden = single && parseInt(element.dataset.p4Day, 10) !== P4.activeMobileDay;
+            element.classList.toggle('p4-day-hidden', hidden);
+            if (hidden) element.setAttribute('aria-hidden', 'true');
+            else element.removeAttribute('aria-hidden');
+        });
+        var switcher = document.getElementById('p4DaySwitcher');
+        if (switcher) switcher.setAttribute('aria-hidden', single ? 'false' : 'true');
+    }
+
+    function p4InstallGridAccessibility() {
+        if (window.__p4GridInstalled) return;
+        window.__p4GridInstalled = true;
+        if (typeof window.renderWeekGrid === 'function') {
+            var originalRender = window.renderWeekGrid;
+            window.renderWeekGrid = function (days) {
+                originalRender(days);
+                p4EnhanceWeekGrid(days);
+            };
+        }
+        if (typeof window.selectCell === 'function') {
+            var originalSelect = window.selectCell;
+            window.selectCell = function (day, row, key) {
+                originalSelect(day, row, key);
+                window.requestAnimationFrame(p4FocusSelectedCell);
+            };
+        }
+        if (typeof window.clearSelection === 'function') {
+            var originalClear = window.clearSelection;
+            window.clearSelection = function () {
+                originalClear();
+                document.querySelectorAll('.grid-cell[role="gridcell"]').forEach(function (cell, index) {
+                    cell.setAttribute('aria-selected', 'false');
+                    cell.tabIndex = index === 0 ? 0 : -1;
+                });
+            };
+        }
+        if (STATE.weekData && STATE.weekData.days) p4EnhanceWeekGrid(STATE.weekData.days);
+    }
+</script>
