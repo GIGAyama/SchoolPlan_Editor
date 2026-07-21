@@ -1,0 +1,86 @@
+<script>
+    'use strict';
+
+    // スマートフォンの1日表示では、非表示セルをTab停止点に残さない。
+    function p4ApplyGridResponsiveMode() {
+        var grid = document.getElementById('weekGrid');
+        if (!grid) return;
+        var single = P4.mobileQuery.matches && P4.prefs.singleDay !== 'scroll';
+        grid.classList.toggle('p4-single-day', single);
+        grid.querySelectorAll('[data-p4-day]').forEach(function (element) {
+            var hidden = single && parseInt(element.dataset.p4Day, 10) !== P4.activeMobileDay;
+            element.classList.toggle('p4-day-hidden', hidden);
+            if (hidden) element.setAttribute('aria-hidden', 'true');
+            else element.removeAttribute('aria-hidden');
+        });
+
+        if (single) {
+            var visibleCells = Array.prototype.slice.call(
+                grid.querySelectorAll('.grid-cell[data-p4-day="' + P4.activeMobileDay + '"]')
+            );
+            var current = visibleCells.filter(function (cell) {
+                return cell.getAttribute('aria-selected') === 'true' || cell.tabIndex === 0;
+            })[0];
+            if (!current && visibleCells.length) current = visibleCells[0];
+            grid.querySelectorAll('.grid-cell[role="gridcell"]').forEach(function (cell) {
+                cell.tabIndex = cell === current ? 0 : -1;
+            });
+        }
+
+        var switcher = document.getElementById('p4DaySwitcher');
+        if (switcher) switcher.setAttribute('aria-hidden', single ? 'false' : 'true');
+    }
+
+    // autoSaveを伴うビュー切替は非同期になり得るため、STATEの確定後にUI状態を同期する。
+    (function p4InstallConfirmedViewSync() {
+        if (window.__p4ConfirmedViewSync || typeof window.switchView !== 'function') return;
+        window.__p4ConfirmedViewSync = true;
+        var previousSwitchView = window.switchView;
+        window.switchView = function (viewName) {
+            previousSwitchView(viewName);
+            var attempts = 0;
+            var syncWhenConfirmed = function () {
+                attempts++;
+                if (STATE.view === viewName) {
+                    document.querySelectorAll('.view').forEach(function (view) {
+                        view.setAttribute('aria-hidden', view.classList.contains('active') ? 'false' : 'true');
+                    });
+                    if (typeof p4SyncMobileNavigation === 'function') p4SyncMobileNavigation();
+                    if (typeof p4ApplyResponsiveLayout === 'function') p4ApplyResponsiveLayout();
+                    return;
+                }
+                if (attempts < 50) window.setTimeout(syncWhenConfirmed, 100);
+            };
+            window.setTimeout(syncWhenConfirmed, 0);
+        };
+    })();
+
+    // フォーカスモードへ入る際は、開いているタスクドロワーを閉じて背景遮蔽を残さない。
+    (function p4InstallFocusModeDrawerGuard() {
+        if (window.__p4FocusDrawerGuard || typeof window.p4ToggleFocusMode !== 'function') return;
+        window.__p4FocusDrawerGuard = true;
+        var previousToggle = window.p4ToggleFocusMode;
+        var closeDrawer = function () {
+            var sidebar = document.getElementById('weeklyTaskSidebar');
+            if (sidebar && P4.tabletQuery.matches && !sidebar.classList.contains('collapsed')) {
+                sidebar.classList.add('collapsed');
+                try { localStorage.setItem('weeklyTaskSidebarCollapsed', '1'); } catch (e) { }
+                if (typeof updateTaskSidebarToggleIcon === 'function') updateTaskSidebarToggleIcon(true);
+                if (typeof p4SyncTaskDrawer === 'function') p4SyncTaskDrawer();
+            }
+        };
+        window.p4ToggleFocusMode = function (force) {
+            var next = typeof force === 'boolean' ? force : !P4.focusMode;
+            if (next) closeDrawer();
+            return previousToggle(force);
+        };
+        var floatingButton = document.getElementById('p4FocusToggle');
+        if (floatingButton) {
+            floatingButton.addEventListener('click', function () {
+                if (document.body.classList.contains('p4-focus-mode')) closeDrawer();
+            });
+        }
+    })();
+
+    p4ApplyGridResponsiveMode();
+</script>

@@ -1,0 +1,354 @@
+<script>
+    'use strict';
+
+    window.P4 = window.P4 || {
+        installed: false,
+        mobileQuery: window.matchMedia('(max-width: 768px)'),
+        tabletQuery: window.matchMedia('(max-width: 1180px)'),
+        activeMobileDay: null,
+        focusMode: false,
+        moreOpen: false,
+        lastFocus: null,
+        viewLabels: {
+            plan: '週案', events: '行事予定', task: 'タスク', unitmaster: '単元マスタ',
+            newsletter: '学級通信', hours: '時数', integration: 'PDF読み込み', settings: '設定'
+        },
+        prefs: {
+            textSize: 'standard', contrast: 'standard', density: 'comfortable', motion: 'system', singleDay: 'auto'
+        }
+    };
+
+    function p4ReadPrefs() {
+        try {
+            var raw = localStorage.getItem('weeklyP4Preferences');
+            if (!raw) return;
+            var parsed = JSON.parse(raw);
+            Object.keys(P4.prefs).forEach(function (key) {
+                if (parsed && parsed[key] !== undefined) P4.prefs[key] = parsed[key];
+            });
+        } catch (e) { }
+    }
+
+    function p4SavePrefs() {
+        try { localStorage.setItem('weeklyP4Preferences', JSON.stringify(P4.prefs)); } catch (e) { }
+    }
+
+    function p4ApplyPrefs() {
+        var root = document.documentElement;
+        root.setAttribute('data-p4-text-size', P4.prefs.textSize || 'standard');
+        root.setAttribute('data-p4-contrast', P4.prefs.contrast || 'standard');
+        root.setAttribute('data-p4-density', P4.prefs.density || 'comfortable');
+        var reduceMotion = P4.prefs.motion === 'reduce'
+            || (P4.prefs.motion === 'system' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        root.setAttribute('data-p4-motion', reduceMotion ? 'reduce' : 'standard');
+        if (typeof p4ApplyResponsiveLayout === 'function') p4ApplyResponsiveLayout();
+    }
+
+    function p4SetPreference(name, value) {
+        if (!Object.prototype.hasOwnProperty.call(P4.prefs, name)) return;
+        P4.prefs[name] = value;
+        p4SavePrefs();
+        p4ApplyPrefs();
+        p4Announce('表示設定を更新しました');
+    }
+
+    function p4ResetPreferences() {
+        P4.prefs = { textSize: 'standard', contrast: 'standard', density: 'comfortable', motion: 'system', singleDay: 'auto' };
+        p4SavePrefs();
+        p4ApplyPrefs();
+        p4SyncPreferenceControls();
+        p4Announce('アクセシビリティ設定を標準に戻しました');
+    }
+
+    function p4SyncPreferenceControls() {
+        Object.keys(P4.prefs).forEach(function (key) {
+            var el = document.getElementById('p4Pref-' + key);
+            if (el) el.value = P4.prefs[key];
+        });
+    }
+
+    function p4EnsureLiveRegions() {
+        if (!document.getElementById('p4Announcer')) {
+            var polite = document.createElement('div');
+            polite.id = 'p4Announcer';
+            polite.className = 'p4-sr-only';
+            polite.setAttribute('role', 'status');
+            polite.setAttribute('aria-live', 'polite');
+            polite.setAttribute('aria-atomic', 'true');
+            document.body.appendChild(polite);
+        }
+        if (!document.getElementById('p4AlertAnnouncer')) {
+            var alert = document.createElement('div');
+            alert.id = 'p4AlertAnnouncer';
+            alert.className = 'p4-sr-only';
+            alert.setAttribute('role', 'alert');
+            alert.setAttribute('aria-live', 'assertive');
+            alert.setAttribute('aria-atomic', 'true');
+            document.body.appendChild(alert);
+        }
+    }
+
+    function p4Announce(message, assertive) {
+        var id = assertive ? 'p4AlertAnnouncer' : 'p4Announcer';
+        var el = document.getElementById(id);
+        if (!el) { p4EnsureLiveRegions(); el = document.getElementById(id); }
+        if (!el) return;
+        el.textContent = '';
+        window.setTimeout(function () { el.textContent = String(message || ''); }, 30);
+    }
+
+    function p4InjectSkipLink() {
+        if (document.getElementById('p4SkipLink')) return;
+        var link = document.createElement('a');
+        link.id = 'p4SkipLink';
+        link.className = 'p4-skip-link';
+        link.href = '#weekGrid';
+        link.textContent = '週案の内容へ移動';
+        link.addEventListener('click', function () {
+            window.setTimeout(function () {
+                var target = STATE.view === 'plan'
+                    ? document.querySelector('#weekGrid [role="gridcell"][tabindex="0"]') || document.getElementById('weekGrid')
+                    : document.querySelector('#view-' + STATE.view + ' button, #view-' + STATE.view + ' input, #view-' + STATE.view + ' [tabindex]');
+                if (target) target.focus({ preventScroll: false });
+            }, 0);
+        });
+        document.body.insertBefore(link, document.body.firstChild);
+    }
+
+    function p4TextFromButton(button) {
+        var clone = button.cloneNode(true);
+        clone.querySelectorAll('.material-symbols-outlined, .nav-task-badge, .reflection-badge').forEach(function (node) { node.remove(); });
+        return (clone.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function p4EnhanceControlSemantics(root) {
+        root = root || document;
+        root.querySelectorAll('button:not([type])').forEach(function (button) { button.type = 'button'; });
+        root.querySelectorAll('.material-symbols-outlined').forEach(function (icon) {
+            if (!icon.hasAttribute('aria-hidden')) icon.setAttribute('aria-hidden', 'true');
+        });
+        root.querySelectorAll('button, [role="button"]').forEach(function (button) {
+            if (!button.getAttribute('aria-label')) {
+                var label = button.getAttribute('title') || p4TextFromButton(button);
+                if (label) button.setAttribute('aria-label', label);
+            }
+        });
+        root.querySelectorAll('input, select, textarea').forEach(function (field) {
+            if (field.getAttribute('aria-label') || field.getAttribute('aria-labelledby')) return;
+            var explicit = field.id ? document.querySelector('label[for="' + field.id.replace(/"/g, '\\"') + '"]') : null;
+            if (explicit) return;
+            var label = field.getAttribute('title') || field.getAttribute('placeholder') || field.getAttribute('name');
+            if (label) field.setAttribute('aria-label', label);
+        });
+        root.querySelectorAll('a[target="_blank"]').forEach(function (link) {
+            if (!link.getAttribute('rel')) link.setAttribute('rel', 'noopener noreferrer');
+            var current = link.getAttribute('aria-label');
+            if (!current) {
+                var text = (link.textContent || '').replace(/\s+/g, ' ').trim();
+                if (text) link.setAttribute('aria-label', text + '（新しいタブで開く）');
+            }
+        });
+    }
+
+    function p4EnhanceLandmarks() {
+        var header = document.querySelector('.app-header');
+        if (header) header.setAttribute('aria-label', 'アプリヘッダー');
+        var nav = document.querySelector('.header-nav');
+        if (nav) nav.setAttribute('aria-label', '主要ナビゲーション');
+        document.querySelectorAll('.view').forEach(function (view) {
+            view.setAttribute('role', 'main');
+            view.setAttribute('aria-hidden', view.classList.contains('active') ? 'false' : 'true');
+            if (!view.hasAttribute('tabindex')) view.setAttribute('tabindex', '-1');
+        });
+        var plan = document.getElementById('view-plan');
+        if (plan) plan.setAttribute('aria-label', '週案');
+        var footer = document.querySelector('.giga-footer');
+        if (footer) footer.setAttribute('role', 'contentinfo');
+        var classSwitcher = document.getElementById('classSwitcher');
+        if (classSwitcher) classSwitcher.setAttribute('aria-label', '表示する学級');
+        var taskSidebar = document.getElementById('weeklyTaskSidebar');
+        if (taskSidebar) {
+            taskSidebar.setAttribute('role', 'complementary');
+            taskSidebar.setAttribute('aria-label', '今週のタスク');
+        }
+        var weekNav = document.querySelector('#view-plan .week-nav');
+        if (weekNav) weekNav.setAttribute('aria-label', '週の移動と表示設定');
+        var editToolbar = document.querySelector('#view-plan .edit-toolbar');
+        if (editToolbar) {
+            editToolbar.setAttribute('role', 'toolbar');
+            editToolbar.setAttribute('aria-label', '週案編集ツール');
+        }
+    }
+
+    function p4MarkWeekNavGroups() {
+        var jump = document.getElementById('jumpDateInput');
+        if (jump && jump.parentElement) jump.parentElement.classList.add('p4-week-jump');
+        var sat = document.getElementById('toggleSatBtn');
+        if (sat && sat.parentElement) sat.parentElement.classList.add('p4-weekend-controls');
+    }
+
+    function p4InjectAccessibilitySettings() {
+        if (document.getElementById('p4AccessibilityCard')) return;
+        var settings = document.getElementById('view-settings');
+        if (!settings) return;
+        var host = settings.querySelector(':scope > div[style*="padding"]') || settings;
+        var card = document.createElement('div');
+        card.id = 'p4AccessibilityCard';
+        card.className = 'integration-section p4-accessibility-card';
+        card.innerHTML = '<div class="integration-header">'
+            + '<span class="integration-icon"><span class="material-symbols-outlined" aria-hidden="true">accessibility_new</span></span>'
+            + '<span class="integration-title">端末表示・アクセシビリティ</span></div>'
+            + '<div class="integration-body">'
+            + '<p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:12px;">文字サイズ、コントラスト、表示密度、動きを端末ごとに保存します。スマートフォンでは1日表示に切り替えると、各セルを画面幅いっぱいに表示できます。</p>'
+            + '<div class="p4-pref-grid">'
+            + '<div class="p4-pref-field"><label for="p4Pref-textSize">文字サイズ</label><select id="p4Pref-textSize" onchange="p4SetPreference(\'textSize\',this.value)"><option value="standard">標準</option><option value="large">大きい（112%）</option><option value="xlarge">さらに大きい（125%）</option></select></div>'
+            + '<div class="p4-pref-field"><label for="p4Pref-contrast">コントラスト</label><select id="p4Pref-contrast" onchange="p4SetPreference(\'contrast\',this.value)"><option value="standard">標準</option><option value="high">高コントラスト</option></select></div>'
+            + '<div class="p4-pref-field"><label for="p4Pref-density">表示密度</label><select id="p4Pref-density" onchange="p4SetPreference(\'density\',this.value)"><option value="comfortable">ゆったり</option><option value="compact">コンパクト</option></select></div>'
+            + '<div class="p4-pref-field"><label for="p4Pref-motion">アニメーション</label><select id="p4Pref-motion" onchange="p4SetPreference(\'motion\',this.value)"><option value="system">端末設定に合わせる</option><option value="standard">標準</option><option value="reduce">動きを減らす</option></select></div>'
+            + '<div class="p4-pref-field"><label for="p4Pref-singleDay">スマートフォンの週案</label><select id="p4Pref-singleDay" onchange="p4SetPreference(\'singleDay\',this.value)"><option value="auto">1日ずつ表示</option><option value="scroll">全曜日を横スクロール</option></select></div>'
+            + '</div><div class="p4-pref-actions">'
+            + '<button class="btn btn-outline" type="button" onclick="p4ToggleFocusMode()"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span> 週案を全画面表示</button>'
+            + '<button class="btn btn-outline" type="button" onclick="p4ResetPreferences()"><span class="material-symbols-outlined" aria-hidden="true">restart_alt</span> 標準に戻す</button>'
+            + '</div></div>';
+        host.insertBefore(card, host.firstChild);
+        p4SyncPreferenceControls();
+    }
+
+    function p4InjectFocusButton() {
+        if (document.getElementById('p4FocusToggle')) return;
+        var button = document.createElement('button');
+        button.id = 'p4FocusToggle';
+        button.type = 'button';
+        button.className = 'p4-focus-toggle';
+        button.title = '週案を全画面表示';
+        button.setAttribute('aria-label', '週案を全画面表示');
+        button.setAttribute('aria-pressed', 'false');
+        button.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">fullscreen</span>';
+        button.addEventListener('click', p4ToggleFocusMode);
+        document.body.appendChild(button);
+    }
+
+    function p4ToggleFocusMode(force) {
+        var next = typeof force === 'boolean' ? force : !P4.focusMode;
+        if (next && STATE.view !== 'plan') switchView('plan');
+        P4.focusMode = next;
+        document.body.classList.toggle('p4-focus-mode', next);
+        var button = document.getElementById('p4FocusToggle');
+        if (button) {
+            button.setAttribute('aria-pressed', next ? 'true' : 'false');
+            button.setAttribute('aria-label', next ? '全画面表示を終了' : '週案を全画面表示');
+            button.title = next ? '全画面表示を終了' : '週案を全画面表示';
+            var icon = button.querySelector('.material-symbols-outlined');
+            if (icon) icon.textContent = next ? 'fullscreen_exit' : 'fullscreen';
+        }
+        p4Announce(next ? '週案を全画面表示しました' : '全画面表示を終了しました');
+        if (typeof p4ApplyResponsiveLayout === 'function') window.setTimeout(p4ApplyResponsiveLayout, 0);
+    }
+
+    function p4WrapAnnouncements() {
+        if (window.__p4AnnouncementsWrapped) return;
+        window.__p4AnnouncementsWrapped = true;
+        if (typeof window.showToast === 'function') {
+            var originalToast = window.showToast;
+            window.showToast = function (type, message) {
+                originalToast(type, message);
+                p4Announce(message, type === 'error');
+            };
+        }
+        if (typeof window.switchView === 'function') {
+            var originalSwitchView = window.switchView;
+            window.switchView = function (viewName) {
+                originalSwitchView(viewName);
+                window.setTimeout(function () {
+                    document.querySelectorAll('.view').forEach(function (view) {
+                        view.setAttribute('aria-hidden', view.classList.contains('active') ? 'false' : 'true');
+                    });
+                    if (typeof p4SyncMobileNavigation === 'function') p4SyncMobileNavigation();
+                    if (typeof p4CloseMoreSheet === 'function') p4CloseMoreSheet(false);
+                    p4Announce((P4.viewLabels[viewName] || viewName) + 'を表示しました');
+                }, 0);
+            };
+        }
+    }
+
+    function p4TrapCustomModal(modal) {
+        if (!modal || modal.__p4TrapInstalled) return;
+        modal.__p4TrapInstalled = true;
+        modal.classList.add('p4-focus-trapped');
+        modal.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                var close = modal.querySelector('[aria-label="閉じる"], .pdf-preview-close');
+                if (close) { event.preventDefault(); close.click(); }
+                return;
+            }
+            if (event.key !== 'Tab') return;
+            var focusables = Array.prototype.filter.call(modal.querySelectorAll('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'), function (el) {
+                return el.offsetParent !== null;
+            });
+            if (!focusables.length) return;
+            var first = focusables[0];
+            var last = focusables[focusables.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        });
+    }
+
+    function p4ObserveDynamicContent() {
+        if (window.__p4Observer) return;
+        var pending = false;
+        window.__p4Observer = new MutationObserver(function (mutations) {
+            if (pending) return;
+            pending = true;
+            window.requestAnimationFrame(function () {
+                pending = false;
+                mutations.forEach(function (mutation) {
+                    Array.prototype.forEach.call(mutation.addedNodes || [], function (node) {
+                        if (node.nodeType !== 1) return;
+                        p4EnhanceControlSemantics(node);
+                        if (node.matches && node.matches('[role="dialog"], .pdf-preview-modal')) p4TrapCustomModal(node);
+                        node.querySelectorAll && node.querySelectorAll('[role="dialog"], .pdf-preview-modal').forEach(p4TrapCustomModal);
+                    });
+                });
+            });
+        });
+        window.__p4Observer.observe(document.body, { childList: true, subtree: true });
+        var pdfModal = document.querySelector('.pdf-preview-modal');
+        if (pdfModal) p4TrapCustomModal(pdfModal);
+    }
+
+    function p4InstallKeyboardShortcuts() {
+        document.addEventListener('keydown', function (event) {
+            if (event.defaultPrevented) return;
+            var tag = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : '';
+            var typing = tag === 'input' || tag === 'textarea' || tag === 'select' || (event.target && event.target.isContentEditable);
+            if (event.key === 'Escape') {
+                if (P4.focusMode) { event.preventDefault(); p4ToggleFocusMode(false); return; }
+                if (typeof p4CloseMoreSheet === 'function' && P4.moreOpen) { event.preventDefault(); p4CloseMoreSheet(true); return; }
+            }
+            if (typing || !(event.altKey && !event.ctrlKey && !event.metaKey)) return;
+            var map = { '1': 'plan', '2': 'task', '3': 'events', '4': 'hours', '5': 'settings' };
+            if (map[event.key]) {
+                event.preventDefault();
+                switchView(map[event.key]);
+            }
+        });
+    }
+
+    function p4InstallCore() {
+        if (P4.installed) return;
+        P4.installed = true;
+        p4ReadPrefs();
+        p4EnsureLiveRegions();
+        p4InjectSkipLink();
+        p4EnhanceLandmarks();
+        p4MarkWeekNavGroups();
+        p4EnhanceControlSemantics(document);
+        p4InjectAccessibilitySettings();
+        p4InjectFocusButton();
+        p4WrapAnnouncements();
+        p4ObserveDynamicContent();
+        p4InstallKeyboardShortcuts();
+        p4ApplyPrefs();
+        p4Announce('端末最適化とアクセシビリティ機能を有効にしました');
+    }
+</script>
