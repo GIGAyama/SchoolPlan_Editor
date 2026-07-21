@@ -102,6 +102,7 @@ test('frontend routes all week mutations through protected save API', () => {
 test('frontend replaces hard deletes with trash or backup-protected operations', () => {
   assert.match(frontend, /trashTaskFromWebApp/);
   assert.match(frontend, /trashUnitMasterRowFromWeb/);
+  assert.match(frontend, /trashNewsletterDataFromWeb/);
   assert.match(frontend, /clearDatabaseDataProtectedFromWeb/);
   assert.match(frontend, /deleteClassProtectedFromWeb/);
 });
