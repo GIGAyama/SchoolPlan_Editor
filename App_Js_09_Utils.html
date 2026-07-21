@@ -134,7 +134,7 @@
                 .withSuccessHandler(function (payload) {
                     if (!payload || document.getElementById('p4AccessibilityModule')) return;
                     if (payload.css) {
-                        var css = String(payload.css).replace(/^\s*<style>/, '').replace(/<\/style>\s*$/, '');
+                        var css = String(payload.css).replace(/<\/?style>/g, '');
                         var style = document.createElement('style');
                         style.id = 'p4AccessibilityStyles';
                         style.textContent = css;
