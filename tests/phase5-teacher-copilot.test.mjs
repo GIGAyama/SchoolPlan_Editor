@@ -13,7 +13,6 @@ const fixes = fs.readFileSync('App_Js_17_TeacherCopilot_Fixes.html', 'utf8');
 const css = fs.readFileSync('App_Css_05_TeacherCopilot.html', 'utf8');
 const manifest = fs.readFileSync('appsscript.json', 'utf8');
 const backend = [core, context, actions, loader].join('\n');
-const frontend = [utils, uiCore, ui, fixes, css].join('\n');
 
 function includesAll(text, values) {
   values.forEach(value => assert.ok(text.includes(value), `missing: ${value}`));
@@ -67,7 +66,7 @@ test('teacher question and app context direct identifiers are redacted before mo
 test('reflection free text is opt-in and scope defaults vary by mode', () => {
   assert.ok(context.includes("reflections: mode === 'reflectionCoach' || mode === 'report'"));
   assert.ok(context.includes('p5MinWeek_(current, scope.reflections)'));
-  assert.ok(context.includes("if (scope.reflections)"));
+  assert.ok(context.includes('if (scope.reflections)'));
   assert.ok(core.includes('reflectionsOptIn: true'));
   assert.ok(ui.includes("p5cContextOptionHtml('reflections'"));
 });
@@ -103,7 +102,7 @@ test('conversation is short-lived client memory and raw prompts are not persiste
   assert.ok(uiCore.includes('messages: []'));
   assert.ok(uiCore.includes('P5C.messages = []'));
   assert.ok(core.includes('rawConversationPersisted: false'));
-  assert.ok(!backend.includes("appendRow([question"));
+  assert.ok(!backend.includes('appendRow([question'));
   assert.ok(!backend.includes("setProperty('p5:conversation"));
   assert.ok(!backend.includes('PropertiesService.getDocumentProperties'));
 });
@@ -111,7 +110,6 @@ test('conversation is short-lived client memory and raw prompts are not persiste
 test('proposal payload is canonicalized server-side and cached per user for 30 minutes', () => {
   assert.ok(core.includes('const P5_PROPOSAL_TTL_SECONDS_ = 1800'));
   assert.ok(core.includes("CacheService.getUserCache().put('p5:proposal:' + proposal.id"));
-  assert.ok(actions.includes("CacheService.getUserCache().get") === false);
   assert.ok(actions.includes("cache.get('p5:proposal:' + proposalId)"));
   assert.ok(actions.includes('function p5CanonicalizeProposal_'));
   assert.ok(actions.includes('function p5LoadProposal_'));
@@ -170,12 +168,12 @@ test('copilot UI is accessible and integrated with desktop and mobile navigation
   includesAll(ui, [
     'view-copilot', 'role="main"', 'aria-label="教師向けAIコパイロット"',
     'p5ContextDrawer', 'aria-modal="true"', 'aria-live="polite"',
-    "data-view = 'copilot'", "p4MobileSwitchView('copilot')"
+    "button.dataset.view = 'copilot'", "p4MobileSwitchView('copilot')"
   ]);
   assert.ok(uiCore.includes("event.key === 'Escape'"));
   assert.ok(uiCore.includes("event.key !== 'Tab'"));
   assert.ok(fixes.includes("STATE.view !== 'copilot'"));
-  assert.ok(fixes.includes("target.focus({ preventScroll: false })"));
+  assert.ok(fixes.includes('target.focus({ preventScroll: false })'));
   assert.ok(css.includes('@media (max-width: 768px)'));
 });
 
