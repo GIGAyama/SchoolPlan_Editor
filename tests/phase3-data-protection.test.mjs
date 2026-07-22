@@ -48,6 +48,23 @@ test('weekly protected save creates a restore point before V2 write', () => {
   assert.match(fn, /WEEK_SAVE/);
 });
 
+test('week snapshots are scoped per class sheet and restores guard the target sheet', () => {
+  assert.match(backend, /function p3WeekScope_/);
+  assert.match(backend, /function p3SnapshotSheetMismatch_/);
+  const preview = between(backend, 'function previewWeekSnapshotFromWeb', 'function restoreWeekSnapshotFromWeb');
+  assert.match(preview, /p3SnapshotSheetMismatch_/);
+  const restore = between(backend, 'function restoreWeekSnapshotFromWeb', 'function p3GetBackupIndex_');
+  assert.match(restore, /p3SnapshotSheetMismatch_/);
+  assert.ok(restore.indexOf('p3SnapshotSheetMismatch_') < restore.indexOf('p3CreateSnapshot_('),
+    'sheet guard must run before the safety snapshot is created');
+});
+
+test('manual restore points are never evicted by the snapshot count cap', () => {
+  const cleanup = between(backend, 'function p3CleanupSnapshots_', 'function p3ReadSnapshot_');
+  assert.match(cleanup, /手動/);
+  assert.match(cleanup, /isManual/);
+});
+
 test('week restore creates a safety restore point before overwriting', () => {
   const fn = between(backend, 'function restoreWeekSnapshotFromWeb', 'function p3GetBackupIndex_');
   assert.ok(fn.indexOf("'自動: 復元直前'") < fn.indexOf('saveWeeklyPlanDataV2('));
