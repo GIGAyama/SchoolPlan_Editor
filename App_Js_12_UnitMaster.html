@@ -230,35 +230,7 @@
     }
 
     // --- 行削除 ---
-    async function deleteUmRow(rowIndex) {
-        var targetRow = STATE.umAllRows.find(function (r) { return r.rowIndex === rowIndex; });
-        var msg = targetRow
-            ? (targetRow.subject + ' / ' + targetRow.unitName + ' (' + targetRow.hourNum + '時間目)')
-            : '行 ' + rowIndex;
-
-        var result = await Swal.fire({
-            title: '行を削除',
-            text: '「' + msg + '」を削除しますか？ 元に戻せません。',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: '削除する',
-            cancelButtonText: 'キャンセル',
-            confirmButtonColor: '#ea4335'
-        });
-        if (!result.isConfirmed) return;
-
-        showToast('info', '行を削除中...');
-        google.script.run
-            .withSuccessHandler(function (res) {
-                if (res.success) {
-                    showToast('success', '削除しました');
-                    loadUnitMasterData();
-                } else {
-                    showToast('error', '削除エラー: ' + res.error);
-                }
-            })
-            .withFailureHandler(_onCommError)
-            .deleteUnitMasterRow(rowIndex);
-    }
+    // deleteUmRow はデータ保護モジュール(App_Js_15_DataProtection_Overrides)が定義する。
+    // 削除はごみ箱移動(30日間復元可能)として扱われる。
 
 </script>

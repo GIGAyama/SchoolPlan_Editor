@@ -146,6 +146,39 @@ test('frontend replaces hard deletes with trash or backup-protected operations',
   assert.match(frontend, /deleteClassProtectedFromWeb/);
 });
 
+test('protection module is included synchronously after its dependencies', () => {
+  const appHtml = fs.readFileSync('App.html', 'utf8');
+  const multiClassAt = appHtml.indexOf("include('App_Js_14_MultiClass')");
+  const coreAt = appHtml.indexOf("include('App_Js_15_DataProtection_Core')");
+  const manageAt = appHtml.indexOf("include('App_Js_15_DataProtection_Manage')");
+  const overridesAt = appHtml.indexOf("include('App_Js_15_DataProtection_Overrides')");
+  assert.ok(multiClassAt >= 0 && coreAt > multiClassAt && manageAt > coreAt && overridesAt > manageAt,
+    'App_Js_15_* must be included synchronously, after App_Js_14_MultiClass');
+  // 遅延ローダー方式(起動後250msの無保護ウィンドウの原因)へ戻さないこと
+  const utils = fs.readFileSync('App_Js_09_Utils.html', 'utf8');
+  assert.doesNotMatch(utils, /getDataProtectionClientModule/);
+});
+
+test('clients no longer call the unprotected delete/clear endpoints', () => {
+  const clientFiles = fs.readdirSync('.').filter(f => /^App_Js_.*\.html$/.test(f));
+  for (const file of clientFiles) {
+    const text = fs.readFileSync(file, 'utf8');
+    assert.doesNotMatch(text, /\.deleteTaskFromWebApp\(/, `${file} must use trashTaskFromWebApp`);
+    assert.doesNotMatch(text, /\.clearDatabaseDataFromWeb\(/, `${file} must use clearDatabaseDataProtectedFromWeb`);
+    assert.doesNotMatch(text, /\.deleteNewsletterData\(/, `${file} must use trashNewsletterDataFromWeb`);
+    assert.doesNotMatch(text, /\.deleteUnitMasterRow\(/, `${file} must use trashUnitMasterRowFromWeb`);
+    assert.doesNotMatch(text, /\.deleteClassFromWeb\(/, `${file} must use deleteClassProtectedFromWeb`);
+  }
+});
+
+test('legacy destructive server endpoints delegate to protected variants', () => {
+  const database = fs.readFileSync('02_Database.gs', 'utf8');
+  const legacyClear = between(database, 'function clearDatabaseDataFromWeb', 'function initTaskSheet_');
+  assert.match(legacyClear, /clearDatabaseDataProtectedFromWeb\(\)/);
+  const legacyDelete = between(webApp, 'function deleteTaskFromWebApp', 'const SP_KEY_TASK_REMINDER_ENABLED');
+  assert.match(legacyDelete, /trashTaskFromWebApp\(/);
+});
+
 test('settings UI exposes backup, restore, trash, audit, migrations, and integrity checks', () => {
   for (const api of [
     'createFullBackupFromWeb',

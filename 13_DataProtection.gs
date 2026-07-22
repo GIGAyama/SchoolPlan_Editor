@@ -275,12 +275,3 @@ function runDataMigrationsFromWeb() {
     return { success: false, error: e.message };
   }
 }
-
-/** Phase 3 client moduleを遅延取得するための内部API。 */
-function getDataProtectionClientModule() {
-  return [
-    'App_Js_15_DataProtection_Core',
-    'App_Js_15_DataProtection_Manage',
-    'App_Js_15_DataProtection_Overrides'
-  ].map(name => HtmlService.createHtmlOutputFromFile(name).getContent());
-}

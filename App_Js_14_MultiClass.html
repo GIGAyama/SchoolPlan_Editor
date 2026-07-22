@@ -183,30 +183,8 @@
             .addClassFromWeb(name, gradeSelect.value);
     }
 
-    async function deleteMultiClass(sheetName, name) {
-        var res = await Swal.fire({
-            icon: 'warning',
-            title: '学級の削除',
-            html: '学級「' + escHtml(name) + '」とそのシート（週案・振り返りのデータを含む）を削除します。<br><strong>この操作は元に戻せません。</strong>よろしいですか？',
-            showCancelButton: true,
-            confirmButtonText: '削除する',
-            cancelButtonText: 'キャンセル',
-            confirmButtonColor: '#dc3545'
-        });
-        if (!res.isConfirmed) return;
-
-        var wasActive = sheetName === STATE.multiClass.activeSheet;
-        showToast('info', '学級を削除しています...');
-        google.script.run
-            .withSuccessHandler(function (r) {
-                if (!r.success) { showToast('error', '削除失敗: ' + r.error); return; }
-                applyMultiClassState(r);
-                if (wasActive) afterClassContextChanged();
-                showToast('success', '学級「' + name + '」を削除しました');
-            })
-            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
-            .deleteClassFromWeb(sheetName);
-    }
+    // deleteMultiClass はデータ保護モジュール(App_Js_15_DataProtection_Overrides)が定義する。
+    // 削除の直前に完全バックアップを自動作成する。
 
     async function renameMultiClass(sheetName, currentName) {
         var res = await Swal.fire({

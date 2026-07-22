@@ -397,13 +397,9 @@ function clearDatabaseInputsForSheet_(dbSheet, dbCols, includeReflection) {
  * @returns {{success: boolean, message: string}}
  */
 function clearDatabaseDataFromWeb() {
-  try {
-    const r = clearDatabaseData_core_();
-    return { success: true, message: r.message };
-  } catch (e) {
-    logError("clearDatabaseDataFromWeb", e);
-    return { success: false, message: `クリアエラー: ${e.message}` };
-  }
+  // 旧クライアント互換の委譲エンドポイント。バックアップ無しのクリアは
+  // 復旧不能なため、完全バックアップ付きの保護版に一本化する。
+  return clearDatabaseDataProtectedFromWeb();
 }
 
 // ===================================================

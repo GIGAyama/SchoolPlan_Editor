@@ -1338,6 +1338,11 @@
     <?!= include('App_Js_12_UnitMaster'); ?>
     <?!= include('App_Js_13_SystemTools'); ?>
     <?!= include('App_Js_14_MultiClass'); ?>
+    <!-- データ保護は同期includeで最後に読み込み、保存・削除の保護版を確実に有効化する。
+         14(STATE.performance/p2UpdateCurrentWeekCache)と06(NW)に依存するため必ずこの位置。 -->
+    <?!= include('App_Js_15_DataProtection_Core'); ?>
+    <?!= include('App_Js_15_DataProtection_Manage'); ?>
+    <?!= include('App_Js_15_DataProtection_Overrides'); ?>
 
 </body>
 

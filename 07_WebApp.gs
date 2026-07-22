@@ -1697,17 +1697,9 @@ function updateTaskStatusFromWebApp(taskId, newStatus) {
  * @returns {Object} { success: boolean }
  */
 function deleteTaskFromWebApp(taskId) {
-  try {
-    validateParams_({ taskId }, {
-      taskId: { type: 'string', required: true, maxLength: 100 }
-    });
-    const isSuccess = deleteTask(taskId);
-    if (isSuccess) return { success: true };
-    return { success: false, error: '対象のタスクが見つかりませんでした（すでに削除された可能性があります）。' };
-  } catch (e) {
-    logError('deleteTaskFromWebApp', e);
-    return { success: false, error: e.message };
-  }
+  // 旧クライアント互換の委譲エンドポイント。完全削除ではなく
+  // ごみ箱移動(30日間復元可能)として扱い、意図しない恒久削除を防ぐ。
+  return trashTaskFromWebApp(taskId);
 }
 
 // ===== タスクリマインダー（毎朝メール通知） =====

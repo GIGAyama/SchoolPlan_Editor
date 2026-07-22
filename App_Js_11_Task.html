@@ -493,36 +493,8 @@
             .updateTaskFromWebApp(taskId, { dueDate: newDue });
     }
 
-    async function deleteTaskById(taskId) {
-        var result = await Swal.fire({
-            title: 'タスク削除',
-            text: 'このタスクを削除しますか？ 元に戻せません。',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: '削除する',
-            cancelButtonText: 'キャンセル',
-            confirmButtonColor: '#ea4335'
-        });
-        if (!result.isConfirmed) return;
-
-        // UI即座反映（一時削除）
-        STATE.allTaskData = STATE.allTaskData.filter(t => t.id !== taskId);
-        STATE.tasks = STATE.allTaskData;
-        refreshTaskViews();
-
-        google.script.run
-            .withSuccessHandler(function (res) {
-                if (!res.success) {
-                    showToast('error', '削除エラー: ' + res.error);
-                    loadTasks(); // エラー時は再取得
-                }
-            })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-                loadTasks();
-            })
-            .deleteTaskFromWebApp(taskId);
-    }
+    // deleteTaskById はデータ保護モジュール(App_Js_15_DataProtection_Overrides)が定義する。
+    // 削除はごみ箱移動(30日間復元可能)として扱われる。
 
     // ===== タスク保存の共通処理 =====
 

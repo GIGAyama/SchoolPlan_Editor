@@ -102,25 +102,3 @@
     }
 
 </script>
-
-<script>
-    'use strict';
-    // Phase 3は初期描画を妨げないよう、アプリ読込後に独立モジュールとして取得する。
-    window.addEventListener('load', function () {
-        setTimeout(function () {
-            google.script.run
-                .withSuccessHandler(function (modules) {
-                    if (!modules || document.getElementById('p3DataProtectionModule')) return;
-                    (Array.isArray(modules) ? modules : [modules]).forEach(function (html, index) {
-                        var code = String(html || '').replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
-                        var script = document.createElement('script');
-                        script.id = index === 0 ? 'p3DataProtectionModule' : 'p3DataProtectionModule' + index;
-                        script.textContent = code;
-                        document.head.appendChild(script);
-                    });
-                })
-                .withFailureHandler(function () { /* 保全UIの遅延読込失敗は週案表示を妨げない */ })
-                .getDataProtectionClientModule();
-        }, 250);
-    });
-</script>

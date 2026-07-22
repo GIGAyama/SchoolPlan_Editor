@@ -151,6 +151,7 @@
         setTimeout(function () { p3LoadProtectionStatus(true); }, 1800);
     }
 
-    // このモジュールは初期画面描画後に遅延取得されるため、読み込み直後に安全に導入できる。
+    // App.html の末尾で同期includeされるため、依存する関数・DOMは構築済み。
+    // ユーザーが操作を始める前に保護版の保存・削除が有効になる。
     setTimeout(p3InstallDataProtection, 0);
 </script>
