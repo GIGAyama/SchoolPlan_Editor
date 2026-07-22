@@ -83,7 +83,11 @@
             if (!result.isConfirmed) return;
             showToast('info', 'ごみ箱へ移動中...');
             google.script.run.withSuccessHandler(function (res) {
-                if (res.success) { showToast('success', res.message); loadUnitMasterData(); }
+                if (res.success) {
+                    showToast('success', res.message);
+                    loadUnitMasterData();
+                    if (typeof invalidateMasterData === 'function') invalidateMasterData(); // 週案サジェストへ反映
+                }
                 else showToast('error', '削除エラー: ' + res.error);
             }).withFailureHandler(_onCommError).trashUnitMasterRowFromWeb(rowIndex);
         };

@@ -372,7 +372,8 @@
         var container = document.getElementById('sidebarTaskList');
         if (!container) return;
 
-        if (!STATE.taskDataLoaded || !STATE.weekData || !STATE.weekData.days) {
+        if (!STATE.taskDataLoaded || !STATE.weekData || !STATE.weekData.days
+            || STATE.weekData.days.length < 7 || !STATE.weekData.days[6].date) {
             container.innerHTML = '<div class="st-empty">タスク読込中...</div>';
             return;
         }

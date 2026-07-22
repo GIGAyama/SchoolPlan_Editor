@@ -38,3 +38,45 @@ test('only the guarded loadMasterData implementation remains', () => {
   assert.doesNotMatch(core, /function loadMasterData/);
   assert.match(multiClass, /function loadMasterData/);
 });
+
+test('unit master mutations invalidate the week-plan suggestion cache', () => {
+  // loadMasterData は STATE.masterData が残っていると何もしないため、
+  // 変更後は invalidateMasterData で確実に再取得する
+  assert.match(multiClass, /function invalidateMasterData/);
+  const unitMaster = read('App_Js_12_UnitMaster.html');
+  const calls = unitMaster.match(/invalidateMasterData\(\)/g) || [];
+  assert.ok(calls.length >= 3, `expected invalidateMasterData after each unit-master mutation, got ${calls.length}`);
+  assert.match(read('App_Js_07_PdfImport.html'), /invalidateMasterData/);
+  assert.match(read('App_Js_15_DataProtection_Overrides.html'), /invalidateMasterData/);
+});
+
+test('V2 bootstrap syncs settings state (grade / tenant info)', () => {
+  const bootstrap = multiClass.slice(multiClass.indexOf('.getAppBootstrapV2') - 3000, multiClass.indexOf('.getAppBootstrapV2'));
+  assert.match(bootstrap, /loadSettingsView/);
+});
+
+test('deferred bootstrap failure retries instead of leaving the task panel empty', () => {
+  assert.match(multiClass, /deferredRetries/);
+  assert.match(multiClass, /p2ShowDeferredRetryUI/);
+});
+
+test('warning toasts render with the warning icon', () => {
+  assert.match(utils, /warning: 'warning'/);
+});
+
+test('small client fixes stay in place', () => {
+  // 設定保存後の再読込は「読み込み中」トーストを出さない
+  const settings = read('App_Js_10_Settings.html');
+  assert.match(settings, /loadSystemSettings\(\{ silent: true \}\)/);
+  // 学級切替は自動保存前にセレクト表示を現在の学級へ戻す
+  const switcher = multiClass.slice(multiClass.indexOf('function onClassSwitcherChange'), multiClass.indexOf('function switchMultiClass'));
+  assert.match(switcher, /renderClassSwitcher\(\);/);
+  // 学級通信の redo は編集中の内容を保存してから履歴を進める
+  const newsletter = read('App_Js_06_Newsletter.html');
+  const redo = newsletter.slice(newsletter.indexOf('NW.redo ='), newsletter.indexOf('NW._restoreHistory ='));
+  assert.match(redo, /NW\.saveEditable\(\)/);
+  // 週データが不完全でも印刷・タスクパネルが例外で止まらない
+  const print = read('App_Js_03_Print.html');
+  assert.match(print, /days\[0\]\.date && days\[6\] && days\[6\]\.date/);
+  assert.match(read('App_Js_11_Task.html'), /days\.length < 7/);
+});

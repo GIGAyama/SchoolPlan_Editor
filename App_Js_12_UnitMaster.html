@@ -140,6 +140,7 @@
             .withSuccessHandler(function (res) {
                 if (res.success) {
                     showToast('success', '保存しました');
+                    invalidateMasterData(); // 週案サジェストへ反映
                 } else {
                     showToast('error', '保存エラー: ' + res.error);
                     loadUnitMasterData(); // ロールバック
@@ -195,6 +196,7 @@
                 if (res.success) {
                     showToast('success', '行を追加しました');
                     loadUnitMasterData();
+                    invalidateMasterData(); // 週案サジェストへ反映
                 } else {
                     showToast('error', '追加エラー: ' + res.error);
                 }
@@ -221,6 +223,7 @@
                 if (res.success) {
                     showToast('success', '行を挿入しました');
                     loadUnitMasterData();
+                    invalidateMasterData(); // 週案サジェストへ反映
                 } else {
                     showToast('error', '挿入エラー: ' + res.error);
                 }

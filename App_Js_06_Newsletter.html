@@ -89,6 +89,7 @@
 
     NW.redo = function () {
         if (NW._historyIdx >= NW._history.length - 1) { showToast('info', 'やり直せません'); return; }
+        NW.saveEditable(); // undoと対称に、編集中の内容を破棄しない
         NW._historyIdx++;
         NW._restoreHistory();
     };

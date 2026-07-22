@@ -549,7 +549,8 @@
             html += '</div>';
         } // end if (opts.stats)
 
-        // Todoリスト
+        // Todoリスト(週データが不完全な場合は日付計算ができないため出力しない)
+        if (days && days[0] && days[0].date && days[6] && days[6].date) {
         html += '<div class="todo-box">';
         html += '<div class="todo-title">Todoリスト</div>';
         html += '<div class="todo-list-wrap">';
@@ -599,6 +600,7 @@
         }
         html += '</div>';
         html += '</div>';
+        } // end Todoリスト
 
         // 週のまとめ（時数表と検印欄の間のフリースペースに印刷）
         var weekSummaryText = (STATE.weekData && STATE.weekData.weekSummary) ? STATE.weekData.weekSummary : '';

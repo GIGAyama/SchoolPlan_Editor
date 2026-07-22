@@ -386,9 +386,11 @@
         delete select.dataset.pendingValue;
     }
 
-    function loadSystemSettings() {
+    function loadSystemSettings(opts) {
         if (STATE.isSystemSettingsLoaded) return;
-        showToast('info', 'システム設定を読み込み中...');
+        // 保存直後の再取得では「保存しました」の直後に「読み込み中...」が出て
+        // 保存に失敗したように見えるため、silent 指定でトーストを抑止する
+        if (!opts || !opts.silent) showToast('info', 'システム設定を読み込み中...');
         google.script.run
             .withSuccessHandler(function (res) {
                 document.getElementById('sysCourseName').value = res.courseName || '';
@@ -453,7 +455,7 @@
                     showToast('success', res.message);
                     // 保存後、念のため再取得してリフレッシュ
                     STATE.isSystemSettingsLoaded = false;
-                    loadSystemSettings();
+                    loadSystemSettings({ silent: true });
                 } else {
                     showToast('error', 'エラー: ' + res.error);
                 }

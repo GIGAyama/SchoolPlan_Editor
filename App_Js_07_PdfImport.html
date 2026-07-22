@@ -752,8 +752,13 @@
                     confirmButtonColor: '#1a73e8'
                 });
                 // 単元マスタ関連のキャッシュを更新
+                // (loadMasterDataは読込済みなら何もしないため、invalidateで確実に再取得する)
                 STATE.umDataLoaded = false;
-                if (typeof loadMasterData === 'function') { try { loadMasterData(); } catch (e) { } }
+                if (typeof invalidateMasterData === 'function') { try { invalidateMasterData(); } catch (e) { } }
+                // 単元マスタタブを開いたまま取り込んだ場合も表を最新化する
+                if (STATE.view === 'unitmaster' && typeof loadUnitMasterData === 'function') {
+                    try { loadUnitMasterData(); } catch (e) { }
+                }
             } catch (e) {
                 showToast('error', 'エラー: ' + e.message);
             } finally {

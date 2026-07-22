@@ -84,7 +84,7 @@
     });
 
     function showToast(type, message) {
-        var iconMap = { success: 'success', error: 'error', info: 'info' };
+        var iconMap = { success: 'success', error: 'error', info: 'info', warning: 'warning' };
         SwalToast.fire({
             icon: iconMap[type] || 'info',
             title: message
