@@ -64,6 +64,19 @@ test('warning toasts render with the warning icon', () => {
   assert.match(utils, /warning: 'warning'/);
 });
 
+test('print options are persistent and the todo list is toggleable and capped', () => {
+  const print = read('App_Js_03_Print.html');
+  assert.match(print, /weeklyPrintOpts/);
+  assert.match(print, /id="po_todo"/);
+  assert.match(print, /TODO_PRINT_MAX = 14/);
+  assert.match(print, /他' \+ todoOverflow \+ '件/);
+});
+
+test('hours tab has a refresh action', () => {
+  assert.match(read('App_Js_05_Hours.html'), /function refreshHoursView/);
+  assert.match(read('App.html'), /refreshHoursView\(\)/);
+});
+
 test('small client fixes stay in place', () => {
   // 設定保存後の再読込は「読み込み中」トーストを出さない
   const settings = read('App_Js_10_Settings.html');

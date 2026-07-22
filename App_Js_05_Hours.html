@@ -6,6 +6,13 @@
         loadAnnualHoursView();
     }
 
+    // ヘッダーの「更新」ボタン。週案を保存した後などに、タブを離れずに
+    // 年間時数・シミュレーション・週の時数集計を最新化する。
+    function refreshHoursView() {
+        loadAnnualHoursView();
+        if (STATE.mondayStr && typeof loadHoursSummary === 'function') loadHoursSummary();
+    }
+
     function loadAnnualHoursView() {
         document.getElementById('yearLabel').textContent = STATE.hoursYear + '年度';
         var content = document.getElementById('hoursContent');

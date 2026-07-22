@@ -305,10 +305,16 @@
         <div id="view-hours" class="view">
             <div class="section-header-bar">
                 <h2><span class="material-symbols-outlined fs-6">calendar_month</span> 年間・教科別 実施時数</h2>
-                <div class="month-nav">
-                    <button class="btn-icon" onclick="navigateYear(-1)">‹</button>
-                    <span id="yearLabel" style="min-width: 100px; text-align: center;">－年度</span>
-                    <button class="btn-icon" onclick="navigateYear(1)">›</button>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <button class="btn btn-outline btn-sm d-flex align-items-center gap-1"
+                        onclick="refreshHoursView()">
+                        <span class="material-symbols-outlined fs-6">refresh</span> 更新
+                    </button>
+                    <div class="month-nav">
+                        <button class="btn-icon" onclick="navigateYear(-1)">‹</button>
+                        <span id="yearLabel" style="min-width: 100px; text-align: center;">－年度</span>
+                        <button class="btn-icon" onclick="navigateYear(1)">›</button>
+                    </div>
                 </div>
             </div>
 
