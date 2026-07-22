@@ -7,8 +7,10 @@ const backend = [
   '13_DataProtection_Snapshots.gs',
   '13_DataProtection_Backups.gs',
   '13_DataProtection_Trash.gs',
-  '13_DataProtection_Operations.gs'
+  '13_DataProtection_Operations.gs',
+  '12_Performance.gs'
 ].map(file => fs.readFileSync(file, 'utf8')).join('\n');
+const webApp = fs.readFileSync('07_WebApp.gs', 'utf8');
 
 const frontend = [
   'App_Js_09_Utils.html',
@@ -40,12 +42,49 @@ test('audit payloads redact secrets before persistence', () => {
   assert.match(backend, /function p3RecordAudit_/);
 });
 
-test('weekly protected save creates a restore point before V2 write', () => {
-  const fn = between(backend, 'function saveWeeklyPlanDataProtected', 'function p3RestoreReflections_');
-  const snapshot = fn.indexOf('p3CreateSnapshot_(');
-  const write = fn.indexOf('saveWeeklyPlanDataV2(');
-  assert.ok(snapshot >= 0 && write > snapshot);
+test('weekly save creates a restore point inside the lock before writing', () => {
+  // 保護はクライアントのオーバーライドではなくV2保存自身が行う。
+  // 不変条件: ロック取得 → 保存前スナップショット → 週の行書込 → 監査ログ。
+  const fn = between(backend, 'function saveWeeklyPlanDataV2', 'function getDbSchemaDiagnosticsFromWeb');
+  const lockAt = fn.indexOf('waitLock');
+  const snapshotAt = fn.indexOf('p3CreateSnapshot_(');
+  const writeAt = fn.indexOf('p2WriteChangedWeekRows_(dbSheet');
+  assert.ok(lockAt >= 0 && snapshotAt > lockAt && writeAt > snapshotAt);
   assert.match(fn, /WEEK_SAVE/);
+});
+
+test('protected and V1 save endpoints delegate to the protected V2 save', () => {
+  const protectedFn = between(backend, 'function saveWeeklyPlanDataProtected', 'function p3RestoreReflections_');
+  assert.match(protectedFn, /saveWeeklyPlanDataV2\(/);
+  assert.doesNotMatch(protectedFn, /p3CreateSnapshot_\(/);
+
+  const v1 = between(webApp, 'function saveWeeklyPlanData(', 'function getUnitMasterForSuggest');
+  assert.match(v1, /saveWeeklyPlanDataV2\(/);
+  assert.doesNotMatch(v1, /setValues/,
+    'V1 must not rewrite the whole sheet (it clobbered formula columns)');
+});
+
+test('protected database clear is serialized with weekly saves', () => {
+  const fn = between(backend, 'function clearDatabaseDataProtectedFromWeb', 'function deleteClassProtectedFromWeb');
+  assert.match(fn, /getScriptLock/);
+  assert.match(fn, /waitLock/);
+});
+
+test('week snapshots are scoped per class sheet and restores guard the target sheet', () => {
+  assert.match(backend, /function p3WeekScope_/);
+  assert.match(backend, /function p3SnapshotSheetMismatch_/);
+  const preview = between(backend, 'function previewWeekSnapshotFromWeb', 'function restoreWeekSnapshotFromWeb');
+  assert.match(preview, /p3SnapshotSheetMismatch_/);
+  const restore = between(backend, 'function restoreWeekSnapshotFromWeb', 'function p3GetBackupIndex_');
+  assert.match(restore, /p3SnapshotSheetMismatch_/);
+  assert.ok(restore.indexOf('p3SnapshotSheetMismatch_') < restore.indexOf('p3CreateSnapshot_('),
+    'sheet guard must run before the safety snapshot is created');
+});
+
+test('manual restore points are never evicted by the snapshot count cap', () => {
+  const cleanup = between(backend, 'function p3CleanupSnapshots_', 'function p3ReadSnapshot_');
+  assert.match(cleanup, /手動/);
+  assert.match(cleanup, /isManual/);
 });
 
 test('week restore creates a safety restore point before overwriting', () => {
@@ -105,6 +144,39 @@ test('frontend replaces hard deletes with trash or backup-protected operations',
   assert.match(frontend, /trashNewsletterDataFromWeb/);
   assert.match(frontend, /clearDatabaseDataProtectedFromWeb/);
   assert.match(frontend, /deleteClassProtectedFromWeb/);
+});
+
+test('protection module is included synchronously after its dependencies', () => {
+  const appHtml = fs.readFileSync('App.html', 'utf8');
+  const multiClassAt = appHtml.indexOf("include('App_Js_14_MultiClass')");
+  const coreAt = appHtml.indexOf("include('App_Js_15_DataProtection_Core')");
+  const manageAt = appHtml.indexOf("include('App_Js_15_DataProtection_Manage')");
+  const overridesAt = appHtml.indexOf("include('App_Js_15_DataProtection_Overrides')");
+  assert.ok(multiClassAt >= 0 && coreAt > multiClassAt && manageAt > coreAt && overridesAt > manageAt,
+    'App_Js_15_* must be included synchronously, after App_Js_14_MultiClass');
+  // 遅延ローダー方式(起動後250msの無保護ウィンドウの原因)へ戻さないこと
+  const utils = fs.readFileSync('App_Js_09_Utils.html', 'utf8');
+  assert.doesNotMatch(utils, /getDataProtectionClientModule/);
+});
+
+test('clients no longer call the unprotected delete/clear endpoints', () => {
+  const clientFiles = fs.readdirSync('.').filter(f => /^App_Js_.*\.html$/.test(f));
+  for (const file of clientFiles) {
+    const text = fs.readFileSync(file, 'utf8');
+    assert.doesNotMatch(text, /\.deleteTaskFromWebApp\(/, `${file} must use trashTaskFromWebApp`);
+    assert.doesNotMatch(text, /\.clearDatabaseDataFromWeb\(/, `${file} must use clearDatabaseDataProtectedFromWeb`);
+    assert.doesNotMatch(text, /\.deleteNewsletterData\(/, `${file} must use trashNewsletterDataFromWeb`);
+    assert.doesNotMatch(text, /\.deleteUnitMasterRow\(/, `${file} must use trashUnitMasterRowFromWeb`);
+    assert.doesNotMatch(text, /\.deleteClassFromWeb\(/, `${file} must use deleteClassProtectedFromWeb`);
+  }
+});
+
+test('legacy destructive server endpoints delegate to protected variants', () => {
+  const database = fs.readFileSync('02_Database.gs', 'utf8');
+  const legacyClear = between(database, 'function clearDatabaseDataFromWeb', 'function initTaskSheet_');
+  assert.match(legacyClear, /clearDatabaseDataProtectedFromWeb\(\)/);
+  const legacyDelete = between(webApp, 'function deleteTaskFromWebApp', 'const SP_KEY_TASK_REMINDER_ENABLED');
+  assert.match(legacyDelete, /trashTaskFromWebApp\(/);
 });
 
 test('settings UI exposes backup, restore, trash, audit, migrations, and integrity checks', () => {

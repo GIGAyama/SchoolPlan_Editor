@@ -83,7 +83,11 @@
             if (!result.isConfirmed) return;
             showToast('info', 'ごみ箱へ移動中...');
             google.script.run.withSuccessHandler(function (res) {
-                if (res.success) { showToast('success', res.message); loadUnitMasterData(); }
+                if (res.success) {
+                    showToast('success', res.message);
+                    loadUnitMasterData();
+                    if (typeof invalidateMasterData === 'function') invalidateMasterData(); // 週案サジェストへ反映
+                }
                 else showToast('error', '削除エラー: ' + res.error);
             }).withFailureHandler(_onCommError).trashUnitMasterRowFromWeb(rowIndex);
         };
@@ -151,6 +155,7 @@
         setTimeout(function () { p3LoadProtectionStatus(true); }, 1800);
     }
 
-    // このモジュールは初期画面描画後に遅延取得されるため、読み込み直後に安全に導入できる。
+    // App.html の末尾で同期includeされるため、依存する関数・DOMは構築済み。
+    // ユーザーが操作を始める前に保護版の保存・削除が有効になる。
     setTimeout(p3InstallDataProtection, 0);
 </script>

@@ -10,9 +10,14 @@
         // 前回選択したレイアウトを復元（standard: 従来の2ページ / compact: A4・1ページ）
         var storedLayout = 'standard';
         try { storedLayout = localStorage.getItem('weeklyPrintLayout') || 'standard'; } catch (e) { }
-        // 「登校前」列を印刷に含めるかの前回選択を復元（デフォルトは含めない）
+        // 「登校前」列を印刷に含めるかの前回選択を復元（デフォルトは含めない・旧キー互換）
         var storedPreclass = false;
         try { storedPreclass = localStorage.getItem('weeklyPrintPreclass') === '1'; } catch (e) { }
+        // 印刷項目のチェック状態をすべて復元し、毎週の再設定を不要にする
+        var storedOpts = {};
+        try { storedOpts = JSON.parse(localStorage.getItem('weeklyPrintOpts') || '{}') || {}; } catch (e) { }
+        var po_ = function (key, def) { return storedOpts[key] === undefined ? def : !!storedOpts[key]; };
+        var storedFontSize = parseInt(storedOpts.fontSize, 10) || 10;
         var weekendNote = '土曜: ' + (STATE.showSat ? '含める' : '含めない') + ' ／ 日曜: ' + (STATE.showSun ? '含める' : '含めない');
 
         Swal.fire({
@@ -25,20 +30,21 @@
                 + '<hr style="margin:12px 0;">'
                 + '<p style="color:var(--text-sub);margin-bottom:12px;">印刷に含める項目を選択してください</p>'
                 + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">'
-                + '<label><input type="checkbox" id="po_event" checked> 行事</label>'
-                + '<label><input type="checkbox" id="po_preclass"' + (storedPreclass ? ' checked' : '') + '> 登校前</label>'
-                + '<label><input type="checkbox" id="po_morning" checked> 朝学習</label>'
-                + '<label><input type="checkbox" id="po_recess1" checked> 中休み</label>'
-                + '<label><input type="checkbox" id="po_recess2" checked> 昼休み</label>'
-                + '<label><input type="checkbox" id="po_afterschool" checked> 放課後</label>'
-                + '<label><input type="checkbox" id="po_stats" checked> 教科時数表</label>'
-                + '<label><input type="checkbox" id="po_summary" checked> 週のまとめ</label>'
+                + '<label><input type="checkbox" id="po_event"' + (po_('event', true) ? ' checked' : '') + '> 行事</label>'
+                + '<label><input type="checkbox" id="po_preclass"' + (po_('preclass', storedPreclass) ? ' checked' : '') + '> 登校前</label>'
+                + '<label><input type="checkbox" id="po_morning"' + (po_('morning', true) ? ' checked' : '') + '> 朝学習</label>'
+                + '<label><input type="checkbox" id="po_recess1"' + (po_('recess1', true) ? ' checked' : '') + '> 中休み</label>'
+                + '<label><input type="checkbox" id="po_recess2"' + (po_('recess2', true) ? ' checked' : '') + '> 昼休み</label>'
+                + '<label><input type="checkbox" id="po_afterschool"' + (po_('afterschool', true) ? ' checked' : '') + '> 放課後</label>'
+                + '<label><input type="checkbox" id="po_stats"' + (po_('stats', true) ? ' checked' : '') + '> 教科時数表</label>'
+                + '<label><input type="checkbox" id="po_summary"' + (po_('summary', true) ? ' checked' : '') + '> 週のまとめ</label>'
+                + '<label><input type="checkbox" id="po_todo"' + (po_('todo', true) ? ' checked' : '') + '> Todoリスト</label>'
                 + '</div>'
-                + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 0 2px;">※週のまとめは標準ではフリースペース（時数表と検印欄の間）、コンパクトでは週案表の下に印刷されます</div>'
+                + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 0 2px;">※週のまとめは標準ではフリースペース（時数表と検印欄の間）、コンパクトでは週案表の下に印刷されます<br>※Todoリスト・教科時数表は標準レイアウト（2ページ目）にのみ印刷されます</div>'
                 + '<hr style="margin:12px 0;">'
                 + '<label style="display:flex;align-items:center;gap:8px;">'
-                + 'フォントサイズ: <input type="range" id="po_fontSize" min="8" max="14" value="10" style="flex:1;">'
-                + '<span id="po_fontLabel">10px</span>'
+                + 'フォントサイズ: <input type="range" id="po_fontSize" min="8" max="14" value="' + storedFontSize + '" style="flex:1;">'
+                + '<span id="po_fontLabel">' + storedFontSize + 'px</span>'
                 + '</label>'
                 + '</div>',
             width: 420,
@@ -68,8 +74,11 @@
                 afterschool: document.getElementById('po_afterschool').checked,
                 stats: document.getElementById('po_stats').checked,
                 summary: document.getElementById('po_summary').checked,
+                todo: document.getElementById('po_todo').checked,
                 fontSize: parseInt(document.getElementById('po_fontSize').value)
             };
+            // 次回のためにチェック状態を保存する(復元は po_ 経由)
+            try { localStorage.setItem('weeklyPrintOpts', JSON.stringify(opts)); } catch (e) { }
             printWeeklyPlanExec(opts);
         });
     }
@@ -549,7 +558,8 @@
             html += '</div>';
         } // end if (opts.stats)
 
-        // Todoリスト
+        // Todoリスト(週データが不完全な場合は日付計算ができないため出力しない)
+        if (opts.todo !== false && days && days[0] && days[0].date && days[6] && days[6].date) {
         html += '<div class="todo-box">';
         html += '<div class="todo-title">Todoリスト</div>';
         html += '<div class="todo-list-wrap">';
@@ -582,7 +592,11 @@
             return a.dueDate.localeCompare(b.dueDate);
         });
         // 表示（2カラムレイアウトで省スペース化、最低3行確保）
-        var displayCount = Math.max(3, printTasks.length);
+        // .todo-box は overflow:hidden のため、上限を超えた分は黙って切れる。
+        // 上限で打ち切り「…他N件」を明示して、印刷されなかったタスクの存在を伝える。
+        var TODO_PRINT_MAX = 14;
+        var todoOverflow = Math.max(0, printTasks.length - TODO_PRINT_MAX);
+        var displayCount = Math.max(3, Math.min(printTasks.length, TODO_PRINT_MAX));
         for (var i = 0; i < displayCount; i++) {
             if (printTasks[i] && printTasks[i].content) {
                 var duePart = '';
@@ -597,8 +611,12 @@
                 html += '<div class="todo-item">&nbsp;</div>';
             }
         }
+        if (todoOverflow > 0) {
+            html += '<div class="todo-item" style="color:#888;">…他' + todoOverflow + '件（タスクタブを確認）</div>';
+        }
         html += '</div>';
         html += '</div>';
+        } // end Todoリスト
 
         // 週のまとめ（時数表と検印欄の間のフリースペースに印刷）
         var weekSummaryText = (STATE.weekData && STATE.weekData.weekSummary) ? STATE.weekData.weekSummary : '';

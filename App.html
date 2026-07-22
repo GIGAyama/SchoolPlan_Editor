@@ -305,10 +305,16 @@
         <div id="view-hours" class="view">
             <div class="section-header-bar">
                 <h2><span class="material-symbols-outlined fs-6">calendar_month</span> 年間・教科別 実施時数</h2>
-                <div class="month-nav">
-                    <button class="btn-icon" onclick="navigateYear(-1)">‹</button>
-                    <span id="yearLabel" style="min-width: 100px; text-align: center;">－年度</span>
-                    <button class="btn-icon" onclick="navigateYear(1)">›</button>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <button class="btn btn-outline btn-sm d-flex align-items-center gap-1"
+                        onclick="refreshHoursView()">
+                        <span class="material-symbols-outlined fs-6">refresh</span> 更新
+                    </button>
+                    <div class="month-nav">
+                        <button class="btn-icon" onclick="navigateYear(-1)">‹</button>
+                        <span id="yearLabel" style="min-width: 100px; text-align: center;">－年度</span>
+                        <button class="btn-icon" onclick="navigateYear(1)">›</button>
+                    </div>
                 </div>
             </div>
 
@@ -1338,6 +1344,11 @@
     <?!= include('App_Js_12_UnitMaster'); ?>
     <?!= include('App_Js_13_SystemTools'); ?>
     <?!= include('App_Js_14_MultiClass'); ?>
+    <!-- データ保護は同期includeで最後に読み込み、保存・削除の保護版を確実に有効化する。
+         14(STATE.performance/p2UpdateCurrentWeekCache)と06(NW)に依存するため必ずこの位置。 -->
+    <?!= include('App_Js_15_DataProtection_Core'); ?>
+    <?!= include('App_Js_15_DataProtection_Manage'); ?>
+    <?!= include('App_Js_15_DataProtection_Overrides'); ?>
 
 </body>
 

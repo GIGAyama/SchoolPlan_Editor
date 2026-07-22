@@ -93,13 +93,20 @@ function p3EnsureSheet_(ss, name, headers) {
   return sheet;
 }
 
+// p3EnsureSheet_ はシートごとに読取+装飾書込を伴うため、1回のリクエスト内で
+// 何度も呼ばれる保存・監査・ごみ箱操作の負荷を実行内メモ化で抑える。
+let p3SheetsMemo_ = null;
+
 function p3EnsureInternalSheets_(ss) {
-  return {
+  if (p3SheetsMemo_ && p3SheetsMemo_.id === ss.getId()) return p3SheetsMemo_.sheets;
+  const sheets = {
     meta: p3EnsureSheet_(ss, P3_META_SHEET_, P3_META_HEADERS_),
     audit: p3EnsureSheet_(ss, P3_AUDIT_SHEET_, P3_AUDIT_HEADERS_),
     snapshots: p3EnsureSheet_(ss, P3_SNAPSHOT_SHEET_, P3_SNAPSHOT_HEADERS_),
     trash: p3EnsureSheet_(ss, P3_TRASH_SHEET_, P3_TRASH_HEADERS_)
   };
+  p3SheetsMemo_ = { id: ss.getId(), sheets };
+  return sheets;
 }
 
 function p3MetaGet_(ss, key) {
@@ -244,8 +251,19 @@ function p3RunMigrations_(ss) {
 function ensureDataProtectionReady_() {
   const ss = getSs_();
   const result = p3RunMigrations_(ss);
-  p3CleanupExpiredTrash_(ss);
-  p3CleanupSnapshots_(ss);
+  // 期限切れ掃除は全行走査+deleteRowループを伴うため、毎回ではなく
+  // ユーザー・スプレッドシート単位で6時間に1回に間引く(掃除失敗は本処理を妨げない)。
+  try {
+    const cache = CacheService.getUserCache();
+    const cacheKey = 'p3CleanupDone::' + ss.getId();
+    if (!cache.get(cacheKey)) {
+      p3CleanupExpiredTrash_(ss);
+      p3CleanupSnapshots_(ss);
+      cache.put(cacheKey, '1', 21600);
+    }
+  } catch (e) {
+    logError('ensureDataProtectionReady_:cleanup', e);
+  }
   return result;
 }
 
@@ -256,13 +274,4 @@ function runDataMigrationsFromWeb() {
     logError('runDataMigrationsFromWeb', e);
     return { success: false, error: e.message };
   }
-}
-
-/** Phase 3 client moduleを遅延取得するための内部API。 */
-function getDataProtectionClientModule() {
-  return [
-    'App_Js_15_DataProtection_Core',
-    'App_Js_15_DataProtection_Manage',
-    'App_Js_15_DataProtection_Overrides'
-  ].map(name => HtmlService.createHtmlOutputFromFile(name).getContent());
 }

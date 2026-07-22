@@ -24,7 +24,10 @@
             showToast('success', res.message);
             Swal.close();
             if (res.entityType === 'task' && typeof loadTasks === 'function') loadTasks();
-            if (res.entityType === 'unitMaster' && typeof loadUnitMasterData === 'function') loadUnitMasterData();
+            if (res.entityType === 'unitMaster' && typeof loadUnitMasterData === 'function') {
+                loadUnitMasterData();
+                if (typeof invalidateMasterData === 'function') invalidateMasterData(); // 週案サジェストへ反映
+            }
             p3LoadProtectionStatus(false);
         }).catch(_onCommError);
     }

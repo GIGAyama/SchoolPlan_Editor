@@ -562,27 +562,17 @@
         document.addEventListener('touchcancel', onTouchSettle, { passive: true });
     })();
 
-    // ===== 単元マスタ読み込み =====
-    function loadMasterData() {
-        google.script.run
-            .withSuccessHandler(function (data) {
-                if (data.success) STATE.masterData = data;
-            })
-            .withFailureHandler(_onCommError)
-            .getUnitMasterForSuggest();
-    }
+    // 単元マスタ読み込み(loadMasterData)は App_Js_14_MultiClass の
+    // 読込ガード付きの版が正規実装。
 
     // ===== 週案ビュー =====
     function goToToday() {
-        console.log('[DEBUG] goToToday called');
         google.script.run
             .withSuccessHandler(function (mondayStr) {
-                console.log('[DEBUG] getTodaysMondayStr success:', mondayStr);
                 STATE.mondayStr = mondayStr;
                 loadWeeklyPlan();
             })
             .withFailureHandler(function (e) {
-                console.error('[DEBUG] getTodaysMondayStr FAILED:', e.message);
                 if (isNoDbError_(e && e.message)) { handleNoDbError_(); return; }
                 showToast('error', '初期化エラー: ' + e.message);
             })
@@ -752,36 +742,9 @@
         doLoadWeeklyPlan();
     }
 
-    function doLoadWeeklyPlan() {
-        console.log('[DEBUG] loadWeeklyPlan called, mondayStr:', STATE.mondayStr);
-        var grid = document.getElementById('weekGrid');
-        // 前回描画時の inline 幅指定（minWidth / gridTemplateColumns）が残ると、
-        // 空のグリッドが横に広がったまま横スクロールが発生するためリセットする
-        // （ローディング表示自体は position:fixed で常に画面中央に出る）
-        grid.style.minWidth = '';
-        grid.style.gridTemplateColumns = '';
-        grid.innerHTML = '<div class="loading-state"><div class="spinner-lg"></div><p>読み込み中...</p></div>';
-        document.getElementById('weekLabel').textContent = '読み込み中...';
-
-        google.script.run
-            .withSuccessHandler(function (data) {
-                console.log('[DEBUG] getWeeklyPlanData success:', JSON.stringify(data).substring(0, 300));
-                if (!data.success) { showToast('error', 'データ取得エラー: ' + data.error); return; }
-                STATE.weekData = data;
-                renderWeekGrid(data.days);
-                updateWeekHeader(data.days, data.weekNum);
-                loadHoursSummary(); // 週変更時に時数集計も更新
-
-                // 週案表示時にタスクパネルを更新する（loadTasks はwindow.onloadで管理）
-                renderWeeklyTaskPanel();
-            })
-            .withFailureHandler(function (e) {
-                console.error('[DEBUG] getWeeklyPlanData FAILED:', e.message);
-                if (isNoDbError_(e && e.message)) { handleNoDbError_(); return; }
-                showToast('error', '通信エラー: ' + e.message);
-            })
-            .getWeeklyPlanData(STATE.mondayStr);
-    }
+    // doLoadWeeklyPlan は App_Js_14_MultiClass の V2 版が正規実装
+    // (キャッシュ・週移動連打のレースガード付き。旧V1版はガードが無く、
+    //  応答順の入れ替わりで古い週が新しい週を上書きし得たため削除した)。
 
     // ===== ツールバーのドロップダウンメニュー制御 =====
     // 編集ツールバー「入力支援」や学級通信「ファイル」などの収納メニューを開閉する。

@@ -181,8 +181,9 @@ function getMondayStrByWeekNumber(weekNum) {
     }
     return null; // 見つからなかった場合
   } catch (e) {
+    // 他のWeb APIと同様、生の例外をクライアントへ投げず「見つからない」扱いに揃える
     logError('getMondayStrByWeekNumber', e);
-    throw e;
+    return null;
   }
 }
 
@@ -194,128 +195,11 @@ function getMondayStrByWeekNumber(weekNum) {
  * @returns {Object} { success: boolean, message?: string, revision?: string, conflict?: boolean, error?: string }
  */
 function saveWeeklyPlanData(mondayDateStr, days, baseRevision) {
-  // 同時保存による全シート書き戻しの競合（他の週の変更の消失等）を防ぐため直列化する
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(10000);
-  } catch (lockErr) {
-    return { success: false, error: '他の保存処理が進行中です。少し待ってから再度お試しください。' };
-  }
-  try {
-    validateParams_({ mondayDateStr, days }, {
-      mondayDateStr: { type: 'string', required: true, pattern: /^\d{4}\/\d{1,2}\/\d{1,2}$/ },
-      days: { required: true, isArray: true }
-    });
-
-    // 教科セルの検証: 「教科名+分数」形式は分数の合計が必ず1でなければならない
-    const subjectErrors = validateDaysSubjects_(days);
-    if (subjectErrors.length > 0) {
-      return {
-        success: false,
-        error: '教科名の入力に誤りがあるため保存できません。\n' + subjectErrors.join('\n')
-      };
-    }
-
-    const ss = getSs_();
-    const dbSheet = getDbSheet_(ss);
-    if (!dbSheet) throw new Error('データベースシートが見つかりません');
-
-    const dbCols = getDbColumns();
-    const dbData = dbSheet.getDataRange().getValues();
-
-    // 該当週の7日分の日付文字列（リビジョン算出・後段の戻り値に使用）
-    const monday = parseDate_(mondayDateStr);
-    const weekDateStrs = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      return formatDate(d);
-    });
-
-    // 楽観ロック: クライアントが読み込んだ後に他の端末やAI処理で更新されていないか確認する。
-    // baseRevision 未指定（旧クライアント）の場合は従来通り無条件保存する（後方互換）。
-    if (baseRevision) {
-      const currentRevision = computeWeekRevision_(dbData, dbCols, weekDateStrs);
-      if (currentRevision !== baseRevision) {
-        return {
-          success: false,
-          conflict: true,
-          error: 'この週は他の端末またはAI処理によって更新されています。最新を読み込み直してから保存してください。'
-        };
-      }
-    }
-
-    // DB全行をMapに変換 (key: "yyyy/MM/dd", value: array index)
-    const dbDateIndexMap = new Map();
-    for (let i = 0; i < dbData.length; i++) {
-      if (dbData[i][dbCols.DATE - 1] instanceof Date) {
-        dbDateIndexMap.set(formatDate(dbData[i][dbCols.DATE - 1]), i);
-      }
-    }
-
-    const maxCol = Math.max(...Object.values(dbCols));
-    dbData.forEach(row => { while (row.length < maxCol) row.push(''); });
-
-    let updatedCount = 0;
-    const notFoundDates = [];
-
-    for (const day of days) {
-      if (!day.found && !day.periods.some(p => p.subject)) continue; // 空の日はスキップ
-
-      if (dbDateIndexMap.has(day.date)) {
-        const rowIdx = dbDateIndexMap.get(day.date);
-        const row = dbData[rowIdx];
-
-        row[dbCols.EVENT - 1]      = day.event || '';
-        if (dbCols.PRECLASS) row[dbCols.PRECLASS - 1] = day.preclass || '';
-        row[dbCols.MORNING - 1]    = day.morning || '';
-        row[dbCols.PERIOD1 - 1]    = day.periods[0]?.subject || '';
-        row[dbCols.UNIT1 - 1]      = day.periods[0]?.unit || '';
-        row[dbCols.CONTENT1 - 1]   = day.periods[0]?.content || '';
-        row[dbCols.PERIOD2 - 1]    = day.periods[1]?.subject || '';
-        row[dbCols.UNIT2 - 1]      = day.periods[1]?.unit || '';
-        row[dbCols.CONTENT2 - 1]   = day.periods[1]?.content || '';
-        row[dbCols.RECESS1 - 1]    = day.recess1 || '';
-        row[dbCols.PERIOD3 - 1]    = day.periods[2]?.subject || '';
-        row[dbCols.UNIT3 - 1]      = day.periods[2]?.unit || '';
-        row[dbCols.CONTENT3 - 1]   = day.periods[2]?.content || '';
-        row[dbCols.PERIOD4 - 1]    = day.periods[3]?.subject || '';
-        row[dbCols.UNIT4 - 1]      = day.periods[3]?.unit || '';
-        row[dbCols.CONTENT4 - 1]   = day.periods[3]?.content || '';
-        row[dbCols.RECESS2 - 1]    = day.recess2 || '';
-        row[dbCols.PERIOD5 - 1]    = day.periods[4]?.subject || '';
-        row[dbCols.UNIT5 - 1]      = day.periods[4]?.unit || '';
-        row[dbCols.CONTENT5 - 1]   = day.periods[4]?.content || '';
-        row[dbCols.PERIOD6 - 1]    = day.periods[5]?.subject || '';
-        row[dbCols.UNIT6 - 1]      = day.periods[5]?.unit || '';
-        row[dbCols.CONTENT6 - 1]   = day.periods[5]?.content || '';
-        row[dbCols.AFTERSCHOOL - 1] = day.afterschool || '';
-        row[dbCols.HOMEWORK - 1]   = day.homework || '';
-        row[dbCols.ITEMS - 1]      = day.items || '';
-
-        updatedCount++;
-      } else {
-        notFoundDates.push(day.date);
-      }
-    }
-
-    // パフォーマンス: 実際に更新があった場合のみDB書き込み
-    if (updatedCount > 0) {
-      dbSheet.getRange(1, 1, dbData.length, dbData[0].length).setValues(dbData);
-    }
-
-    const msg = notFoundDates.length > 0
-      ? `${updatedCount}日分を保存しました（DB未登録日: ${notFoundDates.join(', ')}）`
-      : `${updatedCount}日分を保存しました`;
-
-    // 書き込み後の新リビジョンを返し、クライアントが次回保存の基準を更新できるようにする
-    const newRevision = computeWeekRevision_(dbData, dbCols, weekDateStrs);
-    return { success: true, message: msg, updatedCount, revision: newRevision };
-  } catch (e) {
-    logError('saveWeeklyPlanData', e);
-    return { success: false, error: e.message };
-  } finally {
-    lock.releaseLock();
-  }
+  // 旧クライアント互換のために残している委譲エンドポイント。
+  // 旧実装はシート全体を書き戻すため、曜日・週番号・時程などの数式列を静的な値に
+  // 置き換えてしまい、保存前スナップショットも作られなかった。
+  // V2は対象週の入力列のみを書き込み、保存前スナップショットと監査ログを常時作成する。
+  return saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision);
 }
 
 /**
@@ -1813,17 +1697,9 @@ function updateTaskStatusFromWebApp(taskId, newStatus) {
  * @returns {Object} { success: boolean }
  */
 function deleteTaskFromWebApp(taskId) {
-  try {
-    validateParams_({ taskId }, {
-      taskId: { type: 'string', required: true, maxLength: 100 }
-    });
-    const isSuccess = deleteTask(taskId);
-    if (isSuccess) return { success: true };
-    return { success: false, error: '対象のタスクが見つかりませんでした（すでに削除された可能性があります）。' };
-  } catch (e) {
-    logError('deleteTaskFromWebApp', e);
-    return { success: false, error: e.message };
-  }
+  // 旧クライアント互換の委譲エンドポイント。完全削除ではなく
+  // ごみ箱移動(30日間復元可能)として扱い、意図しない恒久削除を防ぐ。
+  return trashTaskFromWebApp(taskId);
 }
 
 // ===== タスクリマインダー（毎朝メール通知） =====

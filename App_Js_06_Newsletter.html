@@ -89,6 +89,7 @@
 
     NW.redo = function () {
         if (NW._historyIdx >= NW._history.length - 1) { showToast('info', 'やり直せません'); return; }
+        NW.saveEditable(); // undoと対称に、編集中の内容を破棄しない
         NW._historyIdx++;
         NW._restoreHistory();
     };
@@ -2217,31 +2218,8 @@
             .loadNewsletterData(fileId);
     };
 
-    NW.doDeleteFromSheet = function (rowIndex, fileId) {
-        Swal.fire({
-            title: '削除確認',
-            text: 'この学級通信を削除しますか？',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: '削除',
-            cancelButtonText: 'キャンセル',
-            confirmButtonColor: '#ea4335'
-        }).then(function (result) {
-            if (!result.isConfirmed) return;
-            google.script.run
-                .withSuccessHandler(function (res) {
-                    if (!res) { showToast('error', '削除失敗: サーバーから応答がありません'); return; }
-                    if (res.success) {
-                        showToast('success', '削除しました');
-                        NW.openFromSheet();
-                    } else {
-                        showToast('error', '削除失敗: ' + res.error);
-                    }
-                })
-                .withFailureHandler(_onCommError)
-                .deleteNewsletterData(rowIndex, fileId);
-        });
-    };
+    // NW.doDeleteFromSheet はデータ保護モジュール(App_Js_15_DataProtection_Overrides)が定義する。
+    // 削除はごみ箱移動(30日間復元可能)として扱われる。
 
     // ---- Load schedule data from backend ----
     NW.loadScheduleData = function () {

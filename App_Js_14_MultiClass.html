@@ -102,6 +102,10 @@
 
     function onClassSwitcherChange(sheetName) {
         if (!sheetName || sheetName === STATE.multiClass.activeSheet) return;
+        // 自動保存の失敗・競合で切替が中断された場合に、セレクトだけが
+        // 新しい学級を指したままにならないよう、先に現在の学級へ表示を戻す。
+        // 切替成功時は applyMultiClassState が改めて再描画する。
+        renderClassSwitcher();
         autoSaveAndThen(function () { switchMultiClass(sheetName); });
     }
 
@@ -183,30 +187,8 @@
             .addClassFromWeb(name, gradeSelect.value);
     }
 
-    async function deleteMultiClass(sheetName, name) {
-        var res = await Swal.fire({
-            icon: 'warning',
-            title: '学級の削除',
-            html: '学級「' + escHtml(name) + '」とそのシート（週案・振り返りのデータを含む）を削除します。<br><strong>この操作は元に戻せません。</strong>よろしいですか？',
-            showCancelButton: true,
-            confirmButtonText: '削除する',
-            cancelButtonText: 'キャンセル',
-            confirmButtonColor: '#dc3545'
-        });
-        if (!res.isConfirmed) return;
-
-        var wasActive = sheetName === STATE.multiClass.activeSheet;
-        showToast('info', '学級を削除しています...');
-        google.script.run
-            .withSuccessHandler(function (r) {
-                if (!r.success) { showToast('error', '削除失敗: ' + r.error); return; }
-                applyMultiClassState(r);
-                if (wasActive) afterClassContextChanged();
-                showToast('success', '学級「' + name + '」を削除しました');
-            })
-            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
-            .deleteClassFromWeb(sheetName);
-    }
+    // deleteMultiClass はデータ保護モジュール(App_Js_15_DataProtection_Overrides)が定義する。
+    // 削除の直前に完全バックアップを自動作成する。
 
     async function renameMultiClass(sheetName, currentName) {
         var res = await Swal.fire({
@@ -305,12 +287,21 @@
         if (label) label.textContent = '読み込み中...';
     }
 
+    function p2ShowDeferredRetryUI() {
+        var list = document.getElementById('sidebarTaskList');
+        if (!list) return;
+        list.innerHTML = '<div class="st-empty">タスクを読み込めませんでした<br>'
+            + '<button class="btn btn-outline btn-sm" style="margin-top:8px;" '
+            + 'onclick="STATE.performance.deferredRetries = 0; p2LoadDeferredBootstrap();">再試行</button></div>';
+    }
+
     function p2LoadDeferredBootstrap() {
         if (STATE.performance.deferredLoaded) return;
         STATE.performance.deferredLoaded = true;
         google.script.run
             .withSuccessHandler(function (res) {
                 if (!res || !res.success) return;
+                STATE.performance.deferredRetries = 0;
 
                 if (res.tasks && res.tasks.success) {
                     STATE.allTaskData = res.tasks.tasks || [];
@@ -344,7 +335,15 @@
                 }
             })
             .withFailureHandler(function () {
+                // 一時的な通信断でタスクパネルが空のままにならないよう自動リトライし、
+                // 尽きたら手動の再試行ボタンを出す
                 STATE.performance.deferredLoaded = false;
+                STATE.performance.deferredRetries = (STATE.performance.deferredRetries || 0) + 1;
+                if (STATE.performance.deferredRetries <= 3) {
+                    setTimeout(p2LoadDeferredBootstrap, 4000);
+                } else {
+                    p2ShowDeferredRetryUI();
+                }
             })
             .getDeferredBootstrapV2();
     }
@@ -377,12 +376,27 @@
                     doLoadWeeklyPlan();
                 }
                 p2RunIdle(p2LoadDeferredBootstrap, 80);
+                // 学年・コース名・テナント情報をサーバーと同期する
+                // (旧onloadのstartAppInitでのみ呼ばれていたため、V2起動では
+                //  STATE.gradeが既定値3のままになる不具合があった)
+                p2RunIdle(function () {
+                    if (typeof loadSettingsView === 'function') loadSettingsView();
+                }, 300);
             })
             .withFailureHandler(function () {
                 if (typeof p2LegacyOnload === 'function') p2LegacyOnload();
             })
             .getAppBootstrapV2();
     };
+
+    // 単元マスタの変更(編集・追加・削除・PDF取込・ごみ箱復元)後に呼ぶ。
+    // loadMasterData は読込済みなら何もしないため、先にキャッシュを破棄しないと
+    // 週案のサジェストに変更が反映されない。
+    function invalidateMasterData() {
+        STATE.masterData = null;
+        STATE.performance.masterLoading = false;
+        loadMasterData();
+    }
 
     function loadMasterData() {
         if (STATE.masterData || STATE.performance.masterLoading) return;

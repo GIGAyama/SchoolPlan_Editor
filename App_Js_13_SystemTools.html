@@ -164,22 +164,8 @@
         });
     }
 
-    function clearDatabaseWeb(btn) {
-        _runToolAction(btn, {
-            method: 'clearDatabaseDataFromWeb',
-            busyLabel: 'クリア中...',
-            toMaint: true,
-            danger: true,
-            confirmTitle: 'データベースのクリア',
-            confirmText: '「データベース」シートの入力内容（時程〜放課後）をすべてクリアします。この操作は元に戻せません。よろしいですか？',
-            confirmButton: 'クリアする',
-            onDone: function () {
-                if (typeof loadWeeklyPlan === 'function' && STATE && STATE.mondayStr) {
-                    try { loadWeeklyPlan(STATE.mondayStr); } catch (e) { }
-                }
-            }
-        });
-    }
+    // clearDatabaseWeb はデータ保護モジュール(App_Js_15_DataProtection_Overrides)が定義する。
+    // 実行前に完全バックアップを自動作成する。
 
     // ===================================================
     // ===== 初期設定ウィザード =====
