@@ -86,6 +86,39 @@ function p2ReadRowsForDates_(sheet, cols, dateStrs) {
   return { lastColumn, rowNumbers, rowNumberByDate, rowByNumber, rowByDate };
 }
 
+/**
+ * 読み込み済みの行状態から週7日分のdayオブジェクトを構築します。
+ * getWeeklyPlanDataV2 と保存時のスナップショット用 beforeDays の双方で使用します。
+ */
+function p2BuildWeekDays_(rowState, dbCols, weekDateStrs, holidayMap) {
+  const dayLabels = ['月', '火', '水', '木', '金', '土', '日'];
+  const holidays = holidayMap || {};
+  return weekDateStrs.map((dateStr, index) => {
+    const row = rowState.rowByDate.get(dateStr);
+    return {
+      date: dateStr,
+      dayLabel: dayLabels[index],
+      holiday: holidays[dateStr] || '',
+      event: String(p2Cell_(row, dbCols, 'EVENT') || ''),
+      preclass: String(p2Cell_(row, dbCols, 'PRECLASS') || ''),
+      morning: String(p2Cell_(row, dbCols, 'MORNING') || ''),
+      periods: [1, 2, 3, 4, 5, 6].map(n => ({
+        subject: String(p2Cell_(row, dbCols, 'PERIOD' + n) || ''),
+        unit: String(p2Cell_(row, dbCols, 'UNIT' + n) || ''),
+        content: String(p2Cell_(row, dbCols, 'CONTENT' + n) || '')
+      })),
+      recess1: String(p2Cell_(row, dbCols, 'RECESS1') || ''),
+      recess2: String(p2Cell_(row, dbCols, 'RECESS2') || ''),
+      afterschool: String(p2Cell_(row, dbCols, 'AFTERSCHOOL') || ''),
+      homework: String(p2Cell_(row, dbCols, 'HOMEWORK') || ''),
+      items: String(p2Cell_(row, dbCols, 'ITEMS') || ''),
+      reflection: String(p2Cell_(row, dbCols, 'REFLECTION') || ''),
+      reflectionStatus: String(p2Cell_(row, dbCols, 'REFLECTION_STATUS') || '').trim(),
+      found: !!row
+    };
+  });
+}
+
 function p2Cell_(row, cols, key) {
   const col = cols[key];
   if (!row || !col) return '';
@@ -183,32 +216,7 @@ function getWeeklyPlanDataV2(mondayDateStr) {
     const weekDateStrs = p2WeekDateStrings_(mondayDateStr);
     const rows = p2ReadRowsForDates_(dbSheet, dbCols, weekDateStrs);
     const holidayMap = getHolidayMap_();
-    const dayLabels = ['月', '火', '水', '木', '金', '土', '日'];
-
-    const days = weekDateStrs.map((dateStr, index) => {
-      const row = rows.rowByDate.get(dateStr);
-      return {
-        date: dateStr,
-        dayLabel: dayLabels[index],
-        holiday: holidayMap[dateStr] || '',
-        event: String(p2Cell_(row, dbCols, 'EVENT') || ''),
-        preclass: String(p2Cell_(row, dbCols, 'PRECLASS') || ''),
-        morning: String(p2Cell_(row, dbCols, 'MORNING') || ''),
-        periods: [1, 2, 3, 4, 5, 6].map(n => ({
-          subject: String(p2Cell_(row, dbCols, 'PERIOD' + n) || ''),
-          unit: String(p2Cell_(row, dbCols, 'UNIT' + n) || ''),
-          content: String(p2Cell_(row, dbCols, 'CONTENT' + n) || '')
-        })),
-        recess1: String(p2Cell_(row, dbCols, 'RECESS1') || ''),
-        recess2: String(p2Cell_(row, dbCols, 'RECESS2') || ''),
-        afterschool: String(p2Cell_(row, dbCols, 'AFTERSCHOOL') || ''),
-        homework: String(p2Cell_(row, dbCols, 'HOMEWORK') || ''),
-        items: String(p2Cell_(row, dbCols, 'ITEMS') || ''),
-        reflection: String(p2Cell_(row, dbCols, 'REFLECTION') || ''),
-        reflectionStatus: String(p2Cell_(row, dbCols, 'REFLECTION_STATUS') || '').trim(),
-        found: !!row
-      };
-    });
+    const days = p2BuildWeekDays_(rows, dbCols, weekDateStrs, holidayMap);
 
     const mondayRow = rows.rowByDate.get(mondayDateStr);
     const weekNum = mondayRow && dbCols.WEEK_NUM ? (mondayRow[dbCols.WEEK_NUM - 1] || '?') : '?';
@@ -296,8 +304,17 @@ function p2WriteChangedWeekRows_(sheet, cols, rowState, changedRowNumbers) {
 
 /**
  * 対象週7日分だけを読み書きする週案保存API。
+ *
+ * データ保全(保存前スナップショット+監査ログ)はこの関数自身が行う。
+ * 以前はクライアント側のオーバーライドが saveWeeklyPlanDataProtected を選ぶ設計で、
+ * オーバーライド読込前の保存や直接呼び出しが保護をすり抜けられた。
+ *
+ * ロック順序の規約: ScriptLock(保存・クリア) → UserLock(migration)。逆順で取らないこと。
+ *
+ * @param {Object} [options] 内部用。{ protect:false } でスナップショット省略(復元処理用)、
+ *   { source } で監査ログの操作元を指定。クライアントからの3引数呼び出しは常に保護される。
  */
-function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision) {
+function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
   const startedAt = Date.now();
   const lock = LockService.getScriptLock();
   let locked = false;
@@ -328,17 +345,19 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision) {
     const weekDateStrs = p2WeekDateStrings_(mondayDateStr);
     const rowState = p2ReadRowsForDates_(dbSheet, dbCols, weekDateStrs);
     const currentRows = [...rowState.rowByDate.values()];
+    const currentRevision = computeWeekRevision_(currentRows, dbCols, weekDateStrs);
 
-    if (baseRevision) {
-      const currentRevision = computeWeekRevision_(currentRows, dbCols, weekDateStrs);
-      if (currentRevision !== baseRevision) {
-        return {
-          success: false,
-          conflict: true,
-          error: 'この週は他の端末またはAI処理によって更新されています。最新を読み込み直してから保存してください。'
-        };
-      }
+    if (baseRevision && currentRevision !== baseRevision) {
+      return {
+        success: false,
+        conflict: true,
+        error: 'この週は他の端末またはAI処理によって更新されています。最新を読み込み直してから保存してください。'
+      };
     }
+
+    // p2ApplyDayToRow_ は rowState の行配列を直接書き換えるため、
+    // スナップショット用の保存前状態はここで確定しておく。
+    const beforeDays = p2BuildWeekDays_(rowState, dbCols, weekDateStrs, null);
 
     const changedRowNumbers = [];
     const notFoundDates = [];
@@ -356,9 +375,42 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision) {
     }
 
     const uniqueChangedRows = [...new Set(changedRowNumbers)].sort((a, b) => a - b);
+    const protect = !(options && options.protect === false);
+    let restorePointId = '';
+
+    if (uniqueChangedRows.length > 0 && protect) {
+      try {
+        ensureDataProtectionReady_();
+        const scope = p3WeekScope_(mondayDateStr);
+        if (p3ShouldCreateAutoSnapshot_(scope)) {
+          restorePointId = p3CreateSnapshot_('week', scope, '自動: 週案保存前', {
+            schemaVersion: P3_SCHEMA_VERSION_,
+            spreadsheetId: ss.getId(),
+            activeSheet: dbSheet.getName(),
+            week: { success: true, days: beforeDays, mondayDateStr, revision: currentRevision }
+          });
+        }
+      } catch (protectErr) {
+        throw new Error('保存前の復元ポイントを作成できなかったため保存を中止しました（'
+          + protectErr.message + '）。設定画面の「保全基盤を更新」を実行してから再度お試しください。');
+      }
+    }
+
     p2WriteChangedWeekRows_(dbSheet, dbCols, rowState, uniqueChangedRows);
 
     const newRevision = computeWeekRevision_([...rowState.rowByDate.values()], dbCols, weekDateStrs);
+
+    if (uniqueChangedRows.length > 0 && protect) {
+      p3RecordAudit_(
+        'WEEK_SAVE',
+        'week',
+        mondayDateStr,
+        ((options && options.source) || 'web') + 'から週案を保存 (' + uniqueChangedRows.length + '日)',
+        { revision: currentRevision, snapshotId: restorePointId, days: p3ComparableDays_(beforeDays) },
+        { revision: newRevision, days: p3ComparableDays_(days) },
+        'save_' + Utilities.getUuid()
+      );
+    }
     const msgBase = uniqueChangedRows.length > 0
       ? `${uniqueChangedRows.length}日分を保存しました`
       : '変更はありませんでした';
@@ -371,6 +423,7 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision) {
       message,
       updatedCount: uniqueChangedRows.length,
       revision: newRevision,
+      restorePointId,
       performance: {
         api: 'v2',
         rowsRead: rowState.rowNumbers.length,

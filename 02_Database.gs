@@ -473,8 +473,12 @@ function getTaskData() {
 
 /**
  * 新しいタスク（複数可）をDBに一括保存します。
- * @param {Object[]} tasks 
+ * @param {Object[]} tasks
  * @returns {boolean}
+ *
+ * 既知事項: タスク系の書込(saveTasksBulk/updateTaskStatus/deleteTask/ごみ箱移動)は
+ * ロック無しの read-modify-write のため、同一ユーザーが複数端末から同時に操作すると
+ * 行ズレの可能性がある。単一操作者前提の運用では実害が小さいため現状は許容している。
  */
 function saveTasksBulk(tasks) {
   try {

@@ -240,50 +240,9 @@ function p3ComparableDays_(days) {
 }
 
 function saveWeeklyPlanDataProtected(mondayDateStr, days, baseRevision, source) {
-  const correlationId = 'save_' + Utilities.getUuid();
-  try {
-    ensureDataProtectionReady_();
-    const before = getWeeklyPlanDataV2(mondayDateStr);
-    if (!before || !before.success) {
-      throw new Error((before && before.error) || '保存前の週案を取得できませんでした');
-    }
-
-    const changed = JSON.stringify(p3ComparableDays_(before.days))
-      !== JSON.stringify(p3ComparableDays_(days));
-
-    let snapshotId = '';
-    if (changed && p3ShouldCreateAutoSnapshot_(p3WeekScope_(mondayDateStr))) {
-      snapshotId = p3CreateSnapshot_(
-        'week',
-        p3WeekScope_(mondayDateStr),
-        '自動: 週案保存前',
-        {
-          schemaVersion: P3_SCHEMA_VERSION_,
-          spreadsheetId: getSs_().getId(),
-          activeSheet: getDbSheet_(getSs_()).getName(),
-          week: before
-        }
-      );
-    }
-
-    const result = saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision);
-    if (result && result.success && result.updatedCount > 0) {
-      p3RecordAudit_(
-        'WEEK_SAVE',
-        'week',
-        mondayDateStr,
-        (source || 'web') + 'から週案を保存 (' + result.updatedCount + '日)',
-        { revision: before.revision, snapshotId, days: p3ComparableDays_(before.days) },
-        { revision: result.revision, days: p3ComparableDays_(days) },
-        correlationId
-      );
-    }
-    if (result && result.success) result.restorePointId = snapshotId;
-    return result;
-  } catch (e) {
-    logError('saveWeeklyPlanDataProtected', e);
-    return { success: false, error: e.message };
-  }
+  // 保存前スナップショットと監査ログは saveWeeklyPlanDataV2 側で常時実施される。
+  // クライアント互換(4引数シグネチャ)のため薄い委譲として残す。
+  return saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, { source: source || 'web' });
 }
 
 function p3RestoreReflections_(mondayDateStr, snapshotDays) {
@@ -390,7 +349,8 @@ function restoreWeekSnapshotFromWeb(snapshotId) {
       }
     );
 
-    const result = saveWeeklyPlanDataV2(mondayDateStr, week.days || [], current.revision);
+    // 復元直前スナップショットは上で作成済みのため、保存側の自動スナップショットは省略する
+    const result = saveWeeklyPlanDataV2(mondayDateStr, week.days || [], current.revision, { protect: false, source: 'restore' });
     if (!result || !result.success) {
       throw new Error((result && result.error) || '週案の復元に失敗しました');
     }

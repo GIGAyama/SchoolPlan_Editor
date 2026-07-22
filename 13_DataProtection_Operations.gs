@@ -19,6 +19,17 @@ function p3ClearDatabaseInputsByHeader_() {
 }
 
 function clearDatabaseDataProtectedFromWeb() {
+  // 週案保存(saveWeeklyPlanDataV2)と同じ ScriptLock で直列化する。
+  // ロック無しだと保存の読取→書込の間にクリアが割り込み、クリア済みデータが
+  // 保存側のメモリ上の行で部分的に復活するなどの交錯が起こり得る。
+  const lock = LockService.getScriptLock();
+  let locked = false;
+  try {
+    lock.waitLock(10000);
+    locked = true;
+  } catch (lockErr) {
+    return { success: false, error: '他の保存処理が進行中です。少し待ってから再度お試しください。' };
+  }
   try {
     ensureDataProtectionReady_();
     const backup = p3CreateFullBackup_('データベースクリア直前');
@@ -41,6 +52,8 @@ function clearDatabaseDataProtectedFromWeb() {
   } catch (e) {
     logError('clearDatabaseDataProtectedFromWeb', e);
     return { success: false, error: e.message };
+  } finally {
+    if (locked) lock.releaseLock();
   }
 }
 
@@ -48,6 +61,7 @@ function deleteClassProtectedFromWeb(sheetName) {
   try {
     ensureDataProtectionReady_();
     const backup = p3CreateFullBackup_('学級削除直前: ' + sheetName);
+    // deleteClassFromWeb 自体が ScriptLock を取得して直列化する(二重取得を避けるためここでは取らない)
     const result = deleteClassFromWeb(sheetName);
     if (!result || !result.success) {
       return result || { success: false, error: '学級削除に失敗しました。' };

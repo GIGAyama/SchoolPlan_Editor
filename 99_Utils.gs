@@ -128,9 +128,12 @@ function isDateInRange(date, startDate, endDate) {
 /** 
  * 日付を「yyyy/MM/dd」形式の文字列に変換します。 
  */
-function formatDate(date) { 
-  if (!(date instanceof Date)) return ""; 
-  return Utilities.formatDate(date, "JST", "yyyy/MM/dd"); 
+function formatDate(date) {
+  if (!(date instanceof Date)) return "";
+  // 週案の行照合はすべてこの関数の出力をキーに行う。タイムゾーンを "JST" 固定に
+  // すると、非JSTタイムゾーンのスプレッドシートを紐付けたユーザーで日付が±1日
+  // ずれて週の行が見つからなくなるため、スクリプトのタイムゾーンに追従させる。
+  return Utilities.formatDate(date, Session.getScriptTimeZone() || "Asia/Tokyo", "yyyy/MM/dd");
 }
 
 /** 

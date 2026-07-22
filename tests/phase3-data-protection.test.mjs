@@ -7,8 +7,10 @@ const backend = [
   '13_DataProtection_Snapshots.gs',
   '13_DataProtection_Backups.gs',
   '13_DataProtection_Trash.gs',
-  '13_DataProtection_Operations.gs'
+  '13_DataProtection_Operations.gs',
+  '12_Performance.gs'
 ].map(file => fs.readFileSync(file, 'utf8')).join('\n');
+const webApp = fs.readFileSync('07_WebApp.gs', 'utf8');
 
 const frontend = [
   'App_Js_09_Utils.html',
@@ -40,12 +42,32 @@ test('audit payloads redact secrets before persistence', () => {
   assert.match(backend, /function p3RecordAudit_/);
 });
 
-test('weekly protected save creates a restore point before V2 write', () => {
-  const fn = between(backend, 'function saveWeeklyPlanDataProtected', 'function p3RestoreReflections_');
-  const snapshot = fn.indexOf('p3CreateSnapshot_(');
-  const write = fn.indexOf('saveWeeklyPlanDataV2(');
-  assert.ok(snapshot >= 0 && write > snapshot);
+test('weekly save creates a restore point inside the lock before writing', () => {
+  // 保護はクライアントのオーバーライドではなくV2保存自身が行う。
+  // 不変条件: ロック取得 → 保存前スナップショット → 週の行書込 → 監査ログ。
+  const fn = between(backend, 'function saveWeeklyPlanDataV2', 'function getDbSchemaDiagnosticsFromWeb');
+  const lockAt = fn.indexOf('waitLock');
+  const snapshotAt = fn.indexOf('p3CreateSnapshot_(');
+  const writeAt = fn.indexOf('p2WriteChangedWeekRows_(dbSheet');
+  assert.ok(lockAt >= 0 && snapshotAt > lockAt && writeAt > snapshotAt);
   assert.match(fn, /WEEK_SAVE/);
+});
+
+test('protected and V1 save endpoints delegate to the protected V2 save', () => {
+  const protectedFn = between(backend, 'function saveWeeklyPlanDataProtected', 'function p3RestoreReflections_');
+  assert.match(protectedFn, /saveWeeklyPlanDataV2\(/);
+  assert.doesNotMatch(protectedFn, /p3CreateSnapshot_\(/);
+
+  const v1 = between(webApp, 'function saveWeeklyPlanData(', 'function getUnitMasterForSuggest');
+  assert.match(v1, /saveWeeklyPlanDataV2\(/);
+  assert.doesNotMatch(v1, /setValues/,
+    'V1 must not rewrite the whole sheet (it clobbered formula columns)');
+});
+
+test('protected database clear is serialized with weekly saves', () => {
+  const fn = between(backend, 'function clearDatabaseDataProtectedFromWeb', 'function deleteClassProtectedFromWeb');
+  assert.match(fn, /getScriptLock/);
+  assert.match(fn, /waitLock/);
 });
 
 test('week snapshots are scoped per class sheet and restores guard the target sheet', () => {
