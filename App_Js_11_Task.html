@@ -384,9 +384,10 @@
 
         var weekTasks = STATE.allTaskData.filter(t => {
             if (t.status === '完了') return false; // 完了済みタスクは非表示
+            if (t.status === '進行中') return true; // 進行中は期日に関わらず表示（週案画面から完了操作できるように）
             if (!t.dueDate) return true; // 期限未設定は常に表示
             if (t.dueDate <= endStr) return true; // 当週を含め、過去の未完了は「やるべき」として表示
-            return false; // 来週以降のタスクは隠す
+            return false; // 来週以降の未着手タスクは隠す
         });
 
         var prioOrder = { '高': 0, '中': 1, '低': 2 };

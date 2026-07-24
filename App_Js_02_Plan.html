@@ -613,7 +613,10 @@
         withTasksLoaded(function () { showTaskPickerModal(el); });
     }
 
-    /** タスク選択モーダル（複数選択チェックボックス）を表示し、確定時に対象要素へ転記します。 */
+    /**
+     * タスク選択モーダル（複数選択チェックボックス）を表示し、確定時に対象要素へ転記します。
+     * キーワード検索とステータス絞り込みで目的のタスクを素早く探せます。
+     */
     function showTaskPickerModal(targetEl) {
         // 完了済みを除いた未完了タスクを対象にする
         var tasks = (STATE.allTaskData || []).filter(function (t) { return t.status !== '完了'; });
@@ -622,10 +625,22 @@
             return;
         }
 
+        // 期日が近い順（期日なしは最後）→ 同じ期日は優先度が高い順に並べる
+        var prioOrder = { '高': 0, '中': 1, '低': 2 };
+        tasks.sort(function (a, b) {
+            if (!a.dueDate && b.dueDate) return 1;
+            if (a.dueDate && !b.dueDate) return -1;
+            if (a.dueDate !== b.dueDate) return String(a.dueDate).localeCompare(String(b.dueDate));
+            return (prioOrder[a.priority] !== undefined ? prioOrder[a.priority] : 1)
+                - (prioOrder[b.priority] !== undefined ? prioOrder[b.priority] : 1);
+        });
+
         var listHtml = tasks.map(function (t, i) {
             var statusMeta = taskStatusMeta(t.status || '未着手');
             var due = t.dueDate ? t.dueDate.replace(/^\d{4}-/, '').replace('-', '/') : '期日なし';
-            return '<label class="task-pick-item" style="display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;">'
+            // 検索用テキスト（内容・準備物・メモ・出典を小文字で連結）
+            var haystack = [t.content || '', t.resource || '', t.memo || '', t.source || ''].join(' ').toLowerCase();
+            return '<label class="task-pick-item" data-status="' + escHtmlAttr(t.status || '未着手') + '" data-search="' + escHtmlAttr(haystack) + '" style="display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;">'
                 + '<input type="checkbox" class="task-pick-cb" value="' + i + '" style="margin-top:3px;flex-shrink:0;">'
                 + '<span style="text-align:left;line-height:1.4;">'
                 + '<span style="font-weight:600;">☐' + escHtml(t.content) + '</span>'
@@ -637,11 +652,59 @@
         Swal.fire({
             title: 'タスクから選択',
             html: '<div style="font-size:0.8rem;color:var(--text-sub);margin-bottom:6px;text-align:left;">選択したタスクを内容欄に追加します（複数選択可）。未着手のタスクは自動的に「進行中」になります。</div>'
-                + '<div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">' + listHtml + '</div>',
+                + '<input id="taskPickSearch" type="search" class="form-control" placeholder="キーワードで絞り込み（内容・準備物・メモ）" style="font-family:inherit;font-size:0.85rem;margin-bottom:6px;">'
+                + '<div class="task-filter-chips" style="margin-bottom:6px;">'
+                + '<button type="button" class="task-filter-chip task-pick-filter active" data-status-filter="all">すべて</button>'
+                + '<button type="button" class="task-filter-chip task-pick-filter" data-status-filter="未着手">未着手</button>'
+                + '<button type="button" class="task-filter-chip task-pick-filter" data-status-filter="進行中">進行中</button>'
+                + '<span id="taskPickCount" style="margin-left:auto;font-size:0.75rem;color:var(--text-sub);"></span>'
+                + '</div>'
+                + '<div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">' + listHtml
+                + '<div id="taskPickEmpty" style="display:none;color:var(--text-hint);padding:16px;font-size:0.85rem;">条件に合うタスクがありません。</div>'
+                + '</div>',
             showCancelButton: true,
             confirmButtonText: '追加する',
             cancelButtonText: 'キャンセル',
             focusConfirm: false,
+            didOpen: function () {
+                var container = Swal.getHtmlContainer();
+                var searchEl = container.querySelector('#taskPickSearch');
+                var chips = container.querySelectorAll('.task-pick-filter');
+                var items = container.querySelectorAll('.task-pick-item');
+                var emptyEl = container.querySelector('#taskPickEmpty');
+                var countEl = container.querySelector('#taskPickCount');
+                var statusFilter = 'all';
+
+                // 検索キーワード・ステータスで行を絞り込み、選択件数と表示件数を更新する
+                function updatePickerViews() {
+                    var kw = (searchEl.value || '').trim().toLowerCase();
+                    var visible = 0;
+                    Array.prototype.forEach.call(items, function (item) {
+                        var hit = (statusFilter === 'all' || item.dataset.status === statusFilter)
+                            && (!kw || item.dataset.search.indexOf(kw) >= 0);
+                        item.style.display = hit ? 'flex' : 'none';
+                        if (hit) visible++;
+                    });
+                    if (emptyEl) emptyEl.style.display = visible === 0 ? 'block' : 'none';
+                    var checked = container.querySelectorAll('.task-pick-cb:checked').length;
+                    if (countEl) countEl.textContent = '選択中 ' + checked + ' 件 / 表示 ' + visible + ' 件';
+                }
+
+                searchEl.addEventListener('input', updatePickerViews);
+                Array.prototype.forEach.call(chips, function (chip) {
+                    chip.addEventListener('click', function () {
+                        statusFilter = chip.dataset.statusFilter;
+                        Array.prototype.forEach.call(chips, function (c) { c.classList.toggle('active', c === chip); });
+                        updatePickerViews();
+                    });
+                });
+                // チェック状態は絞り込みで隠れても保持される（選択中件数に含まれる）
+                container.addEventListener('change', function (e) {
+                    if (e.target && e.target.classList && e.target.classList.contains('task-pick-cb')) updatePickerViews();
+                });
+                updatePickerViews();
+                searchEl.focus();
+            },
             preConfirm: function () {
                 var checked = Swal.getHtmlContainer().querySelectorAll('.task-pick-cb:checked');
                 if (checked.length === 0) {
