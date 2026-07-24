@@ -5,7 +5,7 @@
  * GAS本体（script.google.com）はクロスオリジンのiframeとして読み込まれるため、
  * ここではキャッシュしません（オフライン時はシェルのみ表示されます）。
  */
-const CACHE_NAME = 'school-plan-note-shell-v1';
+const CACHE_NAME = 'school-plan-note-shell-v2';
 const SHELL_ASSETS = [
   './',
   './index.html',

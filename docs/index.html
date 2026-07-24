@@ -308,6 +308,123 @@
         #menuPanel a:hover {
             background: #f1f3f4;
         }
+
+        /* ===== iOS/iPadOS Safari 向け「ホーム画面に追加」ガイド ===== */
+        #iosGuide {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(32, 33, 36, .5);
+            z-index: 50;
+            overflow-y: auto;
+        }
+
+        #iosGuide .setup-card {
+            max-width: 480px;
+        }
+
+        .ios-guide-steps {
+            list-style: none;
+            margin: 4px 0 8px;
+            font-size: 14px;
+            color: #3c4043;
+            line-height: 1.8;
+        }
+
+        .ios-guide-steps li {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid #f1f3f4;
+        }
+
+        .ios-guide-steps li:last-child {
+            border-bottom: 0;
+        }
+
+        .ios-guide-num {
+            flex: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #e8f0fe;
+            color: #1a73e8;
+            font-size: 13px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 2px;
+        }
+
+        .ios-share-icon {
+            display: inline-block;
+            vertical-align: -3px;
+            width: 16px;
+            height: 16px;
+        }
+
+        /* ===== iOS向けインストール案内バナー ===== */
+        #iosInstallBanner {
+            position: fixed;
+            left: 50%;
+            transform: translateX(-50%);
+            bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+            display: none;
+            align-items: center;
+            gap: 12px;
+            max-width: min(560px, calc(100% - 96px));
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, .2);
+            padding: 12px 14px;
+            z-index: 40;
+        }
+
+        #iosInstallBanner img {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            flex: none;
+        }
+
+        #iosInstallBanner .banner-text {
+            font-size: 12px;
+            color: #3c4043;
+            line-height: 1.5;
+        }
+
+        #iosInstallBanner .banner-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: none;
+        }
+
+        #iosInstallBanner .banner-actions button {
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        #iosBannerGuideBtn {
+            color: #fff;
+            background: #1a73e8;
+            border: 0;
+            font-weight: 700;
+        }
+
+        #iosBannerCloseBtn {
+            color: #5f6368;
+            background: none;
+            border: 0;
+        }
     </style>
 </head>
 
@@ -391,6 +508,56 @@
         <a id="newTabLink" href="#" target="_blank" rel="noopener">新しいタブで開く（ログイン用）</a>
         <button id="installBtn" style="display:none;">アプリとしてインストール</button>
         <button id="changeUrlBtn">アプリのURLを変更</button>
+    </div>
+
+    <!-- iOS/iPadOS Safari 向け「ホーム画面に追加」ガイド -->
+    <div id="iosGuide" role="dialog" aria-modal="true" aria-labelledby="iosGuideTitle">
+        <div class="setup-card">
+            <img src="icons/icon-192.png" alt="週案エディタ">
+            <h1 id="iosGuideTitle">ホーム画面に追加する</h1>
+            <p class="lead">
+                Safari では下の手順でホーム画面に追加すると、<br>
+                アプリのように全画面で使えるようになります。
+            </p>
+            <ol class="ios-guide-steps">
+                <li>
+                    <span class="ios-guide-num">1</span>
+                    <span>Safari の<b>共有ボタン</b>
+                        <svg class="ios-share-icon" viewBox="0 0 16 16" fill="none" stroke="#1a73e8"
+                            stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M8 10V1.5" />
+                            <path d="M5 4l3-3 3 3" />
+                            <path d="M4 7H3v7.5h10V7h-1" />
+                        </svg>
+                        をタップします。<br>
+                        <small style="color:#5f6368;">iPad はアドレスバーの右上、iPhone は画面下にあります。</small>
+                    </span>
+                </li>
+                <li>
+                    <span class="ios-guide-num">2</span>
+                    <span>メニューから<b>「ホーム画面に追加」</b>を選びます。<br>
+                        <small style="color:#5f6368;">見つからないときは、メニューを下にスクロールしてください。</small>
+                    </span>
+                </li>
+                <li>
+                    <span class="ios-guide-num">3</span>
+                    <span>右上の<b>「追加」</b>をタップすると、ホーム画面にアイコンが追加されます。</span>
+                </li>
+            </ol>
+            <button class="btn-primary" id="iosGuideCloseBtn">閉じる</button>
+        </div>
+    </div>
+
+    <!-- iOS向けインストール案内バナー（初回のみ表示） -->
+    <div id="iosInstallBanner">
+        <img src="icons/icon-192.png" alt="">
+        <div class="banner-text">
+            ホーム画面に追加すると、<br>アプリのように全画面で使えます。
+        </div>
+        <div class="banner-actions">
+            <button id="iosBannerGuideBtn">追加方法を見る</button>
+            <button id="iosBannerCloseBtn">閉じる</button>
+        </div>
     </div>
 
     <script>
@@ -623,22 +790,73 @@
                 }
             });
 
-            // --- インストールボタン（Chromeのbeforeinstallprompt対応）---
+            // --- インストール導線 ---
+            // Chrome/Edge 系: beforeinstallprompt イベントで表示されるネイティブのプロンプトを使う。
+            // iOS/iPadOS の Safari: beforeinstallprompt が存在しないため、
+            // 「共有 → ホーム画面に追加」の手順ガイド（#iosGuide）を表示して案内する。
+            var iosGuide = document.getElementById('iosGuide');
+            var iosBanner = document.getElementById('iosInstallBanner');
+            // 案内バナーを一度閉じたら再表示しないためのキー
+            var IOS_HINT_KEY = 'schoolPlanNote.iosInstallHintDismissed';
+
+            // iPadOS 13以降の Safari は UA が Mac と同じになるため、
+            // タッチ対応（maxTouchPoints）との組み合わせで iPad と判定する。
+            var isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+            // すでにホーム画面から起動している（＝インストール済み）かどうか
+            var isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+                window.navigator.standalone === true;
+
+            function showIosGuide() {
+                menuPanel.style.display = 'none';
+                iosGuide.style.display = 'flex';
+            }
+
+            function dismissIosBanner() {
+                iosBanner.style.display = 'none';
+                try { localStorage.setItem(IOS_HINT_KEY, '1'); } catch (e) { }
+            }
+
             window.addEventListener('beforeinstallprompt', function (e) {
                 e.preventDefault();
                 deferredPrompt = e;
                 installBtn.style.display = 'block';
             });
             installBtn.addEventListener('click', function () {
-                if (!deferredPrompt) return;
-                deferredPrompt.prompt();
-                deferredPrompt = null;
-                installBtn.style.display = 'none';
                 menuPanel.style.display = 'none';
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    deferredPrompt = null;
+                    installBtn.style.display = 'none';
+                    return;
+                }
+                if (isIosDevice) showIosGuide();
             });
             window.addEventListener('appinstalled', function () {
                 installBtn.style.display = 'none';
             });
+
+            if (isIosDevice && !isStandalone) {
+                // Safari では beforeinstallprompt が発火しないので、メニューに常時表示する
+                installBtn.textContent = 'ホーム画面に追加（インストール）';
+                installBtn.style.display = 'block';
+                // 初回のみ、画面下部に案内バナーを表示する
+                var hintDismissed = false;
+                try { hintDismissed = localStorage.getItem(IOS_HINT_KEY) === '1'; } catch (e) { }
+                if (!hintDismissed) iosBanner.style.display = 'flex';
+            }
+
+            document.getElementById('iosGuideCloseBtn').addEventListener('click', function () {
+                iosGuide.style.display = 'none';
+            });
+            iosGuide.addEventListener('click', function (e) {
+                if (e.target === iosGuide) iosGuide.style.display = 'none';
+            });
+            document.getElementById('iosBannerGuideBtn').addEventListener('click', function () {
+                dismissIosBanner();
+                showIosGuide();
+            });
+            document.getElementById('iosBannerCloseBtn').addEventListener('click', dismissIosBanner);
 
             // --- Service Worker 登録 ---
             if ('serviceWorker' in navigator) {
