@@ -93,3 +93,17 @@ test('small client fixes stay in place', () => {
   assert.match(print, /days\[0\]\.date && days\[6\] && days\[6\]\.date/);
   assert.match(read('App_Js_11_Task.html'), /days\.length < 7/);
 });
+
+test('SweetAlert2 dialogs and toasts stack above every in-app overlay', () => {
+  // PDFプレビュー(.pdf-preview-overlay: z-index 1200)の上で確認ダイアログを出すと、
+  // SweetAlert2デフォルト(1060)のままでは後ろに隠れて操作できなかった
+  const css = read('App_Css.html');
+  const swalMatch = css.match(/\.swal2-container\s*\{[^}]*?z-index:\s*(\d+)/);
+  assert.ok(swalMatch, 'expected a .swal2-container z-index override in App_Css.html');
+  const swalZ = parseInt(swalMatch[1], 10);
+  const allZ = [...css.matchAll(/z-index:\s*(\d+)/g)].map(m => parseInt(m[1], 10));
+  const maxZ = Math.max(...allZ);
+  assert.equal(swalZ, maxZ, `.swal2-container (${swalZ}) must be the highest z-index in App_Css.html (max: ${maxZ})`);
+  assert.equal(allZ.filter(z => z === maxZ).length, 1,
+    'no other element may share the top z-index with .swal2-container');
+});

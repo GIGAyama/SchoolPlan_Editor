@@ -2941,6 +2941,13 @@
     }
 
     /* ===== SweetAlert2 カスタマイズ ===== */
+    /* ダイアログ・トーストは常に最前面に出す。
+       デフォルトの z-index:1060 のままだと、PDFプレビュー(.pdf-preview-overlay: 1200)や
+       コンテキストメニュー(9999)などより後ろに隠れてしまうため。 */
+    .swal2-container {
+        z-index: 10000 !important;
+    }
+
     .swal2-popup {
         font-family: 'Zen Maru Gothic', sans-serif !important;
     }
