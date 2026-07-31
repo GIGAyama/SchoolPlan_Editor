@@ -444,31 +444,39 @@
         p2CacheWeek(STATE.weekData);
     }
 
+    // 保存は beginSaveRequest/endSaveRequest で直列化する（App_Js_02_Plan で定義）。
+    // 進行中の保存があるうちに別経路の保存を投げると、後着の要求が保存前のリビジョンを
+    // 持ったまま届き、自分の保存が「競合」として弾かれてしまう。
     function autoSaveAndThen(callback) {
+        if (isSaveInFlight()) {
+            whenSaveIdle(function () { autoSaveAndThen(callback); });
+            return;
+        }
         if (!STATE.editMode || !hasUnsavedChanges()) {
             if (STATE.editMode) { STATE.editMode = false; updateEditUI(); }
             callback();
             return;
         }
         if (_autoSaving) return;
-        _autoSaving = true;
         var days = collectCurrentEditData();
-        if (!days) { _autoSaving = false; callback(); return; }
+        if (!days) { callback(); return; }
 
         var subjectErrors = validateDaysSubjects(days);
         if (subjectErrors.length > 0) {
-            _autoSaving = false;
             showToast('error', '教科名の入力に誤りがあるため自動保存できません: ' + subjectErrors[0]
                 + (subjectErrors.length > 1 ? '（他' + (subjectErrors.length - 1) + '件）' : ''));
             return;
         }
 
+        if (!beginSaveRequest()) { whenSaveIdle(function () { autoSaveAndThen(callback); }); return; }
+        _autoSaving = true;
         showToast('info', '自動保存中...');
         google.script.run
             .withSuccessHandler(function (result) {
                 _autoSaving = false;
+                endSaveRequest();
                 if (result.success) {
-                    STATE.weekData.days = days;
+                    adoptSavedWeekDays(result, days);
                     STATE.weekData.revision = result.revision;
                     STATE.editMode = false;
                     updateEditUI();
@@ -476,13 +484,17 @@
                     showToast('success', '自動保存しました');
                     callback();
                 } else if (result.conflict) {
-                    handleSaveConflict();
+                    handleSaveConflict(result, days, function (revision) {
+                        STATE.weekData.revision = revision;
+                        autoSaveAndThen(callback);
+                    });
                 } else {
                     showToast('error', '自動保存失敗: ' + result.error + ' 手動で保存してください。');
                 }
             })
             .withFailureHandler(function (e) {
                 _autoSaving = false;
+                endSaveRequest();
                 showToast('error', '自動保存エラー: ' + e.message + ' 手動で保存してください。');
             })
             .saveWeeklyPlanDataV2(STATE.mondayStr, days, STATE.weekData.revision);
@@ -498,6 +510,7 @@
             return;
         }
 
+        if (!beginSaveRequest()) { showToast('info', '保存中です。完了までお待ちください。'); return; }
         var btn = document.getElementById('saveBtn');
         btn.disabled = true;
         btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 保存中...';
@@ -505,21 +518,26 @@
 
         google.script.run
             .withSuccessHandler(function (result) {
+                endSaveRequest();
                 btn.disabled = false;
                 btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 if (result.success) {
-                    STATE.weekData.days = days;
+                    adoptSavedWeekDays(result, days);
                     STATE.weekData.revision = result.revision;
                     p2UpdateCurrentWeekCache();
                     cancelEdit();
                     showToast('success', result.message);
                 } else if (result.conflict) {
-                    handleSaveConflict();
+                    handleSaveConflict(result, days, function (revision) {
+                        STATE.weekData.revision = revision;
+                        saveWeeklyPlan();
+                    });
                 } else {
                     showToast('error', '保存失敗: ' + result.error);
                 }
             })
             .withFailureHandler(function (e) {
+                endSaveRequest();
                 btn.disabled = false;
                 btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 showToast('error', '通信エラー: ' + e.message);
@@ -533,21 +551,32 @@
         var mondayStr = STATE.mondayStr;
         clearTimeout(_viewSaveTimer);
         _viewSaveTimer = setTimeout(function () {
-            google.script.run
-                .withSuccessHandler(function (result) {
-                    if (result.success) {
-                        weekData.revision = result.revision;
-                        p2UpdateCurrentWeekCache();
-                    } else if (result.conflict) {
-                        handleSaveConflict();
-                    } else {
-                        showToast('error', '変更の保存に失敗: ' + result.error);
-                    }
-                })
-                .withFailureHandler(function (e) {
-                    showToast('error', '変更の保存に失敗（通信エラー）: ' + e.message);
-                })
-                .saveWeeklyPlanDataV2(mondayStr, weekData.days, weekData.revision);
+            whenSaveIdle(function () {
+                if (!beginSaveRequest()) { whenSaveIdle(function () { persistViewMutation(); }); return; }
+                var days = weekData.days;
+                google.script.run
+                    .withSuccessHandler(function (result) {
+                        endSaveRequest();
+                        if (result.success) {
+                            var normalized = adoptSavedWeekDays(result, days, weekData);
+                            weekData.revision = result.revision;
+                            p2UpdateCurrentWeekCache();
+                            if (normalized && STATE.weekData === weekData) renderWeekGrid(weekData.days);
+                        } else if (result.conflict) {
+                            handleSaveConflict(result, days, function (revision) {
+                                weekData.revision = revision;
+                                persistViewMutation();
+                            });
+                        } else {
+                            showToast('error', '変更の保存に失敗: ' + result.error);
+                        }
+                    })
+                    .withFailureHandler(function (e) {
+                        endSaveRequest();
+                        showToast('error', '変更の保存に失敗（通信エラー）: ' + e.message);
+                    })
+                    .saveWeeklyPlanDataV2(mondayStr, days, weekData.revision);
+            });
         }, 450);
     }
 </script>

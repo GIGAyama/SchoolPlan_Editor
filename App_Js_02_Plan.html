@@ -856,27 +856,173 @@
     var _autoSaving = false;
     var _viewSaveTimer = null;
 
+    // ===== 保存要求の直列化 =====
+    // 手動保存・画面切替の自動保存・閲覧モードの自動保存が同時に飛ぶと、
+    // 後から届いた方は「保存前のリビジョン」を持ったままサーバへ届くため、
+    // 実際には自分の保存が反映されただけなのに競合と判定されてしまう。
+    // 保存は必ずこのゲートを通し、1件ずつ順番に実行する。
+    var _saveInFlight = false;
+    var _afterSaveQueue = [];
+
+    /** 保存要求を開始できるなら true。既に別の保存が飛んでいるなら false。 */
+    function beginSaveRequest() {
+        if (_saveInFlight) return false;
+        _saveInFlight = true;
+        return true;
+    }
+
+    /**
+     * 保存要求の完了を通知し、待たせていた処理を実行する。
+     * 待機処理は必ず次のタスクで実行する。応答ハンドラの途中で呼ばれても、
+     * リビジョン反映などハンドラ内の後続処理が終わってから動くようにするため。
+     */
+    function endSaveRequest() {
+        _saveInFlight = false;
+        if (!_afterSaveQueue.length) return;
+        setTimeout(function () {
+            var queued = _afterSaveQueue;
+            _afterSaveQueue = [];
+            queued.forEach(function (fn) {
+                try { fn(); } catch (e) { /* 後続処理の失敗で他の待機処理を止めない */ }
+            });
+        }, 0);
+    }
+
+    /** 保存が飛んでいなければ即時、飛んでいれば完了後に実行する。 */
+    function whenSaveIdle(fn) {
+        if (!_saveInFlight) { fn(); return; }
+        _afterSaveQueue.push(fn);
+    }
+
+    /** 保存中かどうか（進行中の保存があるあいだの二重送信抑止に使う）。 */
+    function isSaveInFlight() {
+        return _saveInFlight;
+    }
+
+    // ===== 保存結果の取り込み =====
+    // サーバは「シートに実際に入った値」を days で返す。スプレッドシートが
+    // 入力を解釈し直した場合（"007"→7 など）に手元の値がずれ続けないよう、
+    // 保存成功時は返ってきた値で手元のデータを揃える。
+    function adoptSavedWeekDays(result, fallbackDays, weekData) {
+        var target = weekData || STATE.weekData;
+        if (!target) return false;
+        var saved = (result && result.days && result.days.length) ? result.days : fallbackDays;
+        var normalized = JSON.stringify(saved) !== JSON.stringify(target.days);
+        target.days = saved;
+        return normalized;
+    }
+
+    /**
+     * 現在の編集内容を1回だけ保存し、成否を Promise で返します。
+     * 「保存してから実行する」系の操作（一括自動入力・コマ移動）の前処理で使い、
+     * 他の保存と重ならないよう保存ゲートを通します。
+     */
+    function saveCurrentWeekOnce(source) {
+        return new Promise(function (resolve) {
+            var days = collectCurrentEditData();
+            if (!days) { resolve(false); return; }
+            var run = function () {
+                if (!beginSaveRequest()) { whenSaveIdle(run); return; }
+                google.script.run
+                    .withSuccessHandler(function (result) {
+                        endSaveRequest();
+                        if (result.success) {
+                            adoptSavedWeekDays(result, days);
+                            STATE.weekData.revision = result.revision;
+                            if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
+                            cancelEdit();
+                            showToast('success', result.message);
+                            resolve(true);
+                        } else if (result.conflict) {
+                            handleSaveConflict(result, days);
+                            resolve(false);
+                        } else {
+                            showToast('error', '保存失敗: ' + result.error);
+                            resolve(false);
+                        }
+                    })
+                    .withFailureHandler(function (e) {
+                        endSaveRequest();
+                        showToast('error', '通信エラー: ' + e.message);
+                        resolve(false);
+                    })
+                    .saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, source);
+            };
+            whenSaveIdle(run);
+        });
+    }
+
+    /** 2つの週データを比較し、「月(3校時・行事)」形式の差分ラベル配列を返す。 */
+    function summarizeWeekDiff(daysA, daysB) {
+        var labels = {
+            event: '行事', preclass: '登校前', morning: '朝学習', recess1: '中休み',
+            recess2: '昼休み', afterschool: '放課後', homework: '宿題', items: '持ち物'
+        };
+        var byDate = {};
+        (daysA || []).forEach(function (d) { if (d && d.date) byDate[d.date] = d; });
+        var result = [];
+        (daysB || []).forEach(function (b) {
+            if (!b || !b.date) return;
+            var a = byDate[b.date] || {};
+            var fields = [];
+            Object.keys(labels).forEach(function (key) {
+                if (String(a[key] || '') !== String(b[key] || '')) fields.push(labels[key]);
+            });
+            for (var n = 0; n < 6; n++) {
+                var pa = (a.periods && a.periods[n]) || {};
+                var pb = (b.periods && b.periods[n]) || {};
+                if (String(pa.subject || '') !== String(pb.subject || '')
+                    || String(pa.unit || '') !== String(pb.unit || '')
+                    || String(pa.content || '') !== String(pb.content || '')) {
+                    fields.push((n + 1) + '校時');
+                }
+            }
+            if (fields.length) result.push((b.dayLabel || b.date) + '（' + fields.join('・') + '）');
+        });
+        return result;
+    }
+
     // ===== 保存競合（楽観ロック）時の処理 =====
-    // 他の端末やAI処理でこの週が更新されていた場合に、上書きを防いで再読み込みを促す。
-    function handleSaveConflict() {
+    // サーバは「他者の変更を実際に上書きしてしまう保存」だけを競合として返す。
+    // どこが食い違っているのかを示し、読み込み直し・編集継続・上書き保存を選ばせる。
+    // @param {Object} [result] サーバの応答（result.current にシートの現在値）
+    // @param {Object[]} [attemptedDays] 保存しようとした内容
+    // @param {Function} [overwrite] 上書き再保存（サーバの最新リビジョンを受け取る）
+    function handleSaveConflict(result, attemptedDays, overwrite) {
         _autoSaving = false;
+        var current = result && result.current;
         if (typeof Swal === 'undefined') {
             showToast('error', 'この週は他で更新されています。最新を読み込み直してください。');
             return;
         }
+        var diff = (current && attemptedDays) ? summarizeWeekDiff(current.days, attemptedDays) : [];
+        var diffHtml = diff.length
+            ? '<div style="text-align:left;font-size:0.82rem;margin-top:8px;padding:8px;'
+              + 'background:var(--surface-hover);border-radius:6px;max-height:160px;overflow-y:auto;">'
+              + '<strong>今の内容と違うところ</strong><br>' + escHtml(diff.join(' / ')) + '</div>'
+            : '';
+        var canOverwrite = !!(current && current.revision && typeof overwrite === 'function');
         Swal.fire({
             icon: 'warning',
             title: '保存の競合',
-            text: 'この週は他の端末またはAI処理によって更新されました。最新の内容を読み込み直してください（現在の編集内容は破棄されます）。',
+            html: '<div style="text-align:left;font-size:0.88rem;">'
+                + 'この週の内容が、編集を始めた時点から変わっています。'
+                + '別のタブ・端末での保存や、自動入力などが原因のことがあります。'
+                + '</div>' + diffHtml,
+            showDenyButton: canOverwrite,
+            denyButtonText: 'この内容で上書き',
             showCancelButton: true,
             confirmButtonText: '最新を読み込む',
             cancelButtonText: '編集を続ける',
-            confirmButtonColor: '#ea4335'
+            confirmButtonColor: '#ea4335',
+            denyButtonColor: '#f9ab00'
         }).then(function (r) {
             if (r.isConfirmed) {
                 STATE.editMode = false;
                 updateEditUI();
                 doLoadWeeklyPlan();
+            } else if (r.isDenied && canOverwrite) {
+                overwrite(current.revision);
             }
         });
     }
@@ -1522,32 +1668,7 @@
             if (!saveFirst.isConfirmed) return;
 
             // 保存を実行し完了を待つ
-            var saved = await new Promise(function (resolve) {
-                var days = collectCurrentEditData();
-                if (!days) { resolve(false); return; }
-                google.script.run
-                    .withSuccessHandler(function (result) {
-                        if (result.success) {
-                            STATE.weekData.days = days;
-                            STATE.weekData.revision = result.revision;
-                            if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
-                            cancelEdit();
-                            showToast('success', result.message);
-                            resolve(true);
-                        } else if (result.conflict) {
-                            handleSaveConflict();
-                            resolve(false);
-                        } else {
-                            showToast('error', '保存失敗: ' + result.error);
-                            resolve(false);
-                        }
-                    })
-                    .withFailureHandler(function (e) {
-                        showToast('error', '通信エラー: ' + e.message);
-                        resolve(false);
-                    })
-                    .saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, 'batch-autofill');
-            });
+            var saved = await saveCurrentWeekOnce('batch-autofill');
             if (!saved) return;
         }
 
@@ -1714,32 +1835,7 @@
             });
             if (!saveFirst.isConfirmed) return;
 
-            var saved = await new Promise(function (resolve) {
-                var days = collectCurrentEditData();
-                if (!days) { resolve(false); return; }
-                google.script.run
-                    .withSuccessHandler(function (result) {
-                        if (result.success) {
-                            STATE.weekData.days = days;
-                            STATE.weekData.revision = result.revision;
-                            if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
-                            cancelEdit();
-                            showToast('success', result.message);
-                            resolve(true);
-                        } else if (result.conflict) {
-                            handleSaveConflict();
-                            resolve(false);
-                        } else {
-                            showToast('error', '保存失敗: ' + result.error);
-                            resolve(false);
-                        }
-                    })
-                    .withFailureHandler(function (e) {
-                        showToast('error', '通信エラー: ' + e.message);
-                        resolve(false);
-                    })
-                    .saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, 'shift-lessons');
-            });
+            var saved = await saveCurrentWeekOnce('shift-lessons');
             if (!saved) return;
         }
 

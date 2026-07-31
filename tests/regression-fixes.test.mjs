@@ -107,3 +107,63 @@ test('SweetAlert2 dialogs and toasts stack above every in-app overlay', () => {
   assert.equal(allZ.filter(z => z === maxZ).length, 1,
     'no other element may share the top z-index with .swal2-container');
 });
+
+// ===== 保存の競合(楽観ロック)の誤検知対策 =====
+// 単独利用でも「保存の競合」が頻発していた。原因は2つ:
+//   1) 保存応答のリビジョンをメモリ上の行から算出していた。スプレッドシートは
+//      setValues 時に値を解釈し直す("1/3"→日付、"007"→7 など)ため、クライアントの
+//      リビジョンがシート実データと恒久的にずれ、以降の保存が毎回競合になった。
+//   2) 手動保存と画面切替の自動保存が同時に飛び、後着が保存前のリビジョンを送っていた。
+
+test('save response revision is computed from the sheet after the write', () => {
+  const perf = read('12_Performance.gs');
+  const fn = perf.slice(perf.indexOf('function saveWeeklyPlanDataV2'), perf.indexOf('function getDbSchemaDiagnosticsFromWeb'));
+  const writeAt = fn.indexOf('p2WriteChangedWeekRows_(dbSheet');
+  const flushAt = fn.indexOf('SpreadsheetApp.flush()', writeAt);
+  const rereadAt = fn.indexOf('p2ReadRowsForDates_(dbSheet', writeAt);
+  const revisionAt = fn.indexOf('const newRevision =');
+  assert.ok(writeAt >= 0 && flushAt > writeAt && rereadAt > writeAt,
+    'the week rows must be re-read from the sheet after writing');
+  assert.ok(revisionAt > rereadAt, 'newRevision must be derived from the re-read rows');
+  assert.match(fn.slice(revisionAt, revisionAt + 160), /afterState/);
+  // 正規化後の値をクライアントへ返し、手元のデータをシートに揃える
+  assert.match(fn, /days: savedDays/);
+});
+
+test('a revision mismatch is only a conflict when it would overwrite changes', () => {
+  const perf = read('12_Performance.gs');
+  const fn = perf.slice(perf.indexOf('function saveWeeklyPlanDataV2'), perf.indexOf('function getDbSchemaDiagnosticsFromWeb'));
+  assert.match(fn, /currentRevision !== baseRevision && uniqueChangedRows\.length > 0/);
+  // 競合応答には差分提示・上書き再送のための現在値を含める
+  assert.match(fn, /current: \{ mondayDateStr, revision: currentRevision, days: beforeDays \}/);
+  // 判定は変更適用後に行うが、書き込みより前であること
+  assert.ok(fn.indexOf('conflict: true') < fn.indexOf('p2WriteChangedWeekRows_(dbSheet'));
+});
+
+test('every client save path goes through the serialization gate', () => {
+  assert.match(plan, /function beginSaveRequest/);
+  assert.match(plan, /function endSaveRequest/);
+  assert.match(plan, /function whenSaveIdle/);
+  assert.match(plan, /function adoptSavedWeekDays/);
+  for (const [name, source] of [['App_Js_14_MultiClass', multiClass],
+                                ['App_Js_15_DataProtection_Overrides', read('App_Js_15_DataProtection_Overrides.html')]]) {
+    const begins = source.match(/beginSaveRequest\(\)/g) || [];
+    const ends = source.match(/endSaveRequest\(\)/g) || [];
+    assert.ok(begins.length >= 3, `${name}: expected the gate on manual/auto/view saves, got ${begins.length}`);
+    // 成功・失敗の両ハンドラで解放する(3経路×2)
+    assert.ok(ends.length >= 6, `${name}: expected endSaveRequest in both handlers, got ${ends.length}`);
+    assert.match(source, /adoptSavedWeekDays\(result, days/);
+  }
+  // 「保存してから実行」系も同じゲートを通す
+  assert.match(plan, /function saveCurrentWeekOnce/);
+  assert.match(plan, /await saveCurrentWeekOnce\('batch-autofill'\)/);
+  assert.match(plan, /await saveCurrentWeekOnce\('shift-lessons'\)/);
+});
+
+test('the conflict dialog shows what differs and offers a non-destructive choice', () => {
+  assert.match(plan, /function handleSaveConflict\(result, attemptedDays, overwrite\)/);
+  assert.match(plan, /function summarizeWeekDiff/);
+  const dialog = plan.slice(plan.indexOf('function handleSaveConflict'), plan.indexOf('// ====='  , plan.indexOf('function handleSaveConflict')));
+  assert.match(dialog, /denyButtonText: 'この内容で上書き'/);
+  assert.match(dialog, /cancelButtonText: '編集を続ける'/);
+});
