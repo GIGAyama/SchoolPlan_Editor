@@ -346,18 +346,11 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
     const rowState = p2ReadRowsForDates_(dbSheet, dbCols, weekDateStrs);
     const currentRows = [...rowState.rowByDate.values()];
     const currentRevision = computeWeekRevision_(currentRows, dbCols, weekDateStrs);
-
-    if (baseRevision && currentRevision !== baseRevision) {
-      return {
-        success: false,
-        conflict: true,
-        error: 'この週は他の端末またはAI処理によって更新されています。最新を読み込み直してから保存してください。'
-      };
-    }
+    const holidayMap = getHolidayMap_();
 
     // p2ApplyDayToRow_ は rowState の行配列を直接書き換えるため、
     // スナップショット用の保存前状態はここで確定しておく。
-    const beforeDays = p2BuildWeekDays_(rowState, dbCols, weekDateStrs, null);
+    const beforeDays = p2BuildWeekDays_(rowState, dbCols, weekDateStrs, holidayMap);
 
     const changedRowNumbers = [];
     const notFoundDates = [];
@@ -375,6 +368,22 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
     }
 
     const uniqueChangedRows = [...new Set(changedRowNumbers)].sort((a, b) => a - b);
+
+    // 楽観ロックの判定は「リビジョンの不一致」ではなく「他者の変更を上書きするか」で行う。
+    // 送信内容がシートの現在値と完全に一致するなら書き込む差分が無く、誰の変更も失われない。
+    // 同一内容の二重送信(手動保存と画面切替の自動保存が重なる等)を競合として弾かないことで、
+    // 実際には競合していない保存が「保存の競合」ダイアログになるのを防ぐ。
+    if (baseRevision && currentRevision !== baseRevision && uniqueChangedRows.length > 0) {
+      return {
+        success: false,
+        conflict: true,
+        error: 'この週の内容が、いま保存しようとしている編集を始めた時点から変わっています。'
+          + '最新を読み込み直してから保存してください。',
+        // クライアントが差分提示・上書き再送に使う現在値
+        current: { mondayDateStr, revision: currentRevision, days: beforeDays }
+      };
+    }
+
     const protect = !(options && options.protect === false);
     let restorePointId = '';
 
@@ -398,7 +407,18 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
 
     p2WriteChangedWeekRows_(dbSheet, dbCols, rowState, uniqueChangedRows);
 
-    const newRevision = computeWeekRevision_([...rowState.rowByDate.values()], dbCols, weekDateStrs);
+    // 新しいリビジョンは「書き込んだ値」ではなく「シートに実際に入った値」から算出する。
+    // スプレッドシートは setValues の際に文字列を解釈し直す("1/3"→日付、"007"→7、
+    // "TRUE"→真偽値 など)。メモリ上の行から算出すると、クライアントが持つリビジョンが
+    // シートの実データと食い違ったままになり、そのタブでの以降の保存が毎回
+    // 「保存の競合」になっていた(単独利用でも頻発する原因)。
+    let afterState = rowState;
+    if (uniqueChangedRows.length > 0) {
+      SpreadsheetApp.flush();
+      afterState = p2ReadRowsForDates_(dbSheet, dbCols, weekDateStrs);
+    }
+    const savedDays = p2BuildWeekDays_(afterState, dbCols, weekDateStrs, holidayMap);
+    const newRevision = computeWeekRevision_([...afterState.rowByDate.values()], dbCols, weekDateStrs);
 
     if (uniqueChangedRows.length > 0 && protect) {
       p3RecordAudit_(
@@ -407,7 +427,7 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
         mondayDateStr,
         ((options && options.source) || 'web') + 'から週案を保存 (' + uniqueChangedRows.length + '日)',
         { revision: currentRevision, snapshotId: restorePointId, days: p3ComparableDays_(beforeDays) },
-        { revision: newRevision, days: p3ComparableDays_(days) },
+        { revision: newRevision, days: p3ComparableDays_(savedDays) },
         'save_' + Utilities.getUuid()
       );
     }
@@ -423,6 +443,9 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
       message,
       updatedCount: uniqueChangedRows.length,
       revision: newRevision,
+      // シートに実際に入った値。クライアントはこれで手元のデータを揃え、
+      // シート側で正規化された値(例: "007"→7)を持ち続けないようにする。
+      days: savedDays,
       restorePointId,
       performance: {
         api: 'v2',
