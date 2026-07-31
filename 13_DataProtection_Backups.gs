@@ -84,14 +84,56 @@ function p3CleanupBackups_(ss) {
   return remove.length;
 }
 
+/** 未設定は有効扱い。明示的に '0' を保存したときだけ日次バックアップを止める。 */
+function p3IsDailyBackupEnabled_(ss) {
+  return p3MetaGet_(ss, 'dailyBackupEnabled') !== '0';
+}
+
 function p3MaybeCreateDailyBackup_() {
   const ss = getSs_();
+  if (!p3IsDailyBackupEnabled_(ss)) return { created: false, backup: null, reason: 'disabled' };
   const lastDaily = p3MetaGet_(ss, 'lastDailyBackupDate');
   const today = p3TodayKey_();
-  if (lastDaily === today) return { created: false, backup: null };
-  const backup = p3CreateFullBackup_('1日1回の自動バックアップ');
-  p3MetaSet_(ss, 'lastDailyBackupDate', today);
-  return { created: true, backup };
+  if (lastDaily === today) return { created: false, backup: null, reason: 'already' };
+
+  // 複数タブ・複数端末から同時にアプリを開くと「本日分の有無を確認 → 作成 → 日付を記録」
+  // の間に別実行が割り込み、同じ日のバックアップが重複して作られていた。ロックで囲って
+  // 直列化する。取得できなければ別実行が本日分を作成中なので、待たずに諦めてよい。
+  return p3TryWithUserLock_(20000, () => {
+    // ロック待ちの間に別実行が作り終えている場合があるため、取得後に読み直す。
+    if (p3MetaGet_(ss, 'lastDailyBackupDate') === today) {
+      return { created: false, backup: null, reason: 'already' };
+    }
+    const backup = p3CreateFullBackup_('1日1回の自動バックアップ');
+    p3MetaSet_(ss, 'lastDailyBackupDate', today);
+    return { created: true, backup, reason: 'created' };
+  }, { created: false, backup: null, reason: 'busy' });
+}
+
+function setDailyBackupEnabledFromWeb(enabled) {
+  try {
+    ensureDataProtectionReady_();
+    const ss = getSs_();
+    const before = p3IsDailyBackupEnabled_(ss);
+    const after = !!enabled;
+    p3MetaSet_(ss, 'dailyBackupEnabled', after ? '1' : '0');
+    p3RecordAudit_(
+      'DAILY_BACKUP_SETTING', 'database', ss.getId(),
+      after ? '1日1回の自動バックアップを有効化' : '1日1回の自動バックアップを無効化',
+      { dailyBackupEnabled: before }, { dailyBackupEnabled: after },
+      'setting_' + Utilities.getUuid()
+    );
+    return {
+      success: true,
+      enabled: after,
+      message: after
+        ? '1日1回の自動バックアップを有効にしました。'
+        : '1日1回の自動バックアップを無効にしました。手動バックアップと、全消去・学級削除の直前バックアップは引き続き作成されます。'
+    };
+  } catch (e) {
+    logError('setDailyBackupEnabledFromWeb', e);
+    return { success: false, error: e.message };
+  }
 }
 
 function createFullBackupFromWeb(label) {

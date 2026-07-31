@@ -8,14 +8,16 @@
  * - OAuthスコープを追加せず、spreadsheets + drive.file の範囲で動作する
  */
 
-const P3_SCHEMA_VERSION_ = 3;
+const P3_SCHEMA_VERSION_ = 4;
 const P3_META_SHEET_ = '_週案_メタ';
 const P3_AUDIT_SHEET_ = '_週案_監査ログ';
 const P3_SNAPSHOT_SHEET_ = '_週案_復元ポイント';
 const P3_TRASH_SHEET_ = '_週案_ごみ箱';
 
 const P3_BACKUP_RETENTION_DAYS_ = 30;
-const P3_BACKUP_MAX_COUNT_ = 10;
+// バックアップは別スプレッドシートとしてマイドライブ直下に並ぶため、世代数を絞って
+// ドライブが散らからないようにする。これを超えた分は作成・一覧表示のたびに掃除される。
+const P3_BACKUP_MAX_COUNT_ = 4;
 const P3_SNAPSHOT_RETENTION_DAYS_ = 90;
 const P3_SNAPSHOT_MAX_COUNT_ = 300;
 const P3_AUTO_SNAPSHOT_INTERVAL_MINUTES_ = 30;
@@ -193,6 +195,43 @@ function p3RecordAudit_(action, entityType, entityId, summary, beforeValue, afte
   }
 }
 
+// LockService のロックは実行単位で保持されるため、同一実行内で二重に waitLock すると
+// 挙動が保証されない。ネストした取得は「外側が既に保持している」とみなして素通しする。
+let p3UserLockDepth_ = 0;
+
+function p3RunHoldingUserLock_(fn) {
+  p3UserLockDepth_++;
+  try {
+    return fn();
+  } finally {
+    p3UserLockDepth_--;
+  }
+}
+
+/** ユーザー単位のロックを取得して fn を実行する。取得できなければ例外を投げる。 */
+function p3WithUserLock_(timeoutMs, fn) {
+  if (p3UserLockDepth_ > 0) return p3RunHoldingUserLock_(fn);
+  const lock = LockService.getUserLock();
+  lock.waitLock(timeoutMs);
+  try {
+    return p3RunHoldingUserLock_(fn);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** ロックを取れなければ待たずに busyValue を返す。重複実行を捨ててよい処理に使う。 */
+function p3TryWithUserLock_(timeoutMs, fn, busyValue) {
+  if (p3UserLockDepth_ > 0) return p3RunHoldingUserLock_(fn);
+  const lock = LockService.getUserLock();
+  if (!lock.tryLock(timeoutMs)) return busyValue;
+  try {
+    return p3RunHoldingUserLock_(fn);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function p3MigrationV1_(ss) {
   p3EnsureInternalSheets_(ss);
   p3MetaSet_(ss, 'protectionCreatedAt', p3NowIso_());
@@ -209,12 +248,14 @@ function p3MigrationV3_(ss) {
   p3MetaSet_(ss, 'lastIntegrityCheckAt', '');
 }
 
+function p3MigrationV4_(ss) {
+  p3MetaSet_(ss, 'backupMaxCount', P3_BACKUP_MAX_COUNT_);
+  // 既存ユーザーの挙動を変えないよう、日次バックアップは有効のまま引き継ぐ。
+  if (p3MetaGet_(ss, 'dailyBackupEnabled') === '') p3MetaSet_(ss, 'dailyBackupEnabled', '1');
+}
+
 function p3RunMigrations_(ss) {
-  const lock = LockService.getUserLock();
-  let locked = false;
-  try {
-    lock.waitLock(10000);
-    locked = true;
+  return p3WithUserLock_(10000, () => {
     let version = p3GetSchemaVersion_(ss);
     if (version > P3_SCHEMA_VERSION_) {
       throw new Error('このデータベースは現在のアプリより新しいスキーマです。アプリを最新版へ更新してください。');
@@ -223,7 +264,8 @@ function p3RunMigrations_(ss) {
     const migrations = [
       { version: 1, name: '保全用内部シート作成', run: p3MigrationV1_ },
       { version: 2, name: '保持期間設定', run: p3MigrationV2_ },
-      { version: 3, name: '日次バックアップ方式設定', run: p3MigrationV3_ }
+      { version: 3, name: '日次バックアップ方式設定', run: p3MigrationV3_ },
+      { version: 4, name: 'バックアップ世代数と自動作成の切替設定', run: p3MigrationV4_ }
     ];
 
     const applied = [];
@@ -243,9 +285,7 @@ function p3RunMigrations_(ss) {
       );
     }
     return { success: true, version, applied };
-  } finally {
-    if (locked) lock.releaseLock();
-  }
+  });
 }
 
 function ensureDataProtectionReady_() {

@@ -40,6 +40,14 @@
             + '<p style="font-size:0.8rem;color:var(--text-sub);margin-bottom:12px;">'
             + '週案保存前の復元ポイント、1日1回の完全バックアップ、30日間のごみ箱、監査ログでデータを保護します。既存シートの列順は変更しません。</p>'
             + '<div id="p3ProtectionStatus" style="padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);font-size:0.8rem;line-height:1.7;">状態を確認中...</div>'
+            + '<div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px;">'
+            + '<label class="form-check-label" style="font-size:0.85rem;display:flex;align-items:center;gap:8px;cursor:pointer;">'
+            + '<input type="checkbox" id="p3DailyBackupEnabled" class="form-check-input" style="width:18px;height:18px;" checked onchange="p3ToggleDailyBackupUI(this)">'
+            + '1日1回、自動で完全バックアップを作成する</label>'
+            + '<p id="p3BackupPolicyNote" style="font-size:0.75rem;color:var(--text-hint);margin-top:6px;">'
+            + 'バックアップは別スプレッドシートとしてマイドライブに作られます。古い世代は自動で整理されます。<br>'
+            + 'オフにしても手動バックアップと、データベース全消去・学級削除の直前バックアップは作成されます。</p>'
+            + '</div>'
             + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px;">'
             + '<button class="btn btn-primary d-flex align-items-center justify-content-center gap-1" onclick="p3CreateBackupUI(this)"><span class="material-symbols-outlined fs-6">backup</span> 今すぐ完全バックアップ</button>'
             + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3CreateWeekRestorePointUI(this)"><span class="material-symbols-outlined fs-6">restore_page</span> 今週の復元ポイント</button>'
@@ -76,6 +84,37 @@
             + '<span>ごみ箱 ' + (counts.trash || 0) + '件</span>'
             + '<span>監査記録 ' + (counts.audit || 0) + '件</span></div>'
             + (warnings.length ? '<div style="margin-top:6px;color:#b26a00;">⚠ ' + warnings.map(escHtml).join('<br>⚠ ') + '</div>' : '');
+
+        var toggle = document.getElementById('p3DailyBackupEnabled');
+        if (toggle) toggle.checked = res.dailyBackupEnabled !== false;
+        var note = document.getElementById('p3BackupPolicyNote');
+        if (note && res.backupMaxCount) {
+            note.innerHTML = 'バックアップは別スプレッドシートとしてマイドライブに作られます。'
+                + '最新' + escHtml(String(res.backupMaxCount)) + '件・'
+                + escHtml(String(res.backupRetentionDays || 30)) + '日を超えた世代は自動でドライブのごみ箱へ移動します。<br>'
+                + 'オフにしても手動バックアップと、データベース全消去・学級削除の直前バックアップは作成されます。';
+        }
+    }
+
+    function p3ToggleDailyBackupUI(input) {
+        var enabled = !!(input && input.checked);
+        if (input) input.disabled = true;
+        p3CallServer('setDailyBackupEnabledFromWeb', enabled)
+            .then(function (res) {
+                if (input) input.disabled = false;
+                if (!res || !res.success) {
+                    // 保存に失敗したらチェック状態をサーバー側の実態へ戻す。
+                    if (input) input.checked = !enabled;
+                    showToast('error', (res && res.error) || '設定の保存に失敗しました');
+                    return;
+                }
+                showToast('success', res.message);
+                p3LoadProtectionStatus(false);
+            })
+            .catch(function (e) {
+                if (input) { input.disabled = false; input.checked = !enabled; }
+                _onCommError(e);
+            });
     }
 
     function p3LoadProtectionStatus(runDailyBackup) {
