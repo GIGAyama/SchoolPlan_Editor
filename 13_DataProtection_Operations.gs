@@ -218,8 +218,13 @@ function getDataProtectionStatusFromWeb(runDailyBackup) {
     const warnings = [];
     const schemaDiagnostics = getDbSchemaDiagnosticsFromWeb();
 
+    const dailyBackupEnabled = p3IsDailyBackupEnabled_(ss);
+
     if (dailyError) warnings.push(dailyError);
     if (!backups.length) warnings.push('完全バックアップがまだありません。');
+    if (!dailyBackupEnabled && !backups.length) {
+      warnings.push('1日1回の自動バックアップは無効です。必要に応じて手動で作成してください。');
+    }
     if (!schemaDiagnostics.success || !schemaDiagnostics.safeToWrite) {
       warnings.push('データベースの列構成に問題があります。');
     }
@@ -228,9 +233,14 @@ function getDataProtectionStatusFromWeb(runDailyBackup) {
       success: true,
       schemaVersion: migration.version,
       currentSchemaVersion: P3_SCHEMA_VERSION_,
-      protectionMode: '初回起動時の日次バックアップ + 30分間隔の週復元ポイント',
+      protectionMode: dailyBackupEnabled
+        ? '初回起動時の日次バックアップ + 30分間隔の週復元ポイント'
+        : '手動バックアップ + 30分間隔の週復元ポイント',
       lastBackupAt: p3MetaGet_(ss, 'lastBackupAt'),
       lastDailyBackupDate: p3MetaGet_(ss, 'lastDailyBackupDate'),
+      dailyBackupEnabled,
+      backupMaxCount: P3_BACKUP_MAX_COUNT_,
+      backupRetentionDays: P3_BACKUP_RETENTION_DAYS_,
       backups: backups.slice(0, 20),
       counts: {
         backup: backups.length,

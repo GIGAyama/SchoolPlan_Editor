@@ -29,11 +29,23 @@ function between(text, start, end) {
 }
 
 test('schema migrations are versioned and forward-only', () => {
-  assert.match(backend, /const P3_SCHEMA_VERSION_ = 3/);
+  assert.match(backend, /const P3_SCHEMA_VERSION_ = 4/);
   assert.match(backend, /p3MigrationV1_/);
   assert.match(backend, /p3MigrationV2_/);
   assert.match(backend, /p3MigrationV3_/);
+  assert.match(backend, /p3MigrationV4_/);
   assert.match(backend, /version > P3_SCHEMA_VERSION_/);
+});
+
+test('the user lock is not acquired twice inside one execution', () => {
+  // p3MaybeCreateDailyBackup_ → p3CreateFullBackup_ → p3RunMigrations_ とネストするため、
+  // 再入時は取得済みロックを使い回す必要がある。
+  const helper = between(backend, 'function p3WithUserLock_', 'function p3MigrationV1_');
+  assert.match(helper, /p3UserLockDepth_ > 0/);
+  assert.match(helper, /tryLock/);
+  const migrations = between(backend, 'function p3RunMigrations_', 'function ensureDataProtectionReady_');
+  assert.match(migrations, /p3WithUserLock_/);
+  assert.doesNotMatch(migrations, /LockService\.getUserLock/);
 });
 
 test('audit payloads redact secrets before persistence', () => {
@@ -101,10 +113,44 @@ test('full backup copies spreadsheet sheets without requesting broad Drive scope
 });
 
 test('daily backup is active-day based and does not create a new trigger', () => {
-  const fn = between(backend, 'function p3MaybeCreateDailyBackup_', 'function createFullBackupFromWeb');
+  const fn = between(backend, 'function p3MaybeCreateDailyBackup_', 'function setDailyBackupEnabledFromWeb');
   assert.match(fn, /lastDailyBackupDate/);
   assert.match(fn, /p3TodayKey_/);
   assert.doesNotMatch(fn, /newTrigger/);
+});
+
+test('daily backup serializes check-create-record so concurrent tabs cannot duplicate it', () => {
+  const fn = between(backend, 'function p3MaybeCreateDailyBackup_', 'function setDailyBackupEnabledFromWeb');
+  const lockAt = fn.indexOf('p3TryWithUserLock_');
+  const recheckAt = fn.indexOf("p3MetaGet_(ss, 'lastDailyBackupDate')", lockAt);
+  const createAt = fn.indexOf('p3CreateFullBackup_');
+  const recordAt = fn.indexOf("p3MetaSet_(ss, 'lastDailyBackupDate'");
+  assert.ok(lockAt >= 0, 'daily backup must take a lock');
+  assert.ok(recheckAt > lockAt, 'the date must be re-read after the lock is acquired');
+  assert.ok(createAt > recheckAt && recordAt > createAt,
+    'create and record must both happen inside the lock, after the re-check');
+});
+
+test('daily backup can be switched off without disabling destructive-operation backups', () => {
+  assert.match(backend, /function p3IsDailyBackupEnabled_/);
+  assert.match(backend, /function setDailyBackupEnabledFromWeb/);
+  const maybe = between(backend, 'function p3MaybeCreateDailyBackup_', 'function setDailyBackupEnabledFromWeb');
+  assert.match(maybe, /p3IsDailyBackupEnabled_/);
+  // 全消去・学級削除の直前バックアップは設定に関係なく必ず走る。
+  const clear = between(backend, 'function clearDatabaseDataProtectedFromWeb', 'function deleteClassProtectedFromWeb');
+  assert.doesNotMatch(clear, /p3IsDailyBackupEnabled_/);
+  const deleteClass = between(backend, 'function deleteClassProtectedFromWeb', 'function listAuditLogFromWeb');
+  assert.doesNotMatch(deleteClass, /p3IsDailyBackupEnabled_/);
+  assert.match(frontend, /setDailyBackupEnabledFromWeb/);
+  assert.match(frontend, /p3DailyBackupEnabled/);
+});
+
+test('backup generations are capped low enough to keep Drive tidy', () => {
+  assert.match(backend, /P3_BACKUP_MAX_COUNT_ = 4/);
+  assert.match(backend, /P3_BACKUP_RETENTION_DAYS_ = 30/);
+  const cleanup = between(backend, 'function p3CleanupBackups_', 'function p3IsDailyBackupEnabled_');
+  assert.match(cleanup, /P3_BACKUP_MAX_COUNT_/);
+  assert.match(cleanup, /setTrashed\(true\)/);
 });
 
 test('destructive database clear backs up first and clears by logical headers', () => {
