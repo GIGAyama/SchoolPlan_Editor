@@ -128,6 +128,48 @@ function callGeminiAPI_(prompt) {
 }
 
 /**
+ * 任意の itemSchema で JSON 配列を返させる汎用ラッパー。
+ * 単元の時数再構成・年間再配分など、配列を1本だけ受け取りたい用途で使います。
+ * （既存の callGeminiAPI_ / callGeminiUnitAllocation_ はスキーマ固定のため統合しません）
+ *
+ * @param {string} prompt
+ * @param {Object} itemSchema 配列要素のスキーマ（type: "OBJECT" ...）
+ * @param {string} description 配列自体の説明
+ * @param {string} logLabel エラーログ用ラベル
+ * @param {number} [temperature] 既定 0.2
+ * @returns {Array} パース済みの配列（取得できなければ空配列）
+ */
+function callGeminiJsonArray_(prompt, itemSchema, description, logLabel, temperature) {
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: (temperature === undefined || temperature === null) ? 0.2 : temperature,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "ARRAY",
+        description: description || '',
+        items: itemSchema
+      }
+    }
+  };
+
+  const json = callGeminiEndpoint_(payload, logLabel || 'Gemini JSON Array Error');
+  if (json.candidates && json.candidates.length > 0) {
+    const text = json.candidates[0].content.parts[0].text;
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      // 出力がトークン上限で途切れた場合に備え、最後の完全な要素までを救出する
+      const repaired = repairTruncatedJsonArray_(text);
+      if (repaired !== null) return repaired;
+      logError((logLabel || 'Gemini JSON Array') + ' Parse Error', e);
+      throw new Error('AIの出力をJSONとして解析できませんでした。再度お試しください。');
+    }
+  }
+  return [];
+}
+
+/**
  * 指定期間の週案・行事データを、AI解析用のテキストに整形して返します。
  * 該当データが1件も無い場合は空文字を返します（呼び出し側で扱いを決めます）。
  * タスク抽出（週案モード）と、PDFモードで既存の予定を併用する際に共用します。

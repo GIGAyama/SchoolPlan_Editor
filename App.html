@@ -1360,6 +1360,8 @@
     <!-- 進捗つき単元ピッカー。02_Plan の openUnitPickerBasic をフォールバックとして使うため、
          必ず 02_Plan より後に読み込む。 -->
     <?!= include('App_Js_16_UnitProgress'); ?>
+    <!-- 単元の時数再構成。PDF取込(07)のプレビューUIを借りるため、必ずその後に読み込む。 -->
+    <?!= include('App_Js_17_UnitMasterAI'); ?>
     <?!= include('App_Js_18_UnitMasterCheck'); ?>
 
 </body>

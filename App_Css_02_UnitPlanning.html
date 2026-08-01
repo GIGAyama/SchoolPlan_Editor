@@ -247,4 +247,28 @@
         color: var(--text-hint);
         margin: 6px 0 0;
     }
+
+    /* ===== 単元の時数再構成（プレビューの拡張） ===== */
+    .um-btn-ai {
+        color: var(--primary, #1a73e8);
+    }
+
+    .pdf-unit-name-fixed {
+        font-weight: 600;
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .pdf-hour-locked {
+        color: var(--text-hint);
+    }
+
+    .pdf-hour-readonly {
+        background: var(--surface-hover, #f1f3f4);
+        color: var(--text-sub);
+        cursor: not-allowed;
+    }
 </style>
