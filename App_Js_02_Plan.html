@@ -424,8 +424,10 @@
         if (box) box.style.display = 'none';
     }
 
-    // ===== 単元マスタピッカー =====
-    function openUnitPicker(dayIdx, pIdx) {
+    // ===== 単元マスタピッカー（進捗情報なしの基本版） =====
+    // 進捗つきの openUnitPicker は App_Js_16_UnitProgress.html で定義され、
+    // 進捗インデックスの取得に失敗したときはこの基本版にフォールバックする。
+    function openUnitPickerBasic(dayIdx, pIdx) {
         // 対象スロットの教科名を取得
         var subjectEl = document.querySelector('[data-field="subject"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
         var subject = subjectEl ? subjectEl.value.trim() : '';
@@ -478,19 +480,25 @@
         });
     }
 
-    function openHourPicker(dayIdx, pIdx, subject, unitName, totalHours) {
-        // 時間目選択用のオプション生成
+    function openHourPicker(dayIdx, pIdx, subject, unitName, totalHours, nextHour) {
+        // 指導済みの時数がマスタの総時数を超えている場合もあるため、選択肢は
+        // 総時数と「次の時間目」の大きい方まで出す（既存の effectiveTotal と同じ考え方）。
+        // ここで決めた maxHour は選択肢の表示にもセルに書く分母にも使う。
+        // 表示と書き込みで分母が食い違うと「13/13 を選んだのに 13/10 と入る」ことになる。
+        var maxHour = Math.max(parseInt(totalHours, 10) || 1, parseInt(nextHour, 10) || 1);
         var options = {};
-        for (var h = 1; h <= totalHours; h++) {
-            options[h] = h + '/' + totalHours + ' 時間目';
+        for (var h = 1; h <= maxHour; h++) {
+            options[h] = h + '/' + maxHour + ' 時間目';
         }
+        // 既定値は「次に指導する時間目」。未指定なら従来どおり1時間目。
+        var defaultHour = Math.min(Math.max(parseInt(nextHour, 10) || 1, 1), maxHour);
 
         Swal.fire({
             title: unitName,
             text: '何時間目を入力しますか？',
             input: 'select',
             inputOptions: options,
-            inputValue: '1',
+            inputValue: String(defaultHour),
             showCancelButton: true,
             confirmButtonText: '入力する',
             cancelButtonText: 'キャンセル',
@@ -503,7 +511,7 @@
 
             // 単元名セルに入力
             var unitEl = document.querySelector('[data-field="unit"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
-            if (unitEl) unitEl.value = unitName + ' ' + hourNum + '/' + totalHours;
+            if (unitEl) unitEl.value = unitName + ' ' + hourNum + '/' + maxHour;
 
             // サーバーから学習活動を取得してcontentに入力
             google.script.run
@@ -514,7 +522,7 @@
                             contentEl.value = res.activity || '';
                             autoResizeTextarea(contentEl);
                         }
-                        showToast('success', unitName + ' ' + hourNum + '/' + totalHours + ' を入力しました。');
+                        showToast('success', unitName + ' ' + hourNum + '/' + maxHour + ' を入力しました。');
                     }
                 })
                 .withFailureHandler(function (e) {
@@ -771,6 +779,8 @@
         STATE.editMode = !STATE.editMode;
         updateEditUI();
         renderWeekGrid(STATE.weekData.days);
+        // 編集モードに入った時点で単元の進捗を先読みしておく（ピッカーを開いた時の待ちを消す）
+        if (STATE.editMode && typeof prefetchUnitProgress === 'function') prefetchUnitProgress();
     }
     function cancelEdit() {
         STATE.editMode = false;

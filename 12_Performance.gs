@@ -416,6 +416,8 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
     if (uniqueChangedRows.length > 0) {
       SpreadsheetApp.flush();
       afterState = p2ReadRowsForDates_(dbSheet, dbCols, weekDateStrs);
+      // 単元セルが変わると単元の進捗も変わるため、進捗インデックスのキャッシュを捨てる。
+      invalidateUnitProgressCache_();
     }
     const savedDays = p2BuildWeekDays_(afterState, dbCols, weekDateStrs, holidayMap);
     const newRevision = computeWeekRevision_([...afterState.rowByDate.values()], dbCols, weekDateStrs);

@@ -1,0 +1,360 @@
+<script>
+    'use strict';
+    // ===================================================
+    // ===== 単元の時数再構成（AI） =====
+    // 一度登録した単元の授業時間数を、実際の進度に合わせて組み直す。
+    // 週案で既に指導済み・入力済みの時間は書き換えず、未指導分だけをAIが再構成する。
+    // 反映前には必ずプレビュー（PDF取込と同じUIを借用）で人が確認する。
+    // ===================================================
+
+    var UMA_STATE = { proposal: null };
+
+    /**
+     * 単元マスタ表の行番号から再構成ダイアログを開く。
+     * 総時数の表示値は行ごとにズレていることがあるため、同一単元の行数と
+     * 総時数列の最大値の大きい方を「現在の時数」として扱う。
+     */
+    function openUnitRecomposeFromRow(rowIndex) {
+        var row = (STATE.umAllRows || []).find(function (r) { return r.rowIndex === rowIndex; });
+        if (!row) { showToast('error', '対象の単元が見つかりません。'); return; }
+        var sameUnit = STATE.umAllRows.filter(function (r) {
+            return r.subject === row.subject && r.unitName === row.unitName;
+        });
+        var declared = sameUnit.reduce(function (max, r) {
+            var v = parseInt(r.totalHours, 10);
+            return (!isNaN(v) && v > max) ? v : max;
+        }, 0);
+        openUnitRecomposeDialog(row.subject, row.unitName, Math.max(declared, sameUnit.length, 1));
+    }
+
+    /** 単元マスタの表から呼ばれる入口。時数と追加指示を尋ねてAIに投げる。 */
+    async function openUnitRecomposeDialog(subject, unitName, currentTotal) {
+        var result = await Swal.fire({
+            title: '単元の時数を再構成',
+            html:
+                '<div style="text-align:left;font-size:0.85rem;">'
+                + '<div style="margin-bottom:8px;">'
+                + '<b>' + escHtml(subject) + ' / ' + escHtml(unitName) + '</b>'
+                + '<span style="color:#666;">（現在 全' + currentTotal + '時間）</span>'
+                + '</div>'
+                + '<label class="mb-1"><strong>再構成後の総時間数</strong></label>'
+                + '<input id="umaHours" class="swal2-input" type="number" min="1" max="60" value="' + currentTotal + '" style="font-size:0.85rem;">'
+                + '<label class="mb-1 mt-2"><strong>指示（任意）</strong></label>'
+                + '<textarea id="umaInstruction" class="swal2-textarea" placeholder="例: 話し合い活動を増やしたい / 実験を2時間続けて行いたい" style="font-size:0.82rem;"></textarea>'
+                + '<p style="font-size:0.74rem;color:#666;margin-top:6px;">'
+                + '週案に入力済みの時間は変更されません。AIの案は反映前にプレビューで確認・修正できます。</p>'
+                + '</div>',
+            focusConfirm: false,
+            showCancelButton: true,
+            confirmButtonText: 'AIで再構成',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8',
+            preConfirm: function () {
+                var hours = parseInt(document.getElementById('umaHours').value, 10);
+                if (!hours || hours < 1 || hours > 60) {
+                    Swal.showValidationMessage('時間数は1〜60で指定してください');
+                    return false;
+                }
+                return { targetHours: hours, instruction: document.getElementById('umaInstruction').value.trim() };
+            }
+        });
+        if (!result.isConfirmed) return;
+
+        Swal.fire({
+            title: 'AIが再構成しています...',
+            html: '<div class="spinner-lg" style="margin:16px auto;"></div><p style="font-size:0.82rem;color:#666;">しばらくお待ちください</p>',
+            allowOutsideClick: false,
+            showConfirmButton: false
+        });
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                Swal.close();
+                if (!res || !res.success) {
+                    Swal.fire({ icon: 'error', title: '再構成できませんでした', text: (res && res.error) || '不明なエラー' });
+                    return;
+                }
+                showRecomposePreview(res);
+            })
+            .withFailureHandler(function (e) {
+                Swal.close();
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .proposeUnitRecomposition({
+                subject: subject,
+                unitName: unitName,
+                targetHours: result.value.targetHours,
+                instruction: result.value.instruction
+            });
+    }
+
+    /** PDF取込のプレビューUIを借りて、再構成案を確認・修正できる形で表示する。 */
+    function showRecomposePreview(res) {
+        UMA_STATE.proposal = res;
+
+        var hourly = res.lockedHours.map(function (h) {
+            return { hour: h.hour, activity: h.activity, locked: true };
+        }).concat(res.proposal.map(function (h) {
+            return { hour: h.hour, activity: h.activity, locked: false };
+        }));
+
+        PDF_PREVIEW.type = 'unit';
+        PDF_PREVIEW.lockNames = true;           // 単元名の変更は週案との紐付けを切るため禁止
+        PDF_PREVIEW.applyHandler = applyRecomposePreview;
+        PDF_PREVIEW.groups = [{
+            key: res.subjectLabel,
+            label: res.subjectLabel,
+            items: [{
+                checked: true,
+                subject: res.subjectLabel,
+                unitName: res.unitName,
+                totalHours: res.targetHours,
+                hourlyActivities: hourly
+            }]
+        }];
+
+        document.getElementById('pdfPreviewTitle').textContent = '単元の再構成プレビュー';
+        document.getElementById('pdfPreviewSub').textContent =
+            res.subjectLabel + ' / ' + res.unitName
+            + ' ─ 全' + res.currentTotal + '時間 → 全' + res.targetHours + '時間'
+            + (res.lockedCount > 0 ? '（1〜' + res.lockedCount + '時間目は入力済みのため変更されません）' : '')
+            + (res.warnings && res.warnings.length ? ' ※' + res.warnings.join(' ') : '');
+
+        // このプレビューでは「全選択/全解除」やまとめ行の追加は不要なのでツールバーを簡素にする
+        var bar = document.getElementById('pdfPreviewToolbar');
+        bar.innerHTML = '';
+        var hint = document.createElement('span');
+        hint.style.cssText = 'color:var(--text-hint);font-size:0.72rem;';
+        hint.textContent = '※学習活動は直接修正できます。「済」の付いた時間は変更できません。';
+        bar.appendChild(hint);
+
+        renderPdfPreviewBody_('unit');
+        updatePdfPreviewCount_();
+        document.getElementById('pdfPreviewOverlay').style.display = 'flex';
+    }
+
+    /** プレビューの内容を単元マスタへ書き戻す。 */
+    async function applyRecomposePreview() {
+        var res = UMA_STATE.proposal;
+        if (!res) return;
+        var item = PDF_PREVIEW.groups[0] && PDF_PREVIEW.groups[0].items[0];
+        if (!item) return;
+
+        var empty = item.hourlyActivities.filter(function (a) { return !(a.activity || '').trim(); });
+        if (empty.length > 0) {
+            showToast('error', '学習活動が空の時間があります（' + empty[0].hour + '時間目）。');
+            return;
+        }
+
+        var confirm = await Swal.fire({
+            title: '単元マスタへ反映',
+            html: '<b>' + escHtml(res.unitName) + '</b> を全' + item.hourlyActivities.length + '時間の構成に置き換えます。<br>'
+                + '単元マスタ上の並び位置は変わりません。<br>'
+                + '実行前の状態は復元ポイントとして保存されます。',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '反映する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8'
+        });
+        if (!confirm.isConfirmed) return;
+
+        var applyBtn = document.getElementById('pdfPreviewApplyBtn');
+        if (applyBtn) {
+            applyBtn.disabled = true;
+            applyBtn.innerHTML = '<span class="material-symbols-outlined fs-6 spin" style="vertical-align:text-bottom;">progress_activity</span> 反映中...';
+        }
+
+        google.script.run
+            .withSuccessHandler(function (r) {
+                if (applyBtn) {
+                    applyBtn.disabled = false;
+                    applyBtn.innerHTML = '<span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">task_alt</span> チェックした項目を反映する';
+                }
+                if (!r || !r.success) {
+                    showToast('error', '反映エラー: ' + ((r && r.error) || '不明なエラー'));
+                    return;
+                }
+                closePdfPreview();
+                Swal.fire({
+                    icon: 'success',
+                    title: '再構成しました',
+                    html: escHtml(r.message || '')
+                        + '<br><span style="font-size:0.8rem;color:#666;">' + r.rowsBefore + '行 → ' + r.rowsAfter + '行。復元ポイントを作成済みです。</span>',
+                    confirmButtonColor: '#1a73e8'
+                });
+                STATE.umDataLoaded = false;
+                if (typeof loadUnitMasterData === 'function') loadUnitMasterData();
+                if (typeof invalidateMasterData === 'function') invalidateMasterData();
+            })
+            .withFailureHandler(function (e) {
+                if (applyBtn) {
+                    applyBtn.disabled = false;
+                    applyBtn.innerHTML = '<span class="material-symbols-outlined fs-6" style="vertical-align:text-bottom;">task_alt</span> チェックした項目を反映する';
+                }
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .applyUnitRecomposition({
+                subject: res.subject,
+                unitName: res.unitName,
+                totalHours: item.hourlyActivities.length,
+                hourlyActivities: item.hourlyActivities.map(function (a, i) {
+                    return { hour: i + 1, activity: (a.activity || '').trim() };
+                }),
+                expectedLockedCount: res.lockedCount,
+                expectedRowCount: res.rowCount
+            });
+    }
+
+    // ===================================================
+    // ===== 年間再配分（時数の過不足から未指導単元へ配分） =====
+    // ===================================================
+
+    var UMR_STATE = { plan: null };
+
+    /** 時数タブの「調整案」から呼ばれる。教科単位で配分案を出す。 */
+    function openAnnualReallocationDialog(subject, academicYear) {
+        Swal.fire({
+            title: '配分案を計算しています...',
+            html: '<div class="spinner-lg" style="margin:16px auto;"></div>'
+                + '<p style="font-size:0.82rem;color:#666;">' + escHtml(subject) + ' の未指導単元を対象に計算します</p>',
+            allowOutsideClick: false,
+            showConfirmButton: false
+        });
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                Swal.close();
+                if (!res || !res.success) {
+                    Swal.fire({ icon: 'error', title: '配分案を作成できませんでした', text: (res && res.error) || '不明なエラー' });
+                    return;
+                }
+                showReallocationPreview(res);
+            })
+            .withFailureHandler(function (e) {
+                Swal.close();
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .proposeAnnualReallocation({ academicYear: academicYear, subject: subject });
+    }
+
+    /** 配分案を表として見せ、承認されたら1単元ずつ順に適用する。 */
+    function showReallocationPreview(res) {
+        UMR_STATE.plan = res;
+        var sim = res.simulation;
+        var changed = res.allocation.filter(function (a) { return a.delta !== 0; });
+
+        var gapText = sim.diff > 0
+            ? ('超過 ' + sim.diff + '時間')
+            : (sim.diff < 0 ? ('不足 ' + Math.abs(sim.diff) + '時間') : '過不足なし');
+
+        var rows = res.allocation.map(function (a) {
+            var deltaHtml = a.delta === 0
+                ? '±0'
+                : '<span class="' + (a.delta > 0 ? 'umr-up' : 'umr-down') + '">'
+                  + (a.delta > 0 ? '+' : '') + a.delta + '</span>';
+            return '<tr' + (a.delta !== 0 ? ' class="umr-changed"' : '') + '>'
+                + '<td>' + escHtml(a.unitName) + '</td>'
+                + '<td class="umr-num">' + a.currentTotal + '</td>'
+                + '<td class="umr-num"><b>' + a.proposedTotal + '</b></td>'
+                + '<td class="umr-num">' + deltaHtml + '</td>'
+                + '<td class="umr-reason">' + escHtml(a.reason || '') + '</td>'
+                + '</tr>';
+        }).join('');
+
+        var warnHtml = (res.warnings && res.warnings.length)
+            ? '<div class="umr-warn">' + res.warnings.map(escHtml).join('<br>') + '</div>'
+            : '';
+
+        Swal.fire({
+            title: escHtml(res.subject) + ' の時数再配分',
+            html: '<div class="umr-wrap">'
+                + '<div class="umr-summary">'
+                + '標準 ' + sim.standard + '時間 ／ 実施済み ' + sim.done + '時間 ／ 年度末見込み ' + sim.projected + '時間'
+                + '<br><b>' + gapText + '</b>'
+                + '<br>未指導単元の合計を <b>' + res.currentRemaining + '時間 → ' + res.targetRemaining + '時間</b> に調整します。'
+                + '</div>'
+                + warnHtml
+                + '<div class="umr-source">' + (res.aiApplied ? 'AIが調整した案です' : '機械的に計算した案です') + '</div>'
+                + '<div style="overflow-x:auto;"><table class="umr-table"><thead><tr>'
+                + '<th>単元</th><th>現在</th><th>変更後</th><th>増減</th><th>理由</th>'
+                + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+                + '<p class="umr-note">総時間数だけを変更します。学習活動の内容は書き換えません'
+                + '（増えた分は空欄になります。必要なら単元マスタの「AIで時数を再構成」で内容も作れます）。</p>'
+                + '</div>',
+            width: 720,
+            showCancelButton: true,
+            showConfirmButton: changed.length > 0,
+            confirmButtonText: changed.length + ' 単元に反映',
+            cancelButtonText: '閉じる',
+            confirmButtonColor: '#1a73e8'
+        }).then(function (r) {
+            if (!r.isConfirmed) return;
+            applyReallocationSequentially(res.subject, changed);
+        });
+    }
+
+    /**
+     * 1単元ずつ順に適用する。
+     * GASの実行時間上限に達しないよう、1リクエスト1単元に分けている。
+     */
+    function applyReallocationSequentially(subject, changed) {
+        var done = 0;
+        var failed = [];
+
+        function step(i) {
+            if (i >= changed.length) {
+                Swal.close();
+                var msg = done + ' 単元の時数を変更しました。';
+                if (failed.length > 0) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: '一部の単元を変更できませんでした',
+                        html: escHtml(msg) + '<br><br>'
+                            + failed.map(function (f) { return escHtml(f.unitName + ': ' + f.error); }).join('<br>'),
+                        confirmButtonColor: '#1a73e8'
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '再配分が完了しました',
+                        html: escHtml(msg) + '<br><span style="font-size:0.8rem;color:#666;">各単元の復元ポイントを作成済みです。</span>',
+                        confirmButtonColor: '#1a73e8'
+                    });
+                }
+                STATE.umDataLoaded = false;
+                if (typeof invalidateMasterData === 'function') invalidateMasterData();
+                if (typeof loadHoursSimulation === 'function') loadHoursSimulation();
+                return;
+            }
+
+            var a = changed[i];
+            Swal.update({
+                title: '反映しています...',
+                html: '<div class="spinner-lg" style="margin:16px auto;"></div>'
+                    + '<p style="font-size:0.82rem;color:#666;">' + (i + 1) + ' / ' + changed.length + '：'
+                    + escHtml(a.unitName) + '</p>'
+            });
+
+            google.script.run
+                .withSuccessHandler(function (r) {
+                    if (r && r.success) done++;
+                    else failed.push({ unitName: a.unitName, error: (r && r.error) || '不明なエラー' });
+                    step(i + 1);
+                })
+                .withFailureHandler(function (e) {
+                    failed.push({ unitName: a.unitName, error: e.message });
+                    step(i + 1);
+                })
+                .applyUnitTotalHours(subject, a.unitName, a.proposedTotal);
+        }
+
+        Swal.fire({
+            title: '反映しています...',
+            html: '<div class="spinner-lg" style="margin:16px auto;"></div>',
+            allowOutsideClick: false,
+            showConfirmButton: false
+        });
+        step(0);
+    }
+</script>

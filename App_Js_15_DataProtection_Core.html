@@ -186,11 +186,17 @@
             if (!res || !res.success) { showToast('error', (res && res.error) || '取得失敗'); return; }
             var items = res.items || [];
             var html = items.length ? items.map(function (item) {
+                // 週案と単元マスタでは復元の手順が違うため、種別ごとに呼び分ける
+                var isUnit = (item.type === 'unitMaster');
+                var handler = isUnit ? 'p3RestoreUnitMasterUI' : 'p3RestoreWeekUI';
+                var typeTag = isUnit
+                    ? '<span style="font-size:0.68rem;padding:1px 6px;border-radius:10px;background:var(--surface-hover,#eee);color:var(--text-sub);margin-right:6px;">単元マスタ</span>'
+                    : '';
                 return '<div style="padding:9px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;text-align:left;">'
-                    + '<div style="flex:1;"><strong>' + escHtml(item.scope) + '</strong> ' + escHtml(item.label) + '<div style="font-size:0.72rem;color:var(--text-sub);">' + escHtml(item.createdAt) + ' / 保持期限 ' + escHtml(item.expiresAt) + '</div></div>'
-                    + '<button class="btn btn-outline btn-sm" onclick="p3RestoreWeekUI(\'' + escAttr(item.id) + '\')">復元</button></div>';
+                    + '<div style="flex:1;">' + typeTag + '<strong>' + escHtml(item.scope) + '</strong> ' + escHtml(item.label) + '<div style="font-size:0.72rem;color:var(--text-sub);">' + escHtml(item.createdAt) + ' / 保持期限 ' + escHtml(item.expiresAt) + '</div></div>'
+                    + '<button class="btn btn-outline btn-sm" onclick="' + handler + '(\'' + escAttr(item.id) + '\')">復元</button></div>';
             }).join('') : '<p>復元ポイントはまだありません。</p>';
-            Swal.fire({ title: '週案の復元ポイント', html: '<div style="max-height:440px;overflow:auto;">' + html + '</div>', width: 760, showConfirmButton: false, showCloseButton: true });
+            Swal.fire({ title: '復元ポイント', html: '<div style="max-height:440px;overflow:auto;">' + html + '</div>', width: 760, showConfirmButton: false, showCloseButton: true });
         }).catch(_onCommError);
     }
 
@@ -232,6 +238,32 @@
                 }).catch(function (e) { Swal.fire('通信エラー', e.message || String(e), 'error'); });
             });
         }).catch(function (e) { Swal.fire('通信エラー', e.message || String(e), 'error'); });
+    }
+
+    /** 単元マスタの復元ポイントから戻す（週案とは復元先が違うため別経路）。 */
+    function p3RestoreUnitMasterUI(snapshotId) {
+        Swal.fire({
+            icon: 'warning',
+            title: '単元マスタを復元しますか？',
+            html: '<p style="font-size:0.82rem;">この復元ポイントの内容で単元マスタを上書きします。<br>'
+                + '復元直前の状態も新しい復元ポイントとして保存されます。</p>',
+            showCancelButton: true,
+            confirmButtonText: '復元する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#e65100'
+        }).then(function (answer) {
+            if (!answer.isConfirmed) return;
+            Swal.fire({ title: '復元中...', allowOutsideClick: false, didOpen: function () { Swal.showLoading(); } });
+            p3CallServer('restoreUnitMasterSnapshotFromWeb', snapshotId).then(function (res) {
+                if (!res || !res.success) { Swal.fire('復元失敗', (res && res.error) || '不明', 'error'); return; }
+                Swal.fire('復元完了', res.message, 'success').then(function () {
+                    STATE.umDataLoaded = false;
+                    if (typeof loadUnitMasterData === 'function') loadUnitMasterData();
+                    if (typeof invalidateMasterData === 'function') invalidateMasterData();
+                    p3LoadProtectionStatus(false);
+                });
+            }).catch(function (e) { Swal.fire('通信エラー', e.message || String(e), 'error'); });
+        });
     }
 
 </script>

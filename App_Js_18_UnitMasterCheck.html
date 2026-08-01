@@ -1,0 +1,156 @@
+<script>
+    'use strict';
+    // ===================================================
+    // ===== 単元マスタの整合性チェックと修復 =====
+    // 単元マスタは「1行 = 単元の1時間分」で総時間数を全行に重複して持つため、
+    // 行を足しても総時間数が増えないなどのズレが溜まりやすい。
+    // ここではそれを検出し、内容を消さずに整える。AIは使わない。
+    // ===================================================
+
+    var UMC_ISSUE_LABELS = {
+        TOTAL_MISMATCH: '総時数と行数が不一致',
+        TOTAL_INCONSISTENT: '総時数が行ごとに異なる',
+        MISSING_HOUR: '何時間目が空の行がある',
+        HOUR_DUPLICATE: '何時間目が重複',
+        HOUR_GAP: '何時間目に欠番',
+        NON_CONTIGUOUS: '単元の行がシート上で離れている',
+        TAUGHT_EXCEEDS_TOTAL: '週案では総時数を超えて指導済み'
+    };
+
+    var UMC_STATE = { units: [], subjectTotals: [], orphanUnits: [] };
+
+    /** 整合性チェックを実行してモーダルを開く。 */
+    function runUnitMasterCheck() {
+        showToast('info', '単元マスタを検査しています...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res || !res.success) {
+                    showToast('error', '検査エラー: ' + ((res && res.error) || '不明なエラー'));
+                    return;
+                }
+                UMC_STATE.units = res.units || [];
+                UMC_STATE.subjectTotals = res.subjectTotals || [];
+                UMC_STATE.orphanUnits = res.orphanUnits || [];
+                showUnitMasterCheckModal(res);
+            })
+            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .checkUnitMasterConsistency();
+    }
+
+    function buildUmcTotalsHtml(totals) {
+        if (!totals || totals.length === 0) return '';
+        var rows = totals.map(function (t) {
+            var diffCell = '—';
+            if (t.standardHours !== null && t.standardHours !== undefined) {
+                var sign = t.diff > 0 ? '+' : '';
+                var cls = t.diff === 0 ? '' : (t.diff > 0 ? 'umc-over' : 'umc-under');
+                diffCell = '<span class="' + cls + '">' + sign + t.diff + '</span>';
+            }
+            return '<tr><td>' + escHtml(t.subject) + '</td><td class="umc-num">' + t.unitCount + '</td>'
+                + '<td class="umc-num">' + t.unitHoursTotal + '</td>'
+                + '<td class="umc-num">' + (t.standardHours === null || t.standardHours === undefined ? '—' : t.standardHours) + '</td>'
+                + '<td class="umc-num">' + diffCell + '</td></tr>';
+        }).join('');
+        return '<details class="umc-totals"><summary>教科別 単元時数と標準時数の比較</summary>'
+            + '<table class="umc-table"><thead><tr><th>教科</th><th>単元数</th><th>単元時数計</th><th>標準時数</th><th>差</th></tr></thead>'
+            + '<tbody>' + rows + '</tbody></table>'
+            + '<p class="umc-hint">標準時数は現在の担当学年の設定値です。単元時数の合計が標準時数と一致している必要はありませんが、大きく離れている場合は年間指導計画を見直す目安になります。</p>'
+            + '</details>';
+    }
+
+    function showUnitMasterCheckModal(res) {
+        var problem = UMC_STATE.units.filter(function (u) { return u.issues && u.issues.length > 0; });
+        var repairable = problem.filter(function (u) { return u.repairable; });
+
+        var listHtml;
+        if (problem.length === 0) {
+            listHtml = '<div class="umc-ok">不整合は見つかりませんでした（' + (res.summary ? res.summary.unitCount : 0) + '単元を検査）。</div>';
+        } else {
+            listHtml = '<div class="umc-list">' + problem.map(function (u, i) {
+                var badges = u.issues.map(function (t) {
+                    return '<span class="umc-badge' + (t === 'TAUGHT_EXCEEDS_TOTAL' ? ' umc-badge-warn' : '') + '">'
+                        + escHtml(UMC_ISSUE_LABELS[t] || t) + '</span>';
+                }).join('');
+                var plan = u.repairable
+                    ? '修復後: 全' + u.repairPlan.totalHours + '時間・' + u.repairPlan.totalHours + '行'
+                      + (u.repairPlan.padRows > 0 ? '（' + u.repairPlan.padRows + '行を追加）' : '')
+                    : '自動修復の対象外';
+                return '<label class="umc-item">'
+                    + '<input type="checkbox" class="umc-check" data-idx="' + i + '"' + (u.repairable ? ' checked' : ' disabled') + '>'
+                    + '<span class="umc-item-body">'
+                    + '<span class="umc-item-title">' + escHtml(u.subject) + ' / ' + escHtml(u.unitName)
+                    + ' <span class="umc-rows">（現在 ' + u.rowCount + '行 / 総時数 ' + u.declaredTotal + '）</span></span>'
+                    + '<span class="umc-badges">' + badges + '</span>'
+                    + '<span class="umc-plan">' + escHtml(plan) + '</span>'
+                    + '</span></label>';
+            }).join('') + '</div>';
+        }
+
+        var orphanHtml = (UMC_STATE.orphanUnits.length > 0)
+            ? '<details class="umc-orphans"><summary>週案にあるが単元マスタに無い単元（' + UMC_STATE.orphanUnits.length + '件）</summary>'
+              + '<ul>' + UMC_STATE.orphanUnits.map(function (o) {
+                    return '<li>' + escHtml(o.subject) + ' / ' + escHtml(o.unitName) + '（' + o.plannedHour + '時間目まで記入）</li>';
+                }).join('') + '</ul>'
+              + '<p class="umc-hint">単元名を変更したか、週案に手入力した単元です。マスタ側の名前と揃えると進捗が正しく引き継がれます。</p>'
+              + '</details>'
+            : '';
+
+        // problem 配列のインデックスで参照するため保持しておく
+        UMC_STATE.problem = problem;
+
+        Swal.fire({
+            title: '単元マスタの整合性チェック',
+            html: '<div class="umc-wrap">' + buildUmcTotalsHtml(UMC_STATE.subjectTotals) + listHtml + orphanHtml + '</div>',
+            width: 720,
+            showCancelButton: true,
+            showConfirmButton: repairable.length > 0,
+            confirmButtonText: 'チェックした単元を修復',
+            cancelButtonText: '閉じる',
+            confirmButtonColor: '#1a73e8'
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            var targets = [];
+            document.querySelectorAll('.umc-check:checked').forEach(function (cb) {
+                var u = UMC_STATE.problem[parseInt(cb.dataset.idx, 10)];
+                if (u) targets.push({ subject: u.subject, unitName: u.unitName });
+            });
+            if (targets.length === 0) { showToast('warning', '修復する単元が選択されていません。'); return; }
+            applyUnitMasterRepair(targets);
+        });
+    }
+
+    async function applyUnitMasterRepair(targets) {
+        var confirm = await Swal.fire({
+            title: '単元マスタを修復します',
+            html: targets.length + ' 単元の時数・並びを整えます。<br>'
+                + '<b>学習活動の内容は削除されません</b>（不足分は空の行が追加されます）。<br>'
+                + '実行前の状態は復元ポイントとして保存されます。',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '修復する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8'
+        });
+        if (!confirm.isConfirmed) return;
+
+        showToast('info', '修復しています...');
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res || !res.success) {
+                    showToast('error', '修復エラー: ' + ((res && res.error) || '不明なエラー'));
+                    return;
+                }
+                Swal.fire({
+                    icon: 'success',
+                    title: '修復が完了しました',
+                    html: escHtml(res.message || '') + '<br><span style="font-size:0.8rem;color:#666;">復元ポイントを作成済みです。</span>',
+                    confirmButtonColor: '#1a73e8'
+                });
+                STATE.umDataLoaded = false;
+                if (typeof loadUnitMasterData === 'function') loadUnitMasterData();
+                if (typeof invalidateMasterData === 'function') invalidateMasterData();
+            })
+            .withFailureHandler(function (e) { showToast('error', '通信エラー: ' + e.message); })
+            .repairUnitMasterConsistency(targets);
+    }
+</script>

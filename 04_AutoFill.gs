@@ -719,6 +719,7 @@ function batchAutoFillFromWeek(baseMondayStr) {
     // 変更があればDB一括書き戻し
     if (isModified) {
       dbSheet.getRange(1, 1, dbData.length, dbData[0].length).setValues(dbData);
+      invalidateUnitProgressCache_();
     }
 
     return {
@@ -897,6 +898,7 @@ function shiftSubjectLessons(subject, startDateStr, endDateStr, direction, count
     if (changed) {
       dbSheet.getRange(1, 1, dbData.length, dbData[0].length).setValues(dbData);
       SpreadsheetApp.flush();
+      invalidateUnitProgressCache_();
     }
 
     const dirLabel = (dir === 'back') ? '後ろ' : '前';

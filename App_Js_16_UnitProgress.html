@@ -1,0 +1,223 @@
+<script>
+    'use strict';
+    // ===================================================
+    // ===== 進捗つき単元ピッカー =====
+    // 単元マスタの一覧に「指導済み / 指導中 / 未指導」を重ねて表示し、
+    // 指導が終わった単元を畳んで下に送る。次に指導する単元を先頭で示す。
+    //
+    // 進捗の判定はサーバー側（14_UnitProgress.gs）が 04_AutoFill.gs の
+    // 既存ロジックで行う。ここは表示と絞り込みだけを担当する。
+    // ===================================================
+
+    /** 進捗インデックスを取得して STATE にキャッシュする。取得済みなら何もしない。 */
+    function loadUnitProgress(onDone, forceRefresh) {
+        if (!forceRefresh && STATE.unitProgress) { onDone(STATE.unitProgress); return; }
+        if (STATE.unitProgressLoading) {
+            // 取得中なら完了までポーリングして待つ（二重リクエストを避ける）
+            var waited = 0;
+            var timer = setInterval(function () {
+                waited += 100;
+                if (STATE.unitProgress || !STATE.unitProgressLoading || waited > 15000) {
+                    clearInterval(timer);
+                    onDone(STATE.unitProgress);
+                }
+            }, 100);
+            return;
+        }
+        STATE.unitProgressLoading = true;
+        google.script.run
+            .withSuccessHandler(function (res) {
+                STATE.unitProgressLoading = false;
+                STATE.unitProgress = (res && res.success) ? res : null;
+                onDone(STATE.unitProgress);
+            })
+            .withFailureHandler(function () {
+                STATE.unitProgressLoading = false;
+                STATE.unitProgress = null;
+                onDone(null);
+            })
+            .getUnitProgressIndexFromWeb(!!forceRefresh);
+    }
+
+    /** 編集モードに入ったときの先読み。失敗しても何も表示しない。 */
+    function prefetchUnitProgress() {
+        if (STATE.unitProgress || STATE.unitProgressLoading) return;
+        loadUnitProgress(function () { });
+    }
+
+    /** 進捗インデックスから、表記ゆれを吸収して該当教科のエントリを取得する。 */
+    function findProgressSubject(progress, subject) {
+        if (!progress || !progress.subjects) return null;
+        var key = normalizeSubjectName(subject);
+        if (progress.subjects[key]) return progress.subjects[key];
+        for (var k in progress.subjects) {
+            if (normalizeSubjectName(k) === key) return progress.subjects[k];
+        }
+        return null;
+    }
+
+    /**
+     * 単元マスタピッカー（進捗つき）。
+     * 進捗が取れなかった場合は従来の openUnitPickerBasic にフォールバックする。
+     */
+    function openUnitPicker(dayIdx, pIdx) {
+        var subjectEl = document.querySelector('[data-field="subject"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+        var subject = subjectEl ? subjectEl.value.trim() : '';
+        var contentEl = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+        // 教科名が空の時間・空き時間（別教員担当）は、従来どおりタスク選択モーダルへ
+        if (!subject || (contentEl && isFreeContent(contentEl.value))) {
+            openTaskPickerForContent(dayIdx, pIdx);
+            return;
+        }
+
+        var units = STATE.masterData ? findMasterMapUnits(STATE.masterData.masterMap, subject) : null;
+        if (!units || units.length === 0) {
+            showToast('warning', '「' + subject + '」の単元マスタデータが見つかりません。');
+            return;
+        }
+
+        loadUnitProgress(function (progress) {
+            var sp = findProgressSubject(progress, subject);
+            if (!sp || !sp.units || sp.units.length === 0) {
+                // 進捗が取れないときは機能を落として基本版で続行する
+                openUnitPickerBasic(dayIdx, pIdx);
+                return;
+            }
+            showUnitPickerModal(dayIdx, pIdx, subject, sp);
+        });
+    }
+
+    /** 単元1件分の行HTMLを組み立てる。 */
+    function buildUnitPickerItem(u, idx) {
+        var statusLabel, statusClass;
+        if (u.status === 'done') {
+            statusLabel = '指導済み';
+            statusClass = 'up-badge-done';
+        } else if (u.status === 'inProgress') {
+            statusLabel = u.taughtHour > 0
+                ? u.taughtHour + '時間目まで実施済み'
+                : u.plannedHour + '時間目まで入力済み';
+            statusClass = 'up-badge-progress';
+        } else {
+            statusLabel = '未指導';
+            statusClass = 'up-badge-new';
+        }
+
+        var notes = '';
+        if (u.overTaught) notes += '<span class="up-note">総時数を超えて指導済み</span>';
+        if (u.totalMismatch) notes += '<span class="up-note">総時数と行数が不一致</span>';
+
+        return '<div class="up-item' + (u.isNext ? ' up-item-next' : '') + (u.status === 'done' ? ' up-item-done' : '') + '" '
+            + 'data-idx="' + idx + '" data-name="' + escAttr(u.unitName.toLowerCase()) + '" data-status="' + escAttr(u.status) + '">'
+            + '<div class="up-item-main">'
+            + (u.isNext ? '<span class="up-next-tag">次はここから</span>' : '')
+            + '<strong>' + escHtml(u.unitName) + '</strong>'
+            + '<span class="up-hours">（全' + u.effectiveTotal + '時間）</span>'
+            + '</div>'
+            + '<div class="up-item-sub"><span class="up-badge ' + statusClass + '">' + escHtml(statusLabel) + '</span>' + notes + '</div>'
+            + '</div>';
+    }
+
+    /** ピッカー本体。検索・指導済みの折りたたみつき。 */
+    function showUnitPickerModal(dayIdx, pIdx, subject, sp) {
+        // 表示順: 次に指導する単元 → 未指導/指導中（マスタ順） → 指導済み（マスタ順）
+        var active = sp.units.filter(function (u) { return u.status !== 'done'; });
+        var done = sp.units.filter(function (u) { return u.status === 'done'; });
+        active.sort(function (a, b) {
+            if (a.isNext !== b.isNext) return a.isNext ? -1 : 1;
+            return a.order - b.order;
+        });
+        var ordered = active.concat(done);
+
+        var orphanNote = (sp.orphans && sp.orphans.length)
+            ? '<div class="up-orphan-note">週案に記入されているが単元マスタに無い単元: '
+              + sp.orphans.map(function (o) { return escHtml(o.unitName); }).join('、')
+              + '</div>'
+            : '';
+
+        var html =
+            '<div class="up-picker">'
+            + '<input type="text" id="upSearch" class="form-control form-control-sm" placeholder="単元名で検索...">'
+            + '<div class="up-count" id="upCount"></div>'
+            + '<div class="up-list" id="upList">'
+            + active.map(function (u) { return buildUnitPickerItem(u, ordered.indexOf(u)); }).join('')
+            + '</div>'
+            + (done.length
+                ? '<button type="button" class="up-toggle-done" id="upToggleDone">指導済み ' + done.length + '件を表示</button>'
+                  + '<div class="up-list up-list-done" id="upDoneList" style="display:none;">'
+                  + done.map(function (u) { return buildUnitPickerItem(u, ordered.indexOf(u)); }).join('')
+                  + '</div>'
+                : '')
+            + '<div class="up-empty" id="upEmpty" style="display:none;">該当する単元がありません</div>'
+            + orphanNote
+            + '</div>';
+
+        Swal.fire({
+            title: '「' + subject + '」の単元を選択',
+            html: html,
+            width: 560,
+            showConfirmButton: false,
+            showCancelButton: true,
+            cancelButtonText: '閉じる',
+            didOpen: function () {
+                var container = Swal.getHtmlContainer();
+                var searchEl = container.querySelector('#upSearch');
+                var countEl = container.querySelector('#upCount');
+                var emptyEl = container.querySelector('#upEmpty');
+                var doneToggle = container.querySelector('#upToggleDone');
+                var doneList = container.querySelector('#upDoneList');
+
+                function visibleItems() {
+                    return container.querySelectorAll('.up-item:not(.up-hidden)');
+                }
+                function refreshCount() {
+                    var shown = 0;
+                    container.querySelectorAll('.up-item').forEach(function (el) {
+                        // 折りたたまれている指導済みは件数に数えない
+                        if (el.classList.contains('up-hidden')) return;
+                        if (doneList && doneList.contains(el) && doneList.style.display === 'none') return;
+                        shown++;
+                    });
+                    countEl.textContent = shown + ' / ' + sp.units.length + ' 単元';
+                    emptyEl.style.display = (visibleItems().length === 0) ? '' : 'none';
+                }
+
+                function applyFilter() {
+                    var q = (searchEl.value || '').trim().toLowerCase();
+                    container.querySelectorAll('.up-item').forEach(function (el) {
+                        var hit = !q || el.dataset.name.indexOf(q) !== -1;
+                        el.classList.toggle('up-hidden', !hit);
+                    });
+                    // 検索中は指導済みも自動で開く（探しているものが隠れないように）
+                    if (q && doneList && doneList.style.display === 'none') {
+                        doneList.style.display = '';
+                        if (doneToggle) doneToggle.textContent = '指導済みを隠す';
+                    }
+                    refreshCount();
+                }
+
+                searchEl.addEventListener('input', applyFilter);
+                if (doneToggle) {
+                    doneToggle.addEventListener('click', function () {
+                        var hidden = doneList.style.display === 'none';
+                        doneList.style.display = hidden ? '' : 'none';
+                        doneToggle.textContent = hidden ? '指導済みを隠す' : '指導済み ' + sp.units.filter(function (u) { return u.status === 'done'; }).length + '件を表示';
+                        refreshCount();
+                    });
+                }
+
+                container.querySelectorAll('.up-item').forEach(function (item) {
+                    item.addEventListener('click', function () {
+                        var u = ordered[parseInt(item.dataset.idx, 10)];
+                        if (!u) return;
+                        Swal.close();
+                        openHourPicker(dayIdx, pIdx, subject, u.unitName, u.effectiveTotal, u.nextHour);
+                    });
+                });
+
+                refreshCount();
+                searchEl.focus();
+            }
+        });
+    }
+</script>

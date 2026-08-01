@@ -14,7 +14,9 @@
         event: { files: [], running: false, seq: 0 }
     };
 
-    var PDF_PREVIEW = { type: null, groups: [] }; // 表示中プレビューの作業データ
+    // 表示中プレビューの作業データ。
+    // applyHandler / lockNames は、同じプレビューUIを単元の時数再構成でも使うためのフック。
+    var PDF_PREVIEW = { type: null, groups: [], applyHandler: null, lockNames: false };
 
     // google.script.run の Promise ラッパー（並列制御に使用）
     function pdfRunServer_(method) {
@@ -336,6 +338,9 @@
         if (allItems.length === 0) { showToast('info', 'プレビューできる抽出結果がありません。'); return; }
 
         PDF_PREVIEW.type = type;
+        // 別用途（単元の時数再構成）でプレビューを借りた後の状態が残らないよう毎回戻す
+        PDF_PREVIEW.applyHandler = null;
+        PDF_PREVIEW.lockNames = false;
         if (type === 'event') {
             buildEventPreviewGroups_(allItems);
         } else {
@@ -357,6 +362,8 @@
 
     function closePdfPreview() {
         document.getElementById('pdfPreviewOverlay').style.display = 'none';
+        PDF_PREVIEW.applyHandler = null;
+        PDF_PREVIEW.lockNames = false;
     }
 
     // 月ごと（"2025-04" 単位）にグループ化
@@ -588,12 +595,21 @@
                 updatePdfPreviewCount_();
             };
 
-            var nameInput = document.createElement('input');
-            nameInput.type = 'text';
-            nameInput.className = 'pdf-unit-name-input';
-            nameInput.value = unit.unitName;
-            nameInput.placeholder = '単元名';
-            nameInput.oninput = function () { unit.unitName = nameInput.value; };
+            // 単元名の変更は週案の記録との紐付け（教科名＋単元名の一致）を切ってしまうため、
+            // 再構成プレビューでは編集不可のラベルとして表示する。
+            var nameInput;
+            if (PDF_PREVIEW.lockNames) {
+                nameInput = document.createElement('span');
+                nameInput.className = 'pdf-unit-name-fixed';
+                nameInput.textContent = unit.unitName;
+            } else {
+                nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.className = 'pdf-unit-name-input';
+                nameInput.value = unit.unitName;
+                nameInput.placeholder = '単元名';
+                nameInput.oninput = function () { unit.unitName = nameInput.value; };
+            }
 
             var hoursLabel = document.createElement('span');
             hoursLabel.className = 'pdf-unit-hours-label';
@@ -631,11 +647,21 @@
                 var num = document.createElement('span');
                 num.className = 'pdf-hour-num';
                 num.textContent = act.hour + '時間目';
+                // 指導済み・週案に入力済みの時間は書き換えの対象外
+                if (act.locked) {
+                    num.textContent += ' 済';
+                    num.classList.add('pdf-hour-locked');
+                }
 
                 var ta = document.createElement('textarea');
                 ta.value = act.activity || '';
                 ta.rows = 2;
-                ta.oninput = function () { act.activity = ta.value; };
+                if (act.locked) {
+                    ta.readOnly = true;
+                    ta.classList.add('pdf-hour-readonly');
+                } else {
+                    ta.oninput = function () { act.activity = ta.value; };
+                }
 
                 hourRow.appendChild(num);
                 hourRow.appendChild(ta);
@@ -663,6 +689,10 @@
 
     // ---- 反映の実行 ----
     async function applyPdfPreview() {
+        // 単元の時数再構成など、同じプレビューUIを別の反映先で使う場合のフック。
+        // (App_Js_17_UnitMasterAI.html が設定する)
+        if (PDF_PREVIEW.applyHandler) return PDF_PREVIEW.applyHandler();
+
         var type = PDF_PREVIEW.type;
         if (!type) return;
         var applyBtn = document.getElementById('pdfPreviewApplyBtn');

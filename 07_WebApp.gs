@@ -212,7 +212,12 @@ function getUnitMasterForSuggest() {
     const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!masterSheet) return { success: true, subjects: [], masterMap: {} };
 
-    const data = masterSheet.getDataRange().getValues();
+    // 性能: サジェストに必要なのは 教科/単元名/総時間数 の3列だけ。
+    // 最も重い「時間ごとの学習活動」列まで読むと起動時の転送量が無駄に増えるため範囲を絞る。
+    const lastRow = masterSheet.getLastRow();
+    if (lastRow < 2) return { success: true, subjects: [], masterMap: {} };
+    const data = masterSheet.getRange(1, 1, lastRow, MASTER_COL_TOTAL_HOURS).getValues();
+
     const subjects = [...new Set(data.slice(1).map(r => r[MASTER_COL_SUBJECT - 1]).filter(Boolean))];
     const masterMap = {};
     for (const row of data.slice(1)) {
@@ -1898,6 +1903,7 @@ function updateUnitMasterRow(rowIndex, data) {
       data.activity || ''
     ]]);
 
+    invalidateUnitProgressCache_();
     return { success: true };
   } catch (e) {
     logError('updateUnitMasterRow', e);
@@ -1927,6 +1933,7 @@ function insertUnitMasterRow(afterRowIndex, data) {
       data.activity || ''
     ]]);
 
+    invalidateUnitProgressCache_();
     return { success: true, newRowIndex: insertAt };
   } catch (e) {
     logError('insertUnitMasterRow', e);
@@ -1948,6 +1955,7 @@ function deleteUnitMasterRow(rowIndex) {
     const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!sheet) throw new Error('単元マスタシートが見つかりません');
     sheet.deleteRow(rowIndex);
+    invalidateUnitProgressCache_();
     return { success: true };
   } catch (e) {
     logError('deleteUnitMasterRow', e);
@@ -1991,6 +1999,7 @@ function batchUpdateUnitMaster(updates) {
 
     if (count > 0) {
       sheet.getRange(1, 1, lastRow, 5).setValues(allData);
+      invalidateUnitProgressCache_();
     }
 
     return { success: true, count: count };

@@ -81,6 +81,14 @@
                     + '<button class="um-btn um-btn-cancel" onclick="cancelUmEdit()" title="キャンセル"><span class="material-symbols-outlined" style="font-size:18px;">close</span></button>'
                     + '</div></td></tr>';
             } else {
+                // 単元の先頭行にだけ「AIで時数を再構成」を出す。
+                // 自動生成される「〜 のまとめ」は1時間固定のため対象外。
+                var canRecompose = isFirst && r.unitName && r.unitName.indexOf('のまとめ') === -1;
+                // 引用符の問題を避けるため、行番号だけ渡して呼び出し先で STATE から引く
+                var recomposeBtn = canRecompose
+                    ? '<button class="um-btn um-btn-ai" onclick="openUnitRecomposeFromRow(' + r.rowIndex + ')" title="AIで時数を再構成"><span class="material-symbols-outlined" style="font-size:18px;">auto_fix_high</span></button>'
+                    : '';
+
                 html += '<tr class="' + trClass.trim() + '" data-row="' + r.rowIndex + '">'
                     + '<td>' + escHtml(r.subject) + '</td>'
                     + '<td>' + escHtml(r.unitName) + '</td>'
@@ -88,6 +96,7 @@
                     + '<td class="um-cell-center">' + escHtml(String(r.hourNum)) + '</td>'
                     + '<td>' + escHtml(r.activity) + '</td>'
                     + '<td><div class="um-btn-group">'
+                    + recomposeBtn
                     + '<button class="um-btn" onclick="startUmEdit(' + r.rowIndex + ')" title="編集"><span class="material-symbols-outlined" style="font-size:18px;">edit</span></button>'
                     + '<button class="um-btn um-btn-insert" onclick="insertUmRowAfter(' + r.rowIndex + ')" title="この行の後に追加"><span class="material-symbols-outlined" style="font-size:18px;">add</span></button>'
                     + '<button class="um-btn um-btn-danger" onclick="deleteUmRow(' + r.rowIndex + ')" title="削除"><span class="material-symbols-outlined" style="font-size:18px;">delete</span></button>'
