@@ -28,8 +28,14 @@ function p3ScopeMonday_(scope) {
 }
 
 // 復元ポイント一覧向けの表示用 scope。既定シートなら週のみ、学級シートなら「週(学級)」。
+// 単元マスタの復元ポイント（unit::教科::単元名 / sheet::単元マスタ）も読める形にする。
 function p3ScopeDisplay_(scope) {
   const raw = String(scope || '');
+  if (raw.indexOf('unit::') === 0) {
+    const parts = raw.split('::');
+    return parts.length >= 3 ? parts[1] + ' / ' + parts.slice(2).join('::') : raw;
+  }
+  if (raw.indexOf('sheet::') === 0) return raw.substring('sheet::'.length) + ' 全体';
   const idx = raw.lastIndexOf('::');
   if (idx < 0) return raw;
   const sheetName = raw.substring(0, idx);
@@ -117,8 +123,20 @@ function p3CleanupSnapshots_(ss) {
   // 「手動」で始まる復元ポイントは件数上限による自動削除の対象にしない
   // (自動スナップショットの大量発生でユーザーの手動復元ポイントが消えるのを防ぐ)。
   // 期限切れ削除は種別を問わず行う。
-  const autoRows = firstRows.filter(item => String(item.row[5]).indexOf('手動') !== 0);
-  const keepIds = new Set(autoRows.slice(0, P3_SNAPSHOT_MAX_COUNT_).map(item => String(item.row[0])));
+  //
+  // 件数上限は種別ごとに数える。単元マスタの復元ポイントが増えても週案の
+  // 復元ポイントを押し出さないようにするため。
+  const keepIds = new Set();
+  const autoByType = {};
+  firstRows.forEach(item => {
+    if (String(item.row[5]).indexOf('手動') === 0) return;
+    const type = String(item.row[3] || '');
+    (autoByType[type] = autoByType[type] || []).push(item);
+  });
+  Object.keys(autoByType).forEach(type => {
+    autoByType[type].slice(0, P3_SNAPSHOT_MAX_COUNT_)
+      .forEach(item => keepIds.add(String(item.row[0])));
+  });
   const expiredIds = new Set();
   firstRows.forEach(item => {
     const isManual = String(item.row[5]).indexOf('手動') === 0;
@@ -376,6 +394,88 @@ function restoreWeekSnapshotFromWeb(snapshotId) {
     };
   } catch (e) {
     logError('restoreWeekSnapshotFromWeb', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Webアプリ API] 単元マスタの復元ポイントから復元します。
+ *
+ * 単元単位（unit::教科::単元名）は該当単元の行だけを、
+ * シート全体（sheet::単元マスタ）は全データ行を差し戻します。
+ * 復元の直前にも安全用スナップショットを作成します。
+ */
+function restoreUnitMasterSnapshotFromWeb(snapshotId) {
+  const correlationId = 'restore_unit_' + Utilities.getUuid();
+  try {
+    ensureDataProtectionReady_();
+    const snapshot = p3ReadSnapshot_(snapshotId);
+    if (!snapshot) throw new Error('復元ポイントが見つかりません。');
+    if (snapshot.type !== 'unitMaster' || !snapshot.payload || !snapshot.payload.rows) {
+      throw new Error('この復元ポイントは単元マスタの復元に対応していません。');
+    }
+
+    return p3WithUserLock_(20000, function () {
+      const ss = getSs_();
+      const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+      if (!sheet) throw new Error('単元マスタシートが見つかりません。');
+
+      const width = P4_MASTER_WIDTH_;
+      const rows = snapshot.payload.rows.map(function (r) {
+        const out = [];
+        for (let i = 0; i < width; i++) out.push(r[i] === undefined ? '' : r[i]);
+        return out;
+      });
+      const lastRow = sheet.getLastRow();
+
+      if (snapshot.payload.scopeType === 'sheet') {
+        // シート全体の差し戻し
+        const safetyId = p3CreateSnapshot_(
+          'unitMaster', 'sheet::' + SHEET_NAME_UNIT_MASTER, '自動: 復元直前',
+          {
+            schemaVersion: P3_SCHEMA_VERSION_, spreadsheetId: ss.getId(), scopeType: 'sheet',
+            rows: lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, width).getValues() : []
+          }
+        );
+        if (rows.length > 0) sheet.getRange(2, 1, rows.length, width).setValues(rows);
+        const excess = (lastRow - 1) - rows.length;
+        if (excess > 0) sheet.deleteRows(2 + rows.length, excess);
+        SpreadsheetApp.flush();
+        invalidateUnitProgressCache_();
+        p3RecordAudit_('UNIT_MASTER_RESTORE', 'unitMaster', SHEET_NAME_UNIT_MASTER,
+          '単元マスタ全体を復元', { safetySnapshotId: safetyId }, { restoredSnapshotId: snapshotId }, correlationId);
+        return { success: true, safetySnapshotId: safetyId, message: '単元マスタを復元しました。' };
+      }
+
+      // 単元単位の差し戻し。単元名は変わっていない前提で現在の行を探し直す。
+      const subject = String(snapshot.payload.subject || '');
+      const unitName = String(snapshot.payload.unitName || '');
+      if (!unitName) throw new Error('復元ポイントに単元情報がありません。');
+
+      const hours = rows.map(function (r, i) {
+        return { hour: i + 1, activity: r[MASTER_COL_ACTIVITY - 1] };
+      });
+      const declared = rows.map(function (r) { return parseInt(r[MASTER_COL_TOTAL_HOURS - 1], 10); })
+        .filter(function (v) { return !isNaN(v) && v > 0; });
+
+      const result = p4WriteUnitRows_(subject, unitName, hours, {
+        totalHours: declared.length ? Math.max.apply(null, declared) : rows.length,
+        auditAction: 'UNIT_RESTORE',
+        label: '自動: 復元直前'
+      });
+
+      p3RecordAudit_('UNIT_MASTER_RESTORE', 'unitMaster', subject + '/' + unitName,
+        '単元「' + unitName + '」を復元',
+        { safetySnapshotId: result.snapshotId }, { restoredSnapshotId: snapshotId }, correlationId);
+
+      return {
+        success: true,
+        safetySnapshotId: result.snapshotId,
+        message: '単元「' + unitName + '」を復元しました。'
+      };
+    });
+  } catch (e) {
+    logError('restoreUnitMasterSnapshotFromWeb', e);
     return { success: false, error: e.message };
   }
 }

@@ -427,6 +427,27 @@ test('新しいUIは単元マスタ変更後にサジェストのキャッシュ
   assert.match(read('App_Js_14_MultiClass.html'), /STATE\.unitProgress = null/);
 });
 
+test('単元マスタの復元ポイントは復元でき、週案の復元経路とは分かれている', () => {
+  const snapshots = read('13_DataProtection_Snapshots.gs');
+  // 週案の復元は書き込み前に種別を弾く
+  const weekRestore = snapshots.slice(snapshots.indexOf('function restoreWeekSnapshotFromWeb'));
+  assert.match(weekRestore, /snapshot\.type !== 'week'/);
+  // 単元マスタ専用の復元経路がある
+  assert.match(snapshots, /function restoreUnitMasterSnapshotFromWeb/);
+  const unitRestore = snapshots.slice(snapshots.indexOf('function restoreUnitMasterSnapshotFromWeb'));
+  assert.match(unitRestore, /snapshot\.type !== 'unitMaster'/);
+  assert.match(unitRestore, /p3WithUserLock_/);
+  assert.match(unitRestore, /invalidateUnitProgressCache_|p4WriteUnitRows_/);
+  // 単元マスタの scope も一覧で読める形にする
+  assert.match(snapshots, /raw\.indexOf\('unit::'\) === 0/);
+  // 件数上限は種別ごとに数え、単元の復元ポイントが週案のものを追い出さない
+  assert.match(snapshots, /件数上限は種別ごとに数える/);
+
+  const ui = read('App_Js_15_DataProtection_Core.html');
+  assert.match(ui, /p3RestoreUnitMasterUI/);
+  assert.match(ui, /restoreUnitMasterSnapshotFromWeb/);
+});
+
 test('新しいUIは単元マスタ行を直接削除しない', () => {
   for (const file of [
     'App_Js_16_UnitProgress.html', 'App_Js_17_UnitMasterAI.html', 'App_Js_18_UnitMasterCheck.html'
