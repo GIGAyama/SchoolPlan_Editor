@@ -395,6 +395,9 @@
     function invalidateMasterData() {
         STATE.masterData = null;
         STATE.performance.masterLoading = false;
+        // 単元マスタが変わると単元の進捗も変わるので、進捗インデックスも捨てる
+        STATE.unitProgress = null;
+        STATE.unitProgressLoading = false;
         loadMasterData();
     }
 

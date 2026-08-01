@@ -44,6 +44,7 @@ function clearDatabaseDataProtectedFromWeb() {
       result,
       'clear_' + Utilities.getUuid()
     );
+    invalidateUnitProgressCache_();
     return {
       success: true,
       message: result.message + ' 完全バックアップを作成済みです。',

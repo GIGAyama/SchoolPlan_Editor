@@ -1179,6 +1179,7 @@ function applyExtractedUnitsFromWeb(units, options) {
     }
 
     logInfo(`単元マスタプレビュー反映: ${unitCount} 単元・${allRows.length} 行を書き込みました。`);
+    invalidateUnitProgressCache_();
     return { success: true, unitCount: unitCount, rowCount: allRows.length, replacedSubjects: [...subjectLabels] };
   } catch (e) {
     logError('applyExtractedUnitsFromWeb', e);

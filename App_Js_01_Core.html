@@ -46,6 +46,8 @@
         aiPreviewTasks: [],            // AI抽出タスクのプレビュー
         umAllRows: [],                 // 単元マスタ 全行データ
         umEditingRowIndex: null,       // 単元マスタ 編集中の行（シート行番号）
+        unitProgress: null,            // 単元進捗インデックス（単元ピッカー用・遅延取得）
+        unitProgressLoading: false,    // 単元進捗の取得中フラグ（二重呼び出し防止）
         // 行事予定（年間行事予定PDF）ビュー
         eventLibraryLoaded: false,     // 行事予定PDF一覧 読込済み
         eventLibraryLoading: false,    // 行事予定PDF一覧 読込中（二重呼び出し防止）

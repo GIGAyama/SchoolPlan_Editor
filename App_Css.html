@@ -4864,4 +4864,135 @@
         align-items: center;
         padding: 0;
     }
+
+    /* ===== 進捗つき単元ピッカー ===== */
+    .up-picker {
+        text-align: left;
+    }
+
+    .up-picker #upSearch {
+        margin-bottom: 6px;
+    }
+
+    .up-count {
+        font-size: 0.72rem;
+        color: var(--text-sub);
+        margin-bottom: 4px;
+    }
+
+    .up-list {
+        max-height: 260px;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+    }
+
+    .up-list-done {
+        margin-top: 4px;
+    }
+
+    .up-item {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .up-item:last-child {
+        border-bottom: none;
+    }
+
+    .up-item:hover {
+        background: var(--bg-hover, var(--surface-hover));
+    }
+
+    .up-item.up-hidden {
+        display: none;
+    }
+
+    .up-item-done {
+        opacity: 0.55;
+    }
+
+    .up-item-next {
+        background: var(--primary-bg, rgba(26, 115, 232, 0.08));
+    }
+
+    .up-item-main {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .up-item-sub {
+        margin-top: 3px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .up-hours {
+        color: var(--text-sub);
+        font-size: 0.8rem;
+    }
+
+    .up-next-tag {
+        background: var(--primary, #1a73e8);
+        color: #fff;
+        font-size: 0.66rem;
+        padding: 1px 6px;
+        border-radius: 10px;
+    }
+
+    .up-badge {
+        font-size: 0.68rem;
+        padding: 1px 6px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+    }
+
+    .up-badge-done {
+        background: var(--surface-hover, #eee);
+        color: var(--text-sub);
+    }
+
+    .up-badge-progress {
+        background: rgba(26, 115, 232, 0.12);
+        color: var(--primary, #1a73e8);
+    }
+
+    .up-badge-new {
+        background: rgba(52, 168, 83, 0.12);
+        color: #1e8e3e;
+    }
+
+    .up-note {
+        font-size: 0.66rem;
+        color: var(--warning, #e65100);
+    }
+
+    .up-toggle-done {
+        margin-top: 6px;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-size: 0.74rem;
+        cursor: pointer;
+        color: var(--text-sub);
+        width: 100%;
+    }
+
+    .up-empty,
+    .up-orphan-note {
+        font-size: 0.72rem;
+        color: var(--text-hint);
+        padding: 10px 4px;
+    }
+
+    .up-orphan-note {
+        color: var(--warning, #e65100);
+    }
 </style>

@@ -1349,6 +1349,9 @@
     <?!= include('App_Js_15_DataProtection_Core'); ?>
     <?!= include('App_Js_15_DataProtection_Manage'); ?>
     <?!= include('App_Js_15_DataProtection_Overrides'); ?>
+    <!-- 進捗つき単元ピッカー。02_Plan の openUnitPickerBasic をフォールバックとして使うため、
+         必ず 02_Plan より後に読み込む。 -->
+    <?!= include('App_Js_16_UnitProgress'); ?>
 
 </body>
 

@@ -130,6 +130,7 @@ function trashUnitMasterRowFromWeb(rowIndex) {
     sheet.deleteRow(index);
     SpreadsheetApp.flush();
     p3RecordAudit_('TRASH', 'unitMaster', String(index), '単元マスタ行をごみ箱へ移動', payload, { trashId }, trashId);
+    invalidateUnitProgressCache_();
     return { success: true, trashId, message: '単元マスタ行をごみ箱へ移動しました。' };
   } catch (e) {
     logError('trashUnitMasterRowFromWeb', e);
@@ -194,6 +195,7 @@ function restoreTrashItemFromWeb(trashId) {
         : appendRow;
       if (targetRow < appendRow) sheet.insertRowBefore(targetRow);
       sheet.getRange(targetRow, 1, 1, 5).setValues([payload.values || ['', '', '', '', '']]);
+      invalidateUnitProgressCache_();
     } else if (type === 'newsletter') {
       const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
       if (!sheet) throw new Error('学級通信データシートが見つかりません。');
