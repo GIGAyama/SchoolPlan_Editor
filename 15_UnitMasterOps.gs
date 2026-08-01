@@ -383,6 +383,15 @@ function p4WriteUnitRows_(subject, unitName, hours, options) {
 // ===== Webアプリ API =====
 // ===================================================
 
+/**
+ * シートの行数が足りなければ末尾に追加します。
+ * 行を切り詰めたシートで setValues が範囲外にならないようにするためのガード。
+ */
+function p4EnsureRowCapacity_(sheet, neededRows) {
+  const max = sheet.getMaxRows();
+  if (neededRows > max) sheet.insertRowsAfter(max, neededRows - max);
+}
+
 /** 週案全体を対象にした指導履歴を返す内部ヘルパー。 */
 function p4PlannedHistory_(ss) {
   const dbSheet = getDbSheet_(ss);
@@ -462,6 +471,9 @@ function repairUnitMasterConsistency(targets) {
 
       const rows = built.rows;
       if (rows.length > 0) {
+        // 不足行の追加で行数が増える場合、シートの行数が足りないと
+        // getRange が範囲外になるため先に広げておく。
+        p4EnsureRowCapacity_(sheet, rows.length + 1);
         sheet.getRange(2, 1, rows.length, P4_MASTER_WIDTH_).setValues(rows);
       }
       // 行数が減った場合は末尾の余りを1回で消す

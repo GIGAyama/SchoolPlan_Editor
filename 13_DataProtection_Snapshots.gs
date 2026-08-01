@@ -437,7 +437,10 @@ function restoreUnitMasterSnapshotFromWeb(snapshotId) {
             rows: lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, width).getValues() : []
           }
         );
-        if (rows.length > 0) sheet.getRange(2, 1, rows.length, width).setValues(rows);
+        if (rows.length > 0) {
+          p4EnsureRowCapacity_(sheet, rows.length + 1);
+          sheet.getRange(2, 1, rows.length, width).setValues(rows);
+        }
         const excess = (lastRow - 1) - rows.length;
         if (excess > 0) sheet.deleteRows(2 + rows.length, excess);
         SpreadsheetApp.flush();
