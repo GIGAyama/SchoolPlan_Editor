@@ -427,6 +427,106 @@ test('新しいUIは単元マスタ変更後にサジェストのキャッシュ
   assert.match(read('App_Js_14_MultiClass.html'), /STATE\.unitProgress = null/);
 });
 
+// ===== レビューで見つかった不具合の回帰テスト =====
+
+test('指導済みの単元は総時数を超える時間目を「次」として返さない', () => {
+  const context = loadContext();
+  const mk = context.__mkDate;
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', '完了', 3, 1], ['国語', '完了', 3, 2], ['国語', '完了', 3, 3],
+    ['国語', '超過', 10, 1]
+  ];
+  const db = [
+    ['日付', '1校時', '単元1'],
+    [mk(2026, 3, 10), '国語', '完了 1/3'],
+    [mk(2026, 3, 11), '国語', '完了 2/3'],
+    [mk(2026, 3, 12), '国語', '完了 3/3'],
+    [mk(2026, 3, 13), '国語', '超過 12/10']
+  ];
+  const out = context.buildUnitProgressPayload_(master, db, DB_COLS, mk(2026, 3, 20), mk(9999, 0, 1));
+  const units = Object.fromEntries(out.subjects['国語'].units.map((u) => [u.unitName, u]));
+
+  // 3時間の単元を3時間指導した状態で 4/3 を書き込ませない
+  assert.equal(units['完了'].status, 'done');
+  assert.ok(units['完了'].nextHour <= units['完了'].effectiveTotal,
+    `nextHour(${units['完了'].nextHour}) が総時数(${units['完了'].effectiveTotal}) を超えない`);
+
+  // 総時数を超えて指導済みでも、選択肢の上限と一致する
+  assert.ok(units['超過'].nextHour <= units['超過'].effectiveTotal);
+});
+
+test('単元ピッカーが表示する分母とセルに書く分母が一致する', () => {
+  const plan = read('App_Js_02_Plan.html');
+  const fn = plan.slice(plan.indexOf('function openHourPicker'), plan.indexOf('// ===== 空き時間'));
+  // 選択肢のラベルもセルへの書き込みも maxHour を使う
+  assert.match(fn, /options\[h\] = h \+ '\/' \+ maxHour/);
+  assert.match(fn, /unitEl\.value = unitName \+ ' ' \+ hourNum \+ '\/' \+ maxHour/);
+  assert.doesNotMatch(fn, /hourNum \+ '\/' \+ totalHours/,
+    '表示と書き込みで分母が食い違わない');
+});
+
+test('スナップショットは200行を超える単元マスタを取りこぼさない', () => {
+  const context = loadContext();
+  // p3Redact_ が配列を200要素で切り詰める挙動を再現する
+  const redact = (v) => (Array.isArray(v) ? v.slice(0, 200).map(redact) : v);
+  const rows = Array.from({ length: 900 }, (_, i) => ['国語', 'U' + i, 1, 1, 'act' + i]);
+
+  const paged = context.p4PageRows_(rows);
+  const restored = context.p4UnpageRows_({ rowPages: redact(paged) });
+  assert.equal(restored.length, 900, '切り詰め後も全行が復元できる');
+  assert.equal(restored[899][1], 'U899');
+
+  // 旧形式（rows を直接持つ）スナップショットも読める
+  assert.equal(context.p4UnpageRows_({ rows: [['a']] }).length, 1);
+
+  // 保存側がページ形式を使っている
+  assert.match(read('15_UnitMasterOps.gs'), /rowPages: p4PageRows_/);
+  assert.match(read('13_DataProtection_Snapshots.gs'), /rowPages: p4PageRows_/);
+});
+
+test('修復は単元に属さない書きかけの行を消さない', () => {
+  const context = loadContext();
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目', '活動'],
+    ['国語', 'ごんぎつね', 3, 1, 'a'],
+    ['国語', 'ごんぎつね', 3, 1, 'b'],
+    ['国語', 'ごんぎつね', 3, 3, 'c'],
+    ['', '', '', '', ''],
+    ['国語', '', 3, 1, '書きかけの行'],
+    ['', 'メモ', '', '', 'あとで整理する'],
+    ['算数', 'たし算', 1, 1, 'd']
+  ];
+  const analysis = context.analyzeUnitConsistency_(master, {}, []);
+  const built = context.buildRepairedMasterRows_(master, analysis, [{ subject: '国語', unitName: 'ごんぎつね' }]);
+  const rows = host(built.rows);
+
+  assert.ok(rows.some((r) => r[4] === '書きかけの行'), '単元名が空の行が残る');
+  assert.ok(rows.some((r) => r[4] === 'あとで整理する'), '教科名が空の行が残る');
+  assert.ok(rows.some((r) => r[1] === 'たし算'), '対象外の単元が残る');
+  // 内容の無い余白行だけは落とす
+  assert.ok(!rows.some((r) => r.every((c) => String(c).trim() === '')));
+});
+
+test('年間再配分の目標時数が実施済み時数を二重に差し引かない', () => {
+  const source = read('16_UnitRecompose.gs');
+  const fn = source.slice(source.indexOf('function proposeAnnualReallocation'));
+  // 指導済み単元の時数(lockedTotal)を引く。simRow.done を引くと、指導中の単元で
+  // 実施した分が currentTotal 側にも含まれるため二重に差し引かれる。
+  assert.match(fn, /simRow\.standard - lockedTotal/);
+  assert.doesNotMatch(fn, /simRow\.standard - simRow\.done/);
+});
+
+test('週案の保存でクライアントの進捗キャッシュも捨てる', () => {
+  const multiClass = read('App_Js_14_MultiClass.html');
+  const fn = multiClass.slice(
+    multiClass.indexOf('function p2UpdateCurrentWeekCache'),
+    multiClass.indexOf('function autoSaveAndThen')
+  );
+  // 全ての保存経路が通る合流点でキャッシュを捨てる
+  assert.match(fn, /STATE\.unitProgress = null/);
+});
+
 test('単元マスタの復元ポイントは復元でき、週案の復元経路とは分かれている', () => {
   const snapshots = read('13_DataProtection_Snapshots.gs');
   // 週案の復元は書き込み前に種別を弾く

@@ -483,6 +483,8 @@
     function openHourPicker(dayIdx, pIdx, subject, unitName, totalHours, nextHour) {
         // 指導済みの時数がマスタの総時数を超えている場合もあるため、選択肢は
         // 総時数と「次の時間目」の大きい方まで出す（既存の effectiveTotal と同じ考え方）。
+        // ここで決めた maxHour は選択肢の表示にもセルに書く分母にも使う。
+        // 表示と書き込みで分母が食い違うと「13/13 を選んだのに 13/10 と入る」ことになる。
         var maxHour = Math.max(parseInt(totalHours, 10) || 1, parseInt(nextHour, 10) || 1);
         var options = {};
         for (var h = 1; h <= maxHour; h++) {
@@ -509,7 +511,7 @@
 
             // 単元名セルに入力
             var unitEl = document.querySelector('[data-field="unit"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
-            if (unitEl) unitEl.value = unitName + ' ' + hourNum + '/' + totalHours;
+            if (unitEl) unitEl.value = unitName + ' ' + hourNum + '/' + maxHour;
 
             // サーバーから学習活動を取得してcontentに入力
             google.script.run
@@ -520,7 +522,7 @@
                             contentEl.value = res.activity || '';
                             autoResizeTextarea(contentEl);
                         }
-                        showToast('success', unitName + ' ' + hourNum + '/' + totalHours + ' を入力しました。');
+                        showToast('success', unitName + ' ' + hourNum + '/' + maxHour + ' を入力しました。');
                     }
                 })
                 .withFailureHandler(function (e) {

@@ -14,6 +14,8 @@
 
 /** 単元マスタの列数（教科・単元名・総時間数・何時間目・学習活動）。 */
 const P4_MASTER_WIDTH_ = 5;
+/** スナップショット保存時の1ページあたりの行数（p3Redact_ の配列上限に合わせる）。 */
+const P4_SNAPSHOT_PAGE_SIZE_ = 200;
 
 // ===================================================
 // ===== 整合性の解析（純粋関数・テスト対象） =====
@@ -200,21 +202,30 @@ function buildRepairedMasterRows_(masterData, analysis, targets) {
     targetKeys[normalizeSubjectName_(t.subject) + '||' + String(t.unitName).trim()] = true;
   });
 
-  // 単元ごとに元の行をまとめる（登場順を保持）
+  // 単元ごとに元の行をまとめる（登場順を保持）。
+  // 教科名または単元名が空の行（区切りの空行・書きかけの行）は、どの単元にも属さないが
+  // 呼び出し元がこの結果でシート全体を書き直すため、取りこぼすと消えてしまう。
+  // 単独の行としてその場の順序のまま持ち回る。
   const groups = [];
   const groupByKey = {};
   for (let i = 1; i < masterData.length; i++) {
     const row = masterData[i] || [];
+    const values = row.slice(0, P4_MASTER_WIDTH_);
     const subjectRaw = row[MASTER_COL_SUBJECT - 1];
     const unitName = row[MASTER_COL_UNIT_NAME - 1];
-    if (!subjectRaw || !unitName) continue;
+    if (!subjectRaw || !unitName) {
+      // 完全に空の行は復元する意味がないので落とす（シートの余白行）
+      const hasContent = values.some(function (v) { return String(v === undefined || v === null ? '' : v).trim() !== ''; });
+      if (hasContent) groups.push({ passthrough: values });
+      continue;
+    }
     const key = normalizeSubjectName_(subjectRaw) + '||' + String(unitName).trim();
     let g = groupByKey[key];
     if (!g) {
       g = groupByKey[key] = { key: key, rows: [] };
       groups.push(g);
     }
-    g.rows.push(row.slice(0, P4_MASTER_WIDTH_));
+    g.rows.push(values);
   }
 
   const analysisByKey = {};
@@ -223,6 +234,11 @@ function buildRepairedMasterRows_(masterData, analysis, targets) {
   const repaired = [];
   const out = [];
   groups.forEach(function (g) {
+    if (g.passthrough) {
+      // どの単元にも属さない行はそのまま残す
+      out.push(g.passthrough);
+      return;
+    }
     if (!targetKeys[g.key]) {
       // 対象外の単元はそのまま
       g.rows.forEach(function (r) { out.push(r); });
@@ -342,7 +358,8 @@ function p4WriteUnitRows_(subject, unitName, hours, options) {
         subject: subject,
         unitName: name,
         firstRow: firstRow,
-        rows: currentValues
+        // 通常は数十行だが、こちらも200行で切り詰められないようページに分ける
+        rowPages: p4PageRows_(currentValues)
       }
     );
 
@@ -382,6 +399,31 @@ function p4WriteUnitRows_(subject, unitName, hours, options) {
 // ===================================================
 // ===== Webアプリ API =====
 // ===================================================
+
+/**
+ * スナップショット保存用に行を200行ごとのページへ分割します。
+ *
+ * p3Redact_（13_DataProtection.gs）はあらゆる配列を先頭200要素で切り詰めるため、
+ * 数百行になる単元マスタをそのまま渡すと201行目以降が黙って失われ、
+ * その復元ポイントから戻したときに実データが消えます。
+ * ページに分ければ「ページ数200 × 1ページ200行」まで保持できます。
+ */
+function p4PageRows_(rows) {
+  const pages = [];
+  for (let i = 0; i < rows.length; i += P4_SNAPSHOT_PAGE_SIZE_) {
+    pages.push(rows.slice(i, i + P4_SNAPSHOT_PAGE_SIZE_));
+  }
+  return pages;
+}
+
+/** ページ分割された行を元の1次元配列へ戻します。 */
+function p4UnpageRows_(payload) {
+  if (payload && Array.isArray(payload.rowPages)) {
+    return payload.rowPages.reduce(function (acc, page) { return acc.concat(page); }, []);
+  }
+  // 旧形式（rows を直接持つスナップショット）との互換
+  return (payload && Array.isArray(payload.rows)) ? payload.rows : [];
+}
 
 /**
  * シートの行数が足りなければ末尾に追加します。
@@ -465,7 +507,10 @@ function repairUnitMasterConsistency(targets) {
           schemaVersion: P3_SCHEMA_VERSION_,
           spreadsheetId: ss.getId(),
           scopeType: 'sheet',
-          rows: masterData.slice(1)
+          // p3Redact_ が配列を200要素で切り詰めるため、行をそのまま渡すと
+          // 201行目以降が保存されず、復元時に消えてしまう。
+          // 200行ごとのページに分けて全行を保持する。
+          rowPages: p4PageRows_(masterData.slice(1))
         }
       );
 

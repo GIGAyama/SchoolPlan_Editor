@@ -121,7 +121,10 @@ function buildUnitProgressPayload_(masterData, dbData, dbCols, tomorrowMidnight,
         effectiveTotal: effectiveTotal,
         taughtHour: taughtHour,
         plannedHour: plannedHour,
-        nextHour: plannedHour + 1,
+        // 「次に指導する時間目」。指導済みの単元には次の時間が存在しないため、
+        // 総時数を超えないよう丸める（丸めないと単元ピッカーが 4/3 のような
+        // マスタに無い時数をセルへ書き込んでしまう）。
+        nextHour: done ? Math.max(Math.min(plannedHour, effectiveTotal), 1) : plannedHour + 1,
         status: done ? 'done' : (plannedHour > 0 ? 'inProgress' : 'untaught'),
         isNext: false,
         overTaught: !!(masterTotal && plannedHour > masterTotal),

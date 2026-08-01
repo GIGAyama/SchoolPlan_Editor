@@ -493,8 +493,14 @@ function proposeAnnualReallocation(req) {
 
     const currentRemaining = remainingUnits.reduce(function (a, u) { return a + u.currentTotal; }, 0);
     const minSum = remainingUnits.reduce(function (a, u) { return a + u.minHours; }, 0);
-    // 目標: 標準時数から「指導済み時数」を引いた残り。下限は各単元の最低時数の合計。
-    const targetRemaining = Math.max(Math.round(simRow.standard - simRow.done), minSum);
+    // 目標: 標準時数から「指導済み単元の時数」を引いた残り。下限は各単元の最低時数の合計。
+    //
+    // ここで simRow.done（実施済み時数）を引いてはいけない。done には指導中の単元で
+    // 既に実施した分も含まれるが、その分は remainingUnits の currentTotal にも
+    // 含まれているため、二重に差し引くことになり目標が小さくなりすぎる。
+    // 年間計画の合計は「指導済み単元の時数 + 未消化単元の時数」なので、
+    // 未消化分の目標は standard - lockedTotal。
+    const targetRemaining = Math.max(Math.round(simRow.standard - lockedTotal), minSum);
 
     const baseline = buildReallocationBaseline_(remainingUnits, targetRemaining);
 

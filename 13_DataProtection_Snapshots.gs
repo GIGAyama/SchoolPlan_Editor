@@ -411,8 +411,13 @@ function restoreUnitMasterSnapshotFromWeb(snapshotId) {
     ensureDataProtectionReady_();
     const snapshot = p3ReadSnapshot_(snapshotId);
     if (!snapshot) throw new Error('復元ポイントが見つかりません。');
-    if (snapshot.type !== 'unitMaster' || !snapshot.payload || !snapshot.payload.rows) {
+    if (snapshot.type !== 'unitMaster' || !snapshot.payload) {
       throw new Error('この復元ポイントは単元マスタの復元に対応していません。');
+    }
+    // rowPages（現行）と rows（旧形式）の両方を受け付ける
+    const storedRows = p4UnpageRows_(snapshot.payload);
+    if (storedRows.length === 0) {
+      throw new Error('この復元ポイントには単元マスタの行が含まれていません。');
     }
 
     return p3WithUserLock_(20000, function () {
@@ -421,7 +426,7 @@ function restoreUnitMasterSnapshotFromWeb(snapshotId) {
       if (!sheet) throw new Error('単元マスタシートが見つかりません。');
 
       const width = P4_MASTER_WIDTH_;
-      const rows = snapshot.payload.rows.map(function (r) {
+      const rows = storedRows.map(function (r) {
         const out = [];
         for (let i = 0; i < width; i++) out.push(r[i] === undefined ? '' : r[i]);
         return out;
@@ -434,7 +439,8 @@ function restoreUnitMasterSnapshotFromWeb(snapshotId) {
           'unitMaster', 'sheet::' + SHEET_NAME_UNIT_MASTER, '自動: 復元直前',
           {
             schemaVersion: P3_SCHEMA_VERSION_, spreadsheetId: ss.getId(), scopeType: 'sheet',
-            rows: lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, width).getValues() : []
+            // 復元直前の退避も200行で切り詰められないようページに分ける
+            rowPages: p4PageRows_(lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, width).getValues() : [])
           }
         );
         if (rows.length > 0) {

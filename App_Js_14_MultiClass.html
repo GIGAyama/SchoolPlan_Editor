@@ -445,6 +445,11 @@
         if (!STATE.weekData || !STATE.mondayStr) return;
         STATE.weekData.mondayDateStr = STATE.mondayStr;
         p2CacheWeek(STATE.weekData);
+        // 週案を保存すると単元の進捗も変わる。ここは全ての保存経路が通る合流点なので、
+        // クライアント側にキャッシュした進捗インデックスもここで捨てる。
+        // (捨てないと、保存した時数がピッカーに反映されず同じ時間を二重に入力してしまう)
+        STATE.unitProgress = null;
+        STATE.unitProgressLoading = false;
     }
 
     // 保存は beginSaveRequest/endSaveRequest で直列化する（App_Js_02_Plan で定義）。
