@@ -205,4 +205,156 @@
                 expectedRowCount: res.rowCount
             });
     }
+
+    // ===================================================
+    // ===== 年間再配分（時数の過不足から未指導単元へ配分） =====
+    // ===================================================
+
+    var UMR_STATE = { plan: null };
+
+    /** 時数タブの「調整案」から呼ばれる。教科単位で配分案を出す。 */
+    function openAnnualReallocationDialog(subject, academicYear) {
+        Swal.fire({
+            title: '配分案を計算しています...',
+            html: '<div class="spinner-lg" style="margin:16px auto;"></div>'
+                + '<p style="font-size:0.82rem;color:#666;">' + escHtml(subject) + ' の未指導単元を対象に計算します</p>',
+            allowOutsideClick: false,
+            showConfirmButton: false
+        });
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                Swal.close();
+                if (!res || !res.success) {
+                    Swal.fire({ icon: 'error', title: '配分案を作成できませんでした', text: (res && res.error) || '不明なエラー' });
+                    return;
+                }
+                showReallocationPreview(res);
+            })
+            .withFailureHandler(function (e) {
+                Swal.close();
+                showToast('error', '通信エラー: ' + e.message);
+            })
+            .proposeAnnualReallocation({ academicYear: academicYear, subject: subject });
+    }
+
+    /** 配分案を表として見せ、承認されたら1単元ずつ順に適用する。 */
+    function showReallocationPreview(res) {
+        UMR_STATE.plan = res;
+        var sim = res.simulation;
+        var changed = res.allocation.filter(function (a) { return a.delta !== 0; });
+
+        var gapText = sim.diff > 0
+            ? ('超過 ' + sim.diff + '時間')
+            : (sim.diff < 0 ? ('不足 ' + Math.abs(sim.diff) + '時間') : '過不足なし');
+
+        var rows = res.allocation.map(function (a) {
+            var deltaHtml = a.delta === 0
+                ? '±0'
+                : '<span class="' + (a.delta > 0 ? 'umr-up' : 'umr-down') + '">'
+                  + (a.delta > 0 ? '+' : '') + a.delta + '</span>';
+            return '<tr' + (a.delta !== 0 ? ' class="umr-changed"' : '') + '>'
+                + '<td>' + escHtml(a.unitName) + '</td>'
+                + '<td class="umr-num">' + a.currentTotal + '</td>'
+                + '<td class="umr-num"><b>' + a.proposedTotal + '</b></td>'
+                + '<td class="umr-num">' + deltaHtml + '</td>'
+                + '<td class="umr-reason">' + escHtml(a.reason || '') + '</td>'
+                + '</tr>';
+        }).join('');
+
+        var warnHtml = (res.warnings && res.warnings.length)
+            ? '<div class="umr-warn">' + res.warnings.map(escHtml).join('<br>') + '</div>'
+            : '';
+
+        Swal.fire({
+            title: escHtml(res.subject) + ' の時数再配分',
+            html: '<div class="umr-wrap">'
+                + '<div class="umr-summary">'
+                + '標準 ' + sim.standard + '時間 ／ 実施済み ' + sim.done + '時間 ／ 年度末見込み ' + sim.projected + '時間'
+                + '<br><b>' + gapText + '</b>'
+                + '<br>未指導単元の合計を <b>' + res.currentRemaining + '時間 → ' + res.targetRemaining + '時間</b> に調整します。'
+                + '</div>'
+                + warnHtml
+                + '<div class="umr-source">' + (res.aiApplied ? 'AIが調整した案です' : '機械的に計算した案です') + '</div>'
+                + '<div style="overflow-x:auto;"><table class="umr-table"><thead><tr>'
+                + '<th>単元</th><th>現在</th><th>変更後</th><th>増減</th><th>理由</th>'
+                + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+                + '<p class="umr-note">総時間数だけを変更します。学習活動の内容は書き換えません'
+                + '（増えた分は空欄になります。必要なら単元マスタの「AIで時数を再構成」で内容も作れます）。</p>'
+                + '</div>',
+            width: 720,
+            showCancelButton: true,
+            showConfirmButton: changed.length > 0,
+            confirmButtonText: changed.length + ' 単元に反映',
+            cancelButtonText: '閉じる',
+            confirmButtonColor: '#1a73e8'
+        }).then(function (r) {
+            if (!r.isConfirmed) return;
+            applyReallocationSequentially(res.subject, changed);
+        });
+    }
+
+    /**
+     * 1単元ずつ順に適用する。
+     * GASの実行時間上限に達しないよう、1リクエスト1単元に分けている。
+     */
+    function applyReallocationSequentially(subject, changed) {
+        var done = 0;
+        var failed = [];
+
+        function step(i) {
+            if (i >= changed.length) {
+                Swal.close();
+                var msg = done + ' 単元の時数を変更しました。';
+                if (failed.length > 0) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: '一部の単元を変更できませんでした',
+                        html: escHtml(msg) + '<br><br>'
+                            + failed.map(function (f) { return escHtml(f.unitName + ': ' + f.error); }).join('<br>'),
+                        confirmButtonColor: '#1a73e8'
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '再配分が完了しました',
+                        html: escHtml(msg) + '<br><span style="font-size:0.8rem;color:#666;">各単元の復元ポイントを作成済みです。</span>',
+                        confirmButtonColor: '#1a73e8'
+                    });
+                }
+                STATE.umDataLoaded = false;
+                if (typeof invalidateMasterData === 'function') invalidateMasterData();
+                if (typeof loadHoursSimulation === 'function') loadHoursSimulation();
+                return;
+            }
+
+            var a = changed[i];
+            Swal.update({
+                title: '反映しています...',
+                html: '<div class="spinner-lg" style="margin:16px auto;"></div>'
+                    + '<p style="font-size:0.82rem;color:#666;">' + (i + 1) + ' / ' + changed.length + '：'
+                    + escHtml(a.unitName) + '</p>'
+            });
+
+            google.script.run
+                .withSuccessHandler(function (r) {
+                    if (r && r.success) done++;
+                    else failed.push({ unitName: a.unitName, error: (r && r.error) || '不明なエラー' });
+                    step(i + 1);
+                })
+                .withFailureHandler(function (e) {
+                    failed.push({ unitName: a.unitName, error: e.message });
+                    step(i + 1);
+                })
+                .applyUnitTotalHours(subject, a.unitName, a.proposedTotal);
+        }
+
+        Swal.fire({
+            title: '反映しています...',
+            html: '<div class="spinner-lg" style="margin:16px auto;"></div>',
+            allowOutsideClick: false,
+            showConfirmButton: false
+        });
+        step(0);
+    }
 </script>

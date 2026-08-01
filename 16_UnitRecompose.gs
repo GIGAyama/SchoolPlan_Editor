@@ -430,3 +430,207 @@ function applyUnitRecomposition(payload) {
     return { success: false, error: e.message };
   }
 }
+
+// ===================================================
+// ===== 年間再配分（C） =====
+// ===================================================
+
+/**
+ * [Webアプリ API] 教科の年度末過不足に基づき、未指導単元への時数再配分案を返します。
+ * ルールベースの比例配分案を先に作り、AIにはその調整だけを任せます。
+ * AIの提案が検証を通らなければルールベース案をそのまま返すため、必ず何かを返します。
+ *
+ * @param {Object} req { academicYear: number, subject: string }
+ */
+function proposeAnnualReallocation(req) {
+  try {
+    req = req || {};
+    validateParams_(req, {
+      academicYear: { type: 'number', required: true, min: 2000, max: 2100 },
+      subject: { type: 'string', required: true, maxLength: 50 }
+    });
+
+    const sim = getHoursSimulation(parseInt(req.academicYear, 10));
+    if (!sim || !sim.success) throw new Error((sim && sim.error) || '時数シミュレーションを取得できませんでした。');
+
+    const subjectKey = normalizeSubjectName_(req.subject);
+    const simRow = (sim.rows || []).filter(function (r) {
+      return normalizeSubjectName_(r.subject) === subjectKey;
+    })[0];
+    if (!simRow) throw new Error('教科「' + req.subject + '」の標準時数が設定されていません。');
+
+    // 単元マスタと週案から、この教科の未消化単元を洗い出す
+    const ss = getSs_();
+    const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
+    if (!masterSheet || masterSheet.getLastRow() < 2) throw new Error('単元マスタにデータがありません。');
+    const masterData = masterSheet.getRange(1, 1, masterSheet.getLastRow(), MASTER_COL_HOUR_NUM).getValues();
+    const masterIndex = buildMasterIndex_(masterData);
+    const sm = masterIndex[subjectKey];
+    if (!sm || sm.units.length === 0) throw new Error('教科「' + req.subject + '」の単元がマスタにありません。');
+
+    const planned = p4PlannedHistory_(ss);
+    const tracker = createProgressTracker_(masterIndex, planned);
+
+    let lockedTotal = 0;
+    const remainingUnits = [];
+    sm.units.forEach(function (u) {
+      const total = tracker.effectiveTotal(subjectKey, u.name);
+      const done = tracker.maxProgress(subjectKey, u.name);
+      if (tracker.isFinished(subjectKey, u.name)) {
+        lockedTotal += total;
+        return;
+      }
+      remainingUnits.push({
+        unitName: u.name,
+        currentTotal: total,
+        // 既に指導・入力済みの時数を下回らせない。まだ手つかずなら最低1時間。
+        minHours: Math.max(done, 1)
+      });
+    });
+    if (remainingUnits.length === 0) {
+      throw new Error('この教科は全ての単元が指導済みのため、再配分できる単元がありません。');
+    }
+
+    const currentRemaining = remainingUnits.reduce(function (a, u) { return a + u.currentTotal; }, 0);
+    const minSum = remainingUnits.reduce(function (a, u) { return a + u.minHours; }, 0);
+    // 目標: 標準時数から「指導済み時数」を引いた残り。下限は各単元の最低時数の合計。
+    const targetRemaining = Math.max(Math.round(simRow.standard - simRow.done), minSum);
+
+    const baseline = buildReallocationBaseline_(remainingUnits, targetRemaining);
+
+    // ここまでで案は完成している。AIには調整だけを任せる。
+    let allocation = baseline;
+    let aiApplied = false;
+    const warnings = [];
+
+    try {
+      const prompt = p5BuildReallocationPrompt_(req.subject, simRow, sim, remainingUnits, baseline, targetRemaining);
+      const items = callGeminiJsonArray_(
+        prompt,
+        {
+          type: 'OBJECT',
+          properties: {
+            unitName: { type: 'STRING', description: '対象単元リストの表記そのまま' },
+            proposedTotal: { type: 'NUMBER', description: '再配分後の総時数（整数）' },
+            reason: { type: 'STRING', description: '20文字程度の理由' }
+          },
+          required: ['unitName', 'proposedTotal']
+        },
+        '単元ごとの再配分後の総時数',
+        'Gemini Reallocation Error'
+      );
+      const verdict = validateReallocation_(items, remainingUnits, targetRemaining);
+      if (verdict.ok) {
+        allocation = verdict.allocation;
+        aiApplied = true;
+      } else {
+        warnings.push('AIの提案が検証に通らなかったため、機械的に計算した配分案を表示しています（' + verdict.error + '）');
+      }
+    } catch (aiErr) {
+      // APIキー未設定・レート制限などでもルールベース案は返す
+      warnings.push('AIによる調整は行えませんでした（' + aiErr.message + '）。機械的に計算した配分案を表示しています。');
+    }
+
+    try {
+      if (isMultiClassEnabled_() && getClassList_().length > 1) {
+        warnings.push('単元マスタは全学級で共通です。この変更は他の学級の指導計画にも反映されます。');
+      }
+    } catch (e) { /* 複数学級が未設定なら警告不要 */ }
+
+    return {
+      success: true,
+      subject: req.subject,
+      academicYear: parseInt(req.academicYear, 10),
+      simulation: {
+        standard: simRow.standard, done: simRow.done, planned: simRow.planned,
+        projected: simRow.projected, diff: simRow.diff, remainingWeeks: sim.remainingWeeks
+      },
+      lockedTotal: lockedTotal,
+      currentRemaining: currentRemaining,
+      targetRemaining: targetRemaining,
+      baseline: baseline,
+      allocation: allocation,
+      aiApplied: aiApplied,
+      warnings: warnings
+    };
+  } catch (e) {
+    logError('proposeAnnualReallocation', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/** 年間再配分のプロンプトを組み立てます。 */
+function p5BuildReallocationPrompt_(subject, simRow, sim, remainingUnits, baseline, targetTotal) {
+  const baseByName = {};
+  baseline.forEach(function (b) { baseByName[b.unitName] = b.proposedTotal; });
+
+  const unitLines = remainingUnits.map(function (u) {
+    return '- 「' + u.unitName + '」現在 全' + u.currentTotal + '時間'
+      + '（' + u.minHours + '時間未満にはできない下限あり）→ 現在案 ' + baseByName[u.unitName] + '時間';
+  }).join('\n');
+
+  const gap = simRow.diff > 0 ? ('超過 ' + simRow.diff) : ('不足 ' + Math.abs(simRow.diff));
+
+  return '教科「' + subject + '」の年間指導計画を、残り時数に合わせて再配分してください。\n\n'
+    + '【現状】標準 ' + simRow.standard + '時間 / 実施済み ' + simRow.done + '時間 / 予定 ' + simRow.planned + '時間 / '
+    + '年度末見込み ' + simRow.projected + '時間（' + gap + '時間、残り ' + sim.remainingWeeks + '週）\n'
+    + '【目標】未指導・指導中の単元の総時数の合計を ちょうど ' + targetTotal + ' 時間にする。\n\n'
+    + '【対象単元】（年間指導計画の順。機械的に計算した現在案つき）\n' + unitLines + '\n\n'
+    + '【厳守するルール】\n'
+    + '1. 出力は【対象単元】に挙げた単元だけです。追加・削除・改名はできません。単元名は表記そのままにしてください。\n'
+    + '2. proposedTotal は各単元の下限以上の整数にしてください。\n'
+    + '3. proposedTotal の合計を ちょうど ' + targetTotal + ' にしてください。\n'
+    + '4. 各単元の増減は現在の総時数の ±50% 以内に収めてください。\n'
+    + '5. 判断に迷う場合は現在案をそのまま出力してください。\n\n'
+    + '【調整の観点】\n'
+    + '- 学習内容の分量が多い単元、児童のつまずきやすい単元には時数を厚く配分してください。\n'
+    + '- 削る場合は、まとめや練習の時間から先に削ってください。\n';
+}
+
+/**
+ * [Webアプリ API] 再配分案のうち1単元分の総時数だけを変更します（学習活動は変えません）。
+ * 1リクエスト1単元にすることで、単元数が多くても実行時間の上限に達しないようにしています。
+ *
+ * @param {string} subject
+ * @param {string} unitName
+ * @param {number} newTotal
+ */
+function applyUnitTotalHours(subject, unitName, newTotal) {
+  try {
+    validateParams_({ subject, unitName, newTotal }, {
+      subject: { type: 'string', required: true, maxLength: 50 },
+      unitName: { type: 'string', required: true, maxLength: 200 },
+      newTotal: { type: 'number', required: true, min: 1, max: P5_UNIT_HOURS_MAX_ }
+    });
+    const total = parseInt(newTotal, 10);
+    const ctx = p5LoadUnitContext_(subject, unitName);
+    if (total < ctx.lockedCount) {
+      throw new Error('単元「' + ctx.unitName + '」は既に' + ctx.lockedCount + '時間目まで入力済みのため、'
+        + total + '時間には減らせません。');
+    }
+
+    // 学習活動は既存のものを引き継ぎ、増えた分は空欄にする（内容を捏造しない）
+    const hours = [];
+    for (let h = 1; h <= total; h++) {
+      hours.push({ hour: h, activity: ctx.activities[h - 1] || '' });
+    }
+
+    const result = p4WriteUnitRows_(subject, unitName, hours, {
+      totalHours: total,
+      expectedRowCount: ctx.rowCount,
+      auditAction: 'UNIT_TOTAL_CHANGE',
+      label: '自動: 単元「' + ctx.unitName + '」時数変更前'
+    });
+
+    return {
+      success: true,
+      unitName: ctx.unitName,
+      rowsBefore: result.rowsBefore,
+      rowsAfter: result.rowsAfter,
+      snapshotId: result.snapshotId
+    };
+  } catch (e) {
+    logError('applyUnitTotalHours', e);
+    return { success: false, error: e.message };
+  }
+}

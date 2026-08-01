@@ -84,6 +84,7 @@
             + '<th>教科</th><th>標準</th><th>実施済み<br>(' + escHtml(res.asOf) + 'まで)</th>'
             + '<th>今後の予定</th><th>年度末見込み</th><th>過不足</th>'
             + (res.remainingWeeks > 0 ? '<th>残り必要ペース<br>(時間/週)</th>' : '')
+            + '<th>単元時数の<br>再配分</th>'
             + '</tr></thead><tbody>';
 
         rows.forEach(function (r) {
@@ -105,6 +106,10 @@
                 + (res.remainingWeeks > 0
                     ? '<td>' + (r.neededPerWeek > 0 ? formatFraction(r.neededPerWeek) : '—') + '</td>'
                     : '')
+                // 過不足のある教科だけ、未指導単元への時数再配分を提案できるようにする
+                + '<td>' + (r.standard > 0 && r.diff !== 0
+                    ? '<button class="btn btn-outline btn-sm hours-realloc-btn" data-subject="' + escAttr(r.subject) + '">調整案</button>'
+                    : '—') + '</td>'
                 + '</tr>';
         });
         html += '</tbody></table></div>';
@@ -114,10 +119,18 @@
             + '「年間一括転記」や「以降を一括自動入力」で先の週まで予定を入れておくと予測の精度が上がります。</div>';
 
         content.innerHTML = html;
+
+        // 再配分ボタンの配線（実装は App_Js_17_UnitMasterAI.html）
+        content.querySelectorAll('.hours-realloc-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                if (typeof openAnnualReallocationDialog !== 'function') return;
+                openAnnualReallocationDialog(btn.dataset.subject, STATE.hoursYear);
+            });
+        });
     }
 
-    /** 
-     * 分数表示用ヘルパー 
+    /**
+     * 分数表示用ヘルパー
      * (小数を 1/2, 1/3, 1/4, 1/6, 1/8 などの近似分数にフォーマット)
      */
     function formatFraction(value) {
