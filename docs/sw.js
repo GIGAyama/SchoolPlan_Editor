@@ -5,7 +5,28 @@
  * GAS本体（script.google.com）はクロスオリジンのiframeとして読み込まれるため、
  * ここではキャッシュしません（オフライン時はシェルのみ表示されます）。
  */
-const CACHE_NAME = 'school-plan-note-shell-v2';
+/* 【重要】キャッシュの掃除は、かならず自アプリのぶんだけに限る。
+ *
+ * gigayama.github.io は数十本の学習アプリが同じドメインを共有している。
+ * ブラウザのキャッシュはドメイン単位なので、caches.keys() は
+ * このアプリのものだけでなく、同居する全アプリのキャッシュを返す。
+ *
+ * これまでは「CACHE_NAME 以外ぜんぶ」を消していたため、先生が週案エディタを開いて
+ * 新しい Service Worker が有効になった瞬間、その端末に入っていた
+ * 児童むけアプリ（Qalc・KANJI_Town など）のオフライン用データまで消えていた。
+ * 児童がオフラインでアプリを開いても起動せず、しかも原因がそのアプリ側に
+ * 見えないため「たまに開かなくなる」という再現しにくい不具合になっていた。
+ *
+ * CACHE_PREFIX で始まるものだけを消せば、他のアプリには触らない。
+ *
+ * 【接頭辞はリポジトリごとに固有にすること】
+ * 同一オリジンには GIGAyama/School_plan_note という別リポジトリ版があり、
+ * そちらは 'school-plan-note-shell-' を使っている。接頭辞を共有すると、
+ * 片方が有効になるたびにもう片方のキャッシュを消す——「全消し」を
+ * 2アプリ間に縮めただけの、同じ不具合になる。
+ * ここは 'schoolplan-editor-shell-' として重ならないようにしてある。 */
+const CACHE_PREFIX = 'schoolplan-editor-shell-';
+const CACHE_NAME = CACHE_PREFIX + 'v2';
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -30,7 +51,9 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys
+          .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+          .map((key) => caches.delete(key))   // ← 自アプリ分だけ削除
       ))
       .then(() => self.clients.claim())
   );
