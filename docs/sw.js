@@ -17,8 +17,15 @@
  * 児童がオフラインでアプリを開いても起動せず、しかも原因がそのアプリ側に
  * 見えないため「たまに開かなくなる」という再現しにくい不具合になっていた。
  *
- * CACHE_PREFIX で始まるものだけを消せば、他のアプリには触らない。 */
-const CACHE_PREFIX = 'school-plan-note-shell-';
+ * CACHE_PREFIX で始まるものだけを消せば、他のアプリには触らない。
+ *
+ * 【接頭辞はリポジトリごとに固有にすること】
+ * 同一オリジンには GIGAyama/School_plan_note という別リポジトリ版があり、
+ * そちらは 'school-plan-note-shell-' を使っている。接頭辞を共有すると、
+ * 片方が有効になるたびにもう片方のキャッシュを消す——「全消し」を
+ * 2アプリ間に縮めただけの、同じ不具合になる。
+ * ここは 'schoolplan-editor-shell-' として重ならないようにしてある。 */
+const CACHE_PREFIX = 'schoolplan-editor-shell-';
 const CACHE_NAME = CACHE_PREFIX + 'v2';
 const SHELL_ASSETS = [
   './',
