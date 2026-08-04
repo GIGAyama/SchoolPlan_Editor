@@ -31,5 +31,12 @@
   "maintainability": {
     "warningLineCount": 5000,
     "warningByteCount": 400000
+  },
+  "giga": {
+    "repoName": "SchoolPlan_Editor",
+    "docsDir": "docs",
+    "allowedRemoteScripts": [
+      "^https://apis\\.google\\.com/js/api\\.js$"
+    ]
   }
 }
