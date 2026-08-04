@@ -3,7 +3,10 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- viewport-fit=cover … ノッチ／ホームバーの領域まで背景を伸ばすために要る。
+         GAS は画面を iframe で包むため、07_WebApp.gs の addMetaTag にも同じ指定が要る。
+         片方だけでは safe-area-inset-* が 0 のままになる。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#1a73e8">
     <title>週案エディタ</title>
     <!--
@@ -35,27 +38,37 @@
             } catch (e) { }
         })();
     </script>
-    <!-- GIGA Standard v2: Zen Maru Gothic + Newsletter Fonts -->
+    <!-- 本文用の Web フォント。
+         これは「字の形が変わるだけ」の依存なので、学校のフィルタリングで
+         fonts.googleapis.com が塞がれても動作に影響しない。
+         届かなかったときに崩れないよう、端末側の日本語フォントを
+         App_Css.html の font-family に必ず後ろへ並べてある。 -->
     <link
         href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap"
         rel="stylesheet">
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Google Material Symbols -->
-    <link
-        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
-        rel="stylesheet" />
-    <!-- Bootstrap Icons -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    <!-- SweetAlert2 -->
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <!-- ここから下は「無いと動かない・見た目が壊れる」もの。CDN から読まず、
+         リポジトリに焼き込んだものを配る（tools/build-vendor.mjs が生成）。
+         　Bootstrap CSS      … 届かないとレイアウトが崩れる
+         　SweetAlert2        … 届かないと確認ダイアログが ReferenceError で止まる
+         　Material Symbols   … 届かないとアイコンが "calendar_month" という英単語で出る
+         生成物なので手で編集しないこと。直すときは npm run build:vendor。 -->
+    <?!= include('Vendor_Bootstrap'); ?>
+    <?!= include('Vendor_Icons'); ?>
+    <?!= include('Vendor_Sweetalert'); ?>
 
     <?!= include('App_Css'); ?>
     <!-- 単元進捗ピッカー・整合性チェックのスタイル。App_Css.html が
          保守性の警告閾値（5000行）を超えないよう別ファイルに分けている。 -->
     <?!= include('App_Css_02_UnitPlanning'); ?>
-    <!-- Google Picker API Library -->
-    <script type="text/javascript" src="https://apis.google.com/js/api.js"></script>
+    <!-- 見やすさ・押しやすさの補正。App_Css.html のあとに読み込むこと。 -->
+    <?!= include('App_Css_03_A11y'); ?>
+    <!-- Google Picker API（Googleドライブからファイルを選ぶ画面）。
+         Google 自身の配信元で、GAS 本体（script.google.com）が通る環境なら通る。
+         それでも届かないことはあるため、読み込みは非同期にし、
+         使う側（App_Js_08_Events.html）で gapi の有無を確かめてから呼ぶ。
+         届かなくても、この機能以外は通常どおり使える。 -->
+    <script type="text/javascript" src="https://apis.google.com/js/api.js" async defer></script>
 </head>
 
 <body>
@@ -179,7 +192,7 @@
                         <button type="button" class="btn btn-outline d-flex align-items-center gap-1 tb-dropdown-toggle"
                             aria-haspopup="true" aria-expanded="false" onclick="toggleToolbarDropdown(this)"
                             title="固定時間割の反映や単元の自動入力などの入力支援メニュー"
-                            style="color: var(--secondary); border-color: var(--secondary);">
+                            style="color: var(--secondary-text); border-color: var(--secondary);">
                             <span class="material-symbols-outlined fs-6">auto_fix_high</span> 入力支援
                             <span class="material-symbols-outlined tb-caret">expand_more</span>
                         </button>
@@ -237,7 +250,7 @@
                                 id="sidebarTaskCount" class="sidebar-task-count" style="display:none;">0</span></span>
                         <div class="weekly-task-sidebar-spacer" style="flex:1"></div>
                         <button class="btn-icon weekly-task-add-btn" onclick="showManualTaskInput()"
-                            style="font-size:1.1rem; padding:0 4px; color:var(--primary);" title="タスクを追加">+</button>
+                            style="font-size:1.1rem; padding:0 4px; color:var(--primary-text);" title="タスクを追加">+</button>
                     </div>
                     <!-- 収納時に表示する縦書きラベル（クリックで展開） -->
                     <div class="weekly-task-collapsed-label" onclick="toggleTaskSidebar()" title="タスクパネルを開く">
@@ -290,7 +303,7 @@
                         </a>
                         <button id="eventPdfViewerRemoveBtn" onclick="removeSelectedEventPdf()"
                             class="btn btn-outline btn-sm d-flex align-items-center gap-1"
-                            style="border-color: var(--danger); color: var(--danger);">
+                            style="border-color: var(--danger-text); color: var(--danger-text);">
                             <span class="material-symbols-outlined fs-6">playlist_remove</span> 一覧から外す
                         </button>
                     </div>
@@ -456,7 +469,7 @@
                     <div style="border-top:1px solid var(--border);margin:8px 0;"></div>
                     <div class="nw-palette-label">AI機能</div>
                     <button class="nw-palette-btn" onclick="NW.generateAIText()"
-                        style="border-color:var(--primary);color:var(--primary);">
+                        style="border-color:var(--primary-text);color:var(--primary-text);">
                         <span class="material-symbols-outlined">auto_awesome</span> AI記事生成
                     </button>
                     <button class="nw-palette-btn nw-palette-btn-ai-full" onclick="NW.generateFullNewsletter()">
@@ -519,7 +532,7 @@
                                         class="material-symbols-outlined fs-6">add_circle</span> 新規作成</button>
                                 <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1"
                                     onclick="unlinkMyDatabaseUI()"
-                                    style="color:var(--danger);border-color:var(--danger);"><span
+                                    style="color:var(--danger-text);border-color:var(--danger-text);"><span
                                         class="material-symbols-outlined fs-6">link_off</span> 紐付け解除</button>
                             </div>
                             <p style="font-size:0.75rem; color:var(--text-hint); margin-top:10px;">
@@ -539,7 +552,7 @@
                         <!-- 担当学年設定 -->
                         <div
                             style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
-                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary-text);"><span
                                     class="material-symbols-outlined fs-6"
                                     style="vertical-align:text-bottom;">school</span> 担当学年設定</h4>
                             <div>
@@ -560,14 +573,14 @@
                         <!-- 複数学級・専科モード -->
                         <div
                             style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
-                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary-text);"><span
                                     class="material-symbols-outlined fs-6"
                                     style="vertical-align:text-bottom;">groups</span> 複数学級モード（専科教員向け）</h4>
                             <div style="display:flex; align-items:center; gap:12px;">
                                 <label class="form-check-label"
                                     style="font-size:0.85rem; display:flex; align-items:center; gap:8px; cursor:pointer;">
                                     <input type="checkbox" id="sysMultiClassEnabled" class="form-check-input"
-                                        style="width:18px; height:18px;" onchange="toggleMultiClassMode(this)">
+                                        style="width:20px; height:20px;" onchange="toggleMultiClassMode(this)">
                                     複数の学級を切り替えて使用する
                                 </label>
                             </div>
@@ -605,14 +618,14 @@
                         <!-- モジュール学習設定 -->
                         <div
                             style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
-                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary-text);"><span
                                     class="material-symbols-outlined fs-6"
                                     style="vertical-align:text-bottom;">timer</span> モジュール学習</h4>
                             <div style="display:flex; align-items:center; gap:12px;">
                                 <label class="form-check-label"
                                     style="font-size:0.85rem; display:flex; align-items:center; gap:8px; cursor:pointer;">
                                     <input type="checkbox" id="sysModuleEnabled" class="form-check-input"
-                                        style="width:18px; height:18px;">
+                                        style="width:20px; height:20px;">
                                     朝学習欄の教科名を時数に加算する（1/3時間）
                                 </label>
                             </div>
@@ -625,7 +638,7 @@
                         <!-- Classroom連携 -->
                         <div
                             style="background:var(--surface-2); padding:16px; border-radius:8px; border:1px solid var(--border);">
-                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"><span
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary-text);"><span
                                     class="material-symbols-outlined fs-6"
                                     style="vertical-align:text-bottom;">school</span> Google Classroom
                                 連携</h4>
@@ -661,7 +674,7 @@
 
                         <!-- Gemini設定 -->
                         <div class="settings-card">
-                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary);"
+                            <h4 style="margin-bottom:12px; font-size:0.9rem; color:var(--primary-text);"
                                 class="d-flex align-items-center gap-1"><span
                                     class="material-symbols-outlined">smart_toy</span> Gemini API 設定</h4>
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
@@ -680,8 +693,8 @@
                                             style="flex:1; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
                                             <option value="">読み込み中...</option>
                                         </select>
-                                        <button type="button" onclick="loadGeminiModels(true)"
-                                            title="モデル一覧を再取得"
+                                        <button type="button" class="btn-icon" onclick="loadGeminiModels(true)"
+                                            title="モデル一覧を再取得" aria-label="Geminiのモデル一覧を再取得"
                                             style="background:none; border:1px solid var(--border); border-radius:4px; padding:4px 6px; cursor:pointer; display:flex; align-items:center;">
                                             <span class="material-symbols-outlined" style="font-size:1.1rem;">refresh</span>
                                         </button>
@@ -708,7 +721,7 @@
                     <div class="integration-header" style="background:#fff3e0;">
                         <span class="integration-icon"><span
                                 class="material-symbols-outlined fs-6">calendar_month</span></span>
-                        <span class="integration-title" style="color:#e65100;">年間カレンダー生成機能（年度更新）</span>
+                        <span class="integration-title" style="color:#a34700;">年間カレンダー生成機能（年度更新）</span>
                     </div>
                     <div class="integration-body" style="display:flex; flex-direction:column; gap:16px;">
                         <p style="font-size:0.85rem; color:var(--text-sub); margin-bottom:8px;">
@@ -730,7 +743,7 @@
                             </div>
                         </div>
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
-                            <button class="btn" style="background-color:#e65100; color:white;"
+                            <button class="btn" style="background-color:#b45309; color:white;"
                                 onclick="confirmGenerateCalendar()"><span class="material-symbols-outlined fs-6"
                                     style="vertical-align:text-bottom;">warning</span> カレンダーを再生成する</button>
                         </div>
@@ -876,7 +889,7 @@
                             <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="protectSheetsWeb(this)"><span class="material-symbols-outlined fs-6">lock</span> シート保護を実行</button>
                             <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="clearDbCacheWeb(this)"><span class="material-symbols-outlined fs-6">cached</span> DB列等のキャッシュをクリア</button>
                             <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="resetPdfProcessingWeb(this)"><span class="material-symbols-outlined fs-6">stop_circle</span> PDF読込処理を強制停止</button>
-                            <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="clearDatabaseWeb(this)" style="color:var(--danger);border-color:var(--danger);"><span class="material-symbols-outlined fs-6">delete_sweep</span> データベースの入力内容をクリア</button>
+                            <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="clearDatabaseWeb(this)" style="color:var(--danger-text);border-color:var(--danger-text);"><span class="material-symbols-outlined fs-6">delete_sweep</span> データベースの入力内容をクリア</button>
                         </div>
                         <div id="maintenanceToast" style="margin-top:10px;font-size:0.8rem;color:var(--text-sub);"></div>
                     </div>
@@ -894,7 +907,7 @@
 
                 <!-- 1. AI抽出コンソール -->
                 <div class="integration-section">
-                    <div class="integration-header" style="background: linear-gradient(135deg, #1aa260, #137746);">
+                    <div class="integration-header" style="background: linear-gradient(135deg, #14804f, #0f6b3f); color: #fff;">
                         <span class="integration-icon"><span
                                 class="material-symbols-outlined fs-6">auto_awesome</span></span>
                         <span class="integration-title">AI タスク抽出コンソール</span>
@@ -1098,7 +1111,7 @@
 
                 <!-- 3. リマインダー設定 -->
                 <div class="integration-section">
-                    <div class="integration-header" style="background: linear-gradient(135deg, #e37400, #b45309);">
+                    <div class="integration-header" style="background: linear-gradient(135deg, #b45309, #8a3d00); color: #fff;">
                         <span class="integration-icon"><span
                                 class="material-symbols-outlined fs-6">notifications_active</span></span>
                         <span class="integration-title">リマインダー（毎朝メール通知）</span>
@@ -1286,18 +1299,18 @@
                 </div>
 
                 <!-- バックグラウンド処理・リセット -->
-                <div class="integration-section" style="border-color: var(--danger);">
+                <div class="integration-section" style="border-color: var(--danger-text);">
                     <div class="integration-body"
                         style="flex-direction:row; align-items:center; justify-content:space-between;">
                         <div>
                             <span class="integration-title d-flex align-items-center gap-1"
-                                style="color: var(--danger);"><span
+                                style="color: var(--danger-text);"><span
                                     class="material-symbols-outlined text-danger">warning</span> バックグラウンド処理の強制リセット</span>
                             <p style="font-size:0.75rem;color:var(--text-sub);margin-top:4px;">
                                 スプレッドシートのメニューから開始した従来型のPDF読み込みタスクを強制終了します。</p>
                             <p id="bgProcessStatusText" style="font-size:0.75rem;margin-top:2px;"></p>
                         </div>
-                        <button class="btn btn-outline" style="border-color: var(--danger); color: var(--danger);"
+                        <button class="btn btn-outline" style="border-color: var(--danger-text); color: var(--danger-text);"
                             onclick="resetPdfProcessing()">強制リセット</button>
                     </div>
                 </div>

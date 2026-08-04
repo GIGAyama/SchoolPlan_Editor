@@ -12,7 +12,7 @@
                     + '<div style="flex:1;"><strong>[' + escHtml(p3EntityLabel(item.entityType)) + '] ' + escHtml(item.label || item.entityId) + '</strong>'
                     + '<div style="font-size:0.72rem;color:var(--text-sub);">削除 ' + escHtml(item.deletedAt) + ' / 期限 ' + escHtml(item.expiresAt) + '</div></div>'
                     + '<button class="btn btn-outline btn-sm" onclick="p3RestoreTrashUI(\'' + escAttr(item.id) + '\')">復元</button>'
-                    + '<button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="p3PurgeTrashUI(\'' + escAttr(item.id) + '\')">完全削除</button></div>';
+                    + '<button class="btn btn-outline btn-sm" style="color:var(--danger-text);border-color:var(--danger-text);" onclick="p3PurgeTrashUI(\'' + escAttr(item.id) + '\')">完全削除</button></div>';
             }).join('') : '<p>ごみ箱は空です。</p>';
             Swal.fire({ title: 'ごみ箱（30日間保持）', html: '<div style="max-height:440px;overflow:auto;">' + html + '</div>', width: 820, showConfirmButton: false, showCloseButton: true });
         }).catch(_onCommError);

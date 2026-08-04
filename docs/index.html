@@ -4,6 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- ① インストールの合図を「いちばん先に」受け取る。
+         ページ末尾で待っていると、通信の速い端末では取りこぼし、
+         「アプリを入れる」ボタンが出なくなる。 -->
+    <script src="install-hook.js"></script>
     <title>週案エディタ - School Plan Note</title>
     <meta name="description" content="小学校教員向けの週案（週間指導計画）・校務支援アプリ">
     <meta name="theme-color" content="#1a73e8">
@@ -425,6 +429,80 @@
             background: none;
             border: 0;
         }
+
+        /* ===== 更新のお知らせ =====
+           新しい版が待機したときだけ出る。押されるまで切り替えない。 */
+        #updateToast {
+            position: fixed;
+            left: 50%;
+            transform: translateX(-50%);
+            /* ホームバーのぶんを足す（iPhone で下端に隠れないように） */
+            bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+            z-index: 60;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            max-width: calc(100vw - 24px);
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: #202124;
+            color: #fff;
+            font-size: 14px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, .3);
+        }
+
+        #updateToast button {
+            min-height: 44px;
+            padding: 0 14px;
+            border-radius: 22px;
+            border: 0;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        #updateApplyBtn {
+            background: #8ab4f8;
+            color: #202124;
+        }
+
+        #updateLaterBtn {
+            background: transparent;
+            color: #e3e3e6;
+            text-decoration: underline;
+        }
+
+        /* 画面の隅に置くボタンは、ノッチ・ホームバーのぶんを足し、
+           指で押せる大きさ（44px）にする。 */
+        #menuBtn {
+            width: 44px;
+            height: 44px;
+            left: calc(12px + env(safe-area-inset-left, 0px));
+            bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        }
+
+        #iosInstallBanner {
+            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+        }
+
+        @media (forced-colors: active) {
+
+            #updateToast button,
+            #menuBtn {
+                border: 2px solid ButtonText;
+            }
+        }
+
+        @media print {
+
+            /* あとから足した固定要素にも印刷除外を付ける */
+            #updateToast,
+            #menuBtn,
+            #iosInstallBanner,
+            .no-print {
+                display: none !important;
+            }
+        }
     </style>
 </head>
 
@@ -439,7 +517,7 @@
     <!-- 初回セットアップ -->
     <div id="setup">
         <div class="setup-card">
-            <img src="icons/icon-192.png" alt="週案エディタ">
+            <img src="icons/icon-192.png" alt="週案エディタ" width="64" height="64" decoding="async">
             <h1>週案エディタ - School Plan Note</h1>
             <p class="lead">はじめに、Google Apps Script でデプロイした<br>WebアプリのURLを設定してください。</p>
             <label for="urlInput">WebアプリのURL（/exec で終わるもの）</label>
@@ -456,7 +534,7 @@
     <!-- 表示できなかったときの案内（組織アカウント等でiframe内に表示できない場合） -->
     <div id="recovery">
         <div class="setup-card">
-            <img src="icons/icon-192.png" alt="週案エディタ">
+            <img src="icons/icon-192.png" alt="週案エディタ" width="64" height="64" decoding="async">
             <h1>アプリを表示できませんでした</h1>
             <p class="lead">
                 組織（学校）アカウントでは、セキュリティ設定により<br>
@@ -477,7 +555,7 @@
     <!-- 初回起動時のログイン案内（まだ一度も表示できていない端末向け） -->
     <div id="welcome">
         <div class="setup-card">
-            <img src="icons/icon-192.png" alt="週案エディタ">
+            <img src="icons/icon-192.png" alt="週案エディタ" width="64" height="64" decoding="async">
             <h1>ようこそ！はじめる前に</h1>
             <p class="lead">
                 このアプリはGoogleアカウントでログインして使います。<br>
@@ -513,7 +591,7 @@
     <!-- iOS/iPadOS Safari 向け「ホーム画面に追加」ガイド -->
     <div id="iosGuide" role="dialog" aria-modal="true" aria-labelledby="iosGuideTitle">
         <div class="setup-card">
-            <img src="icons/icon-192.png" alt="週案エディタ">
+            <img src="icons/icon-192.png" alt="週案エディタ" width="64" height="64" decoding="async">
             <h1 id="iosGuideTitle">ホーム画面に追加する</h1>
             <p class="lead">
                 Safari では下の手順でホーム画面に追加すると、<br>
@@ -550,7 +628,7 @@
 
     <!-- iOS向けインストール案内バナー（初回のみ表示） -->
     <div id="iosInstallBanner">
-        <img src="icons/icon-192.png" alt="">
+        <img src="icons/icon-192.png" alt="" width="36" height="36" decoding="async">
         <div class="banner-text">
             ホーム画面に追加すると、<br>アプリのように全画面で使えます。
         </div>
@@ -817,22 +895,28 @@
                 try { localStorage.setItem(IOS_HINT_KEY, '1'); } catch (e) { }
             }
 
-            window.addEventListener('beforeinstallprompt', function (e) {
-                e.preventDefault();
-                deferredPrompt = e;
-                installBtn.style.display = 'block';
-            });
+            // 合図は install-hook.js が <head> の先頭ですでに受け取っている。
+            // ここではその結果を見るだけにする（このスクリプトが動く頃には
+            // イベントが済んでいることがあり、ここで待つと取りこぼす）。
+            function reflectInstallAvailability() {
+                deferredPrompt = window.__pwaInstallPrompt;
+                if (deferredPrompt) installBtn.style.display = 'block';
+            }
+            window.addEventListener('pwa-install-available', reflectInstallAvailability);
+            reflectInstallAvailability();
+
             installBtn.addEventListener('click', function () {
                 menuPanel.style.display = 'none';
                 if (deferredPrompt) {
                     deferredPrompt.prompt();
                     deferredPrompt = null;
+                    window.__pwaInstallPrompt = null;
                     installBtn.style.display = 'none';
                     return;
                 }
                 if (isIosDevice) showIosGuide();
             });
-            window.addEventListener('appinstalled', function () {
+            window.addEventListener('pwa-installed', function () {
                 installBtn.style.display = 'none';
             });
 
@@ -858,13 +942,75 @@
             });
             document.getElementById('iosBannerCloseBtn').addEventListener('click', dismissIosBanner);
 
-            // --- Service Worker 登録 ---
+            // --- Service Worker 登録と、更新のお知らせ ---
             if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function () {
-                    navigator.serviceWorker.register('sw.js').catch(function (err) {
-                        console.warn('Service Worker registration failed:', err);
+                // ⚠️ load イベントを待つだけにすると、すでに読み込みが終わっている場合に
+                //    リスナーが二度と呼ばれず、Service Worker が登録されないままになる。
+                //    「もう済んでいるか」を必ず見る。
+                var startSw = function () {
+                    navigator.serviceWorker.register('sw.js')
+                        .then(watchForUpdate)
+                        .catch(function (err) {
+                            console.warn('Service Worker registration failed:', err);
+                        });
+                };
+                if (document.readyState === 'complete') startSw();
+                else window.addEventListener('load', startSw, { once: true });
+            }
+
+            // 新しい版が待機したら、画面の下に知らせる。押されるまで切り替えない。
+            // 先生が週案を入力している最中に勝手に入れ替わると、打ちかけの内容が消える。
+            var userAskedUpdate = false;
+            var reloadingForUpdate = false;
+
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.addEventListener('controllerchange', function () {
+                    // ⚠️ controllerchange は初回訪問でも飛んでくる（activate の clients.claim() のため）。
+                    //    そのまま受けると、初めて開いた人が必ず1回リロードされる。
+                    //    見るのは「利用者が押したかどうか」だけ。
+                    if (!userAskedUpdate || reloadingForUpdate) return;
+                    reloadingForUpdate = true;
+                    location.reload();
+                });
+            }
+
+            function showUpdateToast(worker) {
+                if (document.getElementById('updateToast')) return;
+                var bar = document.createElement('div');
+                bar.id = 'updateToast';
+                bar.setAttribute('role', 'status');
+                bar.className = 'no-print';
+                bar.innerHTML = '<span>あたらしい版があります。</span>' +
+                    '<button type="button" id="updateApplyBtn">最新にする</button>' +
+                    '<button type="button" id="updateLaterBtn" aria-label="このお知らせを閉じる">あとで</button>';
+                document.body.appendChild(bar);
+                document.getElementById('updateApplyBtn').addEventListener('click', function () {
+                    userAskedUpdate = true;
+                    bar.remove();
+                    worker.postMessage({ type: 'SKIP_WAITING' });
+                });
+                document.getElementById('updateLaterBtn').addEventListener('click', function () {
+                    bar.remove();
+                });
+            }
+
+            function watchForUpdate(registration) {
+                if (!registration) return;
+                registration.addEventListener('updatefound', function () {
+                    var sw = registration.installing;
+                    if (!sw) return;
+                    sw.addEventListener('statechange', function () {
+                        // controller が居る＝初回インストールではなく更新。
+                        // 初回で知らせると「入れた直後に更新があります」と出て混乱する。
+                        if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+                            showUpdateToast(sw);
+                        }
                     });
                 });
+                // 前回の訪問中にすでに待機していた場合も拾う
+                if (registration.waiting && navigator.serviceWorker.controller) {
+                    showUpdateToast(registration.waiting);
+                }
             }
 
             // --- 起動 ---

@@ -13,7 +13,24 @@
         --border: #dadce0;
         --text-main: #202124;
         --text-sub: #5f6368;
-        --text-hint: #9aa0a6;
+        /* #9aa0a6 は白地で 2.64 しかなく、案内文・空状態の説明が読めなかった。
+           1段濃くして 5.29 にしている（面の色ではなく文字の色なので濃くしてよい）。 */
+        --text-hint: #686c70;
+
+        /* 面用（--primary など）と文字用（--*-text）を分ける。
+           面の明るい色をそのまま文字に使うと 4.5:1 に届かない。
+           数値は白地／--surface-2(#f8f9fa) の両方で 4.5 以上を確認済み。 */
+        --primary-text: #1461c8;
+        --secondary-text: #137746;
+        --danger-text: #c5221f;
+        --warning-text: #a34700;
+        --col-sun-text: #c62828;
+        /* 学校のフィルタリングで fonts.googleapis.com が塞がれると
+           Zen Maru Gothic は届かない。そのとき欧文フォントに落ちて
+           日本語がガタつかないよう、端末側の日本語フォントを後ろに並べる。 */
+        --font-ui: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Yu Gothic UI',
+            'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Meiryo', system-ui, sans-serif;
+
         --radius: 12px;
         --radius-sm: 8px;
         --shadow: 0 1px 3px rgba(60, 64, 67, .15), 0 1px 2px rgba(60, 64, 67, .1);
@@ -84,7 +101,12 @@
             --border: #3c4043;
             --text-main: #e3e3e6;
             --text-sub: #b0b3b8;
-            --text-hint: #80868b;
+            --text-hint: #9aa0a6;
+            --primary-text: #8ab4f8;
+            --secondary-text: #81c995;
+            --danger-text: #f28b82;
+            --warning-text: #fdd663;
+            --col-sun-text: #ff9a9a;
             --bg-card: #1e1f22;
             --surface-hover: #2a2c30;
             --overlay: rgba(0, 0, 0, 0.6);
@@ -118,7 +140,12 @@
         --border: #3c4043;
         --text-main: #e3e3e6;
         --text-sub: #b0b3b8;
-        --text-hint: #80868b;
+        --text-hint: #9aa0a6;
+        --primary-text: #8ab4f8;
+        --secondary-text: #81c995;
+        --danger-text: #f28b82;
+        --warning-text: #fdd663;
+        --col-sun-text: #ff9a9a;
         --bg-card: #1e1f22;
         --surface-hover: #2a2c30;
         --overlay: rgba(0, 0, 0, 0.6);
@@ -142,7 +169,7 @@
     }
 
     body {
-        font-family: 'Zen Maru Gothic', sans-serif;
+        font-family: var(--font-ui);
         font-size: 14px;
         color: var(--text-main);
         background: var(--surface-2);
@@ -159,14 +186,28 @@
     #app {
         display: flex;
         flex-direction: column;
-        height: 100vh;
+        /* 100vh はスマホのアドレスバーのぶんだけはみ出す（下端の操作列が隠れる）。
+           表示中の高さに追従する dvh を使い、古い端末だけ @supports で 100vh に落とす。 */
+        height: 100dvh;
         overflow: hidden;
+        /* 横向きにしたときノッチ側が欠けないようにする */
+        padding-left: env(safe-area-inset-left, 0px);
+        padding-right: env(safe-area-inset-right, 0px);
+    }
+
+    @supports not (height: 100dvh) {
+        #app {
+            height: 100vh;
+        }
     }
 
     /* ===== ヘッダー ===== */
     .app-header {
         height: var(--header-h);
-        background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%);
+        /* 白文字を載せる帯なので、明るい側を1段濃くしてある。
+           #1a73e8 のままだと白文字が 4.51、半透明の白（ナビの未選択）が 3.45 で
+           基準に届かなかった。色相は変えず #1665cf にすると 5.53 になる。 */
+        background: linear-gradient(135deg, #1665cf 0%, #0d47a1 100%);
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -186,6 +227,8 @@
 
     .app-logo {
         font-size: 1.6rem;
+        /* 指定が無いと本文色（濃いグレー）を継ぎ、濃紺の帯の上で 1.87 になっていた */
+        color: #fff;
     }
 
     .app-title {
@@ -196,7 +239,8 @@
     }
 
     .app-subtitle {
-        color: rgba(255, 255, 255, 0.7);
+        /* 半透明にすると帯の上で 3.01。読ませる文なので不透明にする */
+        color: rgba(255, 255, 255, 0.95);
         font-size: 0.72rem;
         margin-top: 1px;
     }
@@ -213,7 +257,8 @@
         border-radius: 18px;
         border: none;
         background: transparent;
-        color: rgba(255, 255, 255, 0.8);
+        /* 半透明の白は帯の上で 3.45。押せる文字なので不透明にする */
+        color: #fff;
         font-size: 0.82rem;
         font-family: inherit;
         font-weight: 500;
@@ -230,7 +275,9 @@
     }
 
     .nav-btn.active {
-        background: rgba(255, 255, 255, 0.22);
+        /* 白を重ねると面が明るくなり、白文字が 3.17 になっていた。
+           選択中は「濃くする」ことで示す（明るさではなく暗さで区別する）。 */
+        background: rgba(0, 0, 0, 0.28);
         color: white;
         font-weight: 700;
     }
@@ -296,8 +343,8 @@
 
     .btn-icon:hover {
         background: var(--primary-light);
-        border-color: var(--primary);
-        color: var(--primary);
+        border-color: var(--primary-text);
+        color: var(--primary-text);
     }
 
     .btn-today {
@@ -306,7 +353,7 @@
         border-radius: 16px;
         border: 1px solid var(--primary);
         background: var(--primary-light);
-        color: var(--primary);
+        color: var(--primary-text);
         font-size: 0.8rem;
         font-weight: 600;
         cursor: pointer;
@@ -470,7 +517,7 @@
     }
 
     .weekly-task-sidebar.collapsed .weekly-task-collapsed-label:hover {
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .weekly-task-sidebar-content {
@@ -522,12 +569,12 @@
     }
 
     .st-overdue-label {
-        color: var(--danger);
+        color: var(--danger-text);
         font-weight: 700;
     }
 
     .st-inprogress-label {
-        color: var(--primary);
+        color: var(--primary-text);
         font-weight: 700;
     }
 
@@ -535,7 +582,7 @@
         width: 14px;
         height: 14px;
         cursor: pointer;
-        accent-color: var(--secondary);
+        accent-color: var(--secondary-text);
     }
 
     .st-content {
@@ -585,7 +632,7 @@
 
     .grid-header.today-col {
         background: var(--primary-light);
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .grid-header.sat-col {
@@ -593,7 +640,8 @@
     }
 
     .grid-header.sun-col {
-        color: #c62828;
+        /* ダークの面では #c62828 が 2.63 まで落ちる。テーマで切り替わる色を使う。 */
+        color: var(--col-sun-text, #c62828);
     }
 
     /* 祝日の列ヘッダー: 曜日色より優先して赤系で強調する */
@@ -680,7 +728,7 @@
     }
 
     .weekend-toggle-btn.sun {
-        color: #c62828;
+        color: var(--col-sun-text, #c62828);
     }
 
     .weekend-toggle-btn.off {
@@ -708,7 +756,7 @@
 
     .edit-mode .grid-cell:not(.grid-label):not(.grid-header):hover {
         background: var(--primary-light);
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         box-shadow: inset 0 0 0 2px rgba(26, 115, 232, 0.15);
     }
 
@@ -791,7 +839,7 @@
 
     .suggest-item:hover {
         background: var(--primary-light);
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     /* ===== UX強化: セル選択ハイライト ===== */
@@ -809,7 +857,7 @@
 
     /* ===== リンク埋め込み ===== */
     .cell-link {
-        color: var(--primary);
+        color: var(--primary-text);
         text-decoration: none;
         word-break: break-all;
         cursor: pointer;
@@ -971,7 +1019,7 @@
 
     .ctx-item:hover {
         background: var(--primary-light);
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .ctx-sep {
@@ -985,7 +1033,7 @@
         display: inline-block;
         padding: 2px 6px;
         font-size: 0.78rem;
-        font-family: 'Zen Maru Gothic', monospace;
+        font-family: var(--font-ui), monospace;
         color: var(--kbd-text);
         background: var(--kbd-bg);
         border: 1px solid var(--kbd-border);
@@ -1040,7 +1088,7 @@
         width: 36px;
         height: 36px;
         border: 3px solid var(--border);
-        border-top-color: var(--primary);
+        border-top-color: var(--primary-text);
         border-radius: 50%;
         animation: spin 0.9s linear infinite;
         /* flexコンテナ外（テーブルセル等）で使われた場合も水平中央に置く */
@@ -1254,8 +1302,8 @@
 
     .nw-palette-btn:hover {
         background: var(--primary-light);
-        border-color: var(--primary);
-        color: var(--primary);
+        border-color: var(--primary-text);
+        color: var(--primary-text);
     }
 
     .nw-palette-btn .material-symbols-outlined {
@@ -1301,7 +1349,7 @@
     }
 
     .nw-block.nw-block-selected {
-        border-color: var(--primary) !important;
+        border-color: var(--primary-text) !important;
     }
 
     .nw-block.nw-drag-over {
@@ -1366,7 +1414,7 @@
 
     .nw-block-actions button:hover {
         background: var(--surface-2);
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .nw-block-actions .material-symbols-outlined {
@@ -1412,11 +1460,11 @@
 
     .nw-fmt-toolbar button:hover {
         background: var(--surface-2);
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .nw-fmt-toolbar button.nw-active {
-        color: var(--primary);
+        color: var(--primary-text);
         background: var(--primary-light);
     }
 
@@ -1460,8 +1508,8 @@
     }
 
     .nw-image-placeholder:hover {
-        border-color: var(--primary);
-        color: var(--primary);
+        border-color: var(--primary-text);
+        color: var(--primary-text);
         background: var(--primary-light);
     }
 
@@ -1654,8 +1702,8 @@
     }
 
     .nw-gallery-add:hover {
-        border-color: var(--primary);
-        color: var(--primary);
+        border-color: var(--primary-text);
+        color: var(--primary-text);
         background: var(--primary-light);
     }
 
@@ -1769,8 +1817,8 @@
 
     .nw-wa-fx-btn.nw-active {
         background: var(--primary-light) !important;
-        color: var(--primary) !important;
-        border-color: var(--primary) !important;
+        color: var(--primary-text) !important;
+        border-color: var(--primary-text) !important;
     }
 
     /* WordArt settings dialog */
@@ -1838,11 +1886,11 @@
 
     .nw-color-swatch:hover {
         transform: scale(1.15);
-        border-color: var(--primary);
+        border-color: var(--primary-text);
     }
 
     .nw-color-swatch.nw-color-selected {
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         box-shadow: 0 0 0 2px var(--primary-light);
     }
 
@@ -1883,7 +1931,7 @@
         gap: 8px;
         padding: 12px 20px;
         background: var(--primary-light);
-        color: var(--primary);
+        color: var(--primary-text);
         border-radius: var(--radius-sm);
         font-weight: 600;
         font-size: 0.88rem;
@@ -1934,7 +1982,7 @@
     }
 
     .nw-col-cell:hover {
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         border-style: dashed;
     }
 
@@ -1978,8 +2026,8 @@
     }
 
     .nw-col-img-placeholder:hover {
-        border-color: var(--primary);
-        color: var(--primary);
+        border-color: var(--primary-text);
+        color: var(--primary-text);
         background: var(--primary-light);
     }
 
@@ -2031,7 +2079,7 @@
         border-radius: 50%;
         border: 1.5px solid var(--primary);
         background: white;
-        color: var(--primary);
+        color: var(--primary-text);
         cursor: pointer;
         display: flex;
         align-items: center;
@@ -2076,8 +2124,8 @@
 
     .nw-insert-menu-item:hover {
         background: var(--primary-light);
-        border-color: var(--primary);
-        color: var(--primary);
+        border-color: var(--primary-text);
+        color: var(--primary-text);
     }
 
     .nw-insert-menu-item .material-symbols-outlined {
@@ -2113,7 +2161,7 @@
     }
 
     .nw-quickstart-btn:hover {
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         background: var(--primary-light);
         transform: translateY(-2px);
         box-shadow: var(--shadow-md);
@@ -2121,7 +2169,7 @@
 
     .nw-quickstart-btn .material-symbols-outlined {
         font-size: 28px;
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .nw-quickstart-btn span:nth-child(2) {
@@ -2135,7 +2183,7 @@
     }
 
     .nw-quickstart-ai {
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         background: linear-gradient(135deg, #e8f0fe 0%, #f3e8fd 100%);
     }
 
@@ -2145,7 +2193,7 @@
 
     /* --- AI rewrite button in toolbar --- */
     .nw-ai-btn {
-        color: var(--primary) !important;
+        color: var(--primary-text) !important;
     }
 
     .nw-ai-btn:hover {
@@ -2155,15 +2203,15 @@
     /* --- AI full generate palette button --- */
     .nw-palette-btn-ai-full {
         background: linear-gradient(135deg, #e8f0fe 0%, #f3e8fd 100%);
-        border-color: var(--primary);
-        color: var(--primary);
+        border-color: var(--primary-text);
+        color: var(--primary-text);
         font-weight: 600;
     }
 
     .nw-palette-btn-ai-full:hover {
         background: linear-gradient(135deg, #c5cae9 0%, #e1bee7 100%);
-        border-color: var(--primary);
-        color: var(--primary);
+        border-color: var(--primary-text);
+        color: var(--primary-text);
     }
 
     /* --- Print styles for newsletter --- */
@@ -2211,7 +2259,10 @@
     .integration-title {
         font-weight: 600;
         font-size: 0.85rem;
-        color: var(--text-main);
+        /* 帯の色を継ぐ。色を決め打ちすると、濃い色の帯（緑・橙・紺）の上で
+           濃いグレーの文字になり、比 1.55〜3.21 で読めなかった。
+           1か所ずつ直すのではなく、まとめて継がせるのが正しい。 */
+        color: inherit;
     }
 
     .integration-body {
@@ -2299,13 +2350,13 @@
     .pdf-drop-zone:focus-visible,
     .pdf-drop-zone.dragover {
         background: color-mix(in srgb, var(--primary) 10%, var(--surface-2));
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         outline: none;
     }
 
     .pdf-drop-icon {
         font-size: 34px;
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .pdf-drop-main {
@@ -2369,7 +2420,7 @@
     }
 
     .pdf-queue-clear:hover {
-        color: var(--danger);
+        color: var(--danger-text);
     }
 
     .pdf-queue-list {
@@ -2419,9 +2470,9 @@
     }
 
     .pdf-file-status.st-pending { color: var(--text-hint); }
-    .pdf-file-status.st-processing { color: var(--primary); }
+    .pdf-file-status.st-processing { color: var(--primary-text); }
     .pdf-file-status.st-done { color: var(--success, #188038); }
-    .pdf-file-status.st-error { color: var(--danger); }
+    .pdf-file-status.st-error { color: var(--danger-text); }
 
     .pdf-file-status .spin {
         font-size: 15px;
@@ -2447,12 +2498,12 @@
     }
 
     .pdf-file-remove:hover {
-        color: var(--danger);
+        color: var(--danger-text);
     }
 
     .pdf-file-error-msg {
         font-size: 0.68rem;
-        color: var(--danger);
+        color: var(--danger-text);
         flex-basis: 100%;
         padding-left: 24px;
     }
@@ -2645,7 +2696,7 @@
     .pdf-preview-item select:focus,
     .pdf-preview-item textarea:focus {
         outline: 2px solid color-mix(in srgb, var(--primary) 40%, transparent);
-        border-color: var(--primary);
+        border-color: var(--primary-text);
     }
 
     .pdf-ev-content {
@@ -2704,7 +2755,7 @@
     .pdf-unit-toggle {
         border: none;
         background: none;
-        color: var(--primary);
+        color: var(--primary-text);
         font-size: 0.72rem;
         cursor: pointer;
         white-space: nowrap;
@@ -2788,7 +2839,7 @@
         text-align: center;
         font-weight: 700;
         font-size: 0.82rem;
-        color: var(--primary);
+        color: var(--primary-text);
         background: var(--surface-2);
         width: 36px;
     }
@@ -2807,7 +2858,7 @@
 
     .tt-editor-table input:focus {
         outline: none;
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         background: var(--primary-light);
     }
 
@@ -2846,7 +2897,7 @@
 
     .vacation-card input[type="date"]:focus {
         outline: none;
-        border-color: var(--primary);
+        border-color: var(--primary-text);
     }
 
     @media (max-width: 700px) {
@@ -2888,7 +2939,7 @@
 
     .std-hours-item input:focus {
         outline: none;
-        border-color: var(--primary);
+        border-color: var(--primary-text);
     }
 
     /* ===== 時数集計プログレスバー ===== */
@@ -2949,7 +3000,7 @@
     }
 
     .swal2-popup {
-        font-family: 'Zen Maru Gothic', sans-serif !important;
+        font-family: var(--font-ui) !important;
     }
 
     .swal2-html-container .swal2-input,
@@ -2999,7 +3050,7 @@
         flex-shrink: 0;
         width: 16px;
         height: 16px;
-        accent-color: var(--secondary);
+        accent-color: var(--secondary-text);
         cursor: pointer;
     }
 
@@ -3041,7 +3092,7 @@
     }
 
     .task-card:hover {
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         box-shadow: var(--shadow-md);
     }
 
@@ -3063,7 +3114,7 @@
         width: 18px;
         height: 18px;
         cursor: pointer;
-        accent-color: var(--secondary);
+        accent-color: var(--secondary-text);
     }
 
     .task-content-wrapper {
@@ -3094,7 +3145,7 @@
     }
 
     .task-meta-icon {
-        color: var(--primary);
+        color: var(--primary-text);
         font-size: 0.9rem;
     }
 
@@ -3109,7 +3160,7 @@
 
     .task-date-badge.urgent {
         background: var(--danger-light);
-        color: var(--danger);
+        color: var(--danger-text);
     }
 
     /* ===== タスク: ナビ・サイドバーの件数バッジ ===== */
@@ -3176,11 +3227,11 @@
     }
 
     .task-status-btn.status-inprogress {
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .task-status-btn.status-done {
-        color: var(--secondary);
+        color: var(--secondary-text);
     }
 
     /* ===== タスク: 優先度バッジ ===== */
@@ -3197,7 +3248,7 @@
 
     .task-priority-badge.p-high {
         background: var(--danger-light);
-        color: var(--danger);
+        color: var(--danger-text);
     }
 
     .task-priority-badge.p-mid {
@@ -3261,8 +3312,8 @@
 
     .task-stat-chip.stat-overdue {
         background: var(--danger-light);
-        border-color: var(--danger);
-        color: var(--danger);
+        border-color: var(--danger-text);
+        color: var(--danger-text);
     }
 
     .task-stat-chip.stat-today {
@@ -3279,11 +3330,11 @@
     }
 
     .task-stat-chip.stat-inprogress {
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .task-stat-chip.stat-done {
-        color: var(--secondary);
+        color: var(--secondary-text);
     }
 
     .task-progress-wrap {
@@ -3369,12 +3420,12 @@
 
     .task-filter-chip:hover {
         background: var(--primary-light);
-        border-color: var(--primary);
+        border-color: var(--primary-text);
     }
 
     .task-filter-chip.active {
         background: var(--primary);
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         color: white;
         font-weight: 700;
     }
@@ -3441,7 +3492,7 @@
     }
 
     .task-del-btn:hover {
-        color: var(--danger);
+        color: var(--danger-text);
     }
 
     /* ===== 設定ビュー カード ===== */
@@ -3640,7 +3691,7 @@
     }
 
     .um-btn-save {
-        color: var(--secondary);
+        color: var(--secondary-text);
     }
 
     .um-btn-save:hover {
@@ -3659,11 +3710,11 @@
 
     .um-btn-danger:hover {
         background: var(--danger-light);
-        color: var(--danger);
+        color: var(--danger-text);
     }
 
     .um-btn-insert {
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .um-btn-insert:hover {
@@ -4236,17 +4287,17 @@
 
     .events-file-item.selected {
         background: var(--primary-light);
-        border-color: var(--primary);
+        border-color: var(--primary-text);
     }
 
     .events-file-item .material-symbols-outlined {
         font-size: 20px;
-        color: var(--danger);
+        color: var(--danger-text);
         flex-shrink: 0;
     }
 
     .events-file-item.selected .material-symbols-outlined {
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .events-file-meta {
@@ -4395,7 +4446,7 @@
 
     .plan-search-item-date {
         font-weight: 600;
-        color: var(--primary);
+        color: var(--primary-text);
     }
 
     .plan-search-item-field {
@@ -4505,8 +4556,8 @@
     }
 
     .mic-btn:hover {
-        border-color: var(--primary);
-        color: var(--primary);
+        border-color: var(--primary-text);
+        color: var(--primary-text);
     }
 
     .mic-btn.recording {
@@ -4555,7 +4606,7 @@
     }
 
     .mc-class-row.active {
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         box-shadow: 0 0 0 1px var(--primary) inset;
     }
 
@@ -4813,7 +4864,7 @@
     }
 
     .ai-task-source-card.checked {
-        border-color: var(--primary);
+        border-color: var(--primary-text);
         background: var(--primary-light);
     }
 
@@ -4858,7 +4909,7 @@
     .ai-task-pdf-file .ai-task-pdf-remove {
         background: none;
         border: none;
-        color: var(--danger);
+        color: var(--danger-text);
         cursor: pointer;
         display: flex;
         align-items: center;

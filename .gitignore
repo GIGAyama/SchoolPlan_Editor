@@ -1,0 +1,19 @@
+# 依存とビルドの作業物
+node_modules/
+dist/
+coverage/
+
+# clasp（GASのプッシュ設定。スクリプトIDが入るので置かない）
+.clasp.json
+.clasprc.json
+
+# 環境変数・秘密情報
+.env
+.env.*
+
+# OS・エディタ
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

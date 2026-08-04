@@ -148,7 +148,7 @@
     function buildReflectionPlanHtml(ctx) {
         var rows = '';
         if (ctx.event) {
-            rows += '<div style="padding:2px 0;"><span style="color:var(--secondary);font-weight:600;">行事</span> ' + escHtml(ctx.event) + '</div>';
+            rows += '<div style="padding:2px 0;"><span style="color:var(--secondary-text);font-weight:600;">行事</span> ' + escHtml(ctx.event) + '</div>';
         }
         (ctx.periods || []).forEach(function (p, i) {
             if (!p || !p.subject) return;
@@ -411,7 +411,7 @@
                 html += '<div class="refl-hub-item" data-date="' + escAttr(item.date) + '">'
                     + '<div style="flex:1;min-width:0;">'
                     + '<div style="font-weight:600;font-size:0.85rem;">' + escHtml(item.date.slice(5)) + '（' + escHtml(item.dayLabel || '') + '）'
-                    + (isToday ? ' <span style="color:var(--primary);font-size:0.72rem;">今日</span>' : '') + '</div>'
+                    + (isToday ? ' <span style="color:var(--primary-text);font-size:0.72rem;">今日</span>' : '') + '</div>'
                     + '<div style="font-size:0.72rem;color:var(--text-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(detail || '') + '</div>'
                     + '</div>' + stChip + '</div>';
             });
@@ -423,7 +423,7 @@
         html += '<hr style="margin:12px 0;">';
         html += '<div style="font-weight:600;font-size:0.85rem;margin-bottom:6px;">表示中の週の報告（週まとめ）</div>';
         html += '<div style="font-size:0.78rem;color:var(--text-sub);margin-bottom:8px;">振り返り ' + progress.done + '/' + progress.total + ' 日完了 ／ 週まとめ: '
-            + (ws ? '<span style="color:var(--secondary);font-weight:600;">作成済み</span>' : '未作成') + '</div>';
+            + (ws ? '<span style="color:var(--secondary-text);font-weight:600;">作成済み</span>' : '未作成') + '</div>';
         html += '<button type="button" class="btn btn-outline btn-sm" id="reflHubSummaryBtn" style="width:100%;">'
             + (ws ? '週まとめを表示・編集する' : 'AIで週まとめを作成する') + '</button>';
         html += '</div>';

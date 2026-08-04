@@ -104,6 +104,37 @@ Google Apps Script (GAS) と Google スプレッドシートをバックエン�
     
 *   **External API**: Google Classroom API, Google Drive API
     
+*   **同梱ライブラリ**: Bootstrap 5.3.3 / Bootstrap Icons 1.11.3 / SweetAlert2 11.14.5 /
+    Material Symbols（使用アイコンのみのサブセット）を **CDNではなくリポジトリに焼き込んで**配信
+
+### 外部CDNから実行コードを取らない
+
+学校のネットワークは `cdn.jsdelivr.net` や `fonts.googleapis.com` を塞いでいることがある。
+塞がれると、レイアウトが崩れ、確認ダイアログが `ReferenceError` で止まり、
+アイコンが `calendar_month` のような英単語で表示される（実測）。
+原因がアプリの外にあるため、先生が調べても分からない。
+
+そのため、**無いと動かない／見た目が壊れるものは、すべてリポジトリに焼き込んでいる。**
+
+| ファイル | 編集してよいか |
+|---|---|
+| `tools/build-vendor.mjs` / `tools/ms-ligatures.py` / `package.json` | **ここを直す**（原本） |
+| `Vendor_Bootstrap.html` / `Vendor_Icons.html` / `Vendor_Sweetalert.html` | **手で編集しない**（生成物） |
+
+原本を直したら、**必ず次を走らせてから push すること。**
+
+```bash
+npm install
+npm run build:vendor   # Vendor_*.html を作り直す
+npm run verify:icons   # アイコンが絵として描かれるか実ブラウザで確認
+npm run quality        # 静的検査 + テスト（CI と同じ）
+```
+
+`npm run build:vendor` には Python の fonttools が要る（`pip install fonttools brotli`）。
+
+本文用の Web フォント（Zen Maru Gothic ほか）だけは Google Fonts のまま。
+これは届かなくても字の形が変わるだけで、端末側フォントを `--font-ui` の後ろに並べてある。
+
 
 ## 📁 ディレクトリ・ファイル構成 (File Structure)
 
@@ -127,6 +158,17 @@ Google Apps Script (GAS) と Google スプレッドシートをバックエン�
 ├── App.html              # フロントエンドSPAのメインHTML
 ├── App_Css.html          # UIスタイルシート (CSS)
 ├── App_Css_02_UnitPlanning.html # UIスタイルシート: 単元ピッカー・整合性チェック・再配分
+├── App_Css_03_A11y.html  # UIスタイルシート: 見やすさ・押しやすさの補正（最後に読み込む）
+├── Vendor_Bootstrap.html # [生成物] Bootstrap 5 の CSS
+├── Vendor_Icons.html     # [生成物] Material Symbols / Bootstrap Icons のサブセット
+├── Vendor_Sweetalert.html # [生成物] SweetAlert2
+├── tools/build-vendor.mjs # 上記 Vendor_*.html の生成スクリプト
+├── tools/ms-ligatures.py  # アイコン名から残すグリフを引く（合字表を読む）
+├── tools/verify-icons.mjs # アイコンが絵として描かれるかを実ブラウザで確認
+├── docs/                 # GitHub Pages の PWA シェル（index.html / sw.js / offline.html / install-hook.js）
+├── AUDIT.md              # GIGA Standard v5 の監査結果（実測値と、測っていないものの明示）
+├── MANUAL.md             # 先生向けの使い方（「うまくいかないとき」つき）
+├── ROLLOUT.md            # 改修の記録と、他リポジトリにも効く知見
 ├── App_Js_01_Core.html   # フロントエンドJS: 状態管理・初期化・ビュー切替・全文検索
 ├── App_Js_02_Plan.html   # フロントエンドJS: 週案グリッド・編集・セル操作(D&D/Undo等)
 ├── App_Js_03_Print.html  # フロントエンドJS: 週案印刷（標準/コンパクト）
@@ -236,7 +278,21 @@ Google Apps Script (GAS) と Google スプレッドシートをバックエン�
 
 *   GASアプリ側は、デプロイ時の「アクセスできるユーザー」設定に応じてGoogleアカウントへのログインが必要です。Googleのログイン画面はiframe内に表示できないため、**初回起動時は自動でログイン案内画面が表示されます**。「Googleでログインして始める」を押すと別タブでログイン・認可でき、このタブに戻ると自動で週案が表示されます（一度表示できた端末では次回以降この案内は出ません）。うまくいかないときは左下の⚙メニューから「新しいタブで開く（ログイン用）」で一度ログインしてから「再読み込み」してください。
 *   Service Workerがキャッシュするのはシェル部分のみです。アプリ本体（GAS）はオンライン環境が必要です。
+    圏外でシェルも本体も無い場合は `docs/offline.html`（外部資産にもJSにも頼らない画面）が表示されます。
 *   iOS Safariでは「ホーム画面に追加」で同様にアイコンから起動できます。
+
+### シェルを更新するときの手順
+
+1. `docs/` の中身を変更する。
+2. **`docs/sw.js` の `CACHE_NAME` の版を必ず上げる**（`schoolplan-editor-shell-v3` → `v4`）。
+    上げ忘れると、直した内容が先生の端末に届かない。
+3. 更新は**先生が「最新にする」を押すまで切り替わらない**設計にしてある。
+    入力中に画面が入れ替わると、打ちかけの週案が消えるため。
+
+> キャッシュの接頭辞 `schoolplan-editor-shell-` は**このリポジトリ専用**である。
+> `gigayama.github.io` は複数アプリで同一オリジンを共有しており、
+> 接頭辞を他リポジトリ（`school-plan-note-shell-`）と共有すると、
+> 片方が有効になるたびにもう片方のキャッシュを消してしまう。
 
 ## 💡 使い方 (Usage)
 
