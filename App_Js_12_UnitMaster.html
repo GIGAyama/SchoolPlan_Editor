@@ -28,11 +28,11 @@
                     sel.value = currentVal; // フィルタ値を維持
                     renderUnitMasterTable();
                 } else {
-                    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--danger);padding:20px;">読込エラー: ' + escHtml(res.error) + '</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--danger-text);padding:20px;">読込エラー: ' + escHtml(res.error) + '</td></tr>';
                 }
             })
             .withFailureHandler(function (e) {
-                tbody.innerHTML = '<tr><td colspan="6" style="color:var(--danger);padding:20px;">通信エラー: ' + escHtml(e.message) + '</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="color:var(--danger-text);padding:20px;">通信エラー: ' + escHtml(e.message) + '</td></tr>';
             })
             .getUnitMasterData();
     }

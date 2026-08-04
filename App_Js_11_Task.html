@@ -122,13 +122,13 @@
                     STATE.taskDataLoaded = true;
                     refreshTaskViews();
                 } else {
-                    if (container) container.innerHTML = '<div style="color:var(--danger); padding:20px;">読込エラー: ' + res.error + '</div>';
+                    if (container) container.innerHTML = '<div style="color:var(--danger-text); padding:20px;">読込エラー: ' + res.error + '</div>';
                     showToast('error', 'タスク取得エラー: ' + res.error);
                 }
             })
             .withFailureHandler(function (e) {
                 STATE.taskLoading = false;
-                if (container) container.innerHTML = '<div style="color:var(--danger); padding:20px;">通信エラー</div>';
+                if (container) container.innerHTML = '<div style="color:var(--danger-text); padding:20px;">通信エラー</div>';
                 showToast('error', '致命的な通信エラー: ' + e.message);
             })
             .getTasksFromWebApp();

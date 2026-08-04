@@ -21,10 +21,17 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
+            /* アドレスバーのぶんはみ出さないよう dvh を使う（古い端末は下の @supports で 100vh） */
+            min-height: 100dvh;
             background-color: var(--bg-color);
             color: var(--text-main);
             overflow: hidden;
+        }
+
+        @supports not (min-height: 100dvh) {
+            body {
+                min-height: 100vh;
+            }
         }
 
         .loading-container {

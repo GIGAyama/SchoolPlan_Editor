@@ -335,13 +335,13 @@
                 render: function () {
                     var head;
                     if (status.hasCalendar) {
-                        head = '<div style="text-align:left;font-size:0.85rem;color:var(--secondary);">✅ データベースには既に日付（年間カレンダー）が構築されています。通常はこのステップはスキップで大丈夫です。</div>';
+                        head = '<div style="text-align:left;font-size:0.85rem;color:var(--secondary-text);">✅ データベースには既に日付（年間カレンダー）が構築されています。通常はこのステップはスキップで大丈夫です。</div>';
                     } else {
                         head = '<div style="text-align:left;font-size:0.85rem;">週案を使うには、データベースシートに1年分の日付・曜日・週番号を構築する必要があります。</div>';
                     }
                     return head
                         + '<div class="setup-wiz-field" style="margin-top:12px;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;">'
-                        + '<input type="checkbox" id="wizGenCal" style="width:18px;height:18px;"' + (wiz.genCalendar ? ' checked' : '') + '> 年間カレンダーを生成する</label></div>'
+                        + '<input type="checkbox" id="wizGenCal" style="width:20px;height:20px;"' + (wiz.genCalendar ? ' checked' : '') + '> 年間カレンダーを生成する</label></div>'
                         + wizFieldHtml('wizCalYear', '対象年度', 'number', wiz.calYear, '例：' + wiz.calYear, '')
                         + wizFieldHtml('wizCalStartMonday', '第1週目の月曜日', 'date', wiz.calStartMonday, '',
                             '既存の入力データ（各校時の内容など）は消えません。')

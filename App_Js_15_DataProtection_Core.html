@@ -33,7 +33,7 @@
         wrap.style.padding = '0 20px 20px';
         wrap.id = 'p3ProtectionCard';
         wrap.innerHTML = '<div class="integration-section">'
-            + '<div class="integration-header" style="background:linear-gradient(135deg,#1565c0,#283593);">'
+            + '<div class="integration-header" style="background:linear-gradient(135deg,#1565c0,#283593);color:#fff;">'
             + '<span class="integration-icon"><span class="material-symbols-outlined fs-6">shield</span></span>'
             + '<span class="integration-title">データ保全・復元</span></div>'
             + '<div class="integration-body">'
@@ -42,7 +42,7 @@
             + '<div id="p3ProtectionStatus" style="padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);font-size:0.8rem;line-height:1.7;">状態を確認中...</div>'
             + '<div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:8px;">'
             + '<label class="form-check-label" style="font-size:0.85rem;display:flex;align-items:center;gap:8px;cursor:pointer;">'
-            + '<input type="checkbox" id="p3DailyBackupEnabled" class="form-check-input" style="width:18px;height:18px;" checked onchange="p3ToggleDailyBackupUI(this)">'
+            + '<input type="checkbox" id="p3DailyBackupEnabled" class="form-check-input" style="width:20px;height:20px;" checked onchange="p3ToggleDailyBackupUI(this)">'
             + '1日1回、自動で完全バックアップを作成する</label>'
             + '<p id="p3BackupPolicyNote" style="font-size:0.75rem;color:var(--text-hint);margin-top:6px;">'
             + 'バックアップは別スプレッドシートとしてマイドライブに作られます。古い世代は自動で整理されます。<br>'
@@ -53,7 +53,7 @@
             + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3CreateWeekRestorePointUI(this)"><span class="material-symbols-outlined fs-6">restore_page</span> 今週の復元ポイント</button>'
             + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3ShowBackupsUI()"><span class="material-symbols-outlined fs-6">folder_copy</span> バックアップ一覧</button>'
             + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3ShowRestorePointsUI()"><span class="material-symbols-outlined fs-6">history</span> 復元ポイント一覧</button>'
-            + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3ShowTrashUI()"><span class="material-symbols-outlined fs-6">delete_restore</span> ごみ箱</button>'
+            + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3ShowTrashUI()"><span class="material-symbols-outlined fs-6">restore_from_trash</span> ごみ箱</button>'
             + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3ShowAuditUI()"><span class="material-symbols-outlined fs-6">fact_check</span> 監査ログ</button>'
             + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3RunIntegrityCheckUI(this)"><span class="material-symbols-outlined fs-6">health_and_safety</span> 健全性を診断</button>'
             + '<button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="p3RunMigrationsUI(this)"><span class="material-symbols-outlined fs-6">upgrade</span> 保全基盤を更新</button>'
@@ -65,7 +65,7 @@
         var el = document.getElementById('p3ProtectionStatus');
         if (!el) return;
         if (!res || !res.success) {
-            el.innerHTML = '<strong style="color:var(--danger);">状態取得エラー:</strong> ' + escHtml((res && res.error) || '不明');
+            el.innerHTML = '<strong style="color:var(--danger-text);">状態取得エラー:</strong> ' + escHtml((res && res.error) || '不明');
             return;
         }
         var counts = res.counts || {};
@@ -223,7 +223,7 @@
                     + '<p style="font-size:0.78rem;margin-top:10px;color:var(--text-sub);">復元直前の現在状態も自動保存します。</p>',
                 width: 680, showCancelButton: !preview.noChanges,
                 showConfirmButton: !preview.noChanges, confirmButtonText: 'この内容へ復元',
-                cancelButtonText: 'キャンセル', confirmButtonColor: '#e65100'
+                cancelButtonText: 'キャンセル', confirmButtonColor: '#b45309'
             }).then(function (answer) {
                 if (!answer.isConfirmed) return;
                 Swal.fire({ title: '復元中...', allowOutsideClick: false, didOpen: function () { Swal.showLoading(); } });
@@ -250,7 +250,7 @@
             showCancelButton: true,
             confirmButtonText: '復元する',
             cancelButtonText: 'キャンセル',
-            confirmButtonColor: '#e65100'
+            confirmButtonColor: '#b45309'
         }).then(function (answer) {
             if (!answer.isConfirmed) return;
             Swal.fire({ title: '復元中...', allowOutsideClick: false, didOpen: function () { Swal.showLoading(); } });

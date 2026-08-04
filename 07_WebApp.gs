@@ -41,7 +41,10 @@ function doGet(e) {
     // ALLOWALL（全許可）の2値のみで、特定オリジン（GitHub Pages ドメイン）への限定はできない。
     // そのため PWA シェル運用では ALLOWALL が必須。詳細と緩和策は docs/B3_TOKEN_IFRAME_HARDENING.md 参照。
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    // viewport-fit=cover … GAS は画面を iframe で包むため、App.html 側の <meta> だけでは
+    // 安全領域（ノッチ・ホームバー）が使えるようにならない。両方に要る。
+    // 拡大の禁止（user-scalable=no / maximum-scale）は入れない。見えづらい人が拡大できなくなる害のほうが大きい。
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, viewport-fit=cover')
     .setFaviconUrl('https://drive.google.com/uc?id=1zNSkBUKrzxX4TDeDpcXZ-jKtDtv0c4Yn&.png');
 }
 

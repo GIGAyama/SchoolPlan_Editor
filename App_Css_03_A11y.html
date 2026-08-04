@@ -1,0 +1,243 @@
+<style>
+    /* =========================================================
+       見やすさ・押しやすさの補正（GIGA Standard v5 §2-8/§2-9/§2-3）
+
+       App_Css.html が保守性の警告閾値（5000行）を超えないよう別ファイルにしている。
+       ここは「あとから当てる補正」なので、App_Css.html のあとに読み込むこと。
+       ========================================================= */
+
+    /* ---------- 1. 押せるところは 44px 四方を確保する ----------
+       ⚠️ ボタン自体を大きくして満たそうとしない。
+         詰めて組んであるツールバーに min-height: 44px を当てると折り返しが起き、
+         別の破綻を生む。見た目はそのままに、当たり判定だけを疑似要素で広げる。 */
+    .nav-btn,
+    .btn-icon,
+    .btn-today,
+    .weekend-toggle-btn,
+    .task-filter-chip,
+    .task-stat-chip,
+    .task-edit-btn,
+    .task-del-btn,
+    .task-status-btn,
+    .reflection-chip,
+    .nw-palette-btn,
+    .weekly-task-toggle-btn,
+    .btn,
+    .btn-sm,
+    footer a {
+        position: relative;
+    }
+
+    .nav-btn::after,
+    .btn-icon::after,
+    .btn-today::after,
+    .weekend-toggle-btn::after,
+    .task-filter-chip::after,
+    .task-stat-chip::after,
+    .task-edit-btn::after,
+    .task-del-btn::after,
+    .task-status-btn::after,
+    .reflection-chip::after,
+    .nw-palette-btn::after,
+    .weekly-task-toggle-btn::after,
+    .btn::after,
+    footer a::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 100%;
+        height: 100%;
+        min-width: 44px;
+        min-height: 44px;
+        /* 見た目には出さない。当たり判定だけを広げる */
+        pointer-events: auto;
+    }
+
+    /* チェックボックス・ラジオには上の手が使えない（input は疑似要素を持てない）。
+       囲みのラベル側で高さを確保し、つまみ自体も指で押せる大きさにする。 */
+    .form-check-label,
+    label.form-check-label,
+    label:has(> input[type="checkbox"]),
+    label:has(> input[type="radio"]) {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
+
+    .form-check-input,
+    input[type="checkbox"],
+    input[type="radio"] {
+        width: 20px;
+        height: 20px;
+    }
+
+    /* 単独で置かれている選択メニュー・リンク・小さなアイコンボタンも 44px を確保する。
+       select は疑似要素を持てないので、高さそのものを確保する。 */
+    select,
+    .form-select {
+        min-height: 44px;
+    }
+
+    /* ツールバーの中に並ぶ select は、高さを上げると行が崩れるため対象外 */
+    .toolbar select,
+    .week-nav select,
+    .grid-cell select {
+        min-height: 0;
+    }
+
+    .integration-body a,
+    .tenant-db-info a {
+        position: relative;
+        display: inline-block;
+    }
+
+    .integration-body a::after,
+    .tenant-db-info a::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 100%;
+        height: 100%;
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    /* 折りたたんだタスクパネルの見出し（押すと開く）。幅が 39px しかなかった */
+    .weekly-task-collapsed-label {
+        min-width: 44px;
+    }
+
+    /* 週案グリッドの中のチェックは行の高さを崩すため、対象外にする */
+    .week-grid .form-check-input {
+        width: 16px;
+        height: 16px;
+    }
+
+    .week-grid .form-check-label {
+        min-height: 0;
+    }
+
+    /* ---------- 2. ハイコントラストモード ----------
+       Windows の「ハイコントラスト」では背景色が無効化される。
+       枠線が無いボタンは、押せるものだと分からなくなる。 */
+    @media (forced-colors: active) {
+
+        .btn,
+        .btn-icon,
+        .nav-btn,
+        .btn-today,
+        .task-filter-chip,
+        .nw-palette-btn {
+            border: 2px solid ButtonText;
+        }
+
+        .nav-btn.active,
+        .task-filter-chip.active {
+            border-color: Highlight;
+        }
+
+        /* 色だけで示している状態は、枠線でも分かるようにする */
+        .grid-cell.selected {
+            outline: 3px solid Highlight;
+        }
+    }
+
+    /* ---------- 3. 下端の固定要素はホームバーのぶんを足す ---------- */
+    .toast-container,
+    .weekly-task-sidebar {
+        padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    }
+
+    /* ---------- 4. SweetAlert2 の既定色 ----------
+       ライブラリの既定色は、そのままでは基準に届かない。
+       情報アイコンの水色は白地で 2.05 だった（大きな図形でも 3:1 が要る）。 */
+    .swal2-icon.swal2-info {
+        color: #087990;
+        border-color: #087990;
+    }
+
+    .swal2-icon.swal2-question {
+        color: #5c636a;
+        border-color: #5c636a;
+    }
+
+    .swal2-icon.swal2-warning {
+        color: #a34700;
+        border-color: #a34700;
+    }
+
+    /* ---------- 5. ダークモードで、ライブラリと固定色が読めなくなる箇所 ----------
+       アプリ固有の配色を疑う前に、フレームワークの既定色を疑うこと。
+       Bootstrap の .btn / .text-muted は既定で濃いグレー（#212529）の文字なので、
+       暗い面の上では比 1.07 になる（実測。ダークで55か所）。 */
+    @media (prefers-color-scheme: dark) {
+
+        :root:not([data-theme="light"]) .btn:not(.btn-primary):not([style*="background"]),
+        :root:not([data-theme="light"]) .btn-outline {
+            color: var(--text-main);
+        }
+
+        :root:not([data-theme="light"]) .text-muted {
+            color: var(--text-sub) !important;
+        }
+
+        /* 明るい面を固定で持っている部品は、暗いテーマでも文字を濃いままにする
+           （面が明るいのに文字まで明るくすると読めなくなる） */
+        :root:not([data-theme="light"]) .nw-palette-btn-wordart,
+        :root:not([data-theme="light"]) .nw-palette-btn-ai-full,
+        :root:not([data-theme="light"]) .integration-header[style*="fff3e0"],
+        :root:not([data-theme="light"]) .integration-header[style*="fff3e0"] .integration-title {
+            color: #202124;
+        }
+
+        :root:not([data-theme="light"]) .nw-empty-editor {
+            color: #5f6368;
+        }
+
+        :root:not([data-theme="light"]) .task-date-badge {
+            color: #8ab4f8;
+        }
+
+        :root:not([data-theme="light"]) .task-priority-badge {
+            color: #fdd663;
+        }
+    }
+
+    :root[data-theme="dark"] .btn:not(.btn-primary):not([style*="background"]),
+    :root[data-theme="dark"] .btn-outline {
+        color: var(--text-main);
+    }
+
+    :root[data-theme="dark"] .text-muted {
+        color: var(--text-sub) !important;
+    }
+
+    :root[data-theme="dark"] .nw-palette-btn-wordart,
+    :root[data-theme="dark"] .nw-palette-btn-ai-full,
+    :root[data-theme="dark"] .integration-header[style*="fff3e0"],
+    :root[data-theme="dark"] .integration-header[style*="fff3e0"] .integration-title {
+        color: #202124;
+    }
+
+    :root[data-theme="dark"] .nw-empty-editor {
+        color: #5f6368;
+    }
+
+    :root[data-theme="dark"] .task-date-badge {
+        color: #8ab4f8;
+    }
+
+    :root[data-theme="dark"] .task-priority-badge {
+        color: #fdd663;
+    }
+
+    /* ---------- 6. キーボード操作の現在地 ---------- */
+    :focus-visible {
+        outline: 3px solid var(--primary);
+        outline-offset: 2px;
+    }
+</style>
