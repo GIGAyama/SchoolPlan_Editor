@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>週案エディタ - インターネットにつながっていません</title>
+  <meta name="theme-color" content="#1665cf">
+  <!--
+    この画面は「ネットにつながらず、アプリ本体も手元に無い」ときに出る。
+    そのため、外部のCSS・フォント・JavaScript には一切頼らない。
+    再読み込みも <a href> で行う（インラインの onclick は CSP に引っかかる）。
+  -->
+  <style>
+    :root {
+      color-scheme: light;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px calc(24px + env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) calc(24px + env(safe-area-inset-left, 0px));
+      background: #f6f8fb;
+      color: #202124;
+      font-family: "Hiragino Maru Gothic ProN", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Meiryo", system-ui, sans-serif;
+      line-height: 1.8;
+    }
+
+    @supports not (min-height: 100dvh) {
+      body {
+        min-height: 100vh;
+      }
+    }
+
+    .card {
+      max-width: 30rem;
+      width: 100%;
+      background: #fff;
+      border: 1px solid #dadce0;
+      border-radius: 12px;
+      padding: 28px 24px;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(60, 64, 67, .15);
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(18px, 2.2vw + 12px, 24px);
+      color: #0d47a1;
+    }
+
+    p {
+      margin: 0 0 8px;
+      font-size: clamp(15px, 1.6vw + 10px, 17px);
+      color: #3c4043;
+    }
+
+    .hint {
+      margin-top: 16px;
+      font-size: 14px;
+      color: #5f6368;
+      text-align: left;
+    }
+
+    .hint li {
+      margin-bottom: 4px;
+    }
+
+    a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      margin-top: 20px;
+      padding: 0 24px;
+      border-radius: 22px;
+      background: #1665cf;
+      color: #fff;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    a.button:focus-visible {
+      outline: 3px solid #0d47a1;
+      outline-offset: 2px;
+    }
+
+    @media (forced-colors: active) {
+      a.button {
+        border: 2px solid ButtonText;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="card">
+    <h1>インターネットにつながっていません</h1>
+    <p>週案エディタは、記録の読み書きにインターネット接続が必要です。</p>
+    <p>接続を確かめてから、もう一度開いてください。</p>
+    <ul class="hint">
+      <li>Wi-Fi がつながっているか確かめてください。</li>
+      <li>校内のネットワークが混んでいるときは、少し待つとつながることがあります。</li>
+      <li>それでも開かないときは、端末を再起動してみてください。</li>
+    </ul>
+    <a class="button" href="./index.html">もう一度ひらく</a>
+  </main>
+</body>
+
+</html>
