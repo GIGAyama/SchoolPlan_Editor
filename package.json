@@ -11,6 +11,15 @@
     "check": "node scripts/check-project.mjs",
     "check:json": "node scripts/check-project.mjs --json",
     "test": "node --test",
-    "quality": "npm run check && npm test"
+    "quality": "npm run check && npm test",
+    "build:vendor": "node tools/build-vendor.mjs",
+    "verify:icons": "node tools/verify-icons.mjs"
+  },
+  "devDependencies": {
+    "@material-symbols/font-400": "^0.45.10",
+    "bootstrap": "^5.3.3",
+    "bootstrap-icons": "^1.11.3",
+    "playwright": "^1.56.1",
+    "sweetalert2": "^11.14.5"
   }
 }

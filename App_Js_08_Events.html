@@ -124,6 +124,13 @@
                     showToast('error', '認証情報の取得に失敗しました: ' + ((res && res.error) || ''));
                     return;
                 }
+                // apis.google.com が学校のフィルタリングで塞がれていると gapi が存在しない。
+                // そのまま呼ぶと ReferenceError で画面が固まったように見えるため、
+                // ここで気づいて「何が起きているか」を言葉で伝える。
+                if (typeof gapi === 'undefined' || !gapi.load) {
+                    showToast('error', 'Googleドライブの選択画面（apis.google.com）に接続できませんでした。学校のネットワーク制限が原因のことがあります。');
+                    return;
+                }
                 if (!STATE.pickerApiLoaded) {
                     gapi.load('picker', {
                         callback: function () {
