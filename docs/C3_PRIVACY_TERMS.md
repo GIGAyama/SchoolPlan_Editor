@@ -64,7 +64,15 @@ C2 の同意画面の設定に戻り、次を登録します。
 - **アプリのホームページ**：`https://（あなたのID）.github.io/SchoolPlan_Editor/`
 - **プライバシーポリシー URL**：`.../privacy-policy.html`
 - **利用規約 URL**：`.../terms.html`
-- **承認済みドメイン**に `github.io` を追加
+- **承認済みドメイン**に `（あなたのID）.github.io` を追加（例：`gigayama.github.io`）
+
+> ⚠️ ここは `github.io` ではなく **`（あなたのID）.github.io`** です。
+> `github.io` だけだと「最上位のプライベート ドメインを指定する必要があります」で弾かれます。
+> URL もドメイン欄も、すべて小文字で入力してください。
+>
+> ⚠️ ホームページ欄に **GitHub リポジトリの URL（`https://github.com/...`）を入れてはいけません。**
+> 所有権を確認できないため、「ウェブサイトが登録されていません」で差し戻されます。
+> 必ず GitHub Pages の URL を入れてください。
 
 ---
 

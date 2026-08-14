@@ -41,7 +41,14 @@
      例）`https://（あなたのID）.github.io/SchoolPlan_Editor/`
    - **プライバシーポリシー URL**：`.../privacy-policy.html`（← C3 で用意します）
    - **利用規約 URL**：`.../terms.html`（← C3 で用意します）
-   - **承認済みドメイン**：`github.io` と `google.com` を追加
+   - **承認済みドメイン**：`（あなたのID）.github.io` と `google.com` を追加
+     （例：`gigayama.github.io`。すべて小文字で入力します）
+
+> ⚠️ **承認済みドメインに `github.io` だけを入れると弾かれます。**
+> 「無効なドメイン: 最上位のプライベート ドメインを指定する必要があります」というエラーになります。
+> `github.io` は Public Suffix List に載っている公開サフィックス（実質的な TLD 扱い）なので、
+> Google から見た「最上位のプライベートドメイン」は **`（あなたのID）.github.io`** の方です。
+> 独自ドメイン（例：`example.com`）を使う場合は、そのドメインを入れます。
 4. **「保存して次へ」**。
 
 ---
