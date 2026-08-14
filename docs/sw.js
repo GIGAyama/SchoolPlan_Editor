@@ -27,7 +27,7 @@
  * ここは 'schoolplan-editor-shell-' として重ならないようにしてある。 */
 const CACHE_PREFIX = 'schoolplan-editor-shell-';
 // リリースごとに必ず上げる。上げ忘れると、直した内容が先生の端末に届かない。
-const CACHE_NAME = CACHE_PREFIX + 'v3';
+const CACHE_NAME = CACHE_PREFIX + 'v4';
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -86,8 +86,16 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy));
+          // 【重要】ナビゲーション先が何であれ ./index.html として保存してはいけない。
+          // 同じオリジンには about.html / privacy-policy.html / terms.html があり、
+          // 先生がそれらを一度開くと、オフライン用のシェルがその静的ページに
+          // 差し替わる。次に圏外でアプリを開くと、週案ではなく利用規約が出る。
+          // シェル自身（ルート または index.html）のときだけ保存する。
+          const path = url.pathname.replace(/\/$/, '/index.html');
+          if (path.endsWith('/index.html')) {
+            const copy = res.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy));
+          }
           return res;
         })
         // 圏外のとき：まずキャッシュ済みのシェル、それも無ければ

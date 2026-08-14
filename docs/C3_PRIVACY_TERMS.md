@@ -18,6 +18,7 @@ Google の審査では「このアプリはデータをどう扱うの？」を�
 
 | ページ | ファイル | 公開されるURL（例） |
 |--------|----------|------|
+| アプリ紹介（ホームページ用） | [`about.html`](about.html) | `https://（あなたのID）.github.io/SchoolPlan_Editor/about.html` |
 | プライバシーポリシー | [`privacy-policy.html`](privacy-policy.html) | `https://（あなたのID）.github.io/SchoolPlan_Editor/privacy-policy.html` |
 | 利用規約 | [`terms.html`](terms.html) | `https://（あなたのID）.github.io/SchoolPlan_Editor/terms.html` |
 
@@ -61,7 +62,7 @@ GitHub Pages を公開したあと、上の「公開されるURL」をブラウ�
 
 C2 の同意画面の設定に戻り、次を登録します。
 
-- **アプリのホームページ**：`https://（あなたのID）.github.io/SchoolPlan_Editor/`
+- **アプリのホームページ**：`https://（あなたのID）.github.io/SchoolPlan_Editor/about.html`
 - **プライバシーポリシー URL**：`.../privacy-policy.html`
 - **利用規約 URL**：`.../terms.html`
 - **承認済みドメイン**に `（あなたのID）.github.io` を追加（例：`gigayama.github.io`）
@@ -70,9 +71,12 @@ C2 の同意画面の設定に戻り、次を登録します。
 > `github.io` だけだと「最上位のプライベート ドメインを指定する必要があります」で弾かれます。
 > URL もドメイン欄も、すべて小文字で入力してください。
 >
-> ⚠️ ホームページ欄に **GitHub リポジトリの URL（`https://github.com/...`）を入れてはいけません。**
-> 所有権を確認できないため、「ウェブサイトが登録されていません」で差し戻されます。
-> 必ず GitHub Pages の URL を入れてください。
+> ⚠️ ホームページ欄には、次のどちらも入れてはいけません。
+> - **GitHub リポジトリの URL（`https://github.com/...`）**
+>   … 所有権を確認できず「ウェブサイトが登録されていません」で差し戻されます。
+> - **アプリ本体（`.../SchoolPlan_Editor/`）**
+>   … 開くと GAS のログイン画面になり「ホームページにログインページが表示されます」で
+>   差し戻されます。ログイン不要で読める `about.html` を指定してください。
 
 ---
 
