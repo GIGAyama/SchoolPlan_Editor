@@ -44,9 +44,17 @@ Classroom への投稿など「重い機能（sensitive スコープ）」を使
 
 ### 3. デモ動画を用意（sensitive スコープがある場合）
 Classroom の機能を含むので、**操作のデモ動画**が求められます。
-- YouTube に「限定公開」でアップし、そのURLを申請に貼ります。
+
+> 📹 **撮影台本を用意しています → [C5: OAuth 審査用 デモ動画の撮影台本](C5_DEMO_VIDEO_SCRIPT.md)**
+> シーンごとの操作手順・英語字幕の文面・スコープとの対応表・提出前チェックリストがそろっています。
+
+要点だけ先に挙げると：
+- YouTube に**「限定公開（Unlisted）」**でアップし、そのURLを申請に貼ります（「非公開」は審査担当が視聴できず差し戻しになります）。
 - 内容：ログイン → 同意画面 → 各機能（特に Classroom 投稿）を実際に操作するところ。
+- **同意画面を映すときはアドレスバーごと映し、URL の `client_id` が読める**ようにします。
+- 同意画面は **English 表示**に切り替え、動画には**英語字幕またはナレーション**を付けます。
 - 同意画面に表示されるアプリ名と、動画内のアプリ名を一致させます。
+- **要求する sensitive スコープ 6 個すべて**（`spreadsheets` / `drive.file` / `classroom.courses.readonly` / `classroom.announcements` / `script.send_mail` / `userinfo.email`）の実演が必要です。
 
 ---
 
