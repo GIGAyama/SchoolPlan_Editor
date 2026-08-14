@@ -1,0 +1,213 @@
+1
+00:00:02,000 --> 00:00:07,000
+This is School Plan Note, a web application
+for elementary school teachers in Japan.
+
+2
+00:00:07,000 --> 00:00:13,000
+Teachers use it to write weekly lesson plans,
+manage classroom tasks, and share class newsletters.
+
+3
+00:00:14,000 --> 00:00:20,000
+This is our homepage, our privacy policy,
+and our terms of service.
+
+4
+00:00:20,000 --> 00:00:26,000
+These are the same URLs submitted
+in this verification request.
+
+5
+00:00:40,000 --> 00:00:46,000
+Each teacher owns a single Google Spreadsheet
+that stores their own lesson plan data.
+
+6
+00:00:46,000 --> 00:00:52,000
+This add-on menu is provided
+by the script.container.ui scope.
+
+7
+00:00:52,000 --> 00:00:58,000
+Opening the web application
+starts the OAuth flow.
+
+8
+00:01:12,000 --> 00:01:18,000
+This is the OAuth consent screen
+for our application.
+
+9
+00:01:18,000 --> 00:01:25,000
+The address bar shows the client ID of the
+OAuth client submitted for verification.
+
+10
+00:01:26,000 --> 00:01:32,000
+The application requests the following scopes:
+Google Sheets and Drive file access,
+
+11
+00:01:32,000 --> 00:01:38,000
+Classroom courses read-only,
+and Classroom announcements,
+
+12
+00:01:38,000 --> 00:01:45,000
+sending email on the user's behalf,
+and the user's email address.
+
+13
+00:01:45,000 --> 00:01:52,000
+Each of these scopes is demonstrated
+in the following sections of this video.
+
+14
+00:02:12,000 --> 00:02:18,000
+Teachers enter their weekly lesson plan
+in this grid.
+
+15
+00:02:20,000 --> 00:02:26,000
+The data is written to the teacher's
+own spreadsheet, shown here.
+
+16
+00:02:28,000 --> 00:02:36,000
+We use the spreadsheets scope only to read and write
+this single database file, owned by the teacher.
+
+17
+00:02:36,000 --> 00:02:42,000
+We never access any other spreadsheet.
+
+18
+00:03:02,000 --> 00:03:09,000
+The app calls the Gemini API to draft the class
+newsletter from the teacher's lesson plan.
+
+19
+00:03:10,000 --> 00:03:16,000
+This external HTTPS request requires
+the script.external_request scope.
+
+20
+00:03:18,000 --> 00:03:25,000
+The API key is stored per user in Apps Script
+properties and is never shared.
+
+21
+00:03:42,000 --> 00:03:47,000
+The newsletter is exported as a PDF file.
+
+22
+00:03:48,000 --> 00:03:55,000
+We request the drive.file scope,
+not full Drive access.
+
+23
+00:03:56,000 --> 00:04:03,000
+This means the app can only see and manage
+files it creates itself, such as this PDF.
+
+24
+00:04:03,000 --> 00:04:10,000
+It cannot read any of the teacher's
+other Drive files.
+
+25
+00:04:22,000 --> 00:04:28,000
+Teachers can enable a daily reminder
+for their unfinished tasks.
+
+26
+00:04:30,000 --> 00:04:37,000
+Setting the delivery time creates a time-based
+trigger, requiring the script.scriptapp scope.
+
+27
+00:04:40,000 --> 00:04:46,000
+The script.send_mail scope
+is used to send this reminder.
+
+28
+00:04:46,000 --> 00:04:54,000
+The userinfo.email scope identifies the signed-in
+teacher, so the reminder goes to that teacher only.
+
+29
+00:04:58,000 --> 00:05:06,000
+As you can see, the email is delivered
+to the account that is signed in.
+
+30
+00:05:06,000 --> 00:05:11,000
+We never email anyone else.
+
+31
+00:05:22,000 --> 00:05:29,000
+The teacher links the app to their own
+Google Classroom course.
+
+32
+00:05:30,000 --> 00:05:38,000
+We use classroom.courses.readonly only to list the
+active courses the teacher already teaches,
+
+33
+00:05:38,000 --> 00:05:43,000
+so they can choose one from this dropdown.
+
+34
+00:05:44,000 --> 00:05:51,000
+We do not read student data, rosters,
+coursework, or grades.
+
+35
+00:05:58,000 --> 00:06:06,000
+When the teacher clicks this button, the app posts
+the schedule to the selected course as an announcement.
+
+36
+00:06:06,000 --> 00:06:12,000
+This is what the classroom.announcements
+scope is used for.
+
+37
+00:06:16,000 --> 00:06:22,000
+Here is the announcement
+in Google Classroom.
+
+38
+00:06:22,000 --> 00:06:30,000
+The teacher always initiates the post. The app
+never posts without an explicit action by the teacher.
+
+39
+00:06:42,000 --> 00:06:49,000
+To summarize: School Plan Note stores each teacher's
+lesson plan in their own spreadsheet,
+
+40
+00:06:49,000 --> 00:06:55,000
+exports newsletters as PDF files
+it creates itself,
+
+41
+00:06:55,000 --> 00:07:01,000
+sends reminders only to the signed-in teacher,
+
+42
+00:07:01,000 --> 00:07:07,000
+and posts announcements to the teacher's own
+Classroom course when the teacher chooses to.
+
+43
+00:07:07,000 --> 00:07:13,000
+All requested scopes are used only for these
+purposes, as described in our privacy policy.
+
+44
+00:07:13,000 --> 00:07:18,000
+Thank you for reviewing our application.
