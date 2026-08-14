@@ -234,6 +234,7 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 │   ├── DATABASE_SCHEMA.md              # スプレッドシートのシート構成
 │   ├── QUALITY_ASSURANCE.md            # 品質ゲートの方針
 │   ├── B*/C*/D*.md                     # Driveスコープ・OAuth審査・配布・移行の各手順
+│   │                                   #   （C5 は審査提出用デモ動画の撮影台本）
 │   └── note/                           # 紹介記事とスクリーンショット
 ├── AUDIT.md              # GIGA Standard v5 の監査結果（実測値と、測っていないものの明示）
 ├── MANUAL.md             # 先生向けの使い方（「うまくいかないとき」つき）
