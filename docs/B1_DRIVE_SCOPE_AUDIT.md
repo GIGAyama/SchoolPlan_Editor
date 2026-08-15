@@ -8,7 +8,6 @@
 |----------|------|
 | `spreadsheets` | 各ユーザーのDB（スプレッドシート）読み書き |
 | **`drive`（フル）** | 本レポートの対象。PDFフォルダ列挙・ファイル作成/共有・テンプレ複製 等 |
-| `script.container.ui` | メニュー等 |
 | `script.scriptapp` | トリガー管理 |
 | `script.external_request` | Gemini API 等の外部リクエスト |
 | `script.send_mail` | タスクリマインダー |

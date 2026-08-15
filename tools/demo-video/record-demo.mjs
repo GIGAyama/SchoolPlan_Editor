@@ -248,6 +248,8 @@ if (!NO_CAPTURE) {
 }
 
 console.log('=== 撮影前の確認 ===');
+console.log('  [ ] 録画を【ディスプレイ全体】にした（同意画面は別ウィンドウで開くため、');
+console.log('      ウィンドウ単位の録画では最重要シーンが丸ごと欠落します）');
 console.log('  [ ] https://myaccount.google.com/permissions でこのアプリのアクセス権を削除した');
 console.log('  [ ] 同意画面の表示言語を English に切り替えられる状態にした');
 console.log('  [ ] 実在の児童・保護者の情報が入っていない撮影用データに切り替えた');
