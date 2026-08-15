@@ -78,7 +78,7 @@ function p3CleanupBackups_(ss) {
   });
 
   remove.forEach(item => {
-    try { DriveApp.getFileById(item.id).setTrashed(true); } catch (e) {}
+    try { driveSetTrashed_(item.id, true); } catch (e) {}
   });
   p3SetBackupIndex_(ss, keep);
   return remove.length;

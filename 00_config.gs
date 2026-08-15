@@ -27,7 +27,8 @@ const TRIGGER_FUNCTION_NAME_EVENT = 'processNextEventPdf';
 
 // drive.file 運用: 行事予定PDFはDriveフォルダに保存せず、Googleピッカーで選んだ
 // ファイルの「参照（ID・ファイル名・学校名）」のみをプロパティに保存する。
-// フォルダ作成（DriveApp.createFolder）はフル drive スコープを要求するため行わない。
+// Drive 操作は DriveApp を使わず、Drive REST API v3 のラッパー（17_DriveApi.gs）を通す。
+// DriveApp は組み込みサービスの都合でフル drive スコープを要求し、drive.file では動かない。
 // 閲覧はユーザー自身のブラウザセッションでDriveプレビューを埋め込んで行う。
 const UP_KEY_EVENT_PDF_REFS = 'up_eventPdfRefs'; // Properties: 行事予定PDF参照リスト(JSON)
 

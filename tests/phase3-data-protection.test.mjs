@@ -150,7 +150,8 @@ test('backup generations are capped low enough to keep Drive tidy', () => {
   assert.match(backend, /P3_BACKUP_RETENTION_DAYS_ = 30/);
   const cleanup = between(backend, 'function p3CleanupBackups_', 'function p3IsDailyBackupEnabled_');
   assert.match(cleanup, /P3_BACKUP_MAX_COUNT_/);
-  assert.match(cleanup, /setTrashed\(true\)/);
+  // drive.file 運用のため DriveApp ではなく Drive REST API のラッパーでごみ箱へ送る
+  assert.match(cleanup, /driveSetTrashed_\([^)]*,\s*true\)/);
 });
 
 test('destructive database clear backs up first and clears by logical headers', () => {

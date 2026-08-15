@@ -420,12 +420,10 @@ function createAndSavePDF(sheetName) {
     const url = `https://docs.google.com/spreadsheets/d/${ss.getId()}/export?` +
       `exportFormat=pdf&format=pdf&size=A4&portrait=true&fitToPage=true&gridlines=false&gid=${sheet.getSheetId()}`;
     const blob = UrlFetchApp.fetch(url, { headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() } }).getBlob().setName(pdfFileName);
-    // drive.file 運用: getRootFolder() ではなくトップレベルの DriveApp API を使う
-    // （createFile は My Drive 直下にアプリ所有ファイルを作成、検索はアプリ作成物のみが対象）。
-    const existingFiles = DriveApp.getFilesByName(pdfFileName);
-    while (existingFiles.hasNext()) { existingFiles.next().setTrashed(true); }
-    const file = DriveApp.createFile(blob);
-    logInfo(`PDF「${pdfFileName}」保存完了 (ID: ${file.getId()})`);
+    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
+    driveTrashByName_(pdfFileName);
+    const file = driveCreateFile_(pdfFileName, blob);
+    logInfo(`PDF「${pdfFileName}」保存完了 (ID: ${file.id})`);
     return file;
   } catch (e) {
     logError(`createAndSavePDF (${sheetName})`, e);
@@ -439,9 +437,9 @@ function createAndSavePDF(sheetName) {
 function postToClassroomStream(classroomName, pdfFile) {
   try {
     const courseId = getCourseIdByName(classroomName);
-    const announcement = { text: '学級通信', materials: [{ driveFile: { driveFile: { id: pdfFile.getId() } } }] };
+    const announcement = { text: '学級通信', materials: [{ driveFile: { driveFile: { id: pdfFile.id } } }] };
     Classroom.Courses.Announcements.create(announcement, courseId);
-    logInfo(`PDF(${pdfFile.getName()})をクラス「${classroomName}」に投稿`);
+    logInfo(`PDF(${pdfFile.name})をクラス「${classroomName}」に投稿`);
   } catch (e) {
     logError("postToClassroomStream", e);
     throw e;
