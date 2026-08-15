@@ -781,14 +781,14 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
     const courseName = getCourseNameSafe_();
     const formattedDate = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd_HHmm');
     const fileName = '学級通信_' + formattedDate;
-    const folder = getOrCreateNwFolder_();
 
     // Drive REST API v3 で HTML → Google Doc 変換アップロード
+    // drive.file 運用のため parents は指定しない（既定でマイドライブ直下）。
+    // フォルダを作ろうとするとフル drive スコープが必要になる。
     const boundary = 'nw_boundary_' + formattedDate;
     const metadata = JSON.stringify({
       name: fileName,
-      mimeType: 'application/vnd.google-apps.document',
-      parents: [folder.getId()]
+      mimeType: 'application/vnd.google-apps.document'
     });
     const payload =
       '--' + boundary + '\r\n' +
@@ -838,16 +838,6 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
 // ===================================================
 
 /**
- * 学級通信データ保存用フォルダを取得（なければ作成）
- */
-function getOrCreateNwFolder_() {
-  const folderName = '学級通信データ';
-  const iter = DriveApp.getFoldersByName(folderName);
-  if (iter.hasNext()) return iter.next();
-  return DriveApp.createFolder(folderName);
-}
-
-/**
  * [Web API] 学級通信のブロックデータをDrive+シートに保存します。
  * シート列構成: ID | Title | Date | FileId | TargetWeek (5列)
  * @param {string} title タイトル
@@ -865,9 +855,11 @@ function saveNewsletterData(title, mondayStr, jsonString) {
     const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
     if (!sheet) throw new Error(`「${SHEET_NAME_NEWSLETTER_DATA}」シートが見つかりません`);
 
-    const folder = getOrCreateNwFolder_();
+    // drive.file 運用: フォルダは作らない。
+    // DriveApp.getFoldersByName / createFolder はフル drive スコープを要求するため、
+    // マイドライブ直下にアプリ所有ファイルとして作る（場所はファイルIDで引くので問題ない）。
     const fileName = 'nw_' + new Date().getTime() + '.json';
-    const file = folder.createFile(fileName, jsonString, 'application/json');
+    const file = DriveApp.createFile(fileName, jsonString, 'application/json');
 
     // 5列構成: ID(タイムスタンプ), Title, Date, FileId, TargetWeek
     sheet.appendRow([
