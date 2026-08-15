@@ -149,7 +149,7 @@ Google Apps Script (GAS) と Google スプレッドシートをバックエン�
     
 *   **AI Integration**: Google Gemini API (`gemini-2.5-flash` 等)
     
-*   **External API**: Google Classroom API（拡張サービス `Classroom` v1）／Google Drive（組み込みサービス `DriveApp`・`drive.file` スコープ）／Google Picker API（`apis.google.com` を読み込む唯一の外部スクリプト）／内閣府の祝日CSV
+*   **External API**: Google Classroom API（拡張サービス `Classroom` v1）／Google Drive REST API v3（`drive.file` スコープ。組み込みの `DriveApp` は `drive.file` で動かないため使いません。詳細は [`17_DriveApi.gs`](17_DriveApi.gs)）／Google Picker API（`apis.google.com` を読み込む唯一の外部スクリプト）／内閣府の祝日CSV
 
 *   **OAuthスコープ**: `spreadsheets` / `drive.file` / `script.scriptapp` / `script.external_request` / `script.send_mail` / `userinfo.email` / `classroom.courses.readonly` / `classroom.announcements`（`appsscript.json`）
     
@@ -210,6 +210,7 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 ├── 14_UnitProgress.gs    # 単元の進捗インデックス（単元ピッカー用）とキャッシュ
 ├── 15_UnitMasterOps.gs   # 単元単位の書き込みと単元マスタの整合性チェック・修復
 ├── 16_UnitRecompose.gs   # 単元の時数再構成（AI）と年間時数の再配分
+├── 17_DriveApi.gs        # Drive REST API v3 ラッパー（drive.file で動かすため DriveApp は使わない）
 ├── 99_Utils.gs           # 日付計算等の共通ユーティリティ関数
 ├── appsscript.json       # GASマニフェスト（OAuthスコープ・Classroom拡張サービス）
 ├── App.html              # フロントエンドSPAのメインHTML
@@ -277,7 +278,7 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 3.  **ソースコードの配置** GASのエディタ（または `clasp` を使用）に、本リポジトリの `.gs` および `.html` ファイルをすべてコピーして保存します。`clasp` を使う場合は、必要なOAuthスコープ（メール送信 `script.send_mail` などを含む）を宣言した `appsscript.json` も一緒に反映してください。GASエディタで直接編集する場合は「プロジェクトの設定」で「`appsscript.json` マニフェスト ファイルをエディタで表示する」を有効にし、本リポジトリの `appsscript.json` の `oauthScopes` と `dependencies` を反映します。
     
 4.  **Google サービスの有効化** GASエディタの「サービス」から **Google Classroom API**（`Classroom` / v1）を追加します。前の手順で `appsscript.json` の `dependencies` を反映していれば、この追加はすでに済んでいます。
-    Drive・スプレッドシート・メール送信は組み込みサービス（`DriveApp` / `SpreadsheetApp` / `MailApp`）で扱うため、「サービス」への追加は不要です（`appsscript.json` の `oauthScopes` だけで動作します）。
+    スプレッドシートとメール送信は組み込みサービス（`SpreadsheetApp` / `MailApp`）、Drive は REST API v3 の直接呼び出し（`17_DriveApi.gs`）で扱うため、「サービス」への追加は不要です（`appsscript.json` の `oauthScopes` だけで動作します）。
     
 5.  **Webアプリとしてデプロイ** 「デプロイ」>「新しいデプロイ」を選択し、種類を「ウェブアプリ」にしてデプロイします。発行されたURLにアクセスしてアプリを起動します。
     

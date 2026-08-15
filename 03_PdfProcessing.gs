@@ -19,14 +19,10 @@ function importEventsFromFolder_UI() {
     }
     const fiscalYear = parseInt(yearResponse.getResponseText().trim(), 10);
 
-    const folder = DriveApp.getFolderById(folderId);
-    const files = folder.getFilesByType(MimeType.PDF);
-    const fileIds = [];
-    while (files.hasNext()) {
-      fileIds.push(files.next().getId());
-    }
+    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）
+    const fileIds = driveListPdfsInFolder_(folderId).map(function (f) { return f.id; });
     if (fileIds.length === 0) {
-      throw new Error(`指定されたフォルダ「${folder.getName()}」にPDFファイルが見つかりませんでした。`);
+      throw new Error('指定されたフォルダにPDFファイルが見つかりませんでした。');
     }
 
     const today = new Date();
@@ -110,7 +106,7 @@ function processNextEventPdf() {
   }
   
   const task = queue.shift(); 
-  const file = DriveApp.getFileById(task.fileId);
+  const file = driveOpenFile_(task.fileId);
   
   const totalTasks = parseInt(tGetProp_(SCRIPT_PROP_EVENT_PDF_TOTAL), 10);
   const processedCount = totalTasks - queue.length;
@@ -146,7 +142,7 @@ function processEventPdf(fileId, year, month) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const file = DriveApp.getFileById(fileId);
+    const file = driveOpenFile_(fileId);
     const blob = file.getBlob();
     const apiKey = getApiKey_();
     const schoolYear = parseInt(year, 10);
@@ -279,10 +275,8 @@ function createUnitMasterFromPdfs_UI() {
       ui.alert('指導計画PDFフォルダIDが未設定です。設定ダッシュボードから設定してください。');
       return;
     }
-    const folder = DriveApp.getFolderById(folderId);
-    const files = folder.getFilesByType(MimeType.PDF);
-    const fileIds = [];
-    while (files.hasNext()) { fileIds.push(files.next().getId()); }
+    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）
+    const fileIds = driveListPdfsInFolder_(folderId).map(function (f) { return f.id; });
     if (fileIds.length === 0) {
       ui.alert("指定されたフォルダにPDFファイルが見つかりませんでした。");
       return;
@@ -333,7 +327,7 @@ function createUnitMasterFromPdfs() {
 
     const totalFiles = parseInt(tGetProp_(SCRIPT_PROP_PDF_TOTAL), 10);
     const fileId = fileIds.shift();
-    const file = DriveApp.getFileById(fileId);
+    const file = driveOpenFile_(fileId);
     const processedCount = totalFiles - fileIds.length;
     SpreadsheetApp.getActiveSpreadsheet().toast(`PDF処理中... (${processedCount}/${totalFiles}) \nファイル名: ${file.getName()}`, `処理中`, -1);
 
@@ -767,7 +761,7 @@ function getPdfBlobFromRef_(fileRef) {
   }
 
   if (fileRef.fileId) {
-    const file = DriveApp.getFileById(fileRef.fileId);
+    const file = driveOpenFile_(fileRef.fileId);
     const blob = file.getBlob();
     if (blob.getBytes().length > MAX_PDF_BYTES) {
       throw new Error(`「${file.getName()}」のサイズが大きすぎます（15MBまで対応）。`);

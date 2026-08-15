@@ -2,6 +2,32 @@
 
 > 目的: `appsscript.json` の `.../auth/drive`（フルスコープ）を `.../auth/drive.file`（アプリが作成・ユーザーが選択したファイルのみ）に縮小できるか判断するための調査。**コード変更は含みません。** B2 以降の改修方針の前提資料です。
 
+---
+
+## ⚠️ 本レポートの重大な訂正（実機検証で判明）
+
+**本レポートは「アプリ自身が作成したファイルなら `DriveApp` を `drive.file` で使える」という前提で書かれていましたが、これは誤りです。**
+
+Apps Script 組み込みの `DriveApp` は、**対象がアプリ作成ファイルであっても** フル `drive` スコープ（読み取りは `drive.readonly` も可）を要求します。実機では次のエラーになります。
+
+```
+指定された権限では DriveApp.createFile を呼び出すことができません。
+必要な権限: https://www.googleapis.com/auth/drive
+
+指定された権限では DriveApp.getFileById を呼び出すことができません。
+必要な権限: https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive
+```
+
+このため、下表で **D1〜D4・E1・E2 を「✅ 改修不要」と判定したのは誤り**でした。実際にはこれらもすべて壊れており、学級通信の保存・PDF出力・Classroom 投稿が動作しませんでした。
+
+**正しい対応**: Drive 操作は `DriveApp` を使わず、**Drive REST API v3 を `UrlFetchApp` + `ScriptApp.getOAuthToken()` で直接呼ぶ**。REST API v3 は `drive.file` を正しく解釈し、アプリ作成ファイルとユーザーがピッカーで選んだファイルだけを対象にします。
+
+実装は [`17_DriveApi.gs`](../17_DriveApi.gs) にまとめてあり、`tests/drive-scope.test.mjs` が `DriveApp` の再混入を静的検査で防いでいます。
+
+> 判定基準の節（「`drive.file` の性質」）に書かれた `drive.file` 自体の性質は正しいままです。誤っていたのは「その性質を `DriveApp` 経由で使えるか」という点だけです。
+
+---
+
 ## 現状スコープ（`appsscript.json`）
 
 | スコープ | 用途 |

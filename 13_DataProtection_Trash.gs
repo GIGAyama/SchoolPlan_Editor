@@ -153,7 +153,7 @@ function trashNewsletterDataFromWeb(rowIndex, fileId) {
     const label = String(values[1] || values[0] || '学級通信');
     const trashId = p3AppendTrash_('newsletter', String(fileId || index), label, payload);
     sheet.deleteRow(index);
-    try { if (fileId) DriveApp.getFileById(String(fileId)).setTrashed(true); } catch (e) {}
+    try { if (fileId) driveSetTrashed_(String(fileId), true); } catch (e) {}
     p3RecordAudit_('TRASH', 'newsletter', String(fileId || index), '学級通信をごみ箱へ移動', payload, { trashId }, trashId);
     return { success: true, trashId, message: '学級通信をごみ箱へ移動しました。' };
   } catch (e) {
@@ -209,7 +209,7 @@ function restoreTrashItemFromWeb(trashId) {
       const values = Array.isArray(payload.values) ? payload.values.slice(0, width) : [];
       while (values.length < width) values.push('');
       sheet.getRange(targetRow, 1, 1, width).setValues([values]);
-      try { if (payload.fileId) DriveApp.getFileById(payload.fileId).setTrashed(false); } catch (e) {}
+      try { if (payload.fileId) driveSetTrashed_(payload.fileId, false); } catch (e) {}
     } else {
       throw new Error('この項目の復元方式が定義されていません: ' + type);
     }

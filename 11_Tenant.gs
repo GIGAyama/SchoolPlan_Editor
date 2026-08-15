@@ -331,13 +331,12 @@ function createMyDatabase(name) {
     let method;
     if (templateId) {
       // テンプレート複製方式（配布元が検証済みテンプレートを用意している場合）
-      let copy;
       try {
-        copy = DriveApp.getFileById(templateId).makeCopy(title);
+        // drive.file 運用のため DriveApp ではなく Drive REST API を使う（17_DriveApi.gs 参照）
+        newId = driveCopyFile_(templateId, title).id;
       } catch (copyErr) {
         throw new Error('テンプレートの複製に失敗しました。テンプレートの共有設定（複製可能か）とIDを確認してください: ' + copyErr.message);
       }
-      newId = copy.getId();
       method = 'template';
     } else {
       // プログラム構築方式（テンプレート未設定でも新規作成できる）

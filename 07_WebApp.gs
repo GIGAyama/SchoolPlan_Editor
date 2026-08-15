@@ -746,19 +746,16 @@ function generateNewsletterPdf(mondayDateStr) {
       headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() }
     }).getBlob().setName(fileName);
 
-    // drive.file 運用: getRootFolder() ではなくトップレベルの DriveApp API を使う
-    // （createFile は My Drive 直下にアプリ所有ファイルを作成、検索はアプリ作成物のみが対象）。
-    const existing = DriveApp.getFilesByName(fileName);
-    while (existing.hasNext()) existing.next().setTrashed(true);
-
-    const pdfFile = DriveApp.createFile(blob);
-    pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
+    driveTrashByName_(fileName);
+    const pdfFile = driveCreateFile_(fileName, blob);
+    driveShareAnyoneWithLink_(pdfFile.id);
 
     logInfo(`学級通信PDF生成: ${fileName}`);
     return {
       success: true,
-      downloadUrl: pdfFile.getDownloadUrl(),
-      viewUrl: `https://drive.google.com/file/d/${pdfFile.getId()}/view`,
+      downloadUrl: `https://drive.google.com/uc?export=download&id=${pdfFile.id}`,
+      viewUrl: `https://drive.google.com/file/d/${pdfFile.id}/view`,
       fileName
     };
   } catch (e) {
@@ -782,50 +779,21 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
     const formattedDate = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd_HHmm');
     const fileName = '学級通信_' + formattedDate;
 
-    // Drive REST API v3 で HTML → Google Doc 変換アップロード
-    // drive.file 運用のため parents は指定しない（既定でマイドライブ直下）。
-    // フォルダを作ろうとするとフル drive スコープが必要になる。
-    const boundary = 'nw_boundary_' + formattedDate;
-    const metadata = JSON.stringify({
-      name: fileName,
-      mimeType: 'application/vnd.google-apps.document'
-    });
-    const payload =
-      '--' + boundary + '\r\n' +
-      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-      metadata + '\r\n' +
-      '--' + boundary + '\r\n' +
-      'Content-Type: text/html; charset=UTF-8\r\n\r\n' +
-      htmlContent + '\r\n' +
-      '--' + boundary + '--';
+    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
+    // parents も指定しない（既定でマイドライブ直下。フォルダ作成はフル drive が必要）。
+    const classroomFile = driveCreateConverted_(
+      fileName, htmlContent, 'text/html', 'application/vnd.google-apps.document');
 
-    const resp = UrlFetchApp.fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-      {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() },
-        contentType: 'multipart/related; boundary=' + boundary,
-        payload: Utilities.newBlob(payload).getBytes(),
-        muteHttpExceptions: true
-      }
-    );
-    if (resp.getResponseCode() !== 200) {
-      const errBody = JSON.parse(resp.getContentText());
-      throw new Error('Drive API: ' + (errBody.error ? errBody.error.message : resp.getContentText()));
-    }
-    const fileId = JSON.parse(resp.getContentText()).id;
-    const classroomFile = DriveApp.getFileById(fileId);
-
-    classroomFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    driveShareAnyoneWithLink_(classroomFile.id);
 
     const courseId = getCourseIdByName(courseName);
     const announcement = {
       text: customMessage || '学級通信をお届けします。',
-      materials: [{ driveFile: { driveFile: { id: classroomFile.getId() } } }]
+      materials: [{ driveFile: { driveFile: { id: classroomFile.id } } }]
     };
     Classroom.Courses.Announcements.create(announcement, courseId);
 
-    logInfo(`学級通信をClassroom「${courseName}」に投稿完了: ${classroomFile.getName()}`);
+    logInfo(`学級通信をClassroom「${courseName}」に投稿完了: ${classroomFile.name}`);
     return { success: true, message: `「${courseName}」に学級通信を投稿しました！` };
   } catch (e) {
     logError('postNewsletterToClassroomFromWeb', e);
@@ -855,18 +823,18 @@ function saveNewsletterData(title, mondayStr, jsonString) {
     const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
     if (!sheet) throw new Error(`「${SHEET_NAME_NEWSLETTER_DATA}」シートが見つかりません`);
 
-    // drive.file 運用: フォルダは作らない。
-    // DriveApp.getFoldersByName / createFolder はフル drive スコープを要求するため、
-    // マイドライブ直下にアプリ所有ファイルとして作る（場所はファイルIDで引くので問題ない）。
+    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
+    // フォルダも作らず、マイドライブ直下にアプリ所有ファイルとして作る
+    // （場所はシートに記録したファイルIDで引くので問題ない）。
     const fileName = 'nw_' + new Date().getTime() + '.json';
-    const file = DriveApp.createFile(fileName, jsonString, 'application/json');
+    const file = driveCreateFile_(fileName, jsonString, 'application/json');
 
     // 5列構成: ID(タイムスタンプ), Title, Date, FileId, TargetWeek
     sheet.appendRow([
       new Date().getTime(),
       title || '無題',
       new Date(),
-      file.getId(),
+      file.id,
       mondayStr || ''
     ]);
 
@@ -940,8 +908,7 @@ function loadNewsletterData(fileId) {
     if (!fileId || String(fileId).length < 5) {
       return { success: false, error: 'ファイルIDが無効です' };
     }
-    const file = DriveApp.getFileById(String(fileId));
-    const json = file.getBlob().getDataAsString();
+    const json = driveGetBlob_(String(fileId)).getDataAsString();
     const parsed = JSON.parse(json);
     // GASの google.script.run 転送サイズ上限対策:
     // 画像データ(base64)が含まれると巨大になるため、サイズチェック
@@ -968,7 +935,7 @@ function deleteNewsletterData(rowIndex, fileId) {
     const ss = getSs_();
     const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
     if (sheet && rowIndex >= 2) sheet.deleteRow(rowIndex);
-    try { DriveApp.getFileById(fileId).setTrashed(true); } catch(ignore) {}
+    try { driveSetTrashed_(fileId, true); } catch(ignore) {}
     return { success: true };
   } catch (e) {
     logError('deleteNewsletterData', e);
