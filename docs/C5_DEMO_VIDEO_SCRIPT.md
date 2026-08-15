@@ -34,10 +34,9 @@
 | 5 | `classroom.courses.readonly` | sensitive | シーン8前半（クラス一覧の読み込み） |
 | 6 | `classroom.announcements` | sensitive | シーン8後半（Classroom へ投稿 → Classroom 側のストリームで確認） |
 | 7 | `script.external_request` | 非 sensitive | シーン5（Gemini による学級通信生成／祝日データ取得） |
-| 8 | `script.container.ui` | 非 sensitive | シーン2（スプレッドシートのカスタムメニュー「週案ツール」） |
-| 9 | `script.scriptapp` | 非 sensitive | シーン7（リマインダー時刻の設定＝時限トリガー作成） |
+| 8 | `script.scriptapp` | 非 sensitive | シーン7（リマインダー時刻の設定＝時限トリガー作成） |
 
-> ⚠️ **8・9 は sensitive ではありませんが、同意画面には表示されます。**
+> ⚠️ **7・8 は sensitive ではありませんが、同意画面には表示されます。**
 > 同意画面を映すシーン3で自然に映るので、個別シーンを削っても構いません。
 > 逆に **1〜6 のシーンは 1 つでも欠けると差し戻しの原因**になります。
 
@@ -50,6 +49,7 @@
 - [ ] **YouTube に「限定公開（Unlisted）」でアップロードする**。「非公開（Private）」だと審査担当が見られず、その時点で差し戻しになります。
 - [ ] **言語は英語**。日本語で操作する画面を撮るのは問題ありませんが、**ナレーションか字幕のどちらかは英語**にします（本台本は英語字幕テキストを用意しています）。
 - [ ] **同意画面（OAuth consent screen）の言語設定を English にする**。同意画面の左下に言語切替があります。
+- [ ] **録画は「ウィンドウ」ではなく「ディスプレイ全体」を対象にすること**。同意画面は**別ウィンドウのポップアップ**で開くため、ウィンドウ単位の録画ではこの最重要シーンがまるごと欠落します（実際にこれで1本撮り直しになっています）。
 - [ ] **同意画面を表示しているとき、ブラウザのアドレスバーが映っていること**。URL に含まれる `client_id=...` が読み取れる必要があります。ウィンドウは最大化し、URL が省略表示されないようにしてください。
 - [ ] **アドレスバーの `client_id` が、審査申請に使う OAuth クライアント ID と一致していること**。テスト用に別クライアントで撮ると差し戻されます。
 - [ ] **同意画面に表示されるスコープが、申請するスコープと完全に一致していること**。
@@ -130,19 +130,23 @@
 
 ---
 
-### シーン2：スプレッドシートとカスタムメニュー（0:40〜1:10）
+### シーン2：教員本人のスプレッドシート（0:40〜1:10）
 
-**映すもの**：教員本人の Google スプレッドシート（週案データベース）と、カスタムメニュー「週案ツール」。
+**映すもの**：教員本人の Google スプレッドシート（週案データベース）。
 
 **操作**：
 1. スプレッドシートを開く（ダミーデータのもの）
-2. メニューバーの「週案ツール」をクリックしてメニューを開く
-3. メニューから Web アプリを開く導線をクリック（または Web アプリの URL を直接開く）
+2. 週案データが入っていることが分かる状態で数秒静止する
+3. Web アプリの URL（`https://script.google.com/macros/s/…/exec`）を開く
 
 **English caption**：
 > Each teacher owns a single Google Spreadsheet that stores their own lesson plan data.
-> The add-on menu is provided by the `script.container.ui` scope.
+> The application is a standalone web app. It reads and writes only this one spreadsheet, which the teacher selects.
 > Opening the web application starts the OAuth flow.
+
+> 📌 **カスタムメニュー「週案ツール」は映しません。** 配布形態はスタンドアロン（[D1](D1_STANDALONE_DEPLOY.md)）で、
+> `onOpen()` はコンテナバインド型でしか動かないためメニューは存在しません。
+> これに伴い `script.container.ui` スコープは要求していません（`appsscript.json`）。
 
 ---
 
@@ -166,7 +170,7 @@
 > ⚠️ **チェック**：
 > - アドレスバーの `client_id=` が読めるか（撮影後に一時停止して必ず確認）
 > - 同意画面が English になっているか
-> - 表示スコープ数が `appsscript.json` の `oauthScopes`（9個）と対応しているか
+> - 表示スコープ数が `appsscript.json` の `oauthScopes`（8個）と対応しているか
 
 ---
 

@@ -57,9 +57,9 @@ export const SCENES = [
 
   // ---------------------------------------------------------------- シーン2
   {
-    id: 'container-ui',
-    title: 'スプレッドシートとカスタムメニュー',
-    scopes: ['script.container.ui'],
+    id: 'database',
+    title: '教員本人のスプレッドシート',
+    scopes: [],
     steps: [
       { kind: 'goto', url: '{{SHEET_URL}}' },
       {
@@ -68,15 +68,11 @@ export const SCENES = [
         text: 'Each teacher owns a single Google Spreadsheet that stores their own lesson plan data.',
       },
       {
-        kind: 'manual',
-        prompt: 'スプレッドシートのメニュー「週案ツール」を開いて、項目が見える状態で3秒静止してください。',
-        ms: 12000,
-      },
-      {
         kind: 'caption',
-        ms: 6000,
-        text: 'The add-on menu is provided by the script.container.ui scope.',
+        ms: 8000,
+        text: 'The application is a standalone web app. It reads and writes only this one spreadsheet, which the teacher selects.',
       },
+      { kind: 'wait', ms: 3000 },
     ],
   },
 
@@ -97,9 +93,15 @@ export const SCENES = [
         kind: 'manual',
         prompt: [
           'ここから先は自動化しません（Google が自動操作のログインを拒否するため）。',
+          '',
+          '⚠️ 「REVIEW PERMISSIONS」を押すと同意画面は【別ウィンドウのポップアップ】で開きます。',
+          '   ウィンドウ単位の画面録画だと、この最重要シーンがまるごと欠落します。',
+          '   録画が【ディスプレイ全体】になっていることを、ここで必ず確認してください。',
+          '',
           '次の順に、カットせず一続きで操作してください:',
-          '  1. デモ用アカウントでログイン',
-          '  2. 同意画面が出たら、アドレスバーの client_id= が読める状態で3秒以上静止',
+          '  1. REVIEW PERMISSIONS → デモ用アカウントを選択',
+          '  2. 同意画面が出たら、ポップアップのアドレスバーの client_id= が',
+          '     読める状態で3秒以上静止（ポップアップを最大化するとなお良い）',
           '  3. スコープ一覧をゆっくりスクロールし、全項目を読めるようにする',
           '  4. 「続行 / Continue」を押し、週案画面が表示されるまで待つ',
           '完了したらこのターミナルで Enter を押してください。',
@@ -367,7 +369,6 @@ export const SCENES = [
 export const SCOPE_COVERAGE = {
   'https://www.googleapis.com/auth/spreadsheets': 'spreadsheets',
   'https://www.googleapis.com/auth/drive.file': 'drive.file',
-  'https://www.googleapis.com/auth/script.container.ui': 'script.container.ui',
   'https://www.googleapis.com/auth/script.scriptapp': 'script.scriptapp',
   'https://www.googleapis.com/auth/script.external_request': 'script.external_request',
   'https://www.googleapis.com/auth/script.send_mail': 'script.send_mail',

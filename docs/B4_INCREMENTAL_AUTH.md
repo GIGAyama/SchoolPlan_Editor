@@ -21,7 +21,7 @@
 
 | 区分 | スコープ | 必要性 |
 |------|----------|--------|
-| コア（軽い） | `spreadsheets`, `drive.file`, `userinfo.email`, `script.scriptapp`, `script.external_request`, `script.container.ui` | 週案・単元・タスク・PDF取込（Picker）に必須 |
+| コア（軽い） | `spreadsheets`, `drive.file`, `userinfo.email`, `script.scriptapp`, `script.external_request` | 週案・単元・タスク・PDF取込（Picker）に必須 |
 | 重い（機能別） | `classroom.courses.readonly`, `classroom.announcements` | Classroom 連携を使う人のみ |
 | 重い（機能別） | `script.send_mail` | タスクのメールリマインダーを使う人のみ |
 
