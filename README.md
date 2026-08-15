@@ -1,6 +1,6 @@
-# School Plan Note
+# 週案エディタ（School Plan Note）
 
-**School Plan Note** は、小学校（および小中学校）の教員向けに開発された、週案（週間指導計画）および校務支援のWebアプリケーションです。
+**週案エディタ（School Plan Note）** は、小学校（および小中学校）の教員向けに開発された、週案（週間指導計画）および校務支援のWebアプリケーションです。
 
 Google Apps Script (GAS) と Google スプレッドシートをバックエンドとして利用し、最新の生成AI（Gemini API）を組み込むことで、教員の日常的な事務作業の負担を大幅に軽減することを目的としています。
 
