@@ -7,11 +7,16 @@ OAuth 審査用デモ動画（[C5 撮影台本](../C5_DEMO_VIDEO_SCRIPT.md)）�
 
 | ファイル | 中身 |
 |---|---|
-| `demo_en.srt` | 英語字幕。C5 台本の想定尺（約7分）に合わせた**暫定タイミング**。実際の録画に合わせて打ち直す前提です |
+| `demo_en.srt` | 英語字幕。**2026-08-15 撮影の本番動画（6分42秒）に合わせた実タイミング**。そのまま YouTube にアップロードできます |
+| `demo_en_cues.json` | 上の元データ（開始・終了と英文）。撮り直したら時刻を直して再生成します |
 
-> 🤖 **打ち直しを省く方法**：[`tools/demo-video/`](../../tools/demo-video/README.md) の撮影スクリプトで撮ると、
-> 実測タイミングの `demo_en.srt` が `dist/demo-video/` に自動生成されます。
-> その場合、この暫定版ではなく生成された方を使ってください。
+```bash
+# 時刻を直したら再生成
+node tools/demo-video/build-srt.mjs
+```
+
+> 🤖 [`tools/demo-video/`](../../tools/demo-video/README.md) の撮影スクリプトで撮った場合は、
+> 実測タイミングの `.srt` が `dist/demo-video/` に直接出るので、この手順は不要です。
 
 ## 役割分担
 
