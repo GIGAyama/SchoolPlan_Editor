@@ -5,6 +5,9 @@
  * こちらは「実際に何秒で何を映したか」から起こすので打ち直しが要りません。
  */
 
+/** 1ブロックあたりの最低表示時間。これを下回ると読み切れない */
+const MIN_BLOCK_MS = 1400;
+
 /** ミリ秒を SRT のタイムコード（00:00:00,000）にする */
 export function toTimecode(ms) {
   const total = Math.max(0, Math.round(ms));
@@ -55,11 +58,14 @@ export function buildSrt(cues) {
   for (const cue of cues) {
     const blocks = toBlocks(cue.text);
     const span = Math.max(1, cue.endMs - cue.startMs);
-    // 短い末尾ブロックに長い時間を割り当てないよう、文字数で按分する
+    // 文字数で按分するが、「newsletters.」のような短い末尾ブロックが
+    // 一瞬で消えないよう、まず最低表示時間を確保してから残りを配分する
+    const floor = Math.min(MIN_BLOCK_MS, span / blocks.length);
+    const spare = span - floor * blocks.length;
     const total = blocks.reduce((sum, block) => sum + block.length, 0) || 1;
     let cursor = cue.startMs;
     for (const block of blocks) {
-      const end = cursor + (span * block.length) / total;
+      const end = cursor + floor + (spare * block.length) / total;
       entries.push({ startMs: cursor, endMs: end, text: block });
       cursor = end;
     }
