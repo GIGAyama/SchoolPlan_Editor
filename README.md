@@ -341,7 +341,9 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 ### セットアップ手順
 
 1. **GitHub Pages を有効化する**
-    本リポジトリ（またはフォーク）の「Settings」>「Pages」を開き、Source を「Deploy from a branch」、Branch を `main` / フォルダを `/docs` に設定して保存します。数分後に `https://<ユーザー名>.github.io/SchoolPlan_Editor/` が公開されます（`docs/manifest.webmanifest` の `start_url` / `scope` はこのパス `/SchoolPlan_Editor/` に合わせてあります。リポジトリ名を変えた場合はマニフェストも合わせて直してください）。
+    本リポジトリ（またはフォーク）の「Settings」>「Pages」を開き、Source を「Deploy from a branch」、Branch を `main` / フォルダを `/docs` に設定して保存します。数分後に `https://<ユーザー名>.github.io/SchoolPlan_Editor/` が公開されます。
+
+    本家は独自ドメイン **<https://schoolplan-editor.giga-school.com/>** で配信しています（`docs/CNAME` がその設定です）。`docs/manifest.webmanifest` の `start_url` / `scope` / `id` は相対パス `./` にしてあるので、サブディレクトリ配信（`…github.io/SchoolPlan_Editor/`）とサブドメイン直下配信（`schoolplan-editor.giga-school.com/`）のどちらでもそのまま動きます。**絶対パスに書き換えないでください** — 配信場所が変わった瞬間に `scope` がページの URL を含まなくなり、PWA としてインストールできなくなります。フォークして使う場合は `docs/CNAME` を削除するか、自分のドメインに書き換えてください。
 
 2. **GASアプリのURLを設定する**（どちらか一方でOK）
     *   **画面から設定**: 公開されたページを開くと初回にURL入力画面が表示されるので、GASの「デプロイ」で発行されたWebアプリURL（`https://script.google.com/macros/s/～/exec`）を貼り付けます。URLはそのブラウザのローカルストレージに保存されます。
@@ -361,15 +363,17 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 ### シェルを更新するときの手順
 
 1. `docs/` の中身を変更する。
-2. **`docs/sw.js` の `CACHE_NAME` の版を必ず上げる**（`schoolplan-editor-shell-v3` → `v4`）。
+2. **`docs/sw.js` の `CACHE_NAME` の版を必ず上げる**（`schoolplan-editor-shell-v4` → `v5`）。
     上げ忘れると、直した内容が先生の端末に届かない。
 3. 更新は**先生が「最新にする」を押すまで切り替わらない**設計にしてある。
     入力中に画面が入れ替わると、打ちかけの週案が消えるため。
 
 > キャッシュの接頭辞 `schoolplan-editor-shell-` は**このリポジトリ専用**である。
-> `gigayama.github.io` は複数アプリで同一オリジンを共有しており、
+> 独自ドメイン移行前は `gigayama.github.io` に複数アプリが同居していたため、
 > 接頭辞を他リポジトリ（`school-plan-note-shell-`）と共有すると、
-> 片方が有効になるたびにもう片方のキャッシュを消してしまう。
+> 片方が有効になるたびにもう片方のキャッシュを消してしまっていた。
+> 現在はアプリごとに専用サブドメイン（`schoolplan-editor.giga-school.com`）を持つが、
+> 移行前の端末に残った旧オリジンの Service Worker のために接頭辞は残してある。
 
 ## 💡 使い方 (Usage)
 

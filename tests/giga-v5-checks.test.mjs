@@ -189,13 +189,15 @@ test('offline.html が無ければ拾う', () => {
   assert.ok(codes(check(tree)).includes('GIGA_OFFLINE_HTML_MISSING'));
 });
 
-test('manifest の id/scope/start_url が相対のままなら拾う', () => {
+test('相対パス（./）はどちらの配信でも正しく解決されるので拾わない', () => {
+  // './' は manifest の置き場所を基準に解決される。
+  // 共有オリジンなら /Demo_App/、独自ドメインならサブドメイン直下。
+  // どちらでも自分のアプリを指すので、取り違えは起きない。
   const tree = {
     ...OK_TREE,
     'docs/manifest.webmanifest': JSON.stringify({ id: './', scope: './', start_url: './' })
   };
-  const found = check(tree).filter(i => i.code === 'GIGA_MANIFEST_PATH');
-  assert.equal(found.length, 3);
+  assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_MANIFEST_PATH'), []);
 });
 
 test('別リポジトリ名のパスをコピーしたままなら拾う', () => {
@@ -204,6 +206,67 @@ test('別リポジトリ名のパスをコピーしたままなら拾う', () =>
     'docs/manifest.webmanifest': JSON.stringify({ id: '/Other_App/', scope: '/Other_App/', start_url: '/Other_App/' })
   };
   assert.equal(check(tree).filter(i => i.code === 'GIGA_MANIFEST_PATH').length, 3);
+});
+
+test('CNAME があるのにリポジトリ名の絶対パスのままなら拾う', () => {
+  // 独自ドメインではアプリはサブドメイン直下に置かれる。
+  // /Demo_App/ のままだと scope がページの URL を含まず、インストールできなくなる。
+  const tree = {
+    ...OK_TREE,
+    'docs/CNAME': 'demo-app.giga-school.com\n',
+    'docs/manifest.webmanifest': JSON.stringify({ id: '/Demo_App/', scope: '/Demo_App/', start_url: '/Demo_App/' })
+  };
+  assert.equal(check(tree).filter(i => i.code === 'GIGA_MANIFEST_PATH').length, 3);
+});
+
+test('CNAME があればサブドメイン直下（/）を拾わない', () => {
+  const tree = {
+    ...OK_TREE,
+    'docs/CNAME': 'demo-app.giga-school.com\n',
+    'docs/manifest.webmanifest': JSON.stringify({ id: '/', scope: '/', start_url: '/?source=pwa' })
+  };
+  assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_MANIFEST_PATH'), []);
+});
+
+test('CNAME の BOM を拾う', () => {
+  // 目に見えないので、テストで押さえておかないと二度と気づけない。
+  const tree = {
+    ...OK_TREE,
+    'docs/CNAME': '﻿demo-app.giga-school.com\n',
+    'docs/manifest.webmanifest': JSON.stringify({ id: './', scope: './', start_url: './' })
+  };
+  const found = check(tree).filter(i => i.code === 'GIGA_CNAME_BOM');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'error');
+});
+
+test('正しい CNAME は拾わない', () => {
+  const tree = {
+    ...OK_TREE,
+    'docs/CNAME': 'demo-app.giga-school.com\n',
+    'docs/manifest.webmanifest': JSON.stringify({ id: './', scope: './', start_url: './' })
+  };
+  assert.deepEqual(check(tree).filter(i => i.code.startsWith('GIGA_CNAME')), []);
+});
+
+test('CNAME の書式まちがいを拾う', () => {
+  for (const bad of ['https://demo-app.giga-school.com\n', 'demo-app.giga-school.com/\n', 'Demo-App.giga-school.com\n', 'localhost\n']) {
+    const tree = {
+      ...OK_TREE,
+      'docs/CNAME': bad,
+      'docs/manifest.webmanifest': JSON.stringify({ id: './', scope: './', start_url: './' })
+    };
+    assert.equal(check(tree).filter(i => i.code === 'GIGA_CNAME_FORMAT').length, 1, `見逃した: ${JSON.stringify(bad)}`);
+  }
+});
+
+test('CNAME に 2 行以上あれば拾う', () => {
+  const tree = {
+    ...OK_TREE,
+    'docs/CNAME': 'demo-app.giga-school.com\nwww.demo-app.giga-school.com\n',
+    'docs/manifest.webmanifest': JSON.stringify({ id: './', scope: './', start_url: './' })
+  };
+  assert.equal(check(tree).filter(i => i.code === 'GIGA_CNAME_FORMAT').length, 1);
 });
 
 test('beforeinstallprompt をインラインで受けていたら拾う', () => {

@@ -18,9 +18,14 @@ Google の審査では「このアプリはデータをどう扱うの？」を�
 
 | ページ | ファイル | 公開されるURL（例） |
 |--------|----------|------|
-| アプリ紹介（ホームページ用） | [`about.html`](about.html) | `https://（あなたのID）.github.io/SchoolPlan_Editor/about.html` |
-| プライバシーポリシー | [`privacy-policy.html`](privacy-policy.html) | `https://（あなたのID）.github.io/SchoolPlan_Editor/privacy-policy.html` |
-| 利用規約 | [`terms.html`](terms.html) | `https://（あなたのID）.github.io/SchoolPlan_Editor/terms.html` |
+| アプリ紹介（ホームページ用） | [`about.html`](about.html) | `https://schoolplan-editor.giga-school.com/about.html` |
+| プライバシーポリシー | [`privacy-policy.html`](privacy-policy.html) | `https://schoolplan-editor.giga-school.com/privacy-policy.html` |
+| 利用規約 | [`terms.html`](terms.html) | `https://schoolplan-editor.giga-school.com/terms.html` |
+
+> `privacy.html` でも同じ内容にたどり着けます（`privacy-policy.html` へ転送するだけのページ）。
+> ポータル [giga-school.com](https://giga-school.com) が全アプリを `/privacy.html` で
+> そろえてリンクしているため、その入口も用意してある。
+> **同意画面に登録するのは正典である `privacy-policy.html` のほう。**
 
 `docs/` フォルダに入っているので、GitHub Pages を公開すればそのまま表示されます。
 
@@ -62,19 +67,26 @@ GitHub Pages を公開したあと、上の「公開されるURL」をブラウ�
 
 C2 の同意画面の設定に戻り、次を登録します。
 
-- **アプリのホームページ**：`https://（あなたのID）.github.io/SchoolPlan_Editor/about.html`
+- **アプリのホームページ**：`https://schoolplan-editor.giga-school.com/about.html`
 - **プライバシーポリシー URL**：`.../privacy-policy.html`
 - **利用規約 URL**：`.../terms.html`
-- **承認済みドメイン**に `（あなたのID）.github.io` を追加（例：`gigayama.github.io`）
+- **承認済みドメイン**に `giga-school.com` を追加
 
-> ⚠️ ここは `github.io` ではなく **`（あなたのID）.github.io`** です。
-> `github.io` だけだと「最上位のプライベート ドメインを指定する必要があります」で弾かれます。
-> URL もドメイン欄も、すべて小文字で入力してください。
+> ⚠️ ここは `schoolplan-editor.giga-school.com` ではなく **`giga-school.com`** です。
+> 承認済みドメインには「最上位のプライベート ドメイン」を入れます。独自ドメインなので
+> `giga-school.com` がそれにあたり、サブドメイン（`schoolplan-editor.` 付き）は自動的に
+> 対象に含まれます。URL もドメイン欄も、すべて小文字で入力してください。
+>
+> 💡 以前は GitHub Pages の既定ドメイン（`gigayama.github.io`）を登録していました。
+> `github.io` は公開サフィックスのため利用者ごとの `（ID）.github.io` を入れる必要が
+> ありましたが、独自ドメインに移したことでその制約はなくなりました。
+> **旧ドメインで審査を出している場合は、承認済みドメインと3つの URL を
+> 上記の値に差し替えてください。**
 >
 > ⚠️ ホームページ欄には、次のどちらも入れてはいけません。
 > - **GitHub リポジトリの URL（`https://github.com/...`）**
 >   … 所有権を確認できず「ウェブサイトが登録されていません」で差し戻されます。
-> - **アプリ本体（`.../SchoolPlan_Editor/`）**
+> - **アプリ本体（`https://schoolplan-editor.giga-school.com/`）**
 >   … 開くと GAS のログイン画面になり「ホームページにログインページが表示されます」で
 >   差し戻されます。ログイン不要で読める `about.html` を指定してください。
 

@@ -6,7 +6,7 @@
 
 ## どうやって測ったか
 
-本番（`script.google.com` / `gigayama.github.io`）へはこの作業環境から到達できない。
+本番（`script.google.com` / `schoolplan-editor.giga-school.com`）へはこの作業環境から到達できない。
 そこで §7-3 の方法で、GAS が返す画面を手元で組み立てて実ブラウザ（Chromium）で測った。
 
 1. `App.html` の `<?!= include('…'); ?>` を実体に置き換えて1枚のHTMLにする
@@ -196,7 +196,7 @@ Material Symbols のフォントは **488.7 KB → 14.9 KB**（可変軸を固�
 | **fluid type（D4）** | 教員向け画面で「主役の文字」が無く、全面 clamp() 化は見た目の変更が大きい |
 | **キーボード操作・モーダルの a11y（F2/F3）** | 走査ではなく人が触って確かめる必要がある。今回は未実施 |
 | **`pagehide` での確定保存（C3）** | Chromebook のタブ破棄時にどうなるかを測っていない |
-| **本番での動作確認** | `script.google.com` / `gigayama.github.io` へ到達できない。**GAS 本体（`.gs` / `.html`）の変更は、テストデプロイで確かめてからマージすること** |
+| **本番での動作確認** | `script.google.com` / `schoolplan-editor.giga-school.com` へ到達できない。**GAS 本体（`.gs` / `.html`）の変更は、テストデプロイで確かめてからマージすること** |
 | **印刷の実出力** | 印刷プレビューの目視確認をしていない（CSS の有無のみ確認） |
 
 ---
