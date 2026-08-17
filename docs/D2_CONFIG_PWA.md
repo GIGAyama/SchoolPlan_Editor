@@ -39,6 +39,8 @@
 2. 公開元（Source）を、`docs/` フォルダを配信する設定にします
    （例：Branch = `main`、Folder = `/docs`）。
 3. 数分待つと、`https://（あなたのID）.github.io/SchoolPlan_Editor/` で公開されます。
+   本家は独自ドメインを設定してあるので `https://schoolplan-editor.giga-school.com/` になります
+   （`docs/CNAME` がその設定。フォークして使う場合はこのファイルを消すか自分のドメインに直します）。
 
 ---
 

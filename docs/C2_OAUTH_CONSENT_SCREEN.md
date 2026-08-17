@@ -38,26 +38,31 @@
    - **ユーザー サポートメール**：困ったときの連絡先メール
    - **アプリのロゴ**：入れなくてもOK（あると親切）
    - **アプリのホームページ**：GitHub Pages の**紹介ページ**の URL
-     例）`https://（あなたのID）.github.io/SchoolPlan_Editor/about.html`
+     例）`https://schoolplan-editor.giga-school.com/about.html`
    - **プライバシーポリシー URL**：`.../privacy-policy.html`（← C3 で用意します）
    - **利用規約 URL**：`.../terms.html`（← C3 で用意します）
-   - **承認済みドメイン**：`（あなたのID）.github.io` と `google.com` を追加
-     （例：`gigayama.github.io`。すべて小文字で入力します）
+   - **承認済みドメイン**：`giga-school.com` と `google.com` を追加
+     （すべて小文字で入力します）
 4. **「保存して次へ」**。
 
 ### つまずきやすい2点
 
-> ⚠️ **ホームページ欄にアプリ本体（`.../SchoolPlan_Editor/`）を入れてはいけません。**
+> ⚠️ **ホームページ欄にアプリ本体（`https://schoolplan-editor.giga-school.com/`）を入れてはいけません。**
 > ルートを開くと GAS アプリが読み込まれ、Google の確認ロボットには
 > **ログイン画面しか見えません**。「ホームページにログインページが表示されます」
 > として差し戻されます。ログイン不要で内容が読める `about.html` を指定してください。
 > GitHub リポジトリの URL（`https://github.com/...`）も、所有権を確認できないため不可です。
 
-> ⚠️ **承認済みドメインに `github.io` だけを入れると弾かれます。**
-> 「無効なドメイン: 最上位のプライベート ドメインを指定する必要があります」というエラーになります。
-> `github.io` は Public Suffix List に載っている公開サフィックス（実質的な TLD 扱い）なので、
-> Google から見た「最上位のプライベートドメイン」は **`（あなたのID）.github.io`** の方です。
-> 独自ドメイン（例：`example.com`）を使う場合は、そのドメインを入れます。
+> ⚠️ **承認済みドメインには「最上位のプライベート ドメイン」を入れます。**
+> 独自ドメインを使う本家の場合は **`giga-school.com`** です。
+> サブドメイン（`schoolplan-editor.giga-school.com`）は自動的に対象に含まれるので、
+> アプリごとに追加する必要はありません。
+>
+> GitHub Pages の既定ドメインのまま使う場合は `（あなたのID）.github.io` を入れてください。
+> `github.io` だけだと「無効なドメイン: 最上位のプライベート ドメインを指定する必要があります」
+> というエラーになります。`github.io` は Public Suffix List に載っている公開サフィックス
+> （実質的な TLD 扱い）なので、Google から見た最上位のプライベートドメインは
+> `（あなたのID）.github.io` の方だからです。
 
 ---
 

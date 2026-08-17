@@ -212,16 +212,69 @@ export function runGigaV5Checks(rootDir, files, options = {}) {
   if (manifestFile) {
     try {
       const manifest = JSON.parse(read(manifestFile));
+      // 正しい値は「どこで配信するか」で変わる。
+      //
+      // 独自ドメイン（CNAME あり）だと、アプリはサブドメインの直下に置かれる。
+      //   https://schoolplan-editor.giga-school.com/
+      // ここで scope を /SchoolPlan_Editor/ のままにすると、scope がページの URL を
+      // 含まなくなり、manifest ごと無視されて **PWA としてインストールできなくなる**。
+      //
+      // CNAME が無ければ従来どおり共有オリジンのサブディレクトリ配信なので、
+      //   https://（ID）.github.io/SchoolPlan_Editor/
+      // リポジトリ名の絶対パスでないと、同居する別アプリと取り違えられる。
+      //
+      // 相対パス（'./'）はどちらの配信でも正しく解決されるため、常に許容する。
+      const manifestDir = path.posix.dirname(manifestFile);
+      const hasCname = fileSet.has(path.posix.join(manifestDir, 'CNAME'));
+      const expected = hasCname ? "相対パス（'./'）かサブドメイン直下（'/'）" : `リポジトリ名の絶対パス（/${repoName}/）`;
       for (const key of ['id', 'scope', 'start_url']) {
         const value = manifest[key];
-        if (typeof value !== 'string' || !value.startsWith('/') || !value.includes(repoName)) {
+        const ok = typeof value === 'string' && (
+          value.startsWith('./')
+          || (hasCname ? /^\/(\?|#|$)/.test(value) : value.startsWith('/') && value.includes(repoName))
+        );
+        if (!ok) {
           issues.push(issue('error', 'GIGA_MANIFEST_PATH',
-            `manifest の ${key} はリポジトリ名の絶対パス（/${repoName}/）にしてください。` +
-            '同一オリジンに複数アプリが同居しているため、別アプリと取り違えられます（§3-1）。', manifestFile));
+            `manifest の ${key} は ${expected} にしてください。` +
+            (hasCname
+              ? 'CNAME があるためアプリはサブドメイン直下で配信されます。'
+              + 'リポジトリ名の絶対パスだと scope がページの URL を含まず、インストールできません（§3-1）。'
+              : '同一オリジンに複数アプリが同居しているため、別アプリと取り違えられます（§3-1）。'),
+            manifestFile));
         }
       }
     } catch (error) {
       issues.push(issue('error', 'GIGA_MANIFEST_JSON', String(error), manifestFile));
+    }
+  }
+
+  // 独自ドメインの CNAME（§3-1）
+  //
+  // ⚠️ BOM を必ず見ること。Windows のメモ帳や PowerShell の `>` リダイレクトで書くと
+  //    先頭に U+FEFF が入る。目では見えないのに GitHub Pages はドメイン名の一部として
+  //    読むため、ホスト名として不正になり **カスタムドメインが有効にならない**。
+  //    DNS も Pages の設定も正しいのに「なぜか繋がらない」という、いちばん探しにくい壊れ方をする。
+  //    実際にこれで全リポジトリのカスタムドメインが止まった。
+  for (const cnameFile of files.filter(f => /(^|\/)CNAME$/.test(f))) {
+    const raw = read(cnameFile);
+    if (raw.charCodeAt(0) === 0xFEFF) {
+      issues.push(issue('error', 'GIGA_CNAME_BOM',
+        'CNAME の先頭に BOM が入っています。目に見えませんが、GitHub Pages はこれをドメイン名の一部として読むため、'
+        + 'カスタムドメインが有効になりません。BOM なし UTF-8 で保存し直してください（§3-1）。', cnameFile));
+      continue;
+    }
+    // CNAME に書けるのは 1 行・1 ホスト名だけ。空行やコメントも置けない。
+    const lines = raw.split('\n').filter(line => line.trim() !== '');
+    if (lines.length !== 1) {
+      issues.push(issue('error', 'GIGA_CNAME_FORMAT',
+        `CNAME に書けるのはドメイン名 1 行だけです（${lines.length} 行あります・§3-1）。`, cnameFile));
+      continue;
+    }
+    const host = lines[0].trim();
+    if (!/^(?!-)[a-z0-9-]+(\.(?!-)[a-z0-9-]+)+$/.test(host)) {
+      issues.push(issue('error', 'GIGA_CNAME_FORMAT',
+        `CNAME の「${host}」はホスト名として正しくありません。`
+        + 'スキーム（https://）・末尾のスラッシュ・大文字・空白は入れられません（§3-1）。', cnameFile));
     }
   }
 

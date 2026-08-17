@@ -114,7 +114,7 @@
 
 ### シーン1：アプリの紹介（0:00〜0:40）
 
-**映すもの**：GitHub Pages の紹介ページ（`https://<ユーザー名>.github.io/SchoolPlan_Editor/`）、続けてプライバシーポリシーと利用規約のページ。
+**映すもの**：紹介ページ（`https://schoolplan-editor.giga-school.com/about.html`）、続けてプライバシーポリシーと利用規約のページ。
 
 **操作**：
 1. 紹介ページを開き、アプリ名がはっきり見える状態で数秒静止する
