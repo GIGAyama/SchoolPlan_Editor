@@ -1829,7 +1829,7 @@ function sendTaskReminderMail() {
     body += section('期限切れ', overdue);
     body += section('今日が期日', today);
     body += section('今後1週間', upcoming);
-    body += `----\n学校計画ノート タスクリマインダー\n（設定はWebアプリの「タスク」画面から変更できます）`;
+    body += `----\n週案エディタ（School Plan Note） タスクリマインダー\n（設定はWebアプリの「タスク」画面から変更できます）`;
 
     const subjectParts = [];
     if (overdue.length) subjectParts.push(`期限切れ${overdue.length}件`);
