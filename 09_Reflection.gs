@@ -144,7 +144,12 @@ function getTodayReflectionStatus() {
     const ss = getSs_();
     const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
-    const dbData = dbSheet.getDataRange().getValues();
+    // 未記入件数の集計に使うのは日付・各校時・振り返り関連の列だけ。
+    // 起動のたびに年間分の全列を読む必要はない。
+    const dbData = p2ReadColumnsForAllRows_(dbSheet, cols, [
+      'DATE', 'PERIOD1', 'PERIOD2', 'PERIOD3', 'PERIOD4', 'PERIOD5', 'PERIOD6',
+      'REFLECTION', 'REFLECTION_STATUS'
+    ]);
 
     const todayStr = formatDate(new Date());
     let hasLessons = false;

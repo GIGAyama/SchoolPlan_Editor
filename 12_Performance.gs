@@ -139,6 +139,64 @@ function p2WriteColumnValues_(sheet, column, valueByRowNumber) {
   }
 }
 
+// 読み込む列をまとめる際に、間に挟んでよい不要列の数。
+// 校時列は「校時・単元・学習内容」の3列おきに並ぶため、2列までまたげば
+// 1〜6校時を1回の読み込みにまとめられる。
+const P2_READ_SPAN_MAX_GAP_ = 2;
+
+/**
+ * 連続した番号を、間に許容ギャップを挟んでまとめた範囲に分けます。
+ * @param {number[]} numbers
+ * @param {number} maxGap 間に挟んでよい番号の数
+ * @returns {{start: number, length: number}[]}
+ */
+function p2MergeNumberSpans_(numbers, maxGap) {
+  const sorted = [...new Set((numbers || []).filter(n => Number.isFinite(n)))].sort((a, b) => a - b);
+  const spans = [];
+  for (const n of sorted) {
+    const last = spans[spans.length - 1];
+    const lastEnd = last ? last.start + last.length - 1 : null;
+    if (last && n - lastEnd <= maxGap + 1) last.length = n - last.start + 1;
+    else spans.push({ start: n, length: 1 });
+  }
+  return spans;
+}
+
+/**
+ * 全データ行を、指定した論理列だけ読み込みます。
+ *
+ * 年間集計のように「全行 × 一部の列」が必要な処理向け。シート全体を読むと
+ * 学習内容など長い文字列の列まで転送するため、行が増えるほど待ち時間が延びる。
+ *
+ * 読み込み範囲は少数の連続範囲にまとめる。列ごとに読むと、転送量は減っても
+ * 呼び出し回数ぶんの往復が増えて逆に遅くなるため。
+ *
+ * 戻り値はシート全体を読んだときと同じ形（0番目がヘッダー行、以降がデータ行、
+ * 各行は物理列順）にそろえてあり、読み込まなかった列は空文字になる。
+ * 呼び出し側の `row[cols.XXX - 1]` はそのまま使える。
+ *
+ * @param {string[]} keys 読み込む論理列キー
+ * @returns {Array[]}
+ */
+function p2ReadColumnsForAllRows_(sheet, cols, keys) {
+  const lastRow = sheet.getLastRow();
+  const width = Math.max(1, sheet.getLastColumn());
+  const dataRowCount = Math.max(0, lastRow - 1);
+  const rows = Array.from({ length: dataRowCount + 1 }, () => new Array(width).fill(''));
+  if (dataRowCount === 0) return rows;
+
+  const columns = (keys || []).map(key => cols[key]).filter(Boolean);
+  for (const span of p2MergeNumberSpans_(columns, P2_READ_SPAN_MAX_GAP_)) {
+    const length = Math.min(span.length, width - span.start + 1);
+    if (length <= 0) continue;
+    const values = sheet.getRange(2, span.start, dataRowCount, length).getValues();
+    values.forEach((line, rowOffset) => line.forEach((value, colOffset) => {
+      rows[rowOffset + 1][span.start - 1 + colOffset] = value;
+    }));
+  }
+  return rows;
+}
+
 // 単元・学習内容だけを書き換える処理（一括自動入力・単元のずらし）が使う列。
 const P2_UNIT_CONTENT_KEYS_ = [
   'UNIT1', 'CONTENT1', 'UNIT2', 'CONTENT2', 'UNIT3', 'CONTENT3',

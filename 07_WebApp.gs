@@ -1393,7 +1393,10 @@ function getHoursSummary(mondayStr) {
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();
-    const dbData = dbSheet.getDataRange().getValues();
+    // 集計に使うのは日付・各校時・朝学習だけ。学習内容などの長い列まで読むと、
+    // 年度が進んで行が増えるほど週移動のたびの待ち時間が延びる。
+    const dbData = p2ReadColumnsForAllRows_(dbSheet, dbCols,
+      ['DATE', 'PERIOD1', 'PERIOD2', 'PERIOD3', 'PERIOD4', 'PERIOD5', 'PERIOD6', 'MORNING']);
 
     // モジュール学習設定
     const moduleEnabled = tGetProp_('moduleEnabled') === 'true';

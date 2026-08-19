@@ -16,9 +16,11 @@ const read = (name) => readFileSync(new URL(`../${name}`, import.meta.url), 'utf
 /** 呼び出しを記録する簡易スプレッドシートシート。 */
 function makeSheet(name, grid) {
   const writes = [];
+  const reads = [];
   const sheet = {
     grid,
     writes,
+    reads,
     getName: () => name,
     getLastRow: () => grid.length,
     getLastColumn: () => grid.reduce((max, row) => Math.max(max, row.length), 0),
@@ -30,6 +32,7 @@ function makeSheet(name, grid) {
       const cols = nCols === undefined ? 1 : nCols;
       return {
         getValues() {
+          reads.push({ row, col, rows, cols });
           const out = [];
           for (let r = 0; r < rows; r++) {
             const line = [];
@@ -45,6 +48,16 @@ function makeSheet(name, grid) {
           return this.getValues().map(line => line.map(v => (v === null || v === undefined) ? '' : String(v)));
         },
         getValue() { return (grid[row - 1] || [])[col - 1]; },
+        getA1Notation() { return `R${row}C${col}:R${row + rows - 1}C${col + cols - 1}`; },
+        clearContent() {
+          writes.push({ row, col, rows, cols });
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              if (grid[row - 1 + r]) grid[row - 1 + r][col - 1 + c] = '';
+            }
+          }
+          return this;
+        },
         setValue(value) { grid[row - 1][col - 1] = value; writes.push({ row, col, rows: 1, cols: 1 }); },
         setValues(values) {
           writes.push({ row, col, rows, cols });
@@ -327,4 +340,105 @@ test('同じセルへ複数件の予定を反映しても取りこぼさない',
 
   assert.equal(boot.sheet.grid[1][COL['行事'] - 1], '既存行事0\n朝会\n委員会',
     '同一セルへの追記がまとめて反映され、重複は弾かれること');
+});
+
+test('年間集計は必要な列だけを読み、結果は全列を読んだ場合と一致する', () => {
+  const boot = loadBackend([]);
+  // 1年分の行を作り、学習内容には長い文字列を入れておく（読まない列）
+  const rows = [HEADERS.slice()];
+  const monday = new Date(2026, 3, 6); // 2026/04/06 (月)
+  for (let i = 0; i < 200; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const row = new Array(HEADERS.length).fill('');
+    row[COL['日付'] - 1] = dateCell(boot.context, d.getFullYear(), d.getMonth() + 1, d.getDate());
+    row[COL['1校時'] - 1] = '国語';
+    row[COL['2校時'] - 1] = '算数1/2理科1/2';
+    row[COL['学習内容1'] - 1] = 'x'.repeat(400);
+    rows.push(row);
+  }
+  boot.sheet.grid.length = 0;
+  rows.forEach(r => boot.sheet.grid.push(r));
+
+  const cols = boot.run(`getDbColumns()`);
+  const full = boot.sheet.getRange(1, 1, boot.sheet.grid.length, boot.sheet.getLastColumn()).getValues();
+  boot.sheet.reads.length = 0;
+  const targeted = boot.run(`p2ReadColumnsForAllRows_(__sheet, getDbColumns(),
+    ['DATE', 'PERIOD1', 'PERIOD2', 'PERIOD3', 'PERIOD4', 'PERIOD5', 'PERIOD6', 'MORNING'])`);
+
+  assert.equal(targeted.length, full.length, '行数はシート全体と同じであること');
+  for (let i = 1; i < full.length; i++) {
+    for (const key of ['DATE', 'PERIOD1', 'PERIOD2', 'PERIOD6', 'MORNING']) {
+      const col = cols[key];
+      assert.deepEqual(targeted[i][col - 1], full[i][col - 1], `${key} の値が一致すること`);
+    }
+  }
+  // 末尾の重い列（宿題・持ち物・振り返り）までは読まない
+  assert.equal(targeted[1][COL['宿題'] - 1], '');
+  // 列ごとに読むと往復が増えて逆に遅くなる。読み込みは少数の連続範囲にまとめる
+  assert.ok(boot.sheet.reads.length <= 3,
+    `読み込みは少数の範囲にまとめること (実際: ${boot.sheet.reads.length}回)`);
+  const readCells = boot.sheet.reads.reduce((sum, r) => sum + r.rows * r.cols, 0);
+  const fullCells = (boot.sheet.grid.length - 1) * boot.sheet.getLastColumn();
+  assert.ok(readCells < fullCells, `シート全体より少ないセル数で済むこと (${readCells} < ${fullCells})`);
+});
+
+test('必要な列だけの読み込みでも時数集計の結果は変わらない', () => {
+  const boot = loadBackend([]);
+  const rows = [HEADERS.slice()];
+  [6, 7, 8, 9, 10].forEach(day => {
+    const row = new Array(HEADERS.length).fill('');
+    row[COL['日付'] - 1] = dateCell(boot.context, 2026, 4, day);
+    row[COL['1校時'] - 1] = '国語';
+    row[COL['2校時'] - 1] = '算数1/2理科1/2';
+    row[COL['学習内容1'] - 1] = '読まなくてよい長い内容';
+    rows.push(row);
+  });
+  boot.sheet.grid.length = 0;
+  rows.forEach(r => boot.sheet.grid.push(r));
+
+  boot.run(`
+    function getStandardHours() {
+      return { success: true, data: [
+        { subject: '国語', hours: 175 }, { subject: '算数', hours: 175 }, { subject: '理科', hours: 105 }
+      ] };
+    }
+    function getModuleCountableSubjects_() { return null; }
+    function getModuleSubjectFromMorningCell_() { return ''; }
+  `);
+  const summary = boot.run(`getHoursSummary('2026/04/06')`);
+  assert.equal(summary.success, true);
+  const weekly = {};
+  [...summary.data].forEach(row => { weekly[row.subject] = row.weekly; });
+  // 月〜金の5日 × 1校時「国語」= 5、2校時は 算数1/2・理科1/2 が5日分
+  assert.equal(weekly['国語'], 5);
+  assert.equal(weekly['算数'], 2.5);
+  assert.equal(weekly['理科'], 2.5);
+});
+
+test('DBクリアは入力列を残さず消し、日付・数式列は消さない', () => {
+  const boot = loadBackend([]);
+  const rows = makeWeekRows(boot.context);
+  // 入力列に一通り値を入れておく
+  for (let r = 1; r < rows.length; r++) {
+    ['時程', '朝学習', '1校時', '単元1', '学習内容1', '6校時', '中休み', '昼休み',
+      '放課後', '宿題', '持ち物'].forEach(name => { rows[r][COL[name] - 1] = name + 'の値'; });
+  }
+  boot.sheet.grid.length = 0;
+  rows.forEach(r => boot.sheet.grid.push(r));
+
+  const cleared = boot.run(`clearDatabaseInputsForSheet_(__sheet, getDbColumns())`);
+  assert.equal(cleared.cleared, true);
+
+  const row = boot.sheet.grid[1];
+  // 放課後より右にある宿題・持ち物も消えること（以前は消え残っていた）
+  ['時程', '朝学習', '1校時', '単元1', '学習内容1', '6校時', '中休み', '昼休み',
+    '放課後', '宿題', '持ち物', '行事'].forEach(name => {
+    assert.equal(row[COL[name] - 1], '', `${name} が消えていること`);
+  });
+  // 日付と数式列は残ること
+  // vm 側の Date はホストの instanceof を通らないため、振る舞いで確かめる
+  assert.equal(typeof row[COL['日付'] - 1].getDate, 'function', '日付は消さないこと');
+  assert.equal(row[COL['第何週'] - 1], '=WEEKNUM()');
+  assert.equal(row[COL['曜日'] - 1], '=TEXT()');
 });

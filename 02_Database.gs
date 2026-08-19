@@ -365,9 +365,17 @@ function clearDatabaseData_core_() {
   return clearDatabaseInputsForSheet_(dbSheet, getDbColumns());
 }
 
+// クリア対象の入力列。「時程」＋週案の入力列すべて。
+// 以前は「時程〜放課後」の連続範囲をまとめて消していたため、
+//   ・放課後より右にある宿題・持ち物が消えずに残る
+//   ・列順の違うシートでは日付など消してはいけない列まで巻き込む
+// という2つの問題があった。列は必ず論理名で指定する。
+const DB_CLEARABLE_INPUT_KEYS_ = ['TIME'].concat(P2_WEEK_READ_KEYS_);
+
 /**
- * 指定したデータベースシートの入力内容（時程〜放課後）をクリアします。
+ * 指定したデータベースシートの入力内容をクリアします。
  * 複数学級モードの学級シート作成（コピー後の初期化）でも使用します。
+ * 曜日・週番号などの数式列には触れません。
  * @param {GoogleAppsScript.Spreadsheet.Sheet} dbSheet 対象シート
  * @param {Object} dbCols 対象シートの列マップ（getDbColumns() と同形式）
  * @param {boolean} [includeReflection] 振り返り・振り返り状態の列もクリアするか（学級シート作成時のみ true）
@@ -378,18 +386,19 @@ function clearDatabaseInputsForSheet_(dbSheet, dbCols, includeReflection) {
   if (lastRow < 2) {
     return { cleared: false, message: `「${dbSheet.getName()}」にクリア対象のデータがありません。` };
   }
-  const rangeToClear = dbSheet.getRange(2, dbCols.TIME, lastRow - 1, dbCols.AFTERSCHOOL - dbCols.TIME + 1);
-  rangeToClear.clearContent();
-  if (includeReflection) {
-    // 振り返り・振り返り状態の列（時程〜放課後の範囲外）もクリアする
-    if (dbCols.REFLECTION) {
-      dbSheet.getRange(2, dbCols.REFLECTION, lastRow - 1, 1).clearContent();
-    }
-    if (dbCols.REFLECTION_STATUS) {
-      dbSheet.getRange(2, dbCols.REFLECTION_STATUS, lastRow - 1, 1).clearContent();
-    }
+
+  const keys = includeReflection
+    ? DB_CLEARABLE_INPUT_KEYS_.concat(['REFLECTION', 'REFLECTION_STATUS'])
+    : DB_CLEARABLE_INPUT_KEYS_;
+  const columns = keys.map(key => dbCols[key]).filter(Boolean);
+  const cleared = [];
+  for (const group of p2GroupConsecutiveNumbers_(columns)) {
+    const range = dbSheet.getRange(2, group[0], lastRow - 1, group.length);
+    range.clearContent();
+    cleared.push(range.getA1Notation());
   }
-  logInfo(`データベースクリア完了 (${dbSheet.getName()}): ${rangeToClear.getA1Notation()}`);
+
+  logInfo(`データベースクリア完了 (${dbSheet.getName()}): ${cleared.join(', ')}`);
   return { cleared: true, message: `「${dbSheet.getName()}」の入力内容をクリアしました。` };
 }
 
