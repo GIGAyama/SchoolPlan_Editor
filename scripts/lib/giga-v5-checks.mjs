@@ -168,6 +168,27 @@ export function runGigaV5Checks(rootDir, files, options = {}) {
         'rt（ふりがな）の色を決め打ちしています。色のついた面では継がせてください（§4）。',
         file, lineNumberAt(body, match.index ?? 0)));
     }
+    // 中央寄せの決まり文句 left:50% + translateX(-50%) は、幅を決めないと文字を潰す（§2-6）
+    //
+    // position:fixed/absolute で width が auto のとき、使える幅は「包む枠 − left」で決まる。
+    // left:50% だと画面の半分しか使えず、そこへ収めようとして日本語が
+    // 1文字ずつ改行される。transform は見た目をずらすだけで、この計算には効かない。
+    // 実際に「ホーム画面に追加」の案内が縦一列の帯になり、読めなくなっていた。
+    // 見た目では気づきにくい（要素は出ているし、色も形も正しい）ので検査で押さえる。
+    // left と right の両方を決めて margin:auto で寄せるか、width を決めれば直る。
+    for (const match of withoutFallback.matchAll(/\{[^{}]*\}/g)) {
+      const block = match[0];
+      if (!/position\s*:\s*(fixed|absolute)/.test(block)) continue;
+      if (!/(?:^|[;{\s])left\s*:\s*50%/.test(block)) continue;
+      if (!/transform\s*:[^;]*translateX\(\s*-\s*50%/.test(block)) continue;
+      // width か right が決まっていれば潰れない（max-width は幅を決めないので除く）
+      if (/(?:^|[;{\s])(?:width|inline-size|right)\s*:/.test(block)) continue;
+      issues.push(issue('error', 'GIGA_FIXED_CENTER_SQUEEZE',
+        'position:fixed/absolute を left:50% + translateX(-50%) で中央に置きながら、幅を決めていません。'
+        + '使える幅が画面の半分になり、文章が1文字ずつ改行されます。'
+        + 'left と right の両方を決めて margin:auto で寄せてください（§2-6）。',
+        file, lineNumberAt(withoutFallback, match.index ?? 0)));
+    }
     // prefers-reduced-motion で 0 にすると fill-mode: forwards が壊れ、中身が消える
     for (const match of body.matchAll(/prefers-reduced-motion[\s\S]{0,400}?animation-duration\s*:\s*0m?s/g)) {
       issues.push(issue('error', 'GIGA_REDUCED_MOTION_ZERO',

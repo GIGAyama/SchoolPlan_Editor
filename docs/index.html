@@ -313,6 +313,13 @@
             background: #f1f3f4;
         }
 
+        /* iOS のときだけ出す注意書き。スクリプトが判定して外す。
+           既定で隠しておくのは、Android や PC の先生に
+           関係のない Safari の話を読ませないため。 */
+        .ios-only-hint {
+            display: none;
+        }
+
         /* ===== iOS/iPadOS Safari 向け「ホーム画面に追加」ガイド ===== */
         #iosGuide {
             position: fixed;
@@ -375,13 +382,21 @@
         /* ===== iOS向けインストール案内バナー ===== */
         #iosInstallBanner {
             position: fixed;
-            left: 50%;
-            transform: translateX(-50%);
+            /* 【重要】left:50% + translateX(-50%) で中央に置いてはいけない。
+               position:fixed で幅が auto のとき、使える幅は「包む枠 − left」で決まる。
+               left:50% だと画面の半分しか使えず、そこへ収めようとして文字が
+               1文字ずつ改行される（iPhone で実際にそうなっていた。案内が
+               縦一列の帯になり、何が書いてあるか読めない）。
+               transform は見た目をずらすだけで、この計算には効かない。
+               left と right の両方を決め、margin:auto で中央に寄せる。 */
+            left: 12px;
+            right: 12px;
+            margin: 0 auto;
             bottom: calc(12px + env(safe-area-inset-bottom, 0px));
             display: none;
             align-items: center;
             gap: 12px;
-            max-width: min(560px, calc(100% - 96px));
+            max-width: min(560px, calc(100% - 24px));
             background: #fff;
             border-radius: 12px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, .2);
@@ -397,6 +412,10 @@
         }
 
         #iosInstallBanner .banner-text {
+            /* 縮むときは、この文章から縮ませる。min-width:0 が無いと
+               flex の既定（min-width:auto）で縮めず、はみ出す。 */
+            flex: 1 1 auto;
+            min-width: 0;
             font-size: 12px;
             color: #3c4043;
             line-height: 1.5;
@@ -434,15 +453,19 @@
            新しい版が待機したときだけ出る。押されるまで切り替えない。 */
         #updateToast {
             position: fixed;
-            left: 50%;
-            transform: translateX(-50%);
+            /* 中央寄せの作法は #iosInstallBanner と同じ理由（left:50% だと
+               使える幅が画面の半分になり、文字が1文字ずつ改行される）。 */
+            left: 12px;
+            right: 12px;
+            margin: 0 auto;
+            width: fit-content;
             /* ホームバーのぶんを足す（iPhone で下端に隠れないように） */
             bottom: calc(16px + env(safe-area-inset-bottom, 0px));
             z-index: 60;
             display: flex;
             align-items: center;
             gap: 12px;
-            max-width: calc(100vw - 24px);
+            max-width: calc(100% - 24px);
             padding: 10px 14px;
             border-radius: 12px;
             background: #202124;
@@ -547,6 +570,11 @@
                 それでも開けないときは、いちどブラウザのタブで直接ログインしてから、もう一度お試しください。
                 複数のGoogleアカウントでログインしている場合は、学校のアカウントに切り替えてください。
             </p>
+            <p class="setup-hint ios-only-hint">
+                <b>ホーム画面に追加するのは、この入口ページです。</b>
+                「アプリを開く」で移動した先（script.google.com）を追加しても、アイコンが付かず、
+                アドレスバーが出たままでアプリになりません。
+            </p>
             <button class="btn-text" id="recoveryShowBtn">この画面のまま表示する</button>
             <button class="btn-text" id="recoveryReloadBtn">再読み込み</button>
         </div>
@@ -571,6 +599,14 @@
             <p class="setup-hint">
                 複数のGoogleアカウントでログインしている場合は、学校で使うアカウントに切り替えてください。
                 うまくいかないときは、いちど新しいタブでログインしてからお試しください。
+            </p>
+            <!-- iOS のときだけ出す。ログイン用のタブ（script.google.com）は
+                 ホーム画面に追加してもアプリにならず、アイコンも付かない。
+                 そこで追加してしまうのが実際に起きた失敗なので、先に言っておく。 -->
+            <p class="setup-hint ios-only-hint">
+                <b>ホーム画面に追加するのは、この入口ページです。</b>
+                ログイン用に開いたタブ（script.google.com）を追加しても、アイコンが付かず、
+                アドレスバーが出たままでアプリになりません。
             </p>
             <button class="btn-text" id="welcomeShowBtn">それでも表示されないとき</button>
         </div>
@@ -921,6 +957,9 @@
             });
 
             if (isIosDevice && !isStandalone) {
+                // ログイン用タブを追加してしまう失敗を防ぐ注意書きを出す。
+                var iosHints = document.querySelectorAll('.ios-only-hint');
+                for (var i = 0; i < iosHints.length; i++) iosHints[i].style.display = 'block';
                 // Safari では beforeinstallprompt が発火しないので、メニューに常時表示する
                 installBtn.textContent = 'ホーム画面に追加（インストール）';
                 installBtn.style.display = 'block';

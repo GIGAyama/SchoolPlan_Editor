@@ -395,3 +395,61 @@ test('「あえて書かない」と説明したコメントは拾わない', ()
   };
   assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_LANDING_STANDALONE_META'), []);
 });
+
+// ---- 中央寄せで文字が潰れる ----
+//
+// 実際に「ホーム画面に追加」の案内が iPhone で縦一列の帯になり、読めなくなっていた。
+// 要素は出ていて色も形も正しいので、目視では見落とす。
+
+test('left:50% + translateX(-50%) で幅を決めていなければ拾う', () => {
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+#banner { position: fixed; left: 50%; transform: translateX(-50%); bottom: 12px; max-width: 560px; }
+</style>`
+  };
+  const found = check(tree).filter(i => i.code === 'GIGA_FIXED_CENTER_SQUEEZE');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'error');
+});
+
+test('max-width だけでは「幅を決めた」ことにならない', () => {
+  // max-width は上限を決めるだけで、使える幅（包む枠 − left）は半分のまま。
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+#toast { position: absolute; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 24px); }
+</style>`
+  };
+  assert.ok(codes(check(tree)).includes('GIGA_FIXED_CENTER_SQUEEZE'));
+});
+
+test('left と right の両方を決めていれば拾わない', () => {
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+#banner { position: fixed; left: 12px; right: 12px; margin: 0 auto; max-width: 560px; }
+</style>`
+  };
+  assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_FIXED_CENTER_SQUEEZE'), []);
+});
+
+test('width を決めてあれば拾わない', () => {
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+#banner { position: fixed; left: 50%; transform: translateX(-50%); width: 320px; }
+</style>`
+  };
+  assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_FIXED_CENTER_SQUEEZE'), []);
+});
+
+test('position を指定していない中央寄せは拾わない', () => {
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+.centered { left: 50%; transform: translateX(-50%); }
+</style>`
+  };
+  assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_FIXED_CENTER_SQUEEZE'), []);
+});

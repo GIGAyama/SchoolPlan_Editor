@@ -2,6 +2,26 @@
  * @fileoverview システム全体で使用する定数、設定値定義
  */
 
+// === PWA シェル（入口ページ）の URL ===
+//
+// iOS Safari の「ホーム画面に追加」は、*いま開いているページ* を登録する。
+// この Web アプリ（script.google.com の /exec）を追加しても、アプリにはならない。
+// アイコンが付かず（タイトルの一文字が出るだけ）、開いても Safari のアドレスバーと
+// 「このアプリケーションは Google ではなく他のユーザーが作成したものです」の表示が
+// 残ったままになる。
+//
+// これは GAS 側では直せない。/exec の外枠は Google が出しているページで、
+// apple-touch-icon も manifest も差し込めないためである
+// （HtmlService で触れるのは title・viewport・favicon だけ）。
+// したがって、シェルの外で開かれたときは入口ページへ戻ってもらうしかない。
+//
+// 実際に起きた経路：ログインのために「新しいタブで開く」を押した先生が、
+// そのタブのまま使い続け、そこからホーム画面に追加してしまう。
+//
+// フォークして使う場合は、自分の GitHub Pages の URL に書き換えること。
+// 空文字にすると案内を出さない（PWA シェルを使わない運用向け）。
+const PWA_SHELL_URL = 'https://schoolplan-editor.giga-school.com/';
+
 // --- シート名 ---
 const SHEET_NAME_DATABASE = "データベース";
 const SHEET_NAME_NEWSLETTER = "学級通信";
