@@ -699,9 +699,12 @@ function getNewsletterData(mondayDateStr) {
  * Drive REST API (v3) を UrlFetchApp 経由で呼び出し、
  * HTMLをGoogleドキュメントに変換してそのまま添付します。
  * (Drive Advanced Serviceは不要)
+ *
+ * 添付ファイルはクラスの参加者だけが開けるように共有します（shareFileWithCourse_）。
+ * 共有できなかった場合も投稿は行い、warning に注意文を入れて返します。
  * @param {string} customMessage Classroomへの付加メッセージ
  * @param {string} htmlContent 学級通信エディタのHTML文字列
- * @returns {Object} { success, message }
+ * @returns {Object} { success, message, warning }
  */
 function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
   try {
@@ -709,14 +712,18 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
     const formattedDate = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd_HHmm');
     const fileName = '学級通信_' + formattedDate;
 
+    const courseId = getCourseIdByName(courseName);
+
     // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
     // parents も指定しない（既定でマイドライブ直下。フォルダ作成はフル drive が必要）。
     const classroomFile = driveCreateConverted_(
       fileName, htmlContent, 'text/html', 'application/vnd.google-apps.document');
 
-    driveShareAnyoneWithLink_(classroomFile.id);
+    // 学級通信には児童の氏名や写真が入る。以前は「リンクを知っている全員が閲覧可」に
+    // していたが、URLが出回れば誰でも開ける状態だった（docs/LEGAL_RISK_AUDIT_JP.md の A-1）。
+    // クラスの参加者だけに絞る。失敗しても投稿は止めず、注意文を添えて教員へ伝える。
+    const warning = shareFileWithCourse_(classroomFile.id, courseId);
 
-    const courseId = getCourseIdByName(courseName);
     const announcement = {
       text: customMessage || '学級通信をお届けします。',
       materials: [{ driveFile: { driveFile: { id: classroomFile.id } } }]
@@ -724,7 +731,12 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
     Classroom.Courses.Announcements.create(announcement, courseId);
 
     logInfo(`学級通信をClassroom「${courseName}」に投稿完了: ${classroomFile.name}`);
-    return { success: true, message: `「${courseName}」に学級通信を投稿しました！` };
+    const message = `「${courseName}」に学級通信を投稿しました！`;
+    return {
+      success: true,
+      message: warning ? `${message}\n※ ${warning}` : message,
+      warning: warning
+    };
   } catch (e) {
     logError('postNewsletterToClassroomFromWeb', e);
     return { success: false, error: describeAuthError_(e, 'Google Classroom 連携') };

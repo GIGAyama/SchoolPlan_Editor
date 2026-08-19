@@ -214,16 +214,30 @@ function driveCopyFile_(fileId, name) {
 }
 
 /**
- * 「リンクを知っている全員が閲覧可」を付与します。
- * Classroom に添付したファイルを児童・保護者が開けるようにするために使います。
+ * 指定したグループに「閲覧可」を付与します。
+ *
+ * Classroom に添付したファイルを、そのクラスの参加者だけが開けるようにするために使います。
+ * 宛先には Classroom がコースごとに維持しているグループ（courseGroupEmail）を渡します。
+ *
+ * **「リンクを知っている全員（type: 'anyone'）」は使わないこと。**
+ * 学級通信には児童の氏名や写真が入るため、URLが出回れば誰でも開ける状態になる。
+ * 以前はそうしていたが、印刷用にPDFを作っただけでも全世界公開になっていた
+ * （docs/LEGAL_RISK_AUDIT_JP.md の A-1）。範囲を広げる必要が出た場合でも、
+ * anyone ではなく type:'domain' でドメインを限定すること。
+ *
+ * 通知メールは送らない。コースのグループはメールを受け取る用途のものではなく、
+ * 権限を付けるたびに参加者へメールが飛ぶのは意図しない挙動になる。
  * @param {string} fileId
+ * @param {string} groupEmail 権限を与えるグループのメールアドレス
  */
-function driveShareAnyoneWithLink_(fileId) {
-  driveFetch_(`${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}/permissions?fields=id`, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({ role: 'reader', type: 'anyone' })
-  });
+function driveShareReaderWithGroup_(fileId, groupEmail) {
+  driveFetch_(
+    `${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}/permissions`
+    + `?fields=id&sendNotificationEmail=false`, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ role: 'reader', type: 'group', emailAddress: groupEmail })
+    });
 }
 
 /**

@@ -2504,7 +2504,9 @@
             google.script.run
                 .withSuccessHandler(function (res) {
                     if (!res) { showToast('error', '投稿失敗: サーバーから応答がありません'); return; }
-                    if (res.success) showToast('success', res.message);
+                    // 共有できなかった場合は投稿自体は成功しているが、児童が開けない
+                    // おそれがあるので、成功ではなく警告として見せる。
+                    if (res.success) showToast(res.warning ? 'warning' : 'success', res.message);
                     else showToast('error', '投稿失敗: ' + res.error);
                 })
                 .withFailureHandler(_onCommError)

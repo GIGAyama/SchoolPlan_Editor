@@ -402,9 +402,10 @@ function autoPostToClassroom_core_() {
     const classroomName = getCourseNameSafe_();
     const pdfFile = createAndSavePDF(SHEET_NAME_NEWSLETTER);
     if (!pdfFile) throw new Error("PDF作成/保存失敗");
-    postToClassroomStream(classroomName, pdfFile);
+    const warning = postToClassroomStream(classroomName, pdfFile);
     logInfo(`「${SHEET_NAME_NEWSLETTER}」PDFをクラス「${classroomName}」に投稿完了`);
-    return { message: `「${SHEET_NAME_NEWSLETTER}」のPDFをクラス「${classroomName}」へ投稿しました。` };
+    const message = `「${SHEET_NAME_NEWSLETTER}」のPDFをクラス「${classroomName}」へ投稿しました。`;
+    return { message: warning ? `${message}\n※ ${warning}` : message };
 }
 
 /**
@@ -437,8 +438,41 @@ function listCoursesFromWeb() {
   }
 }
 
-/** 
- * 指定されたシートをPDFとしてGoogleドライブに保存します。 
+/**
+ * Classroom へ添付するファイルを、そのクラスの参加者だけが開けるように共有します。
+ *
+ * Classroom はコースごとに参加者のグループ（courseGroupEmail）を維持しているので、
+ * そこへ閲覧権限を与える。「リンクを知っている全員」にはしない（17_DriveApi.gs 参照）。
+ * 追加の権限は要らない（コースの取得は classroom.courses.readonly、権限付与は
+ * 自分が作ったファイルなので drive.file の範囲）ため、先生に再承認を求めずに済む。
+ *
+ * **共有に失敗しても投稿は続ける。** 投稿そのものが止まるほうが困るため、
+ * ここでは例外を投げず、教員へ伝える注意文を返して呼び出し側に判断させる。
+ * @param {string} fileId 共有するファイルのID
+ * @param {string} courseId 対象コースのID
+ * @returns {string} 教員へ伝える注意文（うまくいったときは空文字）
+ */
+function shareFileWithCourse_(fileId, courseId) {
+  const manualHint = '児童が開けない場合は、Google ドライブでこのファイルをクラスへ共有してください。';
+  try {
+    const course = Classroom.Courses.get(courseId);
+    const groupEmail = course && course.courseGroupEmail;
+    if (!groupEmail) {
+      // 個人アカウント運用の Classroom などでは、コースのグループが無いことがある。
+      logInfo(`コース ${courseId} に共有用グループが無いため、共有設定は変更しませんでした。`);
+      return `このクラスには共有用のグループが無いため、ファイルの共有設定は変更していません。${manualHint}`;
+    }
+    driveShareReaderWithGroup_(fileId, groupEmail);
+    logInfo(`ファイル ${fileId} をクラスの参加者（${groupEmail}）へ共有しました。`);
+    return '';
+  } catch (e) {
+    logError('shareFileWithCourse_', e);
+    return `ファイルの共有設定を変更できませんでした。${manualHint}`;
+  }
+}
+
+/**
+ * 指定されたシートをPDFとしてGoogleドライブに保存します。
  */
 function createAndSavePDF(sheetName) {
   try {
@@ -465,9 +499,13 @@ function createAndSavePDF(sheetName) {
 function postToClassroomStream(classroomName, pdfFile) {
   try {
     const courseId = getCourseIdByName(classroomName);
+    // 添付するPDFを、そのクラスの参加者が開けるようにしてから投稿する。
+    // 失敗しても投稿は続ける（注意文は戻り値で受け取り、投稿結果に添えて教員へ伝える）。
+    const warning = shareFileWithCourse_(pdfFile.id, courseId);
     const announcement = { text: '学級通信', materials: [{ driveFile: { driveFile: { id: pdfFile.id } } }] };
     Classroom.Courses.Announcements.create(announcement, courseId);
     logInfo(`PDF(${pdfFile.name})をクラス「${classroomName}」に投稿`);
+    return warning;
   } catch (e) {
     logError("postToClassroomStream", e);
     throw e;

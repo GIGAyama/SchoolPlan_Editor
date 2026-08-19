@@ -116,3 +116,78 @@ test('appsscript.json とドキュメントのスコープ一覧が一致して�
     }
   }
 });
+
+// --- Drive ファイルを全世界に公開しないこと（docs/LEGAL_RISK_AUDIT_JP.md の A-1）---
+//
+// 学級通信には児童の氏名や写真が入る。以前は Classroom へ添付するファイルを
+// 「リンクを知っている全員が閲覧可（type: 'anyone'）」にしていたため、URLが出回れば
+// 誰でも開ける状態だった。しかも共有を解除する導線がアプリに無い。
+// 「児童が開けない」と相談されたときに anyone へ戻す修正が入りやすい場所なので、
+// 静的検査で塞いでおく。
+
+/** コメント行を落として、コードだけを見る（方針をコメントに書くのは許す）。 */
+const codeOnly = (text) => text
+  .split('\n').filter(line => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n');
+
+test('Drive ファイルを「リンクを知っている全員」に公開していない', () => {
+  for (const file of gsFiles) {
+    const code = codeOnly(fs.readFileSync(file, 'utf8'));
+    assert.doesNotMatch(code, /type:\s*['"]anyone['"]/,
+      `${file}: 全世界公開の共有が入っています。クラスの参加者へ限定してください。`);
+    assert.doesNotMatch(code, /allowFileDiscovery/,
+      `${file}: 検索可能な公開共有が入っています。`);
+  }
+});
+
+test('公開共有のヘルパーがリポジトリに残っていない', () => {
+  // 未使用のまま残すと「便利なヘルパー」として再び呼ばれる
+  for (const file of gsFiles) {
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /driveShareAnyoneWithLink_/,
+      `${file}: 公開共有のヘルパーが残っています。`);
+  }
+});
+
+test('共有はクラスの参加者グループに限定し、通知メールを送らない', () => {
+  const api = fs.readFileSync('17_DriveApi.gs', 'utf8');
+  assert.match(api, /function driveShareReaderWithGroup_/);
+  const share = codeOnly(api.slice(api.indexOf('function driveShareReaderWithGroup_')));
+  assert.match(share, /type:\s*['"]group['"]/);
+  assert.match(share, /role:\s*['"]reader['"]/);
+  // コースのグループはメールを受け取る用途のものではない
+  assert.match(share, /sendNotificationEmail=false/);
+});
+
+test('共有に失敗しても Classroom への投稿は続く', () => {
+  // 共有で例外が飛んで投稿ごと落ちると、先生から見れば「投稿できなくなった」に見える。
+  const classroom = fs.readFileSync('05_Classroom.gs', 'utf8');
+  const helper = classroom.slice(classroom.indexOf('function shareFileWithCourse_'));
+  const body = helper.slice(0, helper.indexOf('\nfunction ', 1));
+
+  assert.match(body, /catch\s*\(/, '共有の失敗を捕まえていません');
+  assert.doesNotMatch(codeOnly(body), /throw\b/, '共有の失敗で例外を投げています');
+  assert.match(body, /Classroom\.Courses\.get/, 'コースのグループを引いていません');
+});
+
+test('Classroom へ添付する経路が共有を通っている', () => {
+  const attachSites = [
+    ['05_Classroom.gs', 'function postToClassroomStream'],
+    ['07_WebApp.gs', 'function postNewsletterToClassroomFromWeb']
+  ];
+  for (const [file, marker] of attachSites) {
+    const source = fs.readFileSync(file, 'utf8');
+    const start = source.indexOf(marker);
+    assert.notEqual(start, -1, `${file}: ${marker} が見つかりません`);
+    const next = source.indexOf('\nfunction ', start + 1);
+    const body = source.slice(start, next === -1 ? source.length : next);
+    assert.match(body, /materials:\s*\[\{\s*driveFile/, `${file}: 添付の形が変わっています`);
+    assert.match(body, /shareFileWithCourse_\(/,
+      `${file}: 添付するファイルの共有を通していません`);
+  }
+});
+
+test('公開前提のダウンロードURLを組み立てていない', () => {
+  for (const file of gsFiles) {
+    assert.doesNotMatch(codeOnly(fs.readFileSync(file, 'utf8')), /uc\?export=download/,
+      `${file}: 公開ファイル前提のURLを組み立てています。`);
+  }
+});
