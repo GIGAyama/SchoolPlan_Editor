@@ -10,7 +10,6 @@ function p3ClearDatabaseInputsByHeader_() {
   const keys = ['TIME'].concat(P2_WEEK_READ_KEYS_);
   const columns = [...new Set(keys.map(key => cols[key]).filter(Boolean))].sort((a, b) => a - b);
   columns.forEach(column => sheet.getRange(2, column, lastRow - 1, 1).clearContent());
-  SpreadsheetApp.flush();
   return {
     cleared: columns.length > 0,
     clearedColumns: columns.length,

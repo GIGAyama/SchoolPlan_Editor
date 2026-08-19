@@ -54,7 +54,7 @@ TaskID, TaskContent, Resource, DueDate, Source, Status, Priority, Memo
 ### 方法A: プログラム構築（テンプレート不要・既定）
 
 スクリプトプロパティ `sp_dbTemplateId` が未設定の場合、`createMyDatabase()` は
-`SpreadsheetApp.create()` で空のスプレッドシートを作り、`initializeNewDatabase_()` で
+`sheetsCreate_()`（Sheets REST API v4）で空のスプレッドシートを作り、`initializeNewDatabase_()` で
 上記の `データベース`／`単元マスタ`／`タスク` を自動構築します。配布元の追加設定は不要です。
 
 ### 方法B: テンプレート複製

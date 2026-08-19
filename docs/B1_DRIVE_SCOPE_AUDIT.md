@@ -32,7 +32,7 @@ Apps Script 組み込みの `DriveApp` は、**対象がアプリ作成ファイ
 
 | スコープ | 用途 |
 |----------|------|
-| `spreadsheets` | 各ユーザーのDB（スプレッドシート）読み書き |
+| `spreadsheets` | 各ユーザーのDB（スプレッドシート）読み書き ※**その後 `drive.file` へ移行し、このスコープは廃止**（[B5](B5_SHEETS_SCOPE_AUDIT.md)） |
 | **`drive`（フル）** | 本レポートの対象。PDFフォルダ列挙・ファイル作成/共有・テンプレ複製 等 |
 | `script.scriptapp` | トリガー管理 |
 | `script.external_request` | Gemini API 等の外部リクエスト |

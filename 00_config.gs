@@ -114,7 +114,7 @@ function getDbSheet_(ss) {
 
 /**
  * 指定シート名がデータベースシート（既定または登録学級のいずれか）かを判定します。
- * onEdit などシート名でのフィルタリングに使用します。
+ * シート名でのフィルタリングに使用します。
  * @param {string} sheetName
  * @returns {boolean}
  */

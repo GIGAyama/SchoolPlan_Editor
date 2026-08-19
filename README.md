@@ -135,7 +135,7 @@ Google Apps Script (GAS) と Google スプレッドシートをバックエン�
 
 ### 10. データ保全・復元
 
-「設定」タブの「データ保全・復元」から、記録を失わないための仕組みをまとめて利用できます。**追加のOAuthスコープは要求せず**、`spreadsheets` + `drive.file` の範囲だけで動作します。既存シートの列順も変更しません。
+「設定」タブの「データ保全・復元」から、記録を失わないための仕組みをまとめて利用できます。**追加のOAuthスコープは要求せず**、`drive.file` の範囲だけで動作します。既存シートの列順も変更しません。
 
 *   **完全バックアップ**: スプレッドシート全体を別ファイルとして複製します。**1日1回の自動バックアップが既定で有効**（設定でOFFにできます）で、「今すぐ完全バックアップ」から手動作成もできます。保持は**30日／最大4世代**で、超えた分は作成・一覧表示のたびにドライブのごみ箱へ移動します。データベースの全消去や学級削除の直前には、自動バックアップの設定に関わらずバックアップが作られます。
 
@@ -159,7 +159,8 @@ Google Apps Script (GAS) と Google スプレッドシートをバックエン�
     
 *   **External API**: Google Classroom API（拡張サービス `Classroom` v1）／Google Drive REST API v3（`drive.file` スコープ。組み込みの `DriveApp` は `drive.file` で動かないため使いません。詳細は [`17_DriveApi.gs`](17_DriveApi.gs)）／Google Picker API（`apis.google.com` を読み込む唯一の外部スクリプト）／内閣府の祝日CSV
 
-*   **OAuthスコープ**: `spreadsheets` / `drive.file` / `script.scriptapp` / `script.external_request` / `script.send_mail` / `userinfo.email` / `classroom.courses.readonly` / `classroom.announcements`（`appsscript.json`）
+*   **OAuthスコープ**: `drive.file` / `script.scriptapp` / `script.external_request` / `script.send_mail` / `userinfo.email` / `classroom.courses.readonly` / `classroom.announcements`（`appsscript.json`）
+    スプレッドシートも Drive も REST API を直接呼ぶことで `drive.file` だけで扱っています（`18_SheetsApi.gs` / `17_DriveApi.gs`。理由は [docs/B5](docs/B5_SHEETS_SCOPE_AUDIT.md)）
     
 *   **同梱ライブラリ**: Bootstrap 5.3.3 / Bootstrap Icons 1.11.3 / SweetAlert2 11.14.5 /
     Material Symbols（使用アイコンのみのサブセット）を **CDNではなくリポジトリに焼き込んで**配信
@@ -291,7 +292,8 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 3.  **ソースコードの配置** GASのエディタ（または `clasp` を使用）に、本リポジトリの `.gs` および `.html` ファイルをすべてコピーして保存します。`clasp` を使う場合は、必要なOAuthスコープ（メール送信 `script.send_mail` などを含む）を宣言した `appsscript.json` も一緒に反映してください。GASエディタで直接編集する場合は「プロジェクトの設定」で「`appsscript.json` マニフェスト ファイルをエディタで表示する」を有効にし、本リポジトリの `appsscript.json` の `oauthScopes` と `dependencies` を反映します。
     
 4.  **Google サービスの有効化** GASエディタの「サービス」から **Google Classroom API**（`Classroom` / v1）を追加します。前の手順で `appsscript.json` の `dependencies` を反映していれば、この追加はすでに済んでいます。
-    スプレッドシートとメール送信は組み込みサービス（`SpreadsheetApp` / `MailApp`）、Drive は REST API v3 の直接呼び出し（`17_DriveApi.gs`）で扱うため、「サービス」への追加は不要です（`appsscript.json` の `oauthScopes` だけで動作します）。
+    メール送信は組み込みサービス（`MailApp`）、スプレッドシートは Sheets REST API v4（`18_SheetsApi.gs`）、Drive は REST API v3（`17_DriveApi.gs`）の直接呼び出しで扱うため、「サービス」への追加は不要です（`appsscript.json` の `oauthScopes` だけで動作します）。
+    組み込みの `SpreadsheetApp` / `DriveApp` は使いません。使うと `spreadsheets` / `drive` という広いスコープを要求してしまうためです。
     
 5.  **Webアプリとしてデプロイ** 「デプロイ」>「新しいデプロイ」を選択し、種類を「ウェブアプリ」にしてデプロイします。発行されたURLにアクセスしてアプリを起動します。
     

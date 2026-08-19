@@ -15,7 +15,7 @@ Google が指摘したのは、独立した **4 件**です。1 件でも欠け�
 | 1 | デモ動画が、次の 4 スコープの**機能の全体像**を示していない<br>`script.send_mail` / `spreadsheets` / `script.external_request` / `script.scriptapp`<br>書き込み・削除は**利用者のアカウント側への反映**まで映すこと | [C5](C5_DEMO_VIDEO_SCRIPT.md) の台本を改訂（シーン4・5・7 を拡張、シーン7-2 を新設）。<br>`script.scriptapp` の反映を見せるため、アプリに**「自動実行（トリガー）の状況」画面を新設** | 台本✅／**撮影は未** |
 | 2 | AI／ML 連携の申告と Limited Use 対応 | プライバシーポリシー §4 に AI 提供者・ティア・送信データを明記。<br>§5 に**英文の Limited Use 宣言**を掲載。<br>アプリの設定画面と初期設定ウィザードに**有料ティア必須**の明示を追加 | ✅ |
 | 3 | プライバシーポリシーに、機微なデータの**保護措置**の記載がない | §7 を「安全管理措置（機微なデータの保護）」として全面的に書き直し、11 項目の具体策を表で明記 | ✅ |
-| 4 | `spreadsheets` は `drive.file` で足りるのではないか（最小スコープ） | **Option 1（移行）に決定**。可否と手順は [B5](B5_SHEETS_SCOPE_AUDIT.md) に棚卸し済み | ⏳ 実装中 |
+| 4 | `spreadsheets` は `drive.file` で足りるのではないか（最小スコープ） | **Option 1（移行）を実施済み。**Sheets REST API v4 + `drive.file` へ移行し、`appsscript.json` から `spreadsheets` を削除（[B5](B5_SHEETS_SCOPE_AUDIT.md)） | コード✅／**実機確認とConsole側の削除は未** |
 
 ---
 
@@ -106,11 +106,12 @@ Workspace API の Limited Use 要件と両立しません。API キーは利用�
 
 ---
 
-## 4. 指摘4：`spreadsheets` を `drive.file` にできるか　★Option 1 で確定★
+## 4. 指摘4：`spreadsheets` を `drive.file` にできるか　★移行済み★
 
-> 📋 **全数の棚卸しと移行手順 → [B5: `spreadsheets` → `drive.file` 化 可否レポート](B5_SHEETS_SCOPE_AUDIT.md)**
+> 📋 **全数の棚卸しと移行結果 → [B5: `spreadsheets` → `drive.file` 化 可否レポート](B5_SHEETS_SCOPE_AUDIT.md)**
 > 使っている Sheet / Range の API はすべて Sheets REST API v4 に対応があり、
-> 「実現できない」項目はありませんでした。よって **Option 1（移行）** を採ります。
+> 「実現できない」項目はありませんでした。**Option 1（移行）を採り、実施済みです。**
+> `appsscript.json` から `spreadsheets` は外れています（**Cloud Console 側の削除は人手で必要**）。
 
 ### Google の提案
 
@@ -142,28 +143,29 @@ Workspace API の Limited Use 要件と両立しません。API キーは利用�
 | **Option 1** | `spreadsheets` を外し、Sheets REST API v4 + `drive.file` へ移行 | "Confirming narrower scopes" | **採用** |
 | Option 2 | `spreadsheets` の維持を主張 | "Unable to use narrower scopes" + 理由 | 見送り。正当化の根拠が `SpreadsheetApp` の制約しかなく、Google が明示的に否定した client library limitation にあたるため |
 
-### 進め方（[B5](B5_SHEETS_SCOPE_AUDIT.md) §5 の要約）
+### 何をしたか（[B5](B5_SHEETS_SCOPE_AUDIT.md) §5 に詳細）
 
-呼び出しは 22 ファイル・約 470 箇所に散っているため、**呼び出し側は書き換えず、
-`SpreadsheetApp` 互換のファサードを REST で作る**（`17_DriveApi.gs` と同じ設計）方針です。
+呼び出しは 22 ファイル・約 470 箇所に散っていたため、**呼び出し側は書き換えず、
+`SpreadsheetApp` 互換のファサードを REST で作りました**（`17_DriveApi.gs` と同じ設計）。
 
-1. ~~取得口を `getSs_()` に集約する~~（✅ 実施済み。防御的な三項 21 箇所を単純化）
-2. コンテナバインド専用の遺物（`onOpen` / `getUi` / `toast` / `onEdit`）を切り離す
-3. `18_SheetsApi.gs` にファサードを実装し、読み取り経路から段階的に切り替える
-4. 書き込み・書式・保護を移す
-5. `SpreadsheetApp` の再混入を静的検査で防ぐ
-6. **動作確認後に** `appsscript.json` と Cloud Console から `spreadsheets` を外す
-7. 同意画面のスコープが変わるため、動画を撮り直す
+- `18_SheetsApi.gs` … Sheets REST API v4 のファサード。`getSs_()` がこれを返します。
+- コンテナバインド専用の遺物（`onOpen`・カスタムメニュー・`_UI` 系・`onEdit`・`toast`）を削除。
+- シート保護は `protectWholeSheet()` に集約（`batchUpdate` 1 回で付け替え）。
+- `flush()` は REST では不要なので 13 箇所とも削除。
+- 既存 DB のために、**Google ピッカーで選び直す導線**を追加（`drive.file` は per-file 権限のため）。
+- `tests/drive-scope.test.mjs` が `SpreadsheetApp` と `spreadsheets` の復活を弾き、
+  `tests/sheets-api.test.mjs` が偽の Sheets API に対してファサードの挙動を固定。
 
 > ⚠️ Google は「**今の時点で承認済みスコープを外すな**」と書いています。
-> `spreadsheets` はまだ未承認なので外して構いませんが、**移行が動くことを確認してから**外してください。
+> `spreadsheets` は未承認だったので外して問題ありませんが、
+> **"Confirming narrower scopes" と返信するのは、実機で動作を確認してから**にしてください。
 
 ---
 
 ## 5. 返信メールのドラフト（英語）
 
 > 📌 送る前に、`{{ }}` を実際の値に置き換えてください。
-> 指摘4 の段落は **Option 1 / Option 2 のどちらか一方だけ**を残します。
+> 指摘4 は Option 1（移行済み）で確定しているので、下の本文はその前提で書いてあります。
 
 ```text
 Subject: Re: [OAuth Verification] School Plan Note — updated demo video and policy
@@ -181,11 +183,13 @@ The video now demonstrates the full operational functionality of every
 requested scope, and for every write or delete operation it also shows the
 resulting change inside the user's own Google account:
 
-- spreadsheets ({{TIMESTAMP}}): entering a weekly lesson plan (write),
-  the annual lesson-hour summary calculated from the same file (read), and
+- drive.file ({{TIMESTAMP}}): entering a weekly lesson plan (write), the
+  annual lesson-hour summary calculated from the same file (read), and
   adding and deleting a task (write/delete). We then open the teacher's own
   spreadsheet and show the new cell, the added row, and the deleted row that
-  was moved to the recycle-bin sheet inside the same file.
+  was moved to the recycle-bin sheet inside the same file. The same scope
+  covers the PDFs the app exports, shown later in the video. The app can
+  reach only the files it created or the teacher picked.
 - script.send_mail ({{TIMESTAMP}}): enabling the daily task reminder,
   choosing the delivery time, and sending a test message. We then open the
   signed-in teacher's Gmail inbox and show the delivered message and its
@@ -254,7 +258,24 @@ configured in the Cloud Console exactly.
 --------------------------------------------------------------------
 4) Minimum scope — spreadsheets
 --------------------------------------------------------------------
-{{OPTION_1_OR_2}}
+Confirming narrower scopes.
+
+We have removed https://www.googleapis.com/auth/spreadsheets from both our
+codebase and our Cloud Console configuration. The application now reads and
+writes its database spreadsheet through the Sheets API v4 using only the
+drive.file scope. The database is a spreadsheet the application creates
+itself on first run, so it falls within drive.file; teachers who already had
+one select it once through the Google Picker, which grants per-file access.
+
+This mirrors what we had already done for Drive: we call the Drive REST API
+v3 directly instead of the built-in DriveApp service, precisely so that
+drive.file is sufficient. We have now applied the same approach to Sheets,
+because the built-in SpreadsheetApp service is what required the broader
+scope. Our repository has automated tests that fail the build if either
+built-in service, or the spreadsheets scope, is reintroduced.
+
+The consent screen now shows seven scopes, and the new demonstration video
+was recorded against that configuration.
 
 --------------------------------------------------------------------
 5) Test credentials and navigation
@@ -268,9 +289,9 @@ their own test account:
 2. Approve the OAuth consent screen.
 3. On first run the app creates a spreadsheet named
    "{{DB_NAME}}" in that account's Drive; this is the only file it uses.
-4. "Weekly plan" tab: double-click any cell to enter a lesson (spreadsheets,
+4. "Weekly plan" tab: double-click any cell to enter a lesson (drive.file,
    write). "Hours" tab: the summary is read back from the same file.
-5. "Tasks" tab: add a task, then delete it (spreadsheets, write/delete).
+5. "Tasks" tab: add a task, then delete it (drive.file, write/delete).
    At the bottom of the same tab, enable "Reminder" and press "Send a test
    message now" (script.send_mail, script.scriptapp).
 6. "Settings" tab: "Scheduled automation" lists the triggers created in the
@@ -291,43 +312,13 @@ GIGAyama
 {{CONTACT_EMAIL}}
 ```
 
-### 指摘4 の差し込み文（どちらか一方）
-
-**Option 1（推奨）— 移行が済んでから送ること**
-
-```text
-Confirming narrower scopes.
-
-We have removed https://www.googleapis.com/auth/spreadsheets from both our
-codebase and our Cloud Console configuration. The application now reads and
-writes its spreadsheet through the Sheets API v4 with the drive.file scope
-only. The database spreadsheet is created by the application itself, so it
-falls within drive.file; for teachers who already had a database, the app
-uses the Google Picker so that they grant per-file access explicitly.
-
-This mirrors what we already did for Drive: we call the Drive REST API v3
-directly instead of the built-in DriveApp service, precisely so that
-drive.file is sufficient. We have applied the same approach to Sheets.
-```
-
-**Option 2 — 使うなら、`drive.file` で本当に不可能な理由を具体的に書くこと**
-
-```text
-Unable to use narrower scopes.
-
-{{理由をここに書く。「SpreadsheetApp が使えないから」は client library
-limitation にあたり、Google は正当な例外として認めないと明記しています。
-アプリの機能として drive.file では成立しない具体的な事情がある場合にだけ
-このオプションを使ってください。}}
-```
-
 ---
 
 ## 6. Cloud Console 側でやること
 
 - [ ] OAuth 同意画面の**プライバシーポリシー URL** が `privacy-policy.html` を指している
 - [ ] 登録スコープと `appsscript.json` の `oauthScopes` が一致している
-- [ ] （Option 1 を選ぶ場合）移行完了後に `spreadsheets` を外す
+- [ ] **`spreadsheets` を登録スコープから外す**（リポジトリ側は削除済み。Console 側は人手）
 - [ ] 公開ステータスは **In production** のまま（テストに戻さない）
 - [ ] 変更を保存して送信し、そのうえで**メールに直接返信**する
 
@@ -339,7 +330,7 @@ limitation にあたり、Google は正当な例外として認めないと明�
 - [ ] 動画に、4 スコープすべての「全体像」と「アカウント側の反映」が映っている
 - [ ] `npm run demo:verify` が問題なしで通った
 - [ ] プライバシーポリシーを公開し、`#s5` と `#s7` のアンカーが実際に飛ぶことを確認した
-- [ ] 指摘4 の Option を決め、返信文をどちらか一方に絞った
+- [ ] `drive.file` だけで週案が動くことを**実機で確認した**（[B5](B5_SHEETS_SCOPE_AUDIT.md) §6 のチェックリスト）
 - [ ] 返信は**元のメールへの直接返信**（新規メールにしない）
 
 ---

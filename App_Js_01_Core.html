@@ -285,22 +285,12 @@
             .createMyDatabase(input.value || '');
     }
 
-    /** 既存紐付けフロー: スプレッドシートのURL/IDを入力して自分のDBとして紐付けます。 */
+    /** 既存紐付けフロー: 使うスプレッドシートを選んで自分のDBとして紐付けます。 */
     async function onboardingLink() {
-        var input = await Swal.fire({
-            title: '既存のシートを紐付け',
-            input: 'text',
-            inputLabel: 'スプレッドシートの URL または ID',
-            inputPlaceholder: 'https://docs.google.com/spreadsheets/d/..../edit',
-            width: 560,
-            allowOutsideClick: false,
-            showCancelButton: true,
-            cancelButtonText: '戻る',
-            confirmButtonText: '紐付ける',
-            confirmButtonColor: '#34a853',
-            inputValidator: function (v) { if (!v) return 'URL または ID を入力してください。'; }
-        });
-        if (!input.isConfirmed) { reopenOnboarding(); return; }
+        // ドライブから選ぶのが主な導線。drive.file では、選んだファイルにだけ
+        // アクセス権が付くため（chooseDatabaseSource_ の説明を参照）。
+        var source = await chooseDatabaseSource_();
+        if (!source) { reopenOnboarding(); return; }
 
         Swal.fire({
             title: '確認中...',
@@ -350,7 +340,7 @@
                     allowOutsideClick: false
                 }).then(function () { reopenOnboarding(); });
             })
-            .linkMyDatabase(input.value || '');
+            .linkMyDatabase(source);
     }
 
     // ===== 週案グリッドの土日列 表示/非表示 =====

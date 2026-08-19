@@ -830,21 +830,129 @@
             .getTenantStatus();
     }
 
-    /** 別の既存スプレッドシートを自分のDBとして紐付け直します（linkMyDatabase）。 */
-    async function switchMyDatabaseUI() {
-        var input = await Swal.fire({
-            title: '別のシートに切替',
+    // ===== データベースの選び方（drive.file スコープ運用） =====
+    //
+    // アプリが要求するのは drive.file だけなので、触れるのは
+    //   1. アプリ自身が作ったスプレッドシート
+    //   2. 利用者が Google ピッカーで明示的に選んだスプレッドシート
+    // の2つに限られる。URL や ID を打ち込む方法は 1 にしか使えないため、
+    // 既存のシートを紐付けるときはピッカーを主な導線にする。
+    // オンボーディング（App_Js_01_Core.html）と設定タブの両方から使う。
+
+    /**
+     * 紐付けるスプレッドシートを選んでもらい、URL か ID を返します。
+     * @returns {Promise<string|null>} 選ばれなければ null
+     */
+    async function chooseDatabaseSource_() {
+        var choice = await Swal.fire({
+            title: 'どのシートを使いますか',
+            html: '<div style="text-align:left; font-size:0.9rem; line-height:1.8;">'
+                + 'このアプリは、<strong>あなたが選んだファイルだけ</strong>にアクセスできます'
+                + '（ドライブ全体は見られません）。<br>'
+                + 'すでにあるシートを使うときは、<strong>ドライブから選んで</strong>ください。'
+                + '</div>',
+            width: 560,
+            showDenyButton: true,
+            showCancelButton: true,
+            confirmButtonText: 'ドライブから選ぶ',
+            denyButtonText: 'URL / ID を入力',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#1a73e8',
+            allowOutsideClick: false
+        });
+
+        if (choice.isConfirmed) return await pickDatabaseFromDrive_();
+        if (!choice.isDenied) return null;
+
+        var typed = await Swal.fire({
+            title: 'URL / ID を入力',
             input: 'text',
-            inputLabel: '紐付けるスプレッドシートの URL または ID',
+            inputLabel: 'スプレッドシートの URL または ID',
             inputPlaceholder: 'https://docs.google.com/spreadsheets/d/..../edit',
+            html: '<div style="text-align:left; font-size:0.82rem; color:var(--text-sub); line-height:1.7;">'
+                + 'このアプリが作ったシートなら、この方法でも切り替えられます。<br>'
+                + 'それ以外のシートは「ドライブから選ぶ」を使ってください。'
+                + '</div>',
             width: 560,
             showCancelButton: true,
             cancelButtonText: 'キャンセル',
-            confirmButtonText: '切り替える',
+            confirmButtonText: '決定',
             confirmButtonColor: '#1a73e8',
+            allowOutsideClick: false,
             inputValidator: function (v) { if (!v) return 'URL または ID を入力してください。'; }
         });
-        if (!input.isConfirmed) return;
+        return typed.isConfirmed ? (typed.value || '') : null;
+    }
+
+    /**
+     * Google ピッカーでスプレッドシートを1つ選ばせ、そのIDを返します。
+     * ここで選ぶと、そのファイルにだけアプリのアクセス権（per-file）が付きます。
+     * @returns {Promise<string|null>}
+     */
+    function pickDatabaseFromDrive_() {
+        return new Promise(function (resolve) {
+            showToast('info', 'Google ドライブに接続中...');
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (!res || !res.success || !res.token) {
+                        showToast('error', '認証情報の取得に失敗しました: ' + ((res && res.error) || ''));
+                        resolve(null);
+                        return;
+                    }
+                    // 学校のネットワークで apis.google.com が塞がれていると gapi が無い。
+                    // 黙って固まらないよう、何が起きたかを伝える。
+                    if (typeof gapi === 'undefined' || !gapi.load) {
+                        showToast('error', 'Googleドライブの選択画面（apis.google.com）に接続できませんでした。学校のネットワーク制限が原因のことがあります。');
+                        resolve(null);
+                        return;
+                    }
+                    var open = function () { showDatabasePicker_(res.token, resolve); };
+                    if (!STATE.pickerApiLoaded) {
+                        gapi.load('picker', {
+                            callback: function () { STATE.pickerApiLoaded = true; open(); }
+                        });
+                    } else {
+                        open();
+                    }
+                })
+                .withFailureHandler(function (e) {
+                    showToast('error', '通信エラー: ' + (e && e.message ? e.message : String(e)));
+                    resolve(null);
+                })
+                .getPickerAuthInfo();
+        });
+    }
+
+    /**
+     * スプレッドシートだけを出すピッカーを開きます。
+     * @param {string} oauthToken
+     * @param {function(string|null)} resolve
+     */
+    function showDatabasePicker_(oauthToken, resolve) {
+        var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);
+        view.setMimeTypes('application/vnd.google-apps.spreadsheet');
+        var picker = new google.picker.PickerBuilder()
+            .addView(view)
+            // resolvePickerOrigin_ は App_Js_08_Events.html で定義している共通処理
+            .setOAuthToken(oauthToken)
+            .setCallback(function (data) {
+                if (data.action === google.picker.Action.PICKED) {
+                    var doc = (data.docs || [])[0];
+                    resolve(doc ? doc.id : null);
+                } else if (data.action === google.picker.Action.CANCEL) {
+                    resolve(null);
+                }
+            })
+            .setOrigin(resolvePickerOrigin_())
+            .setTitle('週案データベースにするスプレッドシートを選択')
+            .build();
+        picker.setVisible(true);
+    }
+
+    /** 別の既存スプレッドシートを自分のDBとして紐付け直します（linkMyDatabase）。 */
+    async function switchMyDatabaseUI() {
+        var source = await chooseDatabaseSource_();
+        if (!source) return;
 
         Swal.fire({
             title: '確認中...',
@@ -887,7 +995,7 @@
             .withFailureHandler(function (e) {
                 Swal.fire({ icon: 'error', title: '通信エラー', html: escHtml(e && e.message ? e.message : String(e)), confirmButtonColor: '#1a73e8' });
             })
-            .linkMyDatabase(input.value || '');
+            .linkMyDatabase(source);
     }
 
     /** テンプレートを複製して自分専用のDBを新規作成し、切り替えます（createMyDatabase）。 */

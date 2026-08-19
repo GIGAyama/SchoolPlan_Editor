@@ -1,18 +1,16 @@
 /**
  * @fileoverview Webアプリケーションのエントリポイントとデータ送受信API (Phase 3)
- * 
- * 重要: Webアプリコンテキスト（doGet経由）では SpreadsheetApp.getActiveSpreadsheet() が
- * null を返すため、全API関数では getSs_() ヘルパー経由でスプレッドシートを取得する。
+ *
+ * 重要: スプレッドシートは必ず getSs_() 経由で取得する。
+ * 中身は 18_SheetsApi.gs の REST ファサードで、SpreadsheetApp は使わない
+ * （spreadsheets スコープを要求してしまうため。docs/B5_SHEETS_SCOPE_AUDIT.md）。
  */
 
-/** Webアプリ・スプレッドシート両コンテキストで安全にSSを取得するヘルパー */
+/** このユーザーのデータベース（スプレッドシート）を取得するヘルパー */
 function getSs_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (ss) return ss;
-  // Webアプリコンテキスト: このユーザーの対象スプレッドシートを解決する。
   // 優先: ユーザー個別(UserProperties) → 従来のグローバル(ScriptProperties)。詳細は 11_Tenant.gs 参照。
   const id = resolveSpreadsheetId_();
-  if (id) return SpreadsheetApp.openById(id);
+  if (id) return sheetsOpenById_(id);
   throw new Error('使用するスプレッドシート（データベース）が設定されていません。ログイン後の初期設定でデータベースを作成または紐付けしてください。');
 }
 
@@ -21,18 +19,15 @@ function getSs_() {
  * 初回アクセス時に SPREADSHEET_ID をスクリプトプロパティへ自動保存する。
  */
 function doGet(e) {
-  // バインドスクリプトの場合、初回にスプレッドシートIDを記録
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    if (ss) {
-      PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
-      // マルチテナント移行の布石: このユーザーが未紐付けなら、バインド先を個別紐付けとして引き継ぐ。
-      // （standalone・実行ユーザー=アクセスユーザー構成へ移行しても同じアカウントで継続利用できる）
-      try {
-        if (!getUserSpreadsheetId_()) setUserSpreadsheetId_(ss.getId());
-      } catch (e2) {}
-    }
-  } catch(e) {}
+  // かつてはここでバインド先スプレッドシートを記録していたが、配布形態は
+  // スタンドアロン（docs/D1）に一本化され、SpreadsheetApp も使わなくなったため廃止した。
+  // 過去にバインドで使っていた利用者は、記録済みの SPREADSHEET_ID を
+  // resolveSpreadsheetId_() が拾うので、これまでどおり開ける。
+  //
+  // 祝日データの定期取得は onOpen が担っていたので、ここへ移した。
+  // 更新間隔内なら中で早々に返るため、毎回の起動が重くなることはない。
+  try { fetchAndStoreHolidays(); } catch (ignore) { /* 祝日が無くても週案は開ける */ }
+
   return HtmlService.createTemplateFromFile('App')
     .evaluate()
     .setTitle('週案エディタ')
@@ -729,7 +724,6 @@ function generateNewsletterPdf(mondayDateStr) {
     // 学級通信シートのA1に直接書き込む
     if (weekNum !== null && weekNum !== undefined) {
       sheet.getRange('A1').setValue(weekNum);
-      SpreadsheetApp.flush();
       Utilities.sleep(3000); // 描画待ち
     } else {
       logInfo('警告: DBに該当日付の週番号が見つかりませんでした。mondayDateStr=' + mondayDateStr);
@@ -737,14 +731,7 @@ function generateNewsletterPdf(mondayDateStr) {
 
     const formattedDate = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd');
     const fileName = `学級通信_${formattedDate}.pdf`;
-    const exportUrl = `https://docs.google.com/spreadsheets/d/${ss.getId()}/export?`
-      + `exportFormat=pdf&format=pdf&size=A4&portrait=true&fitToPage=true`
-      + `&gridlines=false&printtitle=false&sheetnames=false`
-      + `&gid=${sheet.getSheetId()}`;
-
-    const blob = UrlFetchApp.fetch(exportUrl, {
-      headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() }
-    }).getBlob().setName(fileName);
+    const blob = sheetsExportSheetAsPdf_(ss.getId(), sheet.getSheetId(), fileName);
 
     // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
     driveTrashByName_(fileName);
@@ -1034,30 +1021,6 @@ function applyTimetableToWeek(mondayStr) {
 // ===================================================
 
 /**
- * 残存シートを保護します。
- * メニューから実行されることを想定しています。
- */
-function protectSheets() {
-  const ui = SpreadsheetApp.getUi();
-  const response = ui.alert(
-    'シート保護の実行',
-    '以下のシートを保護します。\n\n' +
-    '「データベース」「単元マスタ」「ログ」「学級通信」\n\n' +
-    '実行しますか？',
-    ui.ButtonSet.YES_NO
-  );
-
-  if (response !== ui.Button.YES) {
-    ui.alert('キャンセルしました。');
-    return;
-  }
-
-  const results = protectSheets_core_();
-  ui.alert('完了', results.join('\n'), ui.ButtonSet.OK);
-  logInfo('シート保護完了:\n' + results.join('\n'));
-}
-
-/**
  * 主要シートを保護するコアロジック。UI非依存。処理結果メッセージの配列を返します。
  * @returns {string[]}
  */
@@ -1075,20 +1038,16 @@ function protectSheets_core_() {
       sheetsToProtect.push(c.sheetName);
     }
   });
-  const owner = Session.getEffectiveUser();
+  const ownerEmail = Session.getEffectiveUser().getEmail();
 
   sheetsToProtect.forEach(name => {
     try {
       const sheet = ss.getSheetByName(name);
       if (sheet) {
-        sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(p => p.remove());
-
-        const protection = sheet.protect().setDescription(`${name} (自動保護)`);
-        protection.addEditor(owner);
-        protection.removeEditors(protection.getEditors().filter(u => u.getEmail() !== owner.getEmail()));
-        if (protection.canDomainEdit()) {
-          protection.setDomainEdit(false);
-        }
+        // 既存のシート保護を外し、編集できるのを本人だけにした保護を1つ付け直す。
+        // SpreadsheetApp では protect().addEditor().removeEditors()... と連ねる操作だが、
+        // REST では 1 回の batchUpdate で済むのでファサード側にまとめてある。
+        sheet.protectWholeSheet(`${name} (自動保護)`, ownerEmail);
         results.push(`「${name}」シートを保護しました。`);
         logInfo(`「${name}」シートを保護しました。`);
       } else {
@@ -1138,7 +1097,7 @@ function clearDbColumnsCacheFromWeb() {
 
 const SP_KEY_HOLIDAYS = 'holidayDates';
 const SP_KEY_HOLIDAYS_UPDATED = 'holidayDatesUpdatedAt';
-// 祝日データの自動更新間隔（日）。この日数を超えていれば onOpen 等で再取得する。
+// 祝日データの自動更新間隔（日）。この日数を超えていれば doGet で再取得する。
 const HOLIDAY_REFRESH_INTERVAL_DAYS = 25;
 
 /**
@@ -1155,7 +1114,7 @@ function normalizeDateStr_(s) {
 
 /**
  * 内閣府CSVから祝日データを取得し、スクリプトプロパティに保存します。
- * onOpenトリガーやメニューから呼び出し可能。
+ * Webアプリの起動（doGet）や設定画面から呼び出します。
  * @param {boolean} [force] true の場合、更新間隔に関わらず強制的に再取得します。
  * @returns {boolean} 取得（更新）を行った場合 true、間隔内でスキップした場合 false
  */

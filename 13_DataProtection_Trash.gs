@@ -97,7 +97,6 @@ function trashTaskFromWebApp(taskId) {
       };
       const trashId = p3AppendTrash_('task', task.id, task.content, task);
       sheet.deleteRow(i + 1);
-      SpreadsheetApp.flush();
       p3RecordAudit_('TRASH', 'task', task.id, 'タスクをごみ箱へ移動', task, { trashId }, trashId);
       return { success: true, trashId, message: 'タスクをごみ箱へ移動しました。30日以内は復元できます。' };
     }
@@ -128,7 +127,6 @@ function trashUnitMasterRowFromWeb(rowIndex) {
       .filter(Boolean).join(' / ');
     const trashId = p3AppendTrash_('unitMaster', String(index), label, payload);
     sheet.deleteRow(index);
-    SpreadsheetApp.flush();
     p3RecordAudit_('TRASH', 'unitMaster', String(index), '単元マスタ行をごみ箱へ移動', payload, { trashId }, trashId);
     invalidateUnitProgressCache_();
     return { success: true, trashId, message: '単元マスタ行をごみ箱へ移動しました。' };
@@ -215,7 +213,6 @@ function restoreTrashItemFromWeb(trashId) {
     }
 
     found.sheet.deleteRow(found.sheetRow);
-    SpreadsheetApp.flush();
     p3RecordAudit_('RESTORE_TRASH', type, String(found.row[5] || ''), 'ごみ箱から復元', { trashId }, payload, trashId);
     return { success: true, entityType: type, message: 'ごみ箱から復元しました。' };
   } catch (e) {

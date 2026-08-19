@@ -857,7 +857,7 @@
         if (!result.isConfirmed) return;
 
         showToast('info', '処理を停止中...');
-        // resetAllPdfProcessing_UI はメニュー専用（SpreadsheetApp.getUi() 依存）のため、Web用APIを呼ぶ
+        // 強制停止は Web 用 API 経由で呼ぶ
         google.script.run
             .withSuccessHandler(function (res) {
                 if (res && res.success === false) {

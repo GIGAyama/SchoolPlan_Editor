@@ -23,7 +23,7 @@ function p3CreateFullBackup_(reason) {
   const now = new Date();
   const stamp = Utilities.formatDate(now, 'JST', 'yyyyMMdd_HHmmss');
   const backupName = p3SanitizeFileName_(source.getName()) + '_バックアップ_' + stamp;
-  const backup = SpreadsheetApp.create(backupName);
+  const backup = sheetsCreate_(backupName);
   const defaultSheet = backup.getSheets()[0];
   // コピー元に「シート1 / Sheet1」があっても名前衝突しないよう、一時シートを先に退避名へ変更する。
   defaultSheet.setName('__p3_backup_temp_' + Utilities.getUuid().split('-')[0]);
@@ -35,7 +35,6 @@ function p3CreateFullBackup_(reason) {
   });
 
   if (backup.getSheets().length > 1) backup.deleteSheet(defaultSheet);
-  SpreadsheetApp.flush();
 
   const item = {
     id: backup.getId(),

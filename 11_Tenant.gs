@@ -149,7 +149,7 @@ function getTenantStatus() {
     let name = '';
     if (id) {
       try {
-        const ss = SpreadsheetApp.openById(id);
+        const ss = sheetsOpenById_(id);
         name = ss.getName();
         linked = true;
       } catch (openErr) {
@@ -190,9 +190,12 @@ function linkMyDatabase(input) {
 
     let ss;
     try {
-      ss = SpreadsheetApp.openById(id);
+      ss = sheetsOpenById_(id);
     } catch (openErr) {
-      throw new Error('スプレッドシートを開けませんでした。URLが正しいか、このGoogleアカウントにアクセス権があるかを確認してください。');
+      // drive.file 運用では、URL や ID を打ち込む方法で開けるのは
+      // 「このアプリが作ったファイル」だけ。それ以外はピッカーで選んでもらう必要がある。
+      throw new Error('スプレッドシートを開けませんでした。'
+        + '「ドライブから選ぶ」で選び直してください（このアプリは、あなたが選んだファイルだけにアクセスできます）。');
     }
 
     // 「データベース」シートの有無を確認（無くても紐付けは許可するが警告を返す）
@@ -340,7 +343,7 @@ function createMyDatabase(name) {
       method = 'template';
     } else {
       // プログラム構築方式（テンプレート未設定でも新規作成できる）
-      const ss = SpreadsheetApp.create(title);
+      const ss = sheetsCreate_(title);
       initializeNewDatabase_(ss);
       newId = ss.getId();
       method = 'initialized';

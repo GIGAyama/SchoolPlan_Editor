@@ -376,7 +376,6 @@ function restoreWeekSnapshotFromWeb(snapshotId) {
       throw new Error((result && result.error) || '週案の復元に失敗しました');
     }
     p3RestoreReflections_(mondayDateStr, week.days || []);
-    SpreadsheetApp.flush();
 
     p3RecordAudit_(
       'WEEK_RESTORE',
@@ -452,7 +451,6 @@ function restoreUnitMasterSnapshotFromWeb(snapshotId) {
         }
         const excess = (lastRow - 1) - rows.length;
         if (excess > 0) sheet.deleteRows(2 + rows.length, excess);
-        SpreadsheetApp.flush();
         invalidateUnitProgressCache_();
         p3RecordAudit_('UNIT_MASTER_RESTORE', 'unitMaster', SHEET_NAME_UNIT_MASTER,
           '単元マスタ全体を復元', { safetySnapshotId: safetyId }, { restoredSnapshotId: snapshotId }, correlationId);

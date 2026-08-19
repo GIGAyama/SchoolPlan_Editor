@@ -2,61 +2,6 @@
  * @fileoverview Google Classroomへの時間割、学級通信のPDF投稿など連携機能
  */
 
-/** 
- * クラスルーム投稿用トリガーを設定します（時間指定）。
- */
-function setTriggers() {
-  const ui = SpreadsheetApp.getUi();
-  const functionNameToTrigger = "postScheduleToClassroom";
-  const response = ui.prompt('トリガー時間設定', `「${functionNameToTrigger}」を実行する時間を0～23時の整数で入力してください (例: 15):`, ui.ButtonSet.OK_CANCEL);
-  if (response.getSelectedButton() == ui.Button.OK) {
-    const hour = parseInt(response.getResponseText(), 10);
-    if (!isNaN(hour) && hour >= 0 && hour <= 23) {
-      try {
-        deleteTriggers_(functionNameToTrigger);
-        ScriptApp.newTrigger(functionNameToTrigger).timeBased().everyDays(1).atHour(hour).create();
-        logInfo(`トリガー作成: ${functionNameToTrigger} 毎日${hour}時`);
-        ui.alert(`トリガー設定を完了しました。\n毎日${hour}時に投稿が実行されます。`);
-      } catch (e) {
-        logError("setTriggers", e);
-        ui.alert(`トリガー設定エラー: ${e.message}\n(権限が不足している可能性があります)`);
-      }
-    } else {
-      ui.alert(`入力が無効です。「${response.getResponseText()}」。0から23の整数で入力してください。`);
-    }
-  } else {
-    ui.alert('トリガー設定をキャンセルしました。');
-  }
-}
-
-/**
- * アカウント連携クラス一覧を取得して表示します。
- */
-function listCoursesToSheet() {
-  try {
-    let courses = [];
-    let pageToken = null;
-    do {
-      const response = Classroom.Courses.list({ pageSize: 100, courseStates: ['ACTIVE'], pageToken: pageToken });
-      if (response.courses) {
-        courses = courses.concat(response.courses);
-      }
-      pageToken = response.nextPageToken;
-    } while (pageToken);
-
-    if (courses.length === 0) {
-      SpreadsheetApp.getUi().alert("有効なクラスが見つかりませんでした。");
-    } else {
-      const names = courses.map(c => c.name);
-      logInfo('クラス一覧: ' + names.join(', '));
-      SpreadsheetApp.getUi().alert('クラス一覧の取得が完了しました。\n' + names.join('\n'));
-    }
-  } catch (e) {
-    logError("listCoursesToSheet", e);
-    SpreadsheetApp.getUi().alert(`クラス一覧取得エラー: ${e.message}\n（APIの有効化や権限を確認してください）`);
-  }
-}
-
 /**
  * データベースから次の登校日の予定を読み取り、Google Classroomにお知らせとして投稿します。
  * 本日が登校日のときのみ実行し、休みを挟む場合は休み直前の登校日に休み明けの予定を投稿します
@@ -379,7 +324,7 @@ function autoPostToClassroom_core_() {
 
 /**
  * [Webアプリ API] 連携可能なClassroomクラスの一覧を取得します（UI非依存・結果を返す）。
- * メニュー版 listCoursesToSheet のWeb対応版。
+ * 連携できるクラスの一覧を返します。
  * @returns {{success: boolean, message: string, courses: string[]}}
  */
 function listCoursesFromWeb() {
@@ -417,9 +362,7 @@ function createAndSavePDF(sheetName) {
     if (!sheet) throw new Error(`シート「${sheetName}」見つからず`);
     const formattedDate = Utilities.formatDate(new Date(), "JST", "yyyyMMdd");
     const pdfFileName = `${sheetName}_${formattedDate}.pdf`;
-    const url = `https://docs.google.com/spreadsheets/d/${ss.getId()}/export?` +
-      `exportFormat=pdf&format=pdf&size=A4&portrait=true&fitToPage=true&gridlines=false&gid=${sheet.getSheetId()}`;
-    const blob = UrlFetchApp.fetch(url, { headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() } }).getBlob().setName(pdfFileName);
+    const blob = sheetsExportSheetAsPdf_(ss.getId(), sheet.getSheetId(), pdfFileName);
     // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
     driveTrashByName_(pdfFileName);
     const file = driveCreateFile_(pdfFileName, blob);

@@ -379,7 +379,6 @@ function p4WriteUnitRows_(subject, unitName, hours, options) {
       sheet.deleteRows(firstRow + rowsAfter, rowsBefore - rowsAfter);
     }
     sheet.getRange(firstRow, 1, rowsAfter, P4_MASTER_WIDTH_).setValues(newRows);
-    SpreadsheetApp.flush();
 
     p3RecordAudit_(
       options.auditAction || 'UNIT_REWRITE',
@@ -524,7 +523,6 @@ function repairUnitMasterConsistency(targets) {
       // 行数が減った場合は末尾の余りを1回で消す
       const excess = (lastRow - 1) - rows.length;
       if (excess > 0) sheet.deleteRows(2 + rows.length, excess);
-      SpreadsheetApp.flush();
 
       p3RecordAudit_(
         'UNIT_MASTER_REPAIR',

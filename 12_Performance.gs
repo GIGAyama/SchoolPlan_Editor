@@ -560,7 +560,6 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
     // 「保存の競合」になっていた(単独利用でも頻発する原因)。
     let afterState = rowState;
     if (uniqueChangedRows.length > 0) {
-      SpreadsheetApp.flush();
       afterState = p2ReadRowsForDates_(dbSheet, dbCols, weekDateStrs);
       // 単元セルが変わると単元の進捗も変わるため、進捗インデックスのキャッシュを捨てる。
       invalidateUnitProgressCache_();
