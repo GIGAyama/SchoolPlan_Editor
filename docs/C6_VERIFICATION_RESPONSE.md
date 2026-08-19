@@ -147,7 +147,7 @@ Workspace API の Limited Use 要件と両立しません。API キーは利用�
 呼び出しは 22 ファイル・約 470 箇所に散っているため、**呼び出し側は書き換えず、
 `SpreadsheetApp` 互換のファサードを REST で作る**（`17_DriveApi.gs` と同じ設計）方針です。
 
-1. `SpreadsheetApp.getActiveSpreadsheet()` の直接呼び 39 箇所を `getSs_()` に集約する
+1. ~~取得口を `getSs_()` に集約する~~（✅ 実施済み。防御的な三項 21 箇所を単純化）
 2. コンテナバインド専用の遺物（`onOpen` / `getUi` / `toast` / `onEdit`）を切り離す
 3. `18_SheetsApi.gs` にファサードを実装し、読み取り経路から段階的に切り替える
 4. 書き込み・書式・保護を移す
