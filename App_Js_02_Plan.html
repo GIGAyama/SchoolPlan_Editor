@@ -2023,7 +2023,7 @@
                     showToast('success', res.message);
                     showAutoFillWarnings(res.warnings);
                     // 翌週以降が書き換わっているため、他週のクライアントキャッシュを破棄する
-                    if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
+                    p2InvalidateWeekCache();
                     loadWeeklyPlan(); // 現在の週をリロード
                 } else {
                     showToast('error', 'エラー: ' + res.error);
@@ -2174,7 +2174,7 @@
                         showToast('success', result.message);
                     }
                     // ずらしは週をまたいで書き換えるため、他週のクライアントキャッシュを破棄する
-                    if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
+                    p2InvalidateWeekCache();
                     loadWeeklyPlan(); // 現在の週をリロード
                 } else {
                     showToast('error', 'ずらし処理エラー: ' + (result ? result.error : '不明なエラー'));

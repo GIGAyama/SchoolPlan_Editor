@@ -722,9 +722,12 @@
                 if (res.notInDb > 0) skipped.push('DBに無い日付 ' + res.notInDb + '件');
                 if (skipped.length > 0) lines.push('<span style="font-size:0.85em;color:#888;">スキップ: ' + skipped.join(' / ') + '</span>');
                 Swal.fire({ icon: 'success', title: '反映が完了しました', html: lines.join('<br>'), confirmButtonColor: '#1a73e8' });
+                // 行事は年間の複数週へ書き込まれる。手元の週キャッシュを残すと、
+                // 週を移動したときに反映前の内容が出てしまうため全て捨てる。
+                if (typeof p2InvalidateWeekCache === 'function') p2InvalidateWeekCache();
                 // 表示中の週案に反映結果を反映
                 if (STATE.mondayStr && typeof loadWeeklyPlan === 'function') {
-                    try { loadWeeklyPlan(STATE.mondayStr); } catch (e) { }
+                    try { loadWeeklyPlan(); } catch (e) { }
                 }
             } catch (e) {
                 showToast('error', 'エラー: ' + e.message);

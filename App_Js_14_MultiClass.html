@@ -85,7 +85,7 @@
         STATE.hoursSummaryData = null;
         STATE.stdHoursLoaded = false;
         STATE.isSystemSettingsLoaded = false;
-        if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
+        p2InvalidateWeekCache();
 
         if (STATE.mondayStr) loadWeeklyPlan();
         else goToToday();
@@ -439,6 +439,24 @@
                 if (!cached) showToast('error', '通信エラー: ' + e.message);
             })
             .getWeeklyPlanDataV2(mondayStr);
+    }
+
+    /**
+     * サーバー側で週データが書き換わったとき、クライアントの週キャッシュを捨てます。
+     *
+     * 画面を経由せずDBを直接書き換える操作（固定時間割の転記・一括自動入力・単元のずらし・
+     * 行事PDFの反映・バックアップからの復元）の後は必ずこれを呼ぶこと。捨てずに読み直すと、
+     * doLoadWeeklyPlan() がキャッシュにある「書き換え前の週」を先に描いてしまう。
+     * その状態のまま保存すると、書き換えた内容を古い内容で上書きして消してしまう。
+     *
+     * @param {boolean} [reloadCurrentWeek] true なら表示中の週も読み直す
+     */
+    function p2InvalidateWeekCache(reloadCurrentWeek) {
+        if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
+        // 週の内容が変われば単元の進捗も変わる（p2UpdateCurrentWeekCache と同じ理由）
+        STATE.unitProgress = null;
+        STATE.unitProgressLoading = false;
+        if (reloadCurrentWeek && STATE.mondayStr) doLoadWeeklyPlan();
     }
 
     function p2UpdateCurrentWeekCache() {

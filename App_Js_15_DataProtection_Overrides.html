@@ -161,7 +161,7 @@
                         p3SetBusy(btn, false);
                         if (!res || !res.success) { showToast('error', (res && (res.error || res.message)) || '失敗'); return; }
                         showToast('success', res.message);
-                        if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
+                        p2InvalidateWeekCache();
                         doLoadWeeklyPlan(); p3LoadProtectionStatus(false);
                     }).catch(function (e) { p3SetBusy(btn, false); _onCommError(e); });
                 });
