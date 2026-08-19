@@ -63,7 +63,14 @@ function inlineIncludes(html) {
 export function buildPreview() {
   const source = fs.readFileSync(path.join(ROOT, 'App.html'), 'utf8');
   let html = inlineIncludes(source);
-  if (html.includes('<?')) throw new Error('置き換えられていない GAS テンプレート構文が残っています');
+
+  // include 以外のスクリプトレット（`<?= PWA_SHELL_URL ?>` など）はサーバ側の値なので
+  // オフラインでは決まらない。空文字にして、静的なマークアップだけを残す。
+  html = html.replace(/<\?[\s\S]*?\?>/g, '');
+
+  // 残ったスクリプトレットだけを弾く。`Promise<?Array>` のような JSDoc は
+  // `<?` に続く文字が `!`・`=`・空白ではないので誤検知しない。
+  if (/<\?[!=\s]/.test(html)) throw new Error('置き換えられていない GAS テンプレート構文が残っています');
 
   // apis.google.com の Picker はオフラインでは読めないので外す
   html = html.replace(/<script[^>]*apis\.google\.com[^>]*><\/script>/g, '');

@@ -1741,6 +1741,101 @@ function saveTaskReminderSettings(enabled, hour) {
 }
 
 /**
+ * 自動実行（トリガー）の表示名。`script.scriptapp` で作るトリガーは
+ * すべてここに列挙し、利用者が設定画面で中身を確認・削除できるようにする。
+ * 「何が自分のアカウントに登録されたのか分からない」状態を作らないための一覧。
+ */
+const TRIGGER_LABELS_ = {
+  sendTaskReminderMail: {
+    label: 'タスクのリマインダーメール',
+    detail: '毎日1回、未完了のタスクを自分あてにメールで通知します。'
+  },
+  postScheduleToClassroom: {
+    label: 'Classroom への予定の自動投稿',
+    detail: '毎日1回、翌日の予定を連携中のクラスへ投稿します。'
+  },
+  createUnitMasterFromPdfs: {
+    label: '指導計画 PDF の読み取り（バックグラウンド）',
+    detail: '取り込み中だけ動き、読み取りが終わると自動で消えます。'
+  },
+  processNextEventPdf: {
+    label: '行事予定 PDF の読み取り（バックグラウンド）',
+    detail: '取り込み中だけ動き、読み取りが終わると自動で消えます。'
+  },
+  cleanupOrphanedTriggers: {
+    label: '不要な自動実行の自動整理',
+    detail: '毎晩、役目を終えた自動実行が残っていないか点検して片づけます。'
+  }
+};
+
+/**
+ * [Web API] このアカウントに登録されている、本アプリの自動実行（トリガー）を一覧します。
+ * `ScriptApp.getProjectTriggers()` は実行中の利用者本人のトリガーだけを返すため、
+ * 他の利用者の設定が見えることはありません。
+ * @returns {Object} { success: boolean, triggers: Array<Object>, error?: string }
+ */
+function getMyTriggersForWebApp() {
+  try {
+    const reminderHour = tGetProp_(SP_KEY_TASK_REMINDER_HOUR);
+    const postHour = getSetting(SP_KEY_POST_HOUR);
+
+    const triggers = ScriptApp.getProjectTriggers().map(function (trigger) {
+      const handler = trigger.getHandlerFunction();
+      const known = TRIGGER_LABELS_[handler] || { label: handler, detail: '' };
+      let schedule = '';
+      if (handler === 'sendTaskReminderMail' && reminderHour) schedule = `毎日 ${reminderHour} 時ごろ`;
+      if (handler === 'postScheduleToClassroom' && postHour) schedule = `毎日 ${postHour} 時ごろ`;
+      return {
+        id: trigger.getUniqueId(),
+        handler: handler,
+        label: known.label,
+        detail: known.detail,
+        schedule: schedule
+      };
+    });
+
+    return { success: true, triggers: triggers };
+  } catch (e) {
+    logError('getMyTriggersForWebApp', e);
+    return { success: false, error: describeAuthError_(e, '自動実行（トリガー）の確認') };
+  }
+}
+
+/**
+ * [Web API] 指定した自動実行（トリガー）を削除します。
+ * 設定に紐づくもの（リマインダー・Classroom 投稿）は、設定側のフラグも合わせて落とし、
+ * 「消したのに翌日また作られる」ことがないようにします。
+ * @param {string} triggerId 削除するトリガーの一意 ID
+ * @returns {Object} { success: boolean, message?: string, error?: string }
+ */
+function deleteMyTriggerForWebApp(triggerId) {
+  try {
+    if (!triggerId) throw new Error('削除する自動実行が指定されていません。');
+
+    const target = ScriptApp.getProjectTriggers().filter(function (trigger) {
+      return trigger.getUniqueId() === triggerId;
+    })[0];
+    if (!target) return { success: true, message: 'その自動実行はすでに解除されています。' };
+
+    const handler = target.getHandlerFunction();
+    ScriptApp.deleteTrigger(target);
+
+    if (handler === 'sendTaskReminderMail') {
+      tSetProp_(SP_KEY_TASK_REMINDER_ENABLED, 'false');
+    } else if (handler === 'postScheduleToClassroom') {
+      tSetProp_(SP_KEY_POST_HOUR, '');
+    }
+
+    const known = TRIGGER_LABELS_[handler];
+    logInfo(`自動実行を解除しました: ${handler}`);
+    return { success: true, message: `「${known ? known.label : handler}」を解除しました。` };
+  } catch (e) {
+    logError('deleteMyTriggerForWebApp', e);
+    return { success: false, error: describeAuthError_(e, '自動実行（トリガー）の解除') };
+  }
+}
+
+/**
  * [トリガー実行] 期限切れ・今日・直近1週間の未完了タスクをメールで通知します。
  * 対象タスクが1件もない場合は送信をスキップします。
  * @returns {Object} { success: boolean, sent: boolean, message: string }

@@ -18,27 +18,39 @@
 
 ---
 
+> ⚠️ **2026-08 の差し戻しを受けて改訂しました。**
+> Google からは「**スコープごとに、機能の全体像（maximum extent）を実演すること**」と
+> 「**書き込み・削除の権限は、変更が利用者の Google アカウント側に反映されるところまで映すこと**」を求められています。
+> 対応の全体像は [C6: 審査差し戻しへの回答](C6_VERIFICATION_RESPONSE.md) にまとめてあります。
+
+---
+
 ## 0. まず結論：この動画で証明すべきこと
 
 審査担当者は動画だけを見て「このアプリは、申請したスコープを、申請どおりの目的で使っているか」を判断します。
-つまり **要求スコープ 1 つにつき、それを使っている画面が最低 1 回映っている**必要があります。
+必要なのは次の 2 つです。
+
+1. **要求スコープ 1 つにつき、それを使っている機能を「できることの全体」まで実演する**
+   （1 画面だけ映して終わりにしない。読み取り・書き込み・削除がある機能はすべて見せる）
+2. **書き込み・削除については、その結果が利用者の Google アカウント側に現れるところまで映す**
+   （例：メールなら Gmail の受信トレイ、シートなら実際のスプレッドシート、トリガーならアプリ内の自動実行一覧）
 
 本アプリの要求スコープと、動画で対応させるシーンは次のとおりです。
 
 | # | スコープ | 種別 | 動画で証明するシーン |
 |---|----------|------|----------------------|
 | 1 | `userinfo.email` | sensitive | シーン7（リマインダーがログイン中の本人宛に届く）／シーン3（「設定」タブの「使用中のデータベース」に表示されるログイン中アカウント） |
-| 2 | `spreadsheets` | sensitive | シーン4（週案グリッドの入力 → 本人所有スプレッドシートに保存されるところ） |
+| 2 | `spreadsheets` | sensitive | シーン4（入力＝書き込み／時数集計＝読み取り／タスクの追加・削除、**すべてスプレッドシート側で確認**） |
 | 3 | `drive.file` | sensitive | シーン6（学級通信のPDF出力 → アプリが作成したファイルだけが Drive にできる） |
-| 4 | `script.send_mail` | sensitive | シーン7（「今すぐテスト送信」→ 受信箱で確認） |
+| 4 | `script.send_mail` | sensitive | シーン7（「今すぐテスト送信」→ **Gmail の受信トレイで実物と宛先を確認**） |
 | 5 | `classroom.courses.readonly` | sensitive | シーン8前半（クラス一覧の読み込み） |
 | 6 | `classroom.announcements` | sensitive | シーン8後半（Classroom へ投稿 → Classroom 側のストリームで確認） |
-| 7 | `script.external_request` | 非 sensitive | シーン5（Gemini による学級通信生成／祝日データ取得） |
-| 8 | `script.scriptapp` | 非 sensitive | シーン7（リマインダー時刻の設定＝時限トリガー作成） |
+| 7 | `script.external_request` | 非 sensitive | シーン5（Gemini 生成＋**送信先の全列挙**：Gemini API／Drive REST API／内閣府の祝日 CSV） |
+| 8 | `script.scriptapp` | 非 sensitive | シーン7-2（設定タブ「自動実行（トリガー）の状況」で**登録と解除がアカウントに反映される**ところ） |
 
-> ⚠️ **7・8 は sensitive ではありませんが、同意画面には表示されます。**
-> 同意画面を映すシーン3で自然に映るので、個別シーンを削っても構いません。
-> 逆に **1〜6 のシーンは 1 つでも欠けると差し戻しの原因**になります。
+> ⚠️ **7・8 は sensitive ではありませんが、2026-08 の差し戻しで名指しされました。**
+> 「同意画面に出るから十分」ではなく、**専用のシーンで実演**してください（シーン5・シーン7-2）。
+> **どのシーンも 1 つでも欠けると差し戻しの原因**になります。
 
 ---
 
@@ -107,12 +119,12 @@
 
 ## 3. 撮影台本
 
-**想定尺：6〜8分。** 各シーンの「English caption」は、そのまま字幕として画面下部に載せる想定の英文です。
+**想定尺：9〜10分。**（2026-08 の差し戻しを受け、網羅性を優先して長くしています。`npm run demo:verify` が実測見積もりを出します） 各シーンの「English caption」は、そのまま字幕として画面下部に載せる想定の英文です。
 ナレーションする場合も同じ文を読み上げれば要件を満たします。
 
 ---
 
-### シーン1：アプリの紹介（0:00〜0:40）
+### シーン1：アプリの紹介（約30秒）
 
 **映すもの**：紹介ページ（`https://schoolplan-editor.giga-school.com/about.html`）、続けてプライバシーポリシーと利用規約のページ。
 
@@ -130,7 +142,7 @@
 
 ---
 
-### シーン2：教員本人のスプレッドシート（0:40〜1:10）
+### シーン2：教員本人のスプレッドシート（約30秒）
 
 **映すもの**：教員本人の Google スプレッドシート（週案データベース）。
 
@@ -150,7 +162,7 @@
 
 ---
 
-### シーン3：OAuth 同意画面（1:10〜2:10）★最重要★
+### シーン3：OAuth 同意画面（約1分）★最重要★
 
 **映すもの**：Google のログイン → アカウント選択 → **同意画面（全スコープが見える状態）** → アプリ初期画面。
 
@@ -174,24 +186,40 @@
 
 ---
 
-### シーン4：週案の入力＝`spreadsheets`（2:10〜3:00）
+### シーン4：スプレッドシートの読み書き＝`spreadsheets`（約1分45秒）★書き込み・削除の反映を見せる★
 
-**映すもの**：「週案」タブのグリッド入力と、それがスプレッドシートに保存される様子。
+**映すもの**：週案の入力（書き込み）→ 時数集計（読み取り）→ タスクの追加と削除（書き込み・削除）→ **スプレッドシート本体での確認**。
+
+> 📌 このシーンは「セルに1つ入力して終わり」では**足りません**。
+> 2026-08 の差し戻しでは `spreadsheets` が名指しされ、「機能の全体像を見せること」と
+> 「変更が Google アカウント側に反映されるところまで見せること」を求められています。
 
 **操作**：
-1. 週案グリッドのセルをダブルクリックして編集し、教科・単元・学習活動を入力
+1. 「週案」タブでセルをダブルクリックして編集し、教科・単元・学習活動を入力（**書き込み**）
 2. 保存されたことが分かる表示（トースト等）を映す
-3. **スプレッドシートのタブに切り替え、同じ内容が書き込まれているのを見せる**（これが決定打）
+3. 「時数」タブを開き、集計が表示されるところを映す（**読み取り**：同じシートから計算している）
+4. 「タスク」タブでタスクを1件追加して保存（**書き込み**）
+5. 続けてそのタスクを削除（**削除**：行はごみ箱シートへ移る）
+6. **スプレッドシート本体を開き、次の3つを順に見せる**（ここが決定打）
+   - 週案シート … 手順1で入力したセルが入っている
+   - タスクシート … 追加した行と、削除で減った行
+   - ごみ箱シート … 削除した行がここへ移っている
 
 **English caption**：
 > Teachers enter their weekly lesson plan in this grid.
 > The data is written to the teacher's own spreadsheet, shown here.
+> The same scope is used to read the data back: this annual lesson-hour summary is calculated from the rows stored in that spreadsheet.
+> Creating and deleting a task writes to, and removes rows from, the same spreadsheet. Deleted rows are moved to a recycle-bin sheet inside the same file.
+> Here is the teacher's spreadsheet in their own Google account, showing exactly the changes made in the app a moment ago.
 > We use the `spreadsheets` scope only to read and write this single database file, which is owned by the teacher.
 > We never access any other spreadsheet.
 
+> 💡 シーン2で「このスプレッドシートは**アプリ自身が初回に作る**」と述べておくと、
+> 「なぜ `drive.file` ではなく `spreadsheets` なのか」という追加質問への布石になります。
+
 ---
 
-### シーン5：AI 支援＝`script.external_request`（3:00〜3:40）
+### シーン5：AI 支援と外部通信の全体＝`script.external_request`（約1分15秒）
 
 **映すもの**：「学級通信」タブで Gemini による本文生成。
 
@@ -199,14 +227,23 @@
 1. 「学級通信」タブを開く
 2. AI 生成ボタンを押し、生成された文章が挿入されるまで映す
 
+**追加の操作**：
+3. 「設定」タブを開き、**Gemini API 設定の注意書き（有料ティア必須）**を映す
+4. 外部通信の送信先が次の3つだけであることを字幕で明示する
+   - Gemini API（AI 機能）
+   - Google Drive REST API（アプリが作ったファイルの操作。`DriveApp` を使わないため）
+   - 内閣府「国民の祝日」CSV（公開データの取得のみ。利用者データは送らない）
+
 **English caption**：
 > The app calls the Gemini API to draft the class newsletter from the teacher's lesson plan.
 > This external HTTPS request requires the `script.external_request` scope.
-> The API key is stored per user in Apps Script properties and is never shared.
+> The API key is supplied and stored by each teacher in their own Apps Script user properties. We never receive it.
+> This is every outbound request the app makes: the Gemini API for the AI features, the Google Drive REST API to handle the files it creates, and a public holiday calendar file published by the Japanese government.
+> We require a paid-tier Gemini key, shown in this notice, because free-tier content may be used to improve Google's models — which our Limited Use commitment does not allow.
 
 ---
 
-### シーン6：PDF 出力＝`drive.file`（3:40〜4:20）
+### シーン6：PDF 出力＝`drive.file`（約45秒）
 
 **映すもの**：学級通信の PDF 出力と、生成された PDF が Drive にできる様子。
 
@@ -224,7 +261,7 @@
 
 ---
 
-### シーン7：メールリマインダー＝`script.send_mail` + `userinfo.email` + `script.scriptapp`（4:20〜5:20）
+### シーン7：メールリマインダー＝`script.send_mail` + `userinfo.email`（約1分5秒）
 
 **映すもの**：「タスク」タブのリマインダー設定 → テスト送信 → 受信箱。
 
@@ -245,10 +282,41 @@
 > As you can see, the email is delivered to the account that is signed in. We never email anyone else.
 
 > ⚠️ 宛先欄が読める状態で映してください。「本人宛にしか送らない」ことの証明になります。
+> Gmail では **受信トレイに届いた状態 → メールを開く → 宛先（To）→ 本文** の順に、それぞれ3秒以上静止します。
+> 「送信した」ではなく「**送信先アカウントに届いた**」ところまでが求められています。
+
+**English caption（Gmail を映しているとき）**：
+> Here is the message in the signed-in teacher's own Gmail inbox. The To field is that same teacher.
+> The app has no recipient list, no other addresses, and cannot read any mail — it only sends this one reminder.
 
 ---
 
-### シーン8：Classroom 連携＝`classroom.courses.readonly` + `classroom.announcements`（5:20〜6:40）★2つ目の山場★
+### シーン7-2：自動実行の登録と解除＝`script.scriptapp`（約1分）★2026-08 の差し戻しで追加★
+
+**映すもの**：「設定」タブの **「自動実行（トリガー）の状況」** カード。
+
+> 📌 このカードは、`script.scriptapp` で作られたトリガーが
+> 「いま自分の Google アカウントに何個登録されているか」を見せ、その場で解除もできる画面です。
+> 書き込み系スコープに求められる **source account impact**（アカウント側への反映）を、
+> この一覧の増減で示します。
+
+**操作**：
+1. 「設定」タブを開き、「自動実行（トリガー）の状況」までスクロールする
+2. シーン7で有効化したリマインダーが**一覧に現れている**ことを映す（3秒以上静止）
+3. 「解除」を押し、確認ダイアログで解除する
+4. **一覧からその行が消える**ところを映す（削除がアカウントに反映された証明）
+
+**English caption**：
+> The `script.scriptapp` scope is used to schedule work in the teacher's own account. This panel lists every trigger the app has created there.
+> The daily reminder we just enabled now appears here as a scheduled trigger, together with the nightly job that cleans up triggers which are no longer needed.
+> Deleting it here removes the trigger from the teacher's account immediately, as the list confirms. Teachers can see and remove every scheduled job the app created.
+
+> 💡 PDF の取り込みを実演した直後にこの画面を開くと、**バックグラウンド処理用の一時トリガー**も一覧に出ます。
+> 時間に余裕があれば、その様子（処理が終わると自動で消える）も撮っておくと説得力が上がります。
+
+---
+
+### シーン8：Classroom 連携＝`classroom.courses.readonly` + `classroom.announcements`（約1分25秒）★2つ目の山場★
 
 **映すもの**：「設定」タブの Google Classroom 連携 → クラス一覧の取得 → 投稿 → Classroom 側での確認。
 
@@ -275,7 +343,7 @@
 
 ---
 
-### シーン9：まとめ（6:40〜7:10）
+### シーン9：まとめ（約30秒）
 
 **映すもの**：アプリのトップ画面に戻る。
 
@@ -293,7 +361,9 @@
 - [ ] シーン3で**アドレスバーの `client_id` が一時停止して読める**
 - [ ] 同意画面が **English** で表示されている
 - [ ] 同意画面のアプリ名が申請するアプリ名と一致
-- [ ] シーン4〜8で **sensitive スコープ 6 個すべて**が実演されている
+- [ ] シーン4〜8で **要求スコープ 8 個すべて**が実演されている（`script.external_request` と `script.scriptapp` も専用シーンで）
+- [ ] **書き込み・削除の反映**が、それぞれ Google アカウント側で映っている
+      （スプレッドシート本体／Gmail の受信トレイ／Classroom のストリーム／Drive のファイル／自動実行の一覧）
 - [ ] 実在の児童・保護者・教職員の氏名、写真、メールアドレスが**一切映っていない**
 - [ ] API キー、OAuth トークン、スプレッドシート ID などの秘密情報が映っていない
 - [ ] 英語字幕またはナレーションが全編に入っている

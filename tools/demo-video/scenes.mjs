@@ -69,8 +69,13 @@ export const SCENES = [
       },
       {
         kind: 'caption',
+        ms: 9000,
+        text: 'The application creates this spreadsheet itself the first time a teacher signs in, and it reads and writes only this one file.',
+      },
+      {
+        kind: 'caption',
         ms: 8000,
-        text: 'The application is a standalone web app. It reads and writes only this one spreadsheet, which the teacher selects.',
+        text: 'It never opens any other spreadsheet in the teacher’s Drive, and it never sees another teacher’s data.',
       },
       { kind: 'wait', ms: 3000 },
     ],
@@ -157,17 +162,58 @@ export const SCENES = [
       },
       { kind: 'wait', ms: 2500 },
       { kind: 'highlight', selector: '#tenantDbName', optional: true },
-      { kind: 'goto', url: '{{SHEET_URL}}' },
+
+      // 読み取り側も見せる。集計画面は同じスプレッドシートを読んで作られる。
+      { kind: 'click', selector: 'header .nav-btn[data-view="hours"]' },
+      { kind: 'expect', selector: '#view-hours.active' },
+      {
+        kind: 'caption',
+        ms: 9000,
+        text: 'The same scope is used to read the data back: this annual lesson-hour summary is calculated from the rows stored in that spreadsheet.',
+      },
+      { kind: 'wait', ms: 2500 },
+
+      // 書き込み・削除まで含めて、実際にシート側が変わることを見せる（source account impact）
+      { kind: 'click', selector: 'header .nav-btn[data-view="task"]' },
+      { kind: 'expect', selector: '#view-task.active' },
+      {
+        kind: 'manual',
+        prompt: [
+          'タスクを1件追加し、保存してください（新しい行がシートに書き込まれます）。',
+          '続けて、そのタスクを削除してください（行がごみ箱シートへ移ります）。',
+          '終わったら Enter を押してください。',
+        ].join('\n'),
+        ms: 0,
+      },
       {
         kind: 'caption',
         ms: 10000,
-        text: 'We use the spreadsheets scope only to read and write this single database file, which is owned by the teacher. We never access any other spreadsheet.',
+        text: 'Creating and deleting a task writes to, and removes rows from, the same spreadsheet. Deleted rows are moved to a recycle-bin sheet inside the same file.',
+      },
+
+      { kind: 'goto', url: '{{SHEET_URL}}' },
+      {
+        kind: 'caption',
+        ms: 11000,
+        text: 'Here is the teacher’s spreadsheet in their own Google account, showing exactly the changes made in the app a moment ago.',
       },
       {
-        kind: 'note',
-        text: '同じ内容がシート側に書き込まれていることを画面で確認できるまで静止する',
+        kind: 'manual',
+        prompt: [
+          'スプレッドシート側で次を順に見せてください（source account impact の証明）。',
+          '  1. 週案シート … いま入力したセルが書き込まれている',
+          '  2. タスクシート … 追加した行と、削除で減った行',
+          '  3. ごみ箱シート … 削除した行がここへ移っている',
+          'シート下部のタブを切り替えながら、各3秒以上静止します。終わったら Enter。',
+        ].join('\n'),
+        ms: 0,
       },
-      { kind: 'wait', ms: 4000 },
+      {
+        kind: 'caption',
+        ms: 11000,
+        text: 'We use the spreadsheets scope only to read and write this single database file, which is owned by the teacher. We never access any other spreadsheet.',
+      },
+      { kind: 'wait', ms: 3000 },
       { kind: 'goto', url: '{{APP_URL}}' },
       { kind: 'expect', selector: '#view-plan.active' },
     ],
@@ -200,8 +246,29 @@ export const SCENES = [
       },
       {
         kind: 'caption',
-        ms: 8000,
-        text: 'The API key is stored per user in Apps Script properties and is never shared.',
+        ms: 9000,
+        text: 'The API key is supplied and stored by each teacher in their own Apps Script user properties. We never receive it.',
+      },
+
+      // 送信先を網羅して示す。「外部通信＝Gemini だけ」ではないことを先に明かしておく。
+      { kind: 'goto', url: '{{APP_URL}}' },
+      { kind: 'click', selector: 'header .nav-btn[data-view="settings"]' },
+      { kind: 'expect', selector: '#view-settings.active' },
+      { kind: 'highlight', selector: '#geminiTierNotice' },
+      {
+        kind: 'caption',
+        ms: 12000,
+        text: 'This is every outbound request the app makes: the Gemini API for the AI features, the Google Drive REST API to handle the files it creates, and a public holiday calendar file published by the Japanese government.',
+      },
+      {
+        kind: 'caption',
+        ms: 11000,
+        text: 'We require a paid-tier Gemini key, shown in this notice, because free-tier content may be used to improve Google’s models — which our Limited Use commitment does not allow.',
+      },
+      { kind: 'wait', ms: 3000 },
+      {
+        kind: 'note',
+        text: '祝日CSVの取得（年間カレンダー生成）を撮る場合はここで実演する。デモ用DBでのみ行うこと',
       },
     ],
   },
@@ -275,15 +342,63 @@ export const SCENES = [
         kind: 'manual',
         prompt: [
           'Gmail を開き、届いたリマインダーメールを表示してください。',
-          '宛先が「ログイン中のアカウント自身」であることが読める状態で静止します。',
+          '  1. 受信トレイに届いていること',
+          '  2. メールを開き、宛先（To）がログイン中のアカウント自身であること',
+          '  3. 本文が「自分の未完了タスク」であること',
+          'をそれぞれ3秒以上静止して見せます。終わったら Enter。',
           '（他のメールが映らないよう、あらかじめ検索で絞り込んでおいてください）',
         ].join('\n'),
         ms: 0,
       },
       {
         kind: 'caption',
-        ms: 8000,
-        text: 'As you can see, the email is delivered to the account that is signed in. We never email anyone else.',
+        ms: 12000,
+        text: 'Here is the message in the signed-in teacher’s own Gmail inbox. The To field is that same teacher. The app has no recipient list, no other addresses, and cannot read any mail — it only sends this one reminder.',
+      },
+    ],
+  },
+
+  // ---------------------------------------------------------------- シーン7-2
+  // script.scriptapp は「トリガーが実際にアカウントへ登録される」ところまで見せる。
+  // 設定タブの「自動実行（トリガー）の状況」が、その source account impact にあたる。
+  {
+    id: 'script-triggers',
+    title: '自動実行の登録と解除 = script.scriptapp',
+    scopes: ['script.scriptapp'],
+    steps: [
+      { kind: 'goto', url: '{{APP_URL}}' },
+      { kind: 'click', selector: 'header .nav-btn[data-view="settings"]' },
+      { kind: 'expect', selector: '#view-settings.active' },
+      { kind: 'highlight', selector: '#triggerList' },
+      {
+        kind: 'caption',
+        ms: 11000,
+        text: 'The script.scriptapp scope is used to schedule work in the teacher’s own account. This panel lists every trigger the app has created there.',
+      },
+      { kind: 'wait', ms: 3000 },
+      {
+        kind: 'caption',
+        ms: 10000,
+        text: 'The daily reminder we just enabled now appears here as a scheduled trigger, together with the nightly job that cleans up triggers which are no longer needed.',
+      },
+      { kind: 'wait', ms: 3000 },
+      {
+        kind: 'manual',
+        prompt: [
+          '「解除」を押し、確認ダイアログで解除してください。',
+          '一覧からその自動実行が消えることを見せます（削除がアカウント側に反映される証明）。',
+          '終わったら Enter。',
+        ].join('\n'),
+        ms: 0,
+      },
+      {
+        kind: 'caption',
+        ms: 11000,
+        text: 'Deleting it here removes the trigger from the teacher’s account immediately, as the list confirms. Teachers can see and remove every scheduled job the app created.',
+      },
+      {
+        kind: 'note',
+        text: 'PDF取り込みを実演した直後にこの画面を開くと、バックグラウンド用の一時トリガーも一覧に出る（時間があれば撮る）',
       },
     ],
   },

@@ -140,7 +140,9 @@ for (const [id, sceneMs] of perScene) {
 }
 const minutes = Math.floor(ms / 60000);
 console.log(`  ${'合計'.padEnd(18)} ${minutes} 分 ${Math.round((ms % 60000) / 1000)} 秒`);
-if (ms > 9 * 60000) console.log('  ⚠️ 長すぎます。8分以内を目安に削ってください。');
+// 2026-08 の差し戻しで「各スコープの機能を最大限まで実演すること」を求められたため、
+// 短さより網羅を優先する。それでも冗長にならないよう12分で警告する。
+if (ms > 12 * 60000) console.log('  ⚠️ 長すぎます。12分以内を目安に削ってください。');
 
 console.log('');
 if (problems.length === 0) {
