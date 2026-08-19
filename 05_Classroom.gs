@@ -19,14 +19,80 @@ function postScheduleToClassroom() {
  * [Webアプリ API] 「明日（次の登校日）の予定」をClassroomへ投稿します。
  * メニュー版（postScheduleToClassroom）と同一ロジックを用い、UIに依存せず結果を返します。
  * アプリのボタンからの手動投稿のため、本日が登校日でなくても（土日・休み中でも）投稿できます。
+ *
+ * situationText は、教員が画面で確認・修正した「今日の様子」の本文です。
+ * 省略された場合は予定だけを投稿します（引数なしで呼ばれても従来どおり動きます）。
+ * AIが作った下書きをそのまま渡してはいけません。必ず人が読んだ後の文章を渡してください。
+ * @param {string} [situationText] 教員が確認済みの「今日の様子」本文
  * @returns {{success: boolean, posted: boolean, message: string}}
  */
-function postScheduleToClassroomFromWeb() {
+function postScheduleToClassroomFromWeb(situationText) {
   try {
-    return postScheduleToClassroom_core_({ manual: true });
+    validateParams_({ situationText }, {
+      situationText: { type: 'string', maxLength: 2000 }
+    });
+    return postScheduleToClassroom_core_({ manual: true, situationText: situationText });
   } catch (error) {
     logError("postScheduleToClassroomFromWeb", error);
     return { success: false, posted: false, message: describeAuthError_(error, 'Google Classroom 連携') };
+  }
+}
+
+/**
+ * [Webアプリ API] 本日の学習予定から「今日の様子」の下書きを作ります。**投稿はしません。**
+ *
+ * 教員がこの下書きを画面で読んで直し、postScheduleToClassroomFromWeb へ渡す、という
+ * 2段構えにするための関数です（16_UnitRecompose.gs の propose→apply と同じ考え方）。
+ * 下書きを作れない場合（本日が登校日でない／APIキー未設定／生成失敗）も success:true で返し、
+ * 予定だけの投稿を妨げません。呼び出し側は available を見て判断してください。
+ * @returns {{success: boolean, available: boolean, draft: string, dateLabel: string,
+ *            reason: string, message: string}}
+ */
+function proposeTodaySituationFromWeb() {
+  const unavailable = (reason, message) => ({
+    success: true, available: false, draft: '', dateLabel: '', reason: reason, message: message
+  });
+  try {
+    const ss = getSs_();
+    const databaseSheet = getDbSheet_(ss);
+    if (!databaseSheet) throw new Error("データベースシートが見つかりません");
+
+    const dbCols = getDbColumns();
+    const dbData = databaseSheet.getDataRange().getValues();
+
+    const today = new Date();
+    const daysOfWeek = ["日", "月", "火", "水", "木", "金", "土"];
+    const todayKey = Utilities.formatDate(today, "JST", "yyyyMMdd");
+    const dow = parseInt(Utilities.formatDate(today, "JST", "u"), 10) % 7;
+    const dateLabel = `${Utilities.formatDate(today, "JST", "yyyy/MM/dd")}（${daysOfWeek[dow]}）`;
+
+    const todayRowData = findTodayRowWithPeriod1_(dbData, dbCols, todayKey);
+    if (!todayRowData) {
+      return unavailable('no-lesson', '本日は授業の予定が入っていないため、下書きは作れませんでした。');
+    }
+
+    const lessonContext = buildLessonContext_(todayRowData, dbCols);
+    if (!lessonContext) {
+      return unavailable('no-lesson', '本日の学習内容が入力されていないため、下書きは作れませんでした。');
+    }
+
+    if (!getSetting(SP_KEY_GEMINI_API_KEY)) {
+      return unavailable('no-api-key', 'Gemini APIキーが未設定のため、下書きは作れませんでした。');
+    }
+
+    const draft = generateTodaySituationDraft_(dateLabel, lessonContext);
+    if (!draft) {
+      return unavailable('generation-failed', 'AIが下書きを作れませんでした。ご自分で入力するか、予定だけ投稿してください。');
+    }
+
+    return {
+      success: true, available: true, draft: draft, dateLabel: dateLabel,
+      reason: '', message: ''
+    };
+  } catch (e) {
+    // ここで例外を投げると、予定だけを投稿する導線まで巻き添えで止まる。
+    logError('proposeTodaySituationFromWeb', e);
+    return unavailable('generation-failed', '下書きを作れませんでした。予定だけの投稿はできます。');
   }
 }
 
@@ -72,12 +138,19 @@ function recordPostedSchedule_(fingerprint) {
 /**
  * 次の登校日の予定をClassroomへ投稿するコアロジック。
  * UI非依存。スキップ時/投稿時を表す結果オブジェクトを返し、異常時は例外を送出します。
- * @param {{manual?: boolean}} [options] manual=true のとき手動投稿として扱い、本日が登校日でなくても投稿する。
+ * @param {{manual?: boolean, situationText?: string}} [options]
+ *   manual=true のとき手動投稿として扱い、本日が登校日でなくても投稿する。
  *   自動投稿（既定）では、休み中の重複投稿を防ぐため本日が登校日のときのみ投稿する。
+ *   situationText は教員が確認・修正済みの「今日の様子」本文。渡された文字列をそのまま
+ *   末尾に載せるだけで、この関数がAIを呼ぶことはない。自動投稿では常に未指定になる。
  * @returns {{success: boolean, posted: boolean, message: string}}
  */
 function postScheduleToClassroom_core_(options) {
     const isManual = !!(options && options.manual);
+    // 教員が画面で確認・修正した「今日の様子」。渡されたものをそのまま載せるだけで、
+    // この関数がAIを呼ぶことはない。自動投稿は options を渡さないので常に空になる。
+    const situationText = (options && typeof options.situationText === 'string')
+      ? options.situationText.trim() : '';
     const ss = getSs_();
     const databaseSheet = getDbSheet_(ss);
     if (!databaseSheet) throw new Error("データベースシートが見つかりません");
@@ -99,13 +172,8 @@ function postScheduleToClassroom_core_(options) {
     const todayKey = jstDateKey_(today);
 
     // 本日（日本時間）が登校日（1校時に予定あり）かを判定する。本日の行データも保持し、
-    // 「きょうのかだい」「今日の様子」の生成に用いる。
-    let todayRowData = null;
-    dbData.forEach(row => {
-      if (row[dbCols.DATE - 1] instanceof Date && jstDateKey_(row[dbCols.DATE - 1]) === todayKey && row[dbCols.PERIOD1 - 1]) {
-        todayRowData = row;
-      }
-    });
+    // 「きょうのかだい」の組み立てに用いる。
+    const todayRowData = findTodayRowWithPeriod1_(dbData, dbCols, todayKey);
 
     // 自動投稿では、休み中は投稿しない。休みに入る前の最終登校日に休み明けの予定を投稿済みのため、
     // ここで投稿すると同じ予定が重複して投稿されてしまう。
@@ -178,22 +246,16 @@ function postScheduleToClassroom_core_(options) {
       postText = convertTextToHiragana_(postText);
     }
 
-    // 「今日の様子」を本日（日本時間）の学習予定からGeminiで自動生成し、保護者向けに追記する。
-    // 漢字変換後に追記するため、このセクションは全学年で通常の漢字表記のまま（保護者が読む想定）。
-    // Gemini未設定・生成失敗時はこのセクションを省略し、予定の投稿は継続する。
-    try {
-      const todayLessonContext = buildLessonContext_(todayRowData, dbCols);
-      if (todayLessonContext && typeof generateTodaySituationText_ === 'function') {
-        const todayLabel = jstLabel_(today);
-        const situation = generateTodaySituationText_(todayLabel, todayLessonContext);
-        if (situation) postText += `\n【今日の様子】\n${situation}\n`;
-      }
-    } catch (situationErr) {
-      logError("postScheduleToClassroom_core_ (今日の様子)", situationErr);
-    }
+    // 「今日の様子」は、教員が画面で確認・修正した文章だけを追記する。
+    // ここでAIに生成させることはしない。自動投稿（時間主導トリガー）は situationText を
+    // 渡さないため、このセクションは構造的に付かない。
+    // （かつては予定からAIが「実際に行われた前提」の文章を作り、教員の確認を経ずに
+    //   保護者へ配信していた。事実と異なる内容が学校名義で届くため取りやめた。）
+    // 漢字変換の後に追記するのは従来どおり。このセクションは全学年で漢字のまま（保護者が読む想定）。
+    if (situationText) postText += `\n【今日の様子】\n${situationText}\n`;
 
-    // 重複投稿の防止: 「コースID＋対象日」を識別子にする。本文には毎回変動する
-    // AI生成「今日の様子」が含まれるため、安定した対象日で判定する。
+    // 重複投稿の防止: 「コースID＋対象日」を識別子にする。本文ではなく対象日で判定するのは、
+    // 教員が追記する「今日の様子」の有無で本文が変わっても、同じ日の予定を二重に投稿しないため。
     // 自動投稿で同一対象日が投稿済みならスキップ。手動投稿（教員の明示操作）は常に投稿する。
     const fingerprint = `${courseId}|${Utilities.formatDate(targetDate, "JST", "yyyyMMdd")}`;
     if (!isManual && hasRecentlyPostedSchedule_(fingerprint)) {
@@ -222,6 +284,29 @@ function listifyCellText_(value) {
     parts = raw.split(/[、，,]/).map(s => s.trim()).filter(Boolean);
   }
   return parts;
+}
+
+/**
+ * 本日（日本時間）の行データを探します。1校時に予定が入っている行だけを「登校日」とみなします。
+ * 同じ日付の行が複数ある場合は、最後に見つかったものを返します（従来の挙動を維持）。
+ *
+ * 予定の投稿（postScheduleToClassroom_core_）と「今日の様子」の下書き作成
+ * （proposeTodaySituationFromWeb）の両方が本日の行を必要とするため、関数に切り出しています。
+ * @param {Array[]} dbData データベースの全行
+ * @param {Object} dbCols getDbColumns() の列マップ（1始まり）
+ * @param {string} todayKey 本日の日付キー（JSTの yyyyMMdd）
+ * @returns {?Array} 本日の行データ。登校日でなければ null
+ */
+function findTodayRowWithPeriod1_(dbData, dbCols, todayKey) {
+  let found = null;
+  dbData.forEach(row => {
+    const cellDate = row[dbCols.DATE - 1];
+    if (!(cellDate instanceof Date)) return;
+    if (Utilities.formatDate(cellDate, "JST", "yyyyMMdd") !== todayKey) return;
+    if (!row[dbCols.PERIOD1 - 1]) return;
+    found = row;
+  });
+  return found;
 }
 
 /**

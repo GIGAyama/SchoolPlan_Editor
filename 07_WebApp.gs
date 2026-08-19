@@ -1711,7 +1711,8 @@ const TRIGGER_LABELS_ = {
   },
   postScheduleToClassroom: {
     label: 'Classroom への予定の自動投稿',
-    detail: '毎日1回、翌日の予定を連携中のクラスへ投稿します。'
+    detail: '毎日1回、翌日の予定（時間割・宿題・持ち物）を連携中のクラスへ投稿します。'
+      + 'AI が書いた文章は含みません。'
   },
   createUnitMasterFromPdfs: {
     label: '指導計画 PDF の読み取り（バックグラウンド）',
