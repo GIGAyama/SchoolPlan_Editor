@@ -1,35 +1,266 @@
 {
-  "recording": "2026-08-15 撮影（6分42秒 / 1920x1198 / 無音）",
-  "note": "実際の録画をフレーム単位で確認して起こしたタイミング。撮り直したら値を直して `node tools/demo-video/build-srt.mjs` を実行する。",
+  "recording": "未撮影（台本 scenes.mjs の想定尺から起こした仮の時刻）",
+  "note": "撮影後、実際の映像に合わせて start / end を直してから `node tools/demo-video/build-srt.mjs` を実行する。 record-demo.mjs で撮った場合は実測タイミングの .srt が dist/demo-video/ に出るので、このファイルは不要。",
   "cues": [
-    { "start": "0:02", "end": "0:08", "text": "This is School Plan Note, a web application for elementary school teachers in Japan." },
-    { "start": "0:08", "end": "0:16", "text": "Teachers use it to write their weekly lesson plans, manage classroom tasks, and share class newsletters." },
-    { "start": "0:16", "end": "0:25", "text": "This is our privacy policy — the same URL submitted in this verification request." },
-    { "start": "0:25", "end": "0:39", "text": "And these are our terms of service." },
-    { "start": "0:40", "end": "0:48", "text": "Each teacher owns a single Google Spreadsheet that stores their own lesson plan data." },
-    { "start": "0:49", "end": "0:58", "text": "The application is a standalone web app. It reads and writes only this one spreadsheet, which the teacher selects." },
-    { "start": "1:00", "end": "1:12", "text": "Opening the web application starts the OAuth flow." },
-    { "start": "1:14", "end": "1:27", "text": "The application asks the teacher for permission to access their Google data." },
-    { "start": "1:28", "end": "1:50", "text": "The teacher signs in with the Google account they want to use." },
-    { "start": "1:52", "end": "1:58", "text": "This is the OAuth consent screen for our application." },
-    { "start": "1:58", "end": "2:05", "text": "The address bar shows the client ID of the OAuth client submitted for verification." },
-    { "start": "2:05", "end": "2:14", "text": "The application requests access to Google Sheets, Drive files it creates, Classroom courses and announcements, sending email as the user, and the user's email address." },
-    { "start": "2:14", "end": "2:22", "text": "Each of these scopes is demonstrated in the following sections of this video." },
-    { "start": "2:26", "end": "2:34", "text": "After the teacher grants consent, the application opens." },
-    { "start": "2:36", "end": "2:46", "text": "Teachers enter their weekly lesson plan in this grid." },
-    { "start": "2:46", "end": "3:02", "text": "We use the spreadsheets scope only to read and write this single database file, which is owned by the teacher. We never access any other spreadsheet." },
-    { "start": "3:03", "end": "3:12", "text": "Here is the same entry, written into the teacher's own spreadsheet." },
-    { "start": "3:16", "end": "3:30", "text": "The app calls the Gemini API to draft the class newsletter from the teacher's lesson plan." },
-    { "start": "3:30", "end": "3:42", "text": "This external HTTPS request requires the script.external_request scope. The API key is stored per user in Apps Script properties and is never shared." },
-    { "start": "3:56", "end": "4:08", "text": "The newsletter has been generated from this week's lesson plan." },
-    { "start": "4:14", "end": "4:26", "text": "The teacher saves the newsletter. The app stores it in the teacher's Drive as a file it creates itself." },
-    { "start": "4:28", "end": "4:46", "text": "We request the drive.file scope, not full Drive access. The app can only see and manage the files it creates — it cannot read any of the teacher's other Drive files." },
-    { "start": "4:50", "end": "5:04", "text": "Teachers can enable a daily reminder for their unfinished tasks. Setting the delivery time creates a time-based trigger, which requires the script.scriptapp scope." },
-    { "start": "5:08", "end": "5:22", "text": "The script.send_mail scope is used to send this reminder, and userinfo.email is used to identify the signed-in teacher." },
-    { "start": "5:22", "end": "5:38", "text": "As you can see, the email is delivered to the account that is signed in. We never email anyone else." },
-    { "start": "5:44", "end": "5:58", "text": "We use classroom.courses.readonly only to list the active courses the teacher already teaches, so they can choose one. We do not read student data, rosters, coursework, or grades." },
-    { "start": "6:00", "end": "6:12", "text": "When the teacher clicks this button, the app posts the schedule to the selected course as an announcement. This is what the classroom.announcements scope is used for." },
-    { "start": "6:14", "end": "6:30", "text": "Here is the announcement in Google Classroom. The teacher always initiates the post — the app never posts without an explicit action by the teacher." },
-    { "start": "6:31", "end": "6:41", "text": "All requested scopes are used only for these purposes, as described in our privacy policy. Thank you for reviewing our application." }
+    {
+      "start": "0:03",
+      "end": "0:10",
+      "text": "This is School Plan Note, a web application for elementary school teachers in Japan."
+    },
+    {
+      "start": "0:10",
+      "end": "0:17",
+      "text": "Teachers use it to write weekly lesson plans, manage classroom tasks, and share class newsletters."
+    },
+    {
+      "start": "0:17",
+      "end": "0:25",
+      "text": "Our homepage is served from schoolplan-editor.giga-school.com, a domain we own and have verified in Search Console."
+    },
+    {
+      "start": "0:26",
+      "end": "0:33",
+      "text": "The privacy policy is on that same domain — this is the URL submitted in this verification request."
+    },
+    {
+      "start": "0:34",
+      "end": "0:39",
+      "text": "And these are our terms of service."
+    },
+    {
+      "start": "0:41",
+      "end": "0:49",
+      "text": "Each teacher owns a single Google Spreadsheet that stores their own lesson plan data."
+    },
+    {
+      "start": "0:49",
+      "end": "0:58",
+      "text": "The application creates this spreadsheet itself the first time a teacher signs in. That is why the drive.file scope alone is enough to read and write it."
+    },
+    {
+      "start": "0:58",
+      "end": "1:06",
+      "text": "It never opens any other spreadsheet in the teacher’s Drive, and it never sees another teacher’s data."
+    },
+    {
+      "start": "1:09",
+      "end": "1:15",
+      "text": "Opening the web application starts the OAuth flow."
+    },
+    {
+      "start": "1:30",
+      "end": "1:36",
+      "text": "This is the OAuth consent screen for our application."
+    },
+    {
+      "start": "1:36",
+      "end": "1:43",
+      "text": "The address bar shows the client ID of the OAuth client submitted for verification."
+    },
+    {
+      "start": "1:43",
+      "end": "1:54",
+      "text": "The application requests seven scopes: per-file Drive access, sending email as the user, creating scheduled triggers, outbound HTTPS requests, Classroom courses read-only, Classroom announcements, and the user’s email address."
+    },
+    {
+      "start": "1:54",
+      "end": "2:01",
+      "text": "Every one of them is demonstrated end to end in the following sections of this video."
+    },
+    {
+      "start": "2:04",
+      "end": "2:10",
+      "text": "Teachers enter their weekly lesson plan in this grid."
+    },
+    {
+      "start": "2:26",
+      "end": "2:34",
+      "text": "What we type here is written into the teacher’s own spreadsheet through the Sheets API."
+    },
+    {
+      "start": "2:36",
+      "end": "2:45",
+      "text": "The same file is read back through the same scope: this annual lesson-hour summary is calculated from the rows stored in it."
+    },
+    {
+      "start": "3:05",
+      "end": "3:15",
+      "text": "Creating and deleting a task writes to, and removes rows from, the same spreadsheet. Deleted rows are moved to a recycle-bin sheet inside that same file, so nothing is lost by accident."
+    },
+    {
+      "start": "3:16",
+      "end": "3:26",
+      "text": "Here is the teacher’s spreadsheet in their own Google account, showing exactly the changes made in the app a moment ago."
+    },
+    {
+      "start": "3:42",
+      "end": "3:52",
+      "text": "We do not hold the spreadsheets scope. This file is read and written through drive.file, because the app created it. We cannot open any other spreadsheet."
+    },
+    {
+      "start": "3:58",
+      "end": "4:09",
+      "text": "This panel shows which account is signed in and which single file is being used. We request the user’s email address only to tell one teacher’s database from another’s — it is never sent anywhere."
+    },
+    {
+      "start": "4:13",
+      "end": "4:22",
+      "text": "A teacher who already has a lesson plan file can point the app at it. This is the only way the app can reach a file it did not create."
+    },
+    {
+      "start": "4:38",
+      "end": "4:50",
+      "text": "This is the Google Picker. The teacher chooses one file, and only that file becomes visible to the application. Everything else in their Drive stays out of reach — the app has no way to list or open it."
+    },
+    {
+      "start": "4:53",
+      "end": "5:01",
+      "text": "The school calendar feature works the same way. Teachers pick the PDF files they want the app to use."
+    },
+    {
+      "start": "5:18",
+      "end": "5:29",
+      "text": "The picker is filtered to PDF files and allows multiple selection. The app stores only a reference to the files the teacher selected, and can read those files and nothing else."
+    },
+    {
+      "start": "5:34",
+      "end": "5:42",
+      "text": "The newsletter editor stores each saved newsletter as a file the app creates in the teacher’s Drive."
+    },
+    {
+      "start": "6:00",
+      "end": "6:10",
+      "text": "Deleting it from the app moves that Drive file to the trash of the teacher’s own account."
+    },
+    {
+      "start": "6:30",
+      "end": "6:41",
+      "text": "A backup copies the whole database into a new spreadsheet, again created by the app. Backups older than the retention limit are moved to the trash automatically."
+    },
+    {
+      "start": "6:42",
+      "end": "6:53",
+      "text": "Here is the teacher’s Drive. These are the files the application created: the lesson plan database, the newsletter files, and the backup we just made."
+    },
+    {
+      "start": "6:56",
+      "end": "7:07",
+      "text": "And here is the Drive trash, showing the newsletter file we deleted a moment ago. Every write and every delete is visible in the user’s own account."
+    },
+    {
+      "start": "7:10",
+      "end": "7:19",
+      "text": "We request drive.file, not full Drive access. The app can only see files it created itself or files the teacher picked."
+    },
+    {
+      "start": "7:24",
+      "end": "7:32",
+      "text": "The app calls the Gemini API to draft the class newsletter from the teacher’s lesson plan."
+    },
+    {
+      "start": "7:33",
+      "end": "7:40",
+      "text": "This outbound HTTPS request is what the script.external_request scope is for."
+    },
+    {
+      "start": "7:58",
+      "end": "8:08",
+      "text": "The same scope powers the other AI features: extracting tasks and school events from a PDF, drafting the weekly reflection, and laying out teaching units."
+    },
+    {
+      "start": "8:11",
+      "end": "8:20",
+      "text": "This model list is itself an outbound request: the app asks the Gemini API which models the teacher’s own key can use."
+    },
+    {
+      "start": "8:21",
+      "end": "8:32",
+      "text": "The API key is supplied and stored by each teacher in their own Apps Script user properties. We never receive it, and we require a paid-tier key, because free-tier content may be used to improve Google’s models."
+    },
+    {
+      "start": "8:32",
+      "end": "8:46",
+      "text": "This is every host the app contacts: the Gemini API, the Google Drive and Google Sheets REST APIs, Google’s tokeninfo endpoint to identify our own Cloud project for the file picker, and a public holiday calendar published by the Japanese Cabinet Office. No user data is sent to that last one, and there is no server of ours anywhere in this list."
+    },
+    {
+      "start": "8:51",
+      "end": "8:58",
+      "text": "Teachers can enable a daily reminder for their unfinished tasks."
+    },
+    {
+      "start": "9:00",
+      "end": "9:09",
+      "text": "Setting the delivery time creates a time-based trigger, which requires the script.scriptapp scope."
+    },
+    {
+      "start": "9:14",
+      "end": "9:27",
+      "text": "The script.send_mail scope sends that reminder, and userinfo.email identifies the signed-in teacher so the message goes to that same teacher and no one else."
+    },
+    {
+      "start": "9:45",
+      "end": "9:58",
+      "text": "Here is the message in the signed-in teacher’s own Gmail inbox. The To field is that same teacher. This reminder is the only email the app can send: there is no recipient list and no other template, and the app cannot read any mail."
+    },
+    {
+      "start": "10:01",
+      "end": "10:08",
+      "text": "The teacher links the app to their own Google Classroom course."
+    },
+    {
+      "start": "10:13",
+      "end": "10:25",
+      "text": "We use classroom.courses.readonly only to list the active courses the teacher already teaches, so they can choose one from this dropdown. We do not read student data, rosters, coursework, or grades."
+    },
+    {
+      "start": "10:36",
+      "end": "10:45",
+      "text": "The teacher can post tomorrow’s schedule to the selected course as an announcement."
+    },
+    {
+      "start": "10:55",
+      "end": "11:06",
+      "text": "The second kind of post attaches a file: the newsletter is exported as a PDF that the app creates in the teacher’s Drive, and that file is attached to the announcement."
+    },
+    {
+      "start": "11:16",
+      "end": "11:27",
+      "text": "A teacher who wants this every day can set a posting time here. That schedule is a trigger in their own account, and it posts only to the course they selected. Leaving the field empty removes it."
+    },
+    {
+      "start": "11:48",
+      "end": "12:00",
+      "text": "Here are both announcements in Google Classroom, in the teacher’s own course. The app posts only to the course the teacher chose, and only when the teacher asks for it or schedules it themselves."
+    },
+    {
+      "start": "12:04",
+      "end": "12:15",
+      "text": "The script.scriptapp scope schedules work in the teacher’s own account. This panel lists every trigger the app has created there."
+    },
+    {
+      "start": "12:18",
+      "end": "12:32",
+      "text": "The daily reminder and the Classroom posting time we just set now appear here, next to the nightly job that cleans up triggers which are no longer needed. Importing a PDF adds a short-lived trigger to this list too, and it removes itself when the import finishes."
+    },
+    {
+      "start": "12:47",
+      "end": "12:59",
+      "text": "Deleting it here removes the trigger from the teacher’s account immediately, as the list confirms. Teachers can see and remove every scheduled job the app created, and the app creates none that are not listed."
+    },
+    {
+      "start": "13:02",
+      "end": "13:18",
+      "text": "To summarize: School Plan Note keeps each teacher’s lesson plan in one spreadsheet it created, creates and deletes only its own files in Drive or the ones the teacher picked, sends a reminder to the signed-in teacher alone, schedules that work in the teacher’s own account where they can remove it, and posts to the teacher’s own Classroom course when they ask."
+    },
+    {
+      "start": "13:18",
+      "end": "13:26",
+      "text": "All requested scopes are used only for these purposes, as described in our privacy policy."
+    },
+    {
+      "start": "13:26",
+      "end": "13:30",
+      "text": "Thank you for reviewing our application."
+    }
   ]
 }

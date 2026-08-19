@@ -1,215 +1,499 @@
 1
-00:00:02,000 --> 00:00:08,000
+00:00:03,000 --> 00:00:10,000
 This is School Plan Note, a web application
 for elementary school teachers in Japan.
 
 2
-00:00:08,000 --> 00:00:13,994
-Teachers use it to write their weekly lesson
-plans, manage classroom tasks, and share class
+00:00:10,000 --> 00:00:15,080
+Teachers use it to write weekly lesson plans,
+manage classroom tasks, and share class
 
 3
-00:00:13,994 --> 00:00:16,000
+00:00:15,080 --> 00:00:17,000
 newsletters.
 
 4
-00:00:16,000 --> 00:00:25,000
-This is our privacy policy — the same URL
-submitted in this verification request.
+00:00:17,000 --> 00:00:21,775
+Our homepage is served from
+schoolplan-editor.giga-school.com, a domain we
 
 5
-00:00:25,000 --> 00:00:39,000
-And these are our terms of service.
+00:00:21,775 --> 00:00:25,000
+own and have verified in Search Console.
 
 6
-00:00:40,000 --> 00:00:48,000
+00:00:26,000 --> 00:00:31,257
+The privacy policy is on that same domain —
+this is the URL submitted in this verification
+
+7
+00:00:31,257 --> 00:00:33,000
+request.
+
+8
+00:00:34,000 --> 00:00:39,000
+And these are our terms of service.
+
+9
+00:00:41,000 --> 00:00:49,000
 Each teacher owns a single Google Spreadsheet
 that stores their own lesson plan data.
 
-7
-00:00:49,000 --> 00:00:55,173
-The application is a standalone web app. It
-reads and writes only this one spreadsheet,
+10
+00:00:49,000 --> 00:00:53,949
+The application creates this spreadsheet
+itself the first time a teacher signs in. That
 
-8
-00:00:55,173 --> 00:00:58,000
-which the teacher selects.
+11
+00:00:53,949 --> 00:00:58,000
+is why the drive.file scope alone is enough to
+read and write it.
 
-9
-00:01:00,000 --> 00:01:12,000
+12
+00:00:58,000 --> 00:01:03,828
+It never opens any other spreadsheet in the
+teacher’s Drive, and it never sees another
+
+13
+00:01:03,828 --> 00:01:06,000
+teacher’s data.
+
+14
+00:01:09,000 --> 00:01:15,000
 Opening the web application starts the OAuth
 flow.
 
-10
-00:01:14,000 --> 00:01:27,000
-The application asks the teacher for
-permission to access their Google data.
-
-11
-00:01:28,000 --> 00:01:50,000
-The teacher signs in with the Google account
-they want to use.
-
-12
-00:01:52,000 --> 00:01:58,000
+15
+00:01:30,000 --> 00:01:36,000
 This is the OAuth consent screen for our
 application.
 
-13
-00:01:58,000 --> 00:02:05,000
+16
+00:01:36,000 --> 00:01:43,000
 The address bar shows the client ID of the
 OAuth client submitted for verification.
 
-14
-00:02:05,000 --> 00:02:09,500
-The application requests access to Google
-Sheets, Drive files it creates, Classroom
-
-15
-00:02:09,500 --> 00:02:14,000
-courses and announcements, sending email as
-the user, and the user's email address.
-
-16
-00:02:14,000 --> 00:02:22,000
-Each of these scopes is demonstrated in the
-following sections of this video.
-
 17
-00:02:26,000 --> 00:02:34,000
-After the teacher grants consent, the
-application opens.
+00:01:43,000 --> 00:01:46,889
+The application requests seven scopes:
+per-file Drive access, sending email as the
 
 18
-00:02:36,000 --> 00:02:46,000
+00:01:46,889 --> 00:01:50,961
+user, creating scheduled triggers, outbound
+HTTPS requests, Classroom courses read-only,
+
+19
+00:01:50,961 --> 00:01:54,000
+Classroom announcements, and the user’s email
+address.
+
+20
+00:01:54,000 --> 00:02:01,000
+Every one of them is demonstrated end to end
+in the following sections of this video.
+
+21
+00:02:04,000 --> 00:02:10,000
 Teachers enter their weekly lesson plan in
 this grid.
 
-19
-00:02:46,000 --> 00:02:55,249
-We use the spreadsheets scope only to read and
-write this single database file, which is
-
-20
-00:02:55,249 --> 00:03:02,000
-owned by the teacher. We never access any
-other spreadsheet.
-
-21
-00:03:03,000 --> 00:03:12,000
-Here is the same entry, written into the
-teacher's own spreadsheet.
-
 22
-00:03:16,000 --> 00:03:27,971
-The app calls the Gemini API to draft the
-class newsletter from the teacher's lesson
+00:02:26,000 --> 00:02:32,358
+What we type here is written into the
+teacher’s own spreadsheet through the Sheets
 
 23
-00:03:27,971 --> 00:03:30,000
-plan.
+00:02:32,358 --> 00:02:34,000
+API.
 
 24
-00:03:30,000 --> 00:03:36,746
-This external HTTPS request requires the
-script.external_request scope. The API key is
+00:02:36,000 --> 00:02:41,685
+The same file is read back through the same
+scope: this annual lesson-hour summary is
 
 25
-00:03:36,746 --> 00:03:42,000
-stored per user in Apps Script properties and
-is never shared.
+00:02:41,685 --> 00:02:45,000
+calculated from the rows stored in it.
 
 26
-00:03:56,000 --> 00:04:08,000
-The newsletter has been generated from this
-week's lesson plan.
+00:03:05,000 --> 00:03:09,062
+Creating and deleting a task writes to, and
+removes rows from, the same spreadsheet.
 
 27
-00:04:14,000 --> 00:04:23,247
-The teacher saves the newsletter. The app
-stores it in the teacher's Drive as a file it
+00:03:09,062 --> 00:03:13,315
+Deleted rows are moved to a recycle-bin sheet
+inside that same file, so nothing is lost by
 
 28
-00:04:23,247 --> 00:04:26,000
-creates itself.
+00:03:13,315 --> 00:03:15,000
+accident.
 
 29
-00:04:28,000 --> 00:04:37,463
-We request the drive.file scope, not full
-Drive access. The app can only see and manage
+00:03:16,000 --> 00:03:22,845
+Here is the teacher’s spreadsheet in their own
+Google account, showing exactly the changes
 
 30
-00:04:37,463 --> 00:04:46,000
-the files it creates — it cannot read any of
-the teacher's other Drive files.
+00:03:22,845 --> 00:03:26,000
+made in the app a moment ago.
 
 31
-00:04:50,000 --> 00:04:57,622
-Teachers can enable a daily reminder for their
-unfinished tasks. Setting the delivery time
+00:03:42,000 --> 00:03:47,541
+We do not hold the spreadsheets scope. This
+file is read and written through drive.file,
 
 32
-00:04:57,622 --> 00:05:04,000
-creates a time-based trigger, which requires
-the script.scriptapp scope.
+00:03:47,541 --> 00:03:52,000
+because the app created it. We cannot open any
+other spreadsheet.
 
 33
-00:05:08,000 --> 00:05:17,658
-The script.send_mail scope is used to send
-this reminder, and userinfo.email is used to
+00:03:58,000 --> 00:04:02,309
+This panel shows which account is signed in
+and which single file is being used. We
 
 34
-00:05:17,658 --> 00:05:22,000
-identify the signed-in teacher.
+00:04:02,309 --> 00:04:06,899
+request the user’s email address only to tell
+one teacher’s database from another’s — it is
 
 35
-00:05:22,000 --> 00:05:35,000
-As you can see, the email is delivered to the
-account that is signed in. We never email
+00:04:06,899 --> 00:04:09,000
+never sent anywhere.
 
 36
-00:05:35,000 --> 00:05:38,000
-anyone else.
+00:04:13,000 --> 00:04:18,595
+A teacher who already has a lesson plan file
+can point the app at it. This is the only way
 
 37
-00:05:44,000 --> 00:05:50,106
+00:04:18,595 --> 00:04:22,000
+the app can reach a file it did not create.
+
+38
+00:04:38,000 --> 00:04:42,949
+This is the Google Picker. The teacher chooses
+one file, and only that file becomes visible
+
+39
+00:04:42,949 --> 00:04:47,859
+to the application. Everything else in their
+Drive stays out of reach — the app has no way
+
+40
+00:04:47,859 --> 00:04:50,000
+to list or open it.
+
+41
+00:04:53,000 --> 00:04:59,028
+The school calendar feature works the same
+way. Teachers pick the PDF files they want the
+
+42
+00:04:59,028 --> 00:05:01,000
+app to use.
+
+43
+00:05:18,000 --> 00:05:23,523
+The picker is filtered to PDF files and allows
+multiple selection. The app stores only a
+
+44
+00:05:23,523 --> 00:05:29,000
+reference to the files the teacher selected,
+and can read those files and nothing else.
+
+45
+00:05:34,000 --> 00:05:39,760
+The newsletter editor stores each saved
+newsletter as a file the app creates in the
+
+46
+00:05:39,760 --> 00:05:42,000
+teacher’s Drive.
+
+47
+00:06:00,000 --> 00:06:10,000
+Deleting it from the app moves that Drive file
+to the trash of the teacher’s own account.
+
+48
+00:06:30,000 --> 00:06:36,115
+A backup copies the whole database into a new
+spreadsheet, again created by the app. Backups
+
+49
+00:06:36,115 --> 00:06:41,000
+older than the retention limit are moved to
+the trash automatically.
+
+50
+00:06:42,000 --> 00:06:48,298
+Here is the teacher’s Drive. These are the
+files the application created: the lesson plan
+
+51
+00:06:48,298 --> 00:06:53,000
+database, the newsletter files, and the backup
+we just made.
+
+52
+00:06:56,000 --> 00:07:02,253
+And here is the Drive trash, showing the
+newsletter file we deleted a moment ago. Every
+
+53
+00:07:02,253 --> 00:07:07,000
+write and every delete is visible in the
+user’s own account.
+
+54
+00:07:10,000 --> 00:07:16,129
+We request drive.file, not full Drive access.
+The app can only see files it created itself
+
+55
+00:07:16,129 --> 00:07:19,000
+or files the teacher picked.
+
+56
+00:07:24,000 --> 00:07:30,308
+The app calls the Gemini API to draft the
+class newsletter from the teacher’s lesson
+
+57
+00:07:30,308 --> 00:07:32,000
+plan.
+
+58
+00:07:33,000 --> 00:07:40,000
+This outbound HTTPS request is what the
+script.external_request scope is for.
+
+59
+00:07:58,000 --> 00:08:03,682
+The same scope powers the other AI features:
+extracting tasks and school events from a PDF,
+
+60
+00:08:03,682 --> 00:08:08,000
+drafting the weekly reflection, and laying out
+teaching units.
+
+61
+00:08:11,000 --> 00:08:17,222
+This model list is itself an outbound request:
+the app asks the Gemini API which models the
+
+62
+00:08:17,222 --> 00:08:20,000
+teacher’s own key can use.
+
+63
+00:08:21,000 --> 00:08:25,003
+The API key is supplied and stored by each
+teacher in their own Apps Script user
+
+64
+00:08:25,003 --> 00:08:29,071
+properties. We never receive it, and we
+require a paid-tier key, because free-tier
+
+65
+00:08:29,071 --> 00:08:32,000
+content may be used to improve Google’s
+models.
+
+66
+00:08:32,000 --> 00:08:35,531
+This is every host the app contacts: the
+Gemini API, the Google Drive and Google Sheets
+
+67
+00:08:35,531 --> 00:08:39,012
+REST APIs, Google’s tokeninfo endpoint to
+identify our own Cloud project for the file
+
+68
+00:08:39,012 --> 00:08:42,420
+picker, and a public holiday calendar
+published by the Japanese Cabinet Office. No
+
+69
+00:08:42,420 --> 00:08:46,000
+user data is sent to that last one, and there
+is no server of ours anywhere in this list.
+
+70
+00:08:51,000 --> 00:08:58,000
+Teachers can enable a daily reminder for their
+unfinished tasks.
+
+71
+00:09:00,000 --> 00:09:07,216
+Setting the delivery time creates a time-based
+trigger, which requires the script.scriptapp
+
+72
+00:09:07,216 --> 00:09:09,000
+scope.
+
+73
+00:09:14,000 --> 00:09:20,696
+The script.send_mail scope sends that
+reminder, and userinfo.email identifies the
+
+74
+00:09:20,696 --> 00:09:27,000
+signed-in teacher so the message goes to that
+same teacher and no one else.
+
+75
+00:09:45,000 --> 00:09:49,805
+Here is the message in the signed-in teacher’s
+own Gmail inbox. The To field is that same
+
+76
+00:09:49,805 --> 00:09:54,610
+teacher. This reminder is the only email the
+app can send: there is no recipient list and
+
+77
+00:09:54,610 --> 00:09:58,000
+no other template, and the app cannot read any
+mail.
+
+78
+00:10:01,000 --> 00:10:08,000
+The teacher links the app to their own Google
+Classroom course.
+
+79
+00:10:13,000 --> 00:10:17,783
 We use classroom.courses.readonly only to list
 the active courses the teacher already
 
-38
-00:05:50,106 --> 00:05:56,212
-teaches, so they can choose one. We do not
-read student data, rosters, coursework, or
+80
+00:10:17,783 --> 00:10:22,366
+teaches, so they can choose one from this
+dropdown. We do not read student data,
 
-39
-00:05:56,212 --> 00:05:58,000
-grades.
+81
+00:10:22,366 --> 00:10:25,000
+rosters, coursework, or grades.
 
-40
-00:06:00,000 --> 00:06:06,362
-When the teacher clicks this button, the app
-posts the schedule to the selected course as
+82
+00:10:36,000 --> 00:10:45,000
+The teacher can post tomorrow’s schedule to
+the selected course as an announcement.
 
-41
-00:06:06,362 --> 00:06:12,000
-an announcement. This is what the
-classroom.announcements scope is used for.
+83
+00:10:55,000 --> 00:11:00,770
+The second kind of post attaches a file: the
+newsletter is exported as a PDF that the app
 
-42
-00:06:14,000 --> 00:06:23,392
-Here is the announcement in Google Classroom.
-The teacher always initiates the post — the
+84
+00:11:00,770 --> 00:11:06,000
+creates in the teacher’s Drive, and that file
+is attached to the announcement.
 
-43
-00:06:23,392 --> 00:06:30,000
-app never posts without an explicit action by
-the teacher.
+85
+00:11:16,000 --> 00:11:20,571
+A teacher who wants this every day can set a
+posting time here. That schedule is a trigger
 
-44
-00:06:31,000 --> 00:06:37,385
+86
+00:11:20,571 --> 00:11:25,212
+in their own account, and it posts only to the
+course they selected. Leaving the field empty
+
+87
+00:11:25,212 --> 00:11:27,000
+removes it.
+
+88
+00:11:48,000 --> 00:11:52,674
+Here are both announcements in Google
+Classroom, in the teacher’s own course. The
+
+89
+00:11:52,674 --> 00:11:57,509
+app posts only to the course the teacher
+chose, and only when the teacher asks for it
+
+90
+00:11:57,509 --> 00:12:00,000
+or schedules it themselves.
+
+91
+00:12:04,000 --> 00:12:11,038
+The script.scriptapp scope schedules work in
+the teacher’s own account. This panel lists
+
+92
+00:12:11,038 --> 00:12:15,000
+every trigger the app has created there.
+
+93
+00:12:18,000 --> 00:12:22,779
+The daily reminder and the Classroom posting
+time we just set now appear here, next to the
+
+94
+00:12:22,779 --> 00:12:27,408
+nightly job that cleans up triggers which are
+no longer needed. Importing a PDF adds a
+
+95
+00:12:27,408 --> 00:12:32,000
+short-lived trigger to this list too, and it
+removes itself when the import finishes.
+
+96
+00:12:47,000 --> 00:12:51,716
+Deleting it here removes the trigger from the
+teacher’s account immediately, as the list
+
+97
+00:12:51,716 --> 00:12:56,357
+confirms. Teachers can see and remove every
+scheduled job the app created, and the app
+
+98
+00:12:56,357 --> 00:12:59,000
+creates none that are not listed.
+
+99
+00:13:02,000 --> 00:13:05,543
+To summarize: School Plan Note keeps each
+teacher’s lesson plan in one spreadsheet it
+
+100
+00:13:05,543 --> 00:13:09,161
+created, creates and deletes only its own
+files in Drive or the ones the teacher picked,
+
+101
+00:13:09,161 --> 00:13:12,704
+sends a reminder to the signed-in teacher
+alone, schedules that work in the teacher’s
+
+102
+00:13:12,704 --> 00:13:16,247
+own account where they can remove it, and
+posts to the teacher’s own Classroom course
+
+103
+00:13:16,247 --> 00:13:18,000
+when they ask.
+
+104
+00:13:18,000 --> 00:13:26,000
 All requested scopes are used only for these
 purposes, as described in our privacy policy.
 
-45
-00:06:37,385 --> 00:06:41,000
+105
+00:13:26,000 --> 00:13:30,000
 Thank you for reviewing our application.
