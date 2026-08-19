@@ -31,12 +31,15 @@
  * ここは 'schoolplan-editor-shell-' として重ならないようにしてある。 */
 const CACHE_PREFIX = 'schoolplan-editor-shell-';
 // リリースごとに必ず上げる。上げ忘れると、直した内容が先生の端末に届かない。
-const CACHE_NAME = CACHE_PREFIX + 'v5';
+const CACHE_NAME = CACHE_PREFIX + 'v6';
 const SHELL_ASSETS = [
   './',
   './index.html',
   './offline.html',
   './config.js',
+  // インストールの合図を受ける入口。圏外で取りこぼすと、
+  // 次にオンラインで開いたときに「アプリを入れる」が出なくなる。
+  './install-hook.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

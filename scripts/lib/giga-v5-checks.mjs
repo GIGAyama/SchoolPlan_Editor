@@ -308,5 +308,45 @@ export function runGigaV5Checks(rootDir, files, options = {}) {
     }
   }
 
+  // 公開ページ（紹介ページ）にもインストールの導線を残す（§3-2）
+  //
+  // ポータルや OAuth の「アプリのホームページ」欄からの入口が、アプリ本体
+  // （index.html）ではなく紹介ページ（about.html）になった。先生が最初に開くのが
+  // このページなのに manifest が無いと、iOS Safari の「ホーム画面に追加」は
+  // *紹介ページのブックマーク* を作る。アイコンはページの縮小画像、開いても
+  // Safari の中の紹介ページで、アプリにはならない。Chromium 系でも manifest が
+  // 無ければ beforeinstallprompt が出ないため、インストールの導線がまるごと消える。
+  // 公開ページを差し替えるたびに同じ事故が起きるので、検査で押さえる。
+  const landingPage = path.posix.join(docsDir, 'about.html');
+  if (fileSet.has(landingPage)) {
+    // コメントは落として見る。「なぜ書かないか」の注意書きに反応してしまうし、
+    // コメントアウトされた <link> を「ある」と数えてもいけない。
+    const source = stripComments(read(landingPage));
+    if (!/<link\b[^>]*rel\s*=\s*["']manifest["']/i.test(source)) {
+      issues.push(issue('error', 'GIGA_LANDING_NO_MANIFEST',
+        '公開ページ（紹介ページ）に manifest がありません。iOS Safari の「ホーム画面に追加」が'
+        + 'アプリではなくこのページのブックマークを作ります（§3-2）。', landingPage));
+    }
+    if (!/<script[^>]+src=["'][^"']*install-hook\.js["']/.test(source)) {
+      issues.push(issue('error', 'GIGA_LANDING_NO_INSTALL_HOOK',
+        '公開ページ（紹介ページ）が install-hook.js を読み込んでいません。'
+        + 'Chromium 系のインストールの合図を取りこぼします（§3-2）。', landingPage));
+    }
+    if (!/rel\s*=\s*["']apple-touch-icon["']/i.test(source)) {
+      issues.push(issue('warning', 'GIGA_LANDING_NO_APPLE_ICON',
+        '公開ページ（紹介ページ）に apple-touch-icon がありません。'
+        + 'iOS でホーム画面に載るアイコンがページの縮小画像になります（§3-2）。', landingPage));
+    }
+    // apple-mobile-web-app-capable は、manifest を読まない古い iOS では
+    // 「いま開いているページを枠なしで開く」指定になる。紹介ページに書くと、
+    // ホーム画面のアイコンが紹介ページの行き止まりになる。
+    if (/name\s*=\s*["']apple-mobile-web-app-capable["']/i.test(source)) {
+      issues.push(issue('error', 'GIGA_LANDING_STANDALONE_META',
+        '公開ページ（紹介ページ）に apple-mobile-web-app-capable があります。'
+        + '古い iOS では紹介ページ自体が枠なしで開く行き止まりになります。'
+        + 'アプリの入口（index.html）へ案内してください（§3-2）。', landingPage));
+    }
+  }
+
   return issues;
 }

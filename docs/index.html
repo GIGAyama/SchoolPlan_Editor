@@ -942,6 +942,26 @@
             });
             document.getElementById('iosBannerCloseBtn').addEventListener('click', dismissIosBanner);
 
+            // 紹介ページ（about.html）の「ホーム画面に追加」から渡されてきたとき。
+            //
+            // なぜ紹介ページで完結させないか：
+            //   iOS Safari の「ホーム画面に追加」は *いま開いているページ* を登録する。
+            //   紹介ページで追加させると、ホーム画面に載るのはアプリではなく
+            //   紹介ページのブックマークになる。manifest と apple-touch-icon、
+            //   apple-mobile-web-app-capable を持つこの入口ページで追加してもらう。
+            if (/[?&]install=1(?:&|$)/.test(location.search)) {
+                // ⚠️ 先に印を消すこと。付いたまま「ホーム画面に追加」されると、
+                //    manifest を読まない古い iOS ではその URL がそのまま登録され、
+                //    アプリを開くたびに案内が出続ける。
+                try {
+                    history.replaceState(null, '', location.pathname + location.hash);
+                } catch (e) { }
+                if (!isStandalone) {
+                    if (isIosDevice) showIosGuide();
+                    else if (deferredPrompt) menuPanel.style.display = 'flex';
+                }
+            }
+
             // --- Service Worker 登録と、更新のお知らせ ---
             if ('serviceWorker' in navigator) {
                 // ⚠️ load イベントを待つだけにすると、すでに読み込みが終わっている場合に
