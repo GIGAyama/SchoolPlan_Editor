@@ -63,6 +63,8 @@
     <?!= include('App_Css_02_UnitPlanning'); ?>
     <!-- 見やすさ・押しやすさの補正。App_Css.html のあとに読み込むこと。 -->
     <?!= include('App_Css_03_A11y'); ?>
+    <!-- セル操作（コピー / ペースト / クリア）まわりのスタイル。App_Css.html のあとに読み込むこと。 -->
+    <?!= include('App_Css_04_CellOps'); ?>
     <!-- Google Picker API（Googleドライブからファイルを選ぶ画面）。
          Google 自身の配信元で、GAS 本体（script.google.com）が通る環境なら通る。
          それでも届かないことはあるため、読み込みは非同期にし、
@@ -307,6 +309,7 @@
                 <div class="edit-hint" id="editModeIndicator">
                     <span class="mode-dot view-dot"></span>
                     <span id="modeLabel">閲覧モード</span>
+                    <span id="modeHint" class="mode-hint" style="display:none;"></span>
                 </div>
                 <div class="toolbar-actions">
                     <button class="btn btn-outline d-flex align-items-center gap-1" id="editToggleBtn"
