@@ -52,10 +52,12 @@
          　Bootstrap CSS      … 届かないとレイアウトが崩れる
          　SweetAlert2        … 届かないと確認ダイアログが ReferenceError で止まる
          　Material Symbols   … 届かないとアイコンが "calendar_month" という英単語で出る
+         　QRコード生成       … 学級通信のQRを、外部サービスへURLを送らずに手元で作る
          生成物なので手で編集しないこと。直すときは npm run build:vendor。 -->
     <?!= include('Vendor_Bootstrap'); ?>
     <?!= include('Vendor_Icons'); ?>
     <?!= include('Vendor_Sweetalert'); ?>
+    <?!= include('Vendor_Qrcode'); ?>
 
     <?!= include('App_Css'); ?>
     <!-- 単元進捗ピッカー・整合性チェックのスタイル。App_Css.html が

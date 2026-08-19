@@ -193,17 +193,50 @@ function buildSweetalertHtml() {
   return banner('sweetalert2/dist（npm）') + '<style>\n' + css + '\n</style>\n<script>\n' + js + '\n</script>\n';
 }
 
+// --- 5. QRコード生成 -------------------------------------------------------
+// 学級通信のQRは、以前は外部サービス（api.qrserver.com）へ先生が入れたURLを送って
+// 画像を作らせていた。QRに貼るのは保護者アンケートのフォームなど、URL自体が鍵に
+// なっているものが多いため、送信そのものをやめてブラウザ内で作る
+// （docs/LEGAL_RISK_AUDIT_JP.md の A-2）。
+// 同期APIであることが選定理由。NW.renderContent は同期関数なので、非同期の生成では描画順が崩れる。
+function buildQrcodeHtml() {
+  // ブラウザで <script> として読むとグローバル `qrcode` が生える（末尾のUMD判定は
+  // define も exports も無い環境では何もしない）。原本の先頭に MIT の著作権表示が
+  // 入っているので、そのまま焼き込めばライセンス条件を満たす。
+  const js = readFileSync(join(NM, 'qrcode-generator/dist/qrcode.js'), 'utf8')
+    .replace(/\/\/# sourceMappingURL=.*$/gm, '');
+  return banner('qrcode-generator/dist/qrcode.js（npm）') + '<script>\n' + js + '\n</script>\n';
+}
+
 // --- 実行 ------------------------------------------------------------------
-const icons = collectIconNames();
-const iconsOut = buildIconsHtml(icons);
-writeFileSync(join(ROOT, 'Vendor_Icons.html'), iconsOut.html);
-writeFileSync(join(ROOT, 'Vendor_Bootstrap.html'), buildBootstrapHtml());
-writeFileSync(join(ROOT, 'Vendor_Sweetalert.html'), buildSweetalertHtml());
+// 引数で作るものを選べる。指定が無ければ従来どおり全部作る。
+//   node tools/build-vendor.mjs            … 全部
+//   node tools/build-vendor.mjs qrcode     … Vendor_Qrcode.html だけ
+// アイコンのサブセットには Python の fonttools が要るため、それを持っていない環境でも
+// 他の生成物だけは作れるようにしてある。
+const targets = process.argv.slice(2);
+const wants = (name) => targets.length === 0 || targets.includes(name);
 
 const kb = (n) => (n / 1024).toFixed(1) + ' KB';
 const size = (f) => readFileSync(join(ROOT, f)).length;
-console.log('Material Symbols:', iconsOut.iconCount, '個 →', kb(iconsOut.woff2Bytes), '(元 488.7 KB)');
-console.log('Bootstrap Icons :', iconsOut.biNames.length, '個 →', kb(iconsOut.biBytes));
-console.log('Vendor_Icons.html     ', kb(size('Vendor_Icons.html')));
-console.log('Vendor_Bootstrap.html ', kb(size('Vendor_Bootstrap.html')));
-console.log('Vendor_Sweetalert.html', kb(size('Vendor_Sweetalert.html')));
+
+if (wants('icons')) {
+  const icons = collectIconNames();
+  const iconsOut = buildIconsHtml(icons);
+  writeFileSync(join(ROOT, 'Vendor_Icons.html'), iconsOut.html);
+  console.log('Material Symbols:', iconsOut.iconCount, '個 →', kb(iconsOut.woff2Bytes), '(元 488.7 KB)');
+  console.log('Bootstrap Icons :', iconsOut.biNames.length, '個 →', kb(iconsOut.biBytes));
+  console.log('Vendor_Icons.html     ', kb(size('Vendor_Icons.html')));
+}
+if (wants('bootstrap')) {
+  writeFileSync(join(ROOT, 'Vendor_Bootstrap.html'), buildBootstrapHtml());
+  console.log('Vendor_Bootstrap.html ', kb(size('Vendor_Bootstrap.html')));
+}
+if (wants('sweetalert')) {
+  writeFileSync(join(ROOT, 'Vendor_Sweetalert.html'), buildSweetalertHtml());
+  console.log('Vendor_Sweetalert.html', kb(size('Vendor_Sweetalert.html')));
+}
+if (wants('qrcode')) {
+  writeFileSync(join(ROOT, 'Vendor_Qrcode.html'), buildQrcodeHtml());
+  console.log('Vendor_Qrcode.html    ', kb(size('Vendor_Qrcode.html')));
+}
