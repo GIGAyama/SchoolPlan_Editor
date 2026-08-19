@@ -456,8 +456,12 @@ function writeToLog_(level, message) {
     // appendRow は直感的ですが、高速化のためgetLastRowを使用（API呼び出しを減らしてもよいが、ログは都度更新が必要）
     logSheet.appendRow([new Date(), level, String(message).substring(0, 30000)]);
   } catch (e) {
-    console.error(`ログシートへの書き込みに失敗: ${e.message}`);
-    console.error(`元のログ: [${level}] ${message}`);
+    // ここへ落ちたときの出力先は Stackdriver（Cloud Logging）で、
+    // スクリプトの所有者が閲覧できる。1つのURLを多数の先生へ配る運用では、
+    // 所有者＝配布者なので、本文を出すと週案の記述が配布者側へ渡ることになる。
+    // 何が起きたかを追うには「どのログが書けなかったか」の種別で足りるため、本文は出さない
+    // （docs/LEGAL_RISK_AUDIT_JP.md の B-1）。
+    console.error(`ログシートへの書き込みに失敗しました（レベル: ${level}）: ${e.message}`);
   }
 }
 

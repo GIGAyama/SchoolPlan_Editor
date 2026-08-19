@@ -2083,25 +2083,40 @@
     };
 
     // ---- localStorage auto-save / restore ----
+
+    /**
+     * localStorage へ保存するために、画像そのものを落としたブロックを作る。
+     *
+     * 学級通信には児童の顔写真が入る。この下書きはブラウザに残るため、
+     * 職員室の共用端末では次に同じブラウザを使う人が開ける状態になる
+     * （docs/LEGAL_RISK_AUDIT_JP.md の B-2）。
+     * 以前は容量が足りなくなったときだけ画像を落としていたが、
+     * **写真は常に置かない**ことにした。落ちるのは画像だけで、
+     * 文章・見出し・時間割はそのまま復元できる。
+     */
+    NW.stripImagesForLocalSave_ = function (blocks) {
+        var copy = JSON.parse(JSON.stringify(blocks || []));
+        copy.forEach(function (b) {
+            if (b.src) b.src = '';
+            if (b.images) b.images.forEach(function (img) { if (img.src) img.src = ''; });
+            if (b.colData) b.colData.forEach(function (col) { if (col.src) col.src = ''; });
+        });
+        return copy;
+    };
+
     NW.autoSave = function () {
         clearTimeout(NW._saveTimer);
         NW._saveTimer = setTimeout(function () {
             try {
-                var data = { blocks: NW.blocks, nextId: NW.nextId, mondayStr: NW.mondayStr };
-                localStorage.setItem('nw_autosave', JSON.stringify(data));
+                localStorage.setItem('nw_autosave', JSON.stringify({
+                    blocks: NW.stripImagesForLocalSave_(NW.blocks),
+                    nextId: NW.nextId, mondayStr: NW.mondayStr
+                }));
             } catch (e) {
-                // Quota exceeded - try without base64 images
                 try {
-                    var stripped = JSON.parse(JSON.stringify(NW.blocks));
-                    stripped.forEach(function (b) {
-                        if (b.src && b.src.length > 1000) b.src = '';
-                        if (b.images) b.images.forEach(function (img) {
-                            if (img.src && img.src.length > 1000) img.src = '';
-                        });
-                    });
-                    localStorage.setItem('nw_autosave', JSON.stringify({
-                        blocks: stripped, nextId: NW.nextId, mondayStr: NW.mondayStr
-                    }));
+                    // 画像を落としてもなお入らない場合（文章が非常に長いなど）は、
+                    // 古い下書きを残さないよう消す。中途半端な復元より分かりやすい。
+                    localStorage.removeItem('nw_autosave');
                 } catch (ignore) { }
             }
         }, 800);
@@ -2120,6 +2135,14 @@
                     document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
                 }
                 NW.render();
+                // 写真はブラウザに残していないので、復元しても空のままになる。
+                // 黙っていると「消えた」と見えるため、入れ直しが要ることを伝える。
+                var needsPhotos = data.blocks.some(function (b) {
+                    return b.type === 'image' || b.type === 'gallery' || b.type === 'columns';
+                });
+                if (needsPhotos && typeof showToast === 'function') {
+                    showToast('info', '編集中の内容を復元しました。写真は端末に残していないため、入れ直してください。');
+                }
                 return true;
             }
         } catch (e) { }
