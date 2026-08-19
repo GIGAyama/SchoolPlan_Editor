@@ -266,12 +266,24 @@ function clearDatabaseData_core_() {
   return clearDatabaseInputsForSheet_(dbSheet, getDbColumns());
 }
 
-// クリア対象の入力列。「時程」＋週案の入力列すべて。
-// 以前は「時程〜放課後」の連続範囲をまとめて消していたため、
-//   ・放課後より右にある宿題・持ち物が消えずに残る
-//   ・列順の違うシートでは日付など消してはいけない列まで巻き込む
-// という2つの問題があった。列は必ず論理名で指定する。
-const DB_CLEARABLE_INPUT_KEYS_ = ['TIME'].concat(P2_WEEK_READ_KEYS_);
+/**
+ * クリア対象の入力列。「時程」＋週案の入力列すべて。
+ *
+ * 以前は「時程〜放課後」の連続範囲をまとめて消していたため、
+ *   ・放課後より右にある宿題・持ち物が消えずに残る
+ *   ・列順の違うシートでは日付など消してはいけない列まで巻き込む
+ * という2つの問題があった。列は必ず論理名で指定する。
+ *
+ * 定数ではなく関数にしているのは、`P2_WEEK_READ_KEYS_` が別ファイル
+ * （12_Performance.gs）のトップレベル const だから。Apps Script は
+ * ファイルを順に読み込むので、定数の初期化式から後ろのファイルの定数を
+ * 参照すると「P2_WEEK_READ_KEYS_ is not defined」でアプリ全体が開けなくなる。
+ * 関数の中なら、呼ばれる時点ではどのファイルも読み込み済みで安全。
+ * @returns {string[]}
+ */
+function dbClearableInputKeys_() {
+  return ['TIME'].concat(P2_WEEK_READ_KEYS_);
+}
 
 /**
  * 指定したデータベースシートの入力内容をクリアします。
@@ -288,9 +300,10 @@ function clearDatabaseInputsForSheet_(dbSheet, dbCols, includeReflection) {
     return { cleared: false, message: `「${dbSheet.getName()}」にクリア対象のデータがありません。` };
   }
 
+  const clearable = dbClearableInputKeys_();
   const keys = includeReflection
-    ? DB_CLEARABLE_INPUT_KEYS_.concat(['REFLECTION', 'REFLECTION_STATUS'])
-    : DB_CLEARABLE_INPUT_KEYS_;
+    ? clearable.concat(['REFLECTION', 'REFLECTION_STATUS'])
+    : clearable;
   const columns = keys.map(key => dbCols[key]).filter(Boolean);
   const cleared = [];
   for (const group of p2GroupConsecutiveNumbers_(columns)) {

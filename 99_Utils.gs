@@ -512,14 +512,33 @@ function checkDeploymentIntegrity_() {
   // 「指定された権限では SpreadsheetApp.getActiveSpreadsheet を呼び出すことができません」
   // になる。関数の有無だけ見ていると、これを見逃す。
   // typeof は未定義の識別子でも例外にならないので、そのまま並べてよい。
+  // 各ファイルの「今の版にしか無い」関数・定数を1つずつ見る。
+  // typeof は未定義の識別子でも例外にならないので、そのまま並べてよい。
+  // 新しい .gs を足したらここにも足すこと（tests/load-order.test.mjs が漏れを弾く）。
   const outdated = [];
-  if (typeof sheetsOpenById_ !== 'function') outdated.push('18_SheetsApi.gs');
-  if (typeof driveCreateFile_ !== 'function') outdated.push('17_DriveApi.gs');
-  if (typeof getMyTriggersForWebApp !== 'function') outdated.push('07_WebApp.gs');
-  if (typeof getPickerAppId_ !== 'function') outdated.push('03_PdfProcessing.gs');
-  if (typeof SP_KEY_PICKER_APP_ID === 'undefined') outdated.push('06_Settings.gs');
-  if (typeof resolveSpreadsheetId_ !== 'function') outdated.push('11_Tenant.gs');
   if (typeof getDbColumns !== 'function') outdated.push('00_config.gs');
+  if (typeof getTaskData !== 'function') outdated.push('02_Database.gs');
+  if (typeof getPickerAppId_ !== 'function') outdated.push('03_PdfProcessing.gs');
+  if (typeof buildMasterIndex_ !== 'function') outdated.push('04_AutoFill.gs');
+  if (typeof getCourseIdByName !== 'function') outdated.push('05_Classroom.gs');
+  if (typeof SP_KEY_PICKER_APP_ID === 'undefined') outdated.push('06_Settings.gs');
+  if (typeof getMyTriggersForWebApp !== 'function') outdated.push('07_WebApp.gs');
+  if (typeof getGeminiApiUrl_ !== 'function') outdated.push('08_Gemini.gs');
+  if (typeof saveWeeklySummary !== 'function') outdated.push('09_Reflection.gs');
+  if (typeof addClassFromWeb !== 'function') outdated.push('10_MultiClass.gs');
+  if (typeof resolveSpreadsheetId_ !== 'function') outdated.push('11_Tenant.gs');
+  if (typeof P2_WEEK_READ_KEYS_ === 'undefined') outdated.push('12_Performance.gs');
+  if (typeof p3MetaGet_ !== 'function') outdated.push('13_DataProtection.gs');
+  if (typeof p3GetBackupIndex_ !== 'function') outdated.push('13_DataProtection_Backups.gs');
+  if (typeof p3IntegrityCheck_ !== 'function') outdated.push('13_DataProtection_Operations.gs');
+  if (typeof p3ScopeMonday_ !== 'function') outdated.push('13_DataProtection_Snapshots.gs');
+  if (typeof p3AppendTrash_ !== 'function') outdated.push('13_DataProtection_Trash.gs');
+  if (typeof UP_CACHE_PREFIX_ === 'undefined') outdated.push('14_UnitProgress.gs');
+  if (typeof p4WriteUnitRows_ !== 'function') outdated.push('15_UnitMasterOps.gs');
+  if (typeof p5LoadUnitContext_ !== 'function') outdated.push('16_UnitRecompose.gs');
+  if (typeof driveCreateFile_ !== 'function') outdated.push('17_DriveApi.gs');
+  if (typeof sheetsOpenById_ !== 'function') outdated.push('18_SheetsApi.gs');
+  if (typeof describeApiDisabledError_ !== 'function') outdated.push('99_Utils.gs');
 
   // 削除済みのファイルが残っていないか（それぞれのファイルにしか無かった関数で見る）
   const stale = [];
