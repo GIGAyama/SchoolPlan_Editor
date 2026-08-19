@@ -1062,7 +1062,7 @@ function protectSheets() {
  * @returns {string[]}
  */
 function protectSheets_core_() {
-  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSs_();
   const results = [];
 
   const sheetsToProtect = [

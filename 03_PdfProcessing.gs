@@ -186,7 +186,7 @@ ${items}
       return "0 件の予定を転記しました。";
     }
 
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const dbSheet = getDbSheet_(ss);
 
     // 該当日の行だけを読み、行事・放課後の列だけを書く（数式列を壊さないため）
@@ -310,7 +310,7 @@ function createUnitMasterFromPdfs() {
  * 1つの指導計画PDFファイルを処理して「単元マスタ」に追記します
  */
 function processSinglePdf(file) {
-  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSs_();
   const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
   const apiKey = getApiKey_();
   const grade = tGetProp_(SCRIPT_PROP_GRADE) || '';
@@ -846,7 +846,7 @@ ${items}
  * @returns {Set<string>}
  */
 function getDatabaseDateSet_() {
-  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSs_();
   const dbSheet = getDbSheet_(ss);
   const dates = new Set();
   if (!dbSheet) return dates;
@@ -941,7 +941,7 @@ function applyExtractedEventsFromWeb(events) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
 
@@ -1089,7 +1089,7 @@ function applyExtractedUnitsFromWeb(units, options) {
     options = options || {};
     const addSummaryRows = options.addSummaryRows !== false; // デフォルトON（従来動作と同じ）
 
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     let masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!masterSheet) {
       masterSheet = ss.insertSheet(SHEET_NAME_UNIT_MASTER);

@@ -133,7 +133,7 @@ function recordPostedSchedule_(fingerprint) {
  */
 function postScheduleToClassroom_core_(options) {
     const isManual = !!(options && options.manual);
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const databaseSheet = getDbSheet_(ss);
     if (!databaseSheet) throw new Error("データベースシートが見つかりません");
 
@@ -412,7 +412,7 @@ function listCoursesFromWeb() {
  */
 function createAndSavePDF(sheetName) {
   try {
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const sheet = ss.getSheetByName(sheetName);
     if (!sheet) throw new Error(`シート「${sheetName}」見つからず`);
     const formattedDate = Utilities.formatDate(new Date(), "JST", "yyyyMMdd");

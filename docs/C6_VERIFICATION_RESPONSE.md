@@ -15,7 +15,7 @@ Google が指摘したのは、独立した **4 件**です。1 件でも欠け�
 | 1 | デモ動画が、次の 4 スコープの**機能の全体像**を示していない<br>`script.send_mail` / `spreadsheets` / `script.external_request` / `script.scriptapp`<br>書き込み・削除は**利用者のアカウント側への反映**まで映すこと | [C5](C5_DEMO_VIDEO_SCRIPT.md) の台本を改訂（シーン4・5・7 を拡張、シーン7-2 を新設）。<br>`script.scriptapp` の反映を見せるため、アプリに**「自動実行（トリガー）の状況」画面を新設** | 台本✅／**撮影は未** |
 | 2 | AI／ML 連携の申告と Limited Use 対応 | プライバシーポリシー §4 に AI 提供者・ティア・送信データを明記。<br>§5 に**英文の Limited Use 宣言**を掲載。<br>アプリの設定画面と初期設定ウィザードに**有料ティア必須**の明示を追加 | ✅ |
 | 3 | プライバシーポリシーに、機微なデータの**保護措置**の記載がない | §7 を「安全管理措置（機微なデータの保護）」として全面的に書き直し、11 項目の具体策を表で明記 | ✅ |
-| 4 | `spreadsheets` は `drive.file` で足りるのではないか（最小スコープ） | **要判断**（下記 §4） | ⏳ |
+| 4 | `spreadsheets` は `drive.file` で足りるのではないか（最小スコープ） | **Option 1（移行）に決定**。可否と手順は [B5](B5_SHEETS_SCOPE_AUDIT.md) に棚卸し済み | ⏳ 実装中 |
 
 ---
 
@@ -106,7 +106,11 @@ Workspace API の Limited Use 要件と両立しません。API キーは利用�
 
 ---
 
-## 4. 指摘4：`spreadsheets` を `drive.file` にできるか　★要判断★
+## 4. 指摘4：`spreadsheets` を `drive.file` にできるか　★Option 1 で確定★
+
+> 📋 **全数の棚卸しと移行手順 → [B5: `spreadsheets` → `drive.file` 化 可否レポート](B5_SHEETS_SCOPE_AUDIT.md)**
+> 使っている Sheet / Range の API はすべて Sheets REST API v4 に対応があり、
+> 「実現できない」項目はありませんでした。よって **Option 1（移行）** を採ります。
 
 ### Google の提案
 
@@ -131,20 +135,25 @@ Workspace API の Limited Use 要件と両立しません。API キーは利用�
 `SpreadsheetApp` が使えなくなるという理由は、Google が明示的に否定した
 「client library limitations」に該当し、Option 2 の正当化としては通らない可能性が高いです。
 
-### 選択肢
+### 選択肢と判断
 
-| | 内容 | 返信文 | コスト |
-|---|------|--------|--------|
-| **Option 1（推奨）** | `spreadsheets` を外し、Sheets REST API v4 + `drive.file` へ移行 | "Confirming narrower scopes" | **大**：`SpreadsheetApp` の呼び出しは 16 ファイル・約 75 箇所。`Sheet` / `Range` オブジェクトを前提にした処理の書き換えを含む |
-| Option 2 | `spreadsheets` の維持を主張 | "Unable to use narrower scopes" + 理由 | 小。ただし**却下される可能性が高い** |
+| | 内容 | 返信文 | 判断 |
+|---|------|--------|------|
+| **Option 1** | `spreadsheets` を外し、Sheets REST API v4 + `drive.file` へ移行 | "Confirming narrower scopes" | **採用** |
+| Option 2 | `spreadsheets` の維持を主張 | "Unable to use narrower scopes" + 理由 | 見送り。正当化の根拠が `SpreadsheetApp` の制約しかなく、Google が明示的に否定した client library limitation にあたるため |
 
-### Option 1 を選ぶ場合の進め方（B1〜B2 の再演）
+### 進め方（[B5](B5_SHEETS_SCOPE_AUDIT.md) §5 の要約）
 
-1. `18_SheetsApi.gs`（仮）に Sheets REST API v4 の薄いラッパーを作る（`17_DriveApi.gs` と同じ設計）
-2. `02_Database.gs` を起点に、`SpreadsheetApp` 依存を層で切り出して置き換える
-3. 既存 DB のためのピッカー再選択フローを用意する（`drive.file` 移行に伴う再認可の案内も）
-4. `tests/drive-scope.test.mjs` と同じ要領で、`SpreadsheetApp` の再混入を静的検査で防ぐ
-5. 移行完了後に `appsscript.json` と Cloud Console から `spreadsheets` を外し、動画を撮り直す
+呼び出しは 22 ファイル・約 470 箇所に散っているため、**呼び出し側は書き換えず、
+`SpreadsheetApp` 互換のファサードを REST で作る**（`17_DriveApi.gs` と同じ設計）方針です。
+
+1. ~~取得口を `getSs_()` に集約する~~（✅ 実施済み。防御的な三項 21 箇所を単純化）
+2. コンテナバインド専用の遺物（`onOpen` / `getUi` / `toast` / `onEdit`）を切り離す
+3. `18_SheetsApi.gs` にファサードを実装し、読み取り経路から段階的に切り替える
+4. 書き込み・書式・保護を移す
+5. `SpreadsheetApp` の再混入を静的検査で防ぐ
+6. **動作確認後に** `appsscript.json` と Cloud Console から `spreadsheets` を外す
+7. 同意画面のスコープが変わるため、動画を撮り直す
 
 > ⚠️ Google は「**今の時点で承認済みスコープを外すな**」と書いています。
 > `spreadsheets` はまだ未承認なので外して構いませんが、**移行が動くことを確認してから**外してください。
