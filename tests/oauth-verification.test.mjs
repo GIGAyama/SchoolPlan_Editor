@@ -108,13 +108,19 @@ test('ファイルのコピー漏れを起動時に名指しで知らせる', ()
     utils.indexOf('// ===== クリーニング・保守関連 ====='));
 
   // 名指しするファイルは、実在していなければ意味がない
-  const named = [...check.matchAll(/missing\.push\('([^']+)'\)/g)].map(m => m[1]);
-  assert.ok(named.length >= 3, '必須ファイルの確認が少なすぎます');
+  const named = [...check.matchAll(/outdated\.push\('([^']+)'\)/g)].map(m => m[1]);
+  assert.ok(named.length >= 5, '必須ファイルの確認が少なすぎます');
   for (const file of named) {
     assert.ok(fs.existsSync(file), `存在しないファイルを名指ししています: ${file}`);
   }
   // 移行の要である Sheets ファサードは必ず見る
   assert.ok(named.includes('18_SheetsApi.gs'));
+  // 「ファイルはあるが古い」も捕まえる必要がある。07_WebApp.gs の旧 getSs_() は
+  // SpreadsheetApp を呼ぶため、古いまま残ると権限エラーになる。
+  assert.ok(named.includes('07_WebApp.gs'));
+  assert.match(check, /getMyTriggersForWebApp/,
+    '「今の版にしか無い」関数で見ていない（getSs_ の有無では古い版を見逃す）');
+  assert.match(check, /古いまま/);
 
   // 起動時に一番はじめに呼ばれる経路で止める
   const tenant = fs.readFileSync('11_Tenant.gs', 'utf8');
@@ -123,6 +129,8 @@ test('ファイルのコピー漏れを起動時に名指しで知らせる', ()
   const core = fs.readFileSync('App_Js_01_Core.html', 'utf8');
   assert.match(core, /status\.deploymentError/);
   assert.match(core, /function showDeploymentError/);
+  // 99_Utils.gs 自体が古いと確認用の関数も無い。そのときも配置の問題として扱う
+  assert.match(tenant, /typeof checkDeploymentIntegrity_ !== 'function'/);
 });
 
 test('API がオンになっていないエラーを、権限の問題と取り違えないように言い換える', () => {

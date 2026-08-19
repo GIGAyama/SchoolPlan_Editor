@@ -146,6 +146,12 @@ function getTenantStatus() {
   try {
     // ファイルのコピー漏れは「〇〇 is not defined」としか出ず原因が分からない。
     // 起動時に一番はじめに呼ばれるここで、名指しで知らせる。
+    // 99_Utils.gs 自体が古いと、この関数もまだ無い。そのときも配置の問題として扱う。
+    if (typeof checkDeploymentIntegrity_ !== 'function') {
+      const note = '99_Utils.gs が古いままです。リポジトリの内容で貼り直してください'
+        + '（clasp push が確実です）。';
+      return { success: false, error: note, deploymentError: note };
+    }
     const deployment = checkDeploymentIntegrity_();
     if (!deployment.ok) {
       logError('checkDeploymentIntegrity_', new Error(deployment.message));
