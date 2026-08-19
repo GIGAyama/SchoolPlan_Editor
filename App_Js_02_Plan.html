@@ -813,7 +813,10 @@
      */
     function exitEditMode() {
         var baseline = STATE.editBaseline; // updateEditUI() が捨てる前に受け取る
-        if (baseline && STATE.weekData) STATE.weekData.days = baseline;
+        if (baseline && STATE.weekData) {
+            STATE.weekData.days = baseline;
+            markWeekDaysMutated();
+        }
         STATE.editMode = false;
         updateEditUI();
         if (STATE.weekData && STATE.weekData.days) renderWeekGrid(STATE.weekData.days);
@@ -921,6 +924,47 @@
     var _autoSaving = false;
     var _viewSaveTimer = null;
 
+    // ===== 手元の週データを書き換えた回数 =====
+    // 保存はGASの往復に数秒かかることがある。その間に次のセル操作をすると、
+    // 先に飛ばした保存の応答（＝保存した時点の内容）が後から返ってくる。
+    // その内容で手元を上書きすると、応答を待つ間に行った操作がまとめて巻き戻り、
+    // 「月・火・水と消したのに木曜を消した頃に火・水が復活する」という壊れ方をする。
+    // 保存要求を出した時点の回数を控えておき、応答時に変わっていたら取り込まない。
+    var _weekDaysMutationSeq = 0;
+
+    /** セル操作などで STATE.weekData.days を書き換えたことを記録します。 */
+    function markWeekDaysMutated() {
+        _weekDaysMutationSeq++;
+    }
+
+    /** いまの書き換え回数。保存要求を出す側が控え、応答時に見比べます。 */
+    function weekDaysMutationSeq() {
+        return _weekDaysMutationSeq;
+    }
+
+    // ===== 閲覧モードの自動保存の待ち行列 =====
+    // 進行中の保存があるあいだの保存要求は、週ごとに最新の1件だけ待たせる。
+    // 待っている1件は実行時に最新の days を読み直して送るため、待機中に増えた変更も
+    // まとめて保存される。要求ごとに待たせると、同じ内容の保存がセル操作の回数だけ
+    // 積み上がり、GASのロック待ちで保存全体が遅くなる。
+    var _viewSaveQueue = {};
+
+    /**
+     * 進行中の保存の完了後に、その週の保存を1回だけ実行します。
+     * @param {string} key 週の識別子（月曜日の日付文字列）
+     * @param {Function} run 実行する保存処理
+     */
+    function queueViewSave(key, run) {
+        var alreadyQueued = Object.prototype.hasOwnProperty.call(_viewSaveQueue, key);
+        _viewSaveQueue[key] = run;
+        if (alreadyQueued) return;
+        whenSaveIdle(function () {
+            var fn = _viewSaveQueue[key];
+            delete _viewSaveQueue[key];
+            if (fn) fn();
+        });
+    }
+
     // ===== 保存要求の直列化 =====
     // 手動保存・画面切替の自動保存・閲覧モードの自動保存が同時に飛ぶと、
     // 後から届いた方は「保存前のリビジョン」を持ったままサーバへ届くため、
@@ -968,15 +1012,22 @@
     // サーバは「シートに実際に入った値」を days で返す。スプレッドシートが
     // 入力を解釈し直した場合（"007"→7 など）に手元の値がずれ続けないよう、
     // 保存成功時は返ってきた値で手元のデータを揃える。
-    function adoptSavedWeekDays(result, fallbackDays, weekData) {
+    // @param {number} [mutationSeq] 保存要求を出した時点の weekDaysMutationSeq()。
+    //   応答が返るまでに手元を書き換えていたら、サーバの返した「保存時点の内容」で
+    //   上書きしない（応答待ちのあいだに行ったセル操作がまとめて巻き戻るのを防ぐ）。
+    //   取り込まなかった分は、後続の保存が最新の内容を送り直すことで揃う。
+    function adoptSavedWeekDays(result, fallbackDays, weekData, mutationSeq) {
         var target = weekData || STATE.weekData;
         if (!target) return false;
-        var saved = (result && result.days && result.days.length) ? result.days : fallbackDays;
-        var normalized = JSON.stringify(saved) !== JSON.stringify(target.days);
-        target.days = saved;
         // 保存が通った時点で「編集を始めた時の内容」は保存済みの内容に置き換わる。
         // ここで捨てておかないと、直後の cancelEdit() が保存前の状態へ巻き戻してしまう。
         if (target === STATE.weekData) STATE.editBaseline = null;
+        var stale = (mutationSeq !== undefined && mutationSeq !== null
+            && mutationSeq !== weekDaysMutationSeq());
+        if (stale) return false;
+        var saved = (result && result.days && result.days.length) ? result.days : fallbackDays;
+        var normalized = JSON.stringify(saved) !== JSON.stringify(target.days);
+        target.days = saved;
         return normalized;
     }
 
@@ -1191,6 +1242,7 @@
         var current = collectCurrentEditData();
         if (!current) return false;
         STATE.weekData.days = current;
+        markWeekDaysMutated();
         return true;
     }
 
@@ -1394,6 +1446,7 @@
         syncEditBufferToState();
         STATE.redoStack.push(JSON.parse(JSON.stringify(STATE.weekData.days)));
         STATE.weekData.days = STATE.undoStack.pop();
+        markWeekDaysMutated();
         rerenderGridPreservingFocus();
         showToast('info', '↩ 元に戻しました');
         persistViewMutation();
@@ -1404,6 +1457,7 @@
         syncEditBufferToState();
         STATE.undoStack.push(JSON.parse(JSON.stringify(STATE.weekData.days)));
         STATE.weekData.days = STATE.redoStack.pop();
+        markWeekDaysMutated();
         rerenderGridPreservingFocus();
         showToast('info', '↪ やり直しました');
         persistViewMutation();
@@ -1463,6 +1517,7 @@
         } else {
             day[rowDef.key] = STATE.clipboard.data;
         }
+        markWeekDaysMutated();
         rerenderGridPreservingFocus();
         showToast('success', asPeriod ? '📋 コマをペーストしました' : '📋 ペーストしました');
         persistViewMutation();
@@ -1483,6 +1538,7 @@
         } else {
             day[rowDef.key] = '';
         }
+        markWeekDaysMutated();
         rerenderGridPreservingFocus();
         showToast('info', '🗑 クリアしました');
         persistViewMutation();
@@ -1539,6 +1595,7 @@
         STATE.weekData.days[srcDay].periods[srcPeriod] = dst || { subject: '', unit: '', content: '' };
         STATE.weekData.days[dstDay].periods[dstPeriod] = src || { subject: '', unit: '', content: '' };
 
+        markWeekDaysMutated();
         rerenderGridPreservingFocus();
         showToast('success', '🔄 コマを入れ替えました');
         persistViewMutation();
@@ -1646,6 +1703,7 @@
                 for (var p = 0; p < 6; p++) {
                     STATE.weekData.days[dayIdx].periods[p] = { subject: '', unit: '', content: '' };
                 }
+                markWeekDaysMutated();
                 rerenderGridPreservingFocus();
                 showToast('info', '🗑 ' + DAY_LABELS_JP[dayIdx] + '曜の全コマをクリアしました');
                 persistViewMutation();
@@ -1656,6 +1714,7 @@
                 for (var d = 0; d < 7; d++) {
                     STATE.weekData.days[d].periods[pIdx] = { subject: '', unit: '', content: '' };
                 }
+                markWeekDaysMutated();
                 rerenderGridPreservingFocus();
                 showToast('info', '🗑 ' + (pIdx + 1) + '校時を全曜日クリアしました');
                 persistViewMutation();
@@ -1941,6 +2000,7 @@
                 if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">smart_toy</span> 単元自動入力'; }
                 if (result.success) {
                     STATE.weekData.days = result.days;
+                    markWeekDaysMutated();
                     // 編集状態のまま画面を再描画（計算結果を反映）
                     renderWeekGrid(STATE.weekData.days);
                     var msg = '自動入力が完了しました。内容を確認し、問題なければ「保存する」を押してください。';

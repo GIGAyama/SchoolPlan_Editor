@@ -47,16 +47,21 @@
             var btn = document.getElementById('saveBtn');
             btn.disabled = true; btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 保存中...';
             showToast('info', '保存中...');
+            // 保存中もグリッドは操作できる。応答を待つあいだの右クリックメニューのセル操作を
+            // 保存済みの内容で消してしまわないよう、要求時点の書き換え回数を控えておく。
+            var mutationSeq = weekDaysMutationSeq();
             google.script.run.withSuccessHandler(function (result) {
                 endSaveRequest();
                 btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 if (result.success) {
                     // cancelEdit() が保存後の値で再描画するため、ここでの描画は不要
-                    adoptSavedWeekDays(result, days);
+                    adoptSavedWeekDays(result, days, null, mutationSeq);
                     STATE.weekData.revision = result.revision;
                     if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
                     cancelEdit();
                     showToast('success', result.message);
+                    // 保存に間に合わなかったセル操作は、閲覧モードへ戻ってから保存し直す
+                    if (weekDaysMutationSeq() !== mutationSeq) window.persistViewMutation();
                 } else if (result.conflict) {
                     handleSaveConflict(result, days, function (revision) {
                         STATE.weekData.revision = revision; window.saveWeeklyPlan();
@@ -69,31 +74,44 @@
             }).saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, 'manual-save');
         };
 
+        // 閲覧モードのセル操作（右クリックメニュー・D&D）の自動保存（保護版）。
+        // 応答が返るまでの数秒間にも次の操作ができるため、送る内容は要求時点の
+        // スナップショットにし、応答の取り込みは weekDaysMutationSeq が変わっていない
+        // 時だけ行う。待たせる保存も週ごとに1件だけにする。
+        // （詳しい理由は App_Js_14_MultiClass の persistViewMutation を参照）
         window.persistViewMutation = function () {
             if (STATE.editMode || !STATE.weekData || !STATE.mondayStr) return;
             var weekData = STATE.weekData;
             var mondayStr = STATE.mondayStr;
             clearTimeout(_viewSaveTimer);
-            _viewSaveTimer = setTimeout(function () {
-                whenSaveIdle(function () {
-                    if (!beginSaveRequest()) { whenSaveIdle(function () { window.persistViewMutation(); }); return; }
-                    var days = weekData.days;
-                    google.script.run.withSuccessHandler(function (result) {
-                        endSaveRequest();
-                        if (result.success) {
-                            var normalized = adoptSavedWeekDays(result, days, weekData);
-                            weekData.revision = result.revision;
-                            if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
-                            if (normalized && STATE.weekData === weekData) renderWeekGrid(weekData.days);
-                        } else if (result.conflict) {
-                            handleSaveConflict(result, days, function (revision) {
-                                weekData.revision = revision; window.persistViewMutation();
-                            });
-                        } else showToast('error', '変更の保存に失敗: ' + result.error);
-                    }).withFailureHandler(function (e) { endSaveRequest(); showToast('error', '変更の保存に失敗: ' + e.message); })
-                        .saveWeeklyPlanDataProtected(mondayStr, days, weekData.revision, 'view-mutation');
-                });
-            }, 450);
+            _viewSaveTimer = setTimeout(runViewSave, 450);
+
+            function runViewSave() {
+                if (!weekData.days) return;
+                if (!beginSaveRequest()) { queueViewSave(mondayStr, runViewSave); return; }
+                var mutationSeq = weekDaysMutationSeq();
+                var days = JSON.parse(JSON.stringify(weekData.days));
+                google.script.run.withSuccessHandler(function (result) {
+                    endSaveRequest();
+                    if (result.success) {
+                        weekData.revision = result.revision;
+                        // 編集モードに入っていたら入力欄の方が新しいので取り込まない。
+                        // 週を移動していたら、この応答はもう画面上の週のものではない。
+                        var sameWeek = (STATE.weekData === weekData);
+                        var normalized = (sameWeek && !STATE.editMode)
+                            ? adoptSavedWeekDays(result, days, weekData, mutationSeq)
+                            : false;
+                        // 保存が通れば時数・単元進捗のキャッシュは作り直しが要る（編集中でも同じ）
+                        if (sameWeek && typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
+                        if (normalized) renderWeekGrid(weekData.days);
+                    } else if (result.conflict) {
+                        handleSaveConflict(result, days, function (revision) {
+                            weekData.revision = revision; runViewSave();
+                        });
+                    } else showToast('error', '変更の保存に失敗: ' + result.error);
+                }).withFailureHandler(function (e) { endSaveRequest(); showToast('error', '変更の保存に失敗: ' + e.message); })
+                    .saveWeeklyPlanDataProtected(mondayStr, days, weekData.revision, 'view-mutation');
+            }
         };
 
         window.deleteTaskById = async function (taskId) {
