@@ -43,12 +43,20 @@ Google の審査（あとの手順 C2・C4）を受ける必要があり、そ�
 
 1. 左上のメニュー（≡）→ **「API とサービス」→「ライブラリ」** を開きます。
 2. 検索欄に名前を入れて、出てきたものを開き **「有効にする」** を押します。これを次の分だけ繰り返します。
+   - **Google Sheets API**（週案データベースの読み書きに必要。**必須**）
+   - **Google Drive API**（PDFの読み込み・保存に必要。**必須**）
+   - **Google Picker API**（Driveからファイルを選ぶ画面に必要。**必須**）
    - **Google Classroom API**（Classroom 連携を使うなら）
-   - **Google Drive API**（PDFの読み込み・保存に必要）
-   - **Google Picker API**（Driveからファイルを選ぶ画面に必要）
    - **Apps Script API**（開発ツール clasp を使う場合のみ。手作業でコピーするなら不要）
 
-> 💡 表計算（スプレッドシート）の機能は、特に何もしなくても使えます。
+> ⚠️ **Google Sheets API のオンを忘れないでください。**
+> 以前は「表計算の機能は何もしなくても使える」と書いていましたが、それは
+> Apps Script 組み込みの `SpreadsheetApp` を使っていたときの話です。
+> 現在は要求する権限を `drive.file` だけに絞るため、スプレッドシートも
+> **Sheets API を直接呼んでいます**（[B5](B5_SHEETS_SCOPE_AUDIT.md)）。
+> オンにし忘れると、アプリを開いたときに
+> 「`Sheets API (403): Google Sheets API has not been used in project ... or it is disabled`」
+> というエラーになります。オンにしてから数分待つと反映されます。
 
 ✅ ここまでで機能がオンになりました。
 

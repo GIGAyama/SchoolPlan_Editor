@@ -461,6 +461,93 @@ function writeToLog_(level, message) {
   }
 }
 
+/**
+ * Google API のエラー本文から「Cloud プロジェクトで API がオンになっていない」を
+ * 見分け、何をすればよいかを日本語で添えます。
+ *
+ * 組み込みサービス（SpreadsheetApp / DriveApp）を使っていた頃は、Apps Script が
+ * 裏で処理していたためプロジェクト側の有効化が要りませんでした。REST を直接
+ * 呼ぶようになったので、初回デプロイでここに引っかかります。Google が返す英文
+ * だけだと権限やスコープの問題と紛らわしいので、言い換えて案内します。
+ *
+ * @param {string} apiName 画面に出す API 名（例: 'Google Sheets API'）
+ * @param {number} code HTTP ステータス
+ * @param {string} message API が返した本文
+ * @returns {string} 利用者・管理者向けのメッセージ
+ */
+function describeApiDisabledError_(apiName, code, message) {
+  const text = String(message || '');
+  const disabled = code === 403
+    && (/has not been used in project/i.test(text) || /it is disabled/i.test(text));
+  if (!disabled) return `${apiName} (${code}): ${text}`;
+
+  return `${apiName} が Google Cloud プロジェクトでオンになっていません。`
+    + 'Cloud Console の「API とサービス」→「ライブラリ」で ' + apiName + ' を有効にしてから、'
+    + '数分待って開き直してください。'
+    + '（これは権限の問題ではなく、プロジェクト側の設定です。利用者に求める権限は増えません）'
+    + `\n\n元のメッセージ: ${text}`;
+}
+
+// ============================================================
+// ===== デプロイの取りこぼし検出 =====
+// ============================================================
+
+/**
+ * GAS プロジェクトに必要なファイルがそろっているかを確かめます。
+ *
+ * このアプリはファイルを手で（または clasp で）コピーして配置するため、
+ * **新しく増えたファイルのコピー漏れ**が起きます。漏れたまま動かすと
+ * 「sheetsOpenById_ is not defined」のような、原因の見当がつかない
+ * エラーだけが出て止まります。何が足りないのかを名指しで返します。
+ *
+ * 消したはずのファイルが残っている場合も見つけます。古い版の関数が
+ * 残っていると、消したはずの挙動が生き返るためです。
+ *
+ * @returns {{ok: boolean, missing: string[], stale: string[], message: string}}
+ */
+function checkDeploymentIntegrity_() {
+  // **今の版にしか無い**関数・定数の有無で見る。
+  // 「ファイルが無い」だけでなく「古い版のまま残っている」も同じように引っかかる。
+  // 実際、07_WebApp.gs だけ古いと、旧 getSs_() が SpreadsheetApp を呼んで
+  // 「指定された権限では SpreadsheetApp.getActiveSpreadsheet を呼び出すことができません」
+  // になる。関数の有無だけ見ていると、これを見逃す。
+  // typeof は未定義の識別子でも例外にならないので、そのまま並べてよい。
+  const outdated = [];
+  if (typeof sheetsOpenById_ !== 'function') outdated.push('18_SheetsApi.gs');
+  if (typeof driveCreateFile_ !== 'function') outdated.push('17_DriveApi.gs');
+  if (typeof getMyTriggersForWebApp !== 'function') outdated.push('07_WebApp.gs');
+  if (typeof getPickerAppId_ !== 'function') outdated.push('03_PdfProcessing.gs');
+  if (typeof SP_KEY_PICKER_APP_ID === 'undefined') outdated.push('06_Settings.gs');
+  if (typeof resolveSpreadsheetId_ !== 'function') outdated.push('11_Tenant.gs');
+  if (typeof getDbColumns !== 'function') outdated.push('00_config.gs');
+
+  // 削除済みのファイルが残っていないか（それぞれのファイルにしか無かった関数で見る）
+  const stale = [];
+  if (typeof onOpen === 'function') stale.push('01_Main.gs');
+  if (typeof executeServerFunctionForModal === 'function') stale.push('LoadingModal.html の中継関数');
+
+  const notes = [];
+  if (outdated.length) {
+    notes.push('次のファイルが入っていないか、古いままです: ' + outdated.join(' / '));
+  }
+  if (stale.length) {
+    notes.push('削除されたはずの次のファイルが残っています: ' + stale.join(' / '));
+  }
+
+  const message = notes.length
+    ? (notes.join(' / ')
+      + '。リポジトリの内容で貼り直してください（clasp push が確実です）。'
+      + '一部だけ貼り替えると、古い版が残って原因の分かりにくいエラーになります。')
+    : '';
+
+  return {
+    ok: outdated.length === 0 && stale.length === 0,
+    outdated: outdated,
+    stale: stale,
+    message: message
+  };
+}
+
 // ============================================================
 // ===== クリーニング・保守関連 =====
 // ============================================================

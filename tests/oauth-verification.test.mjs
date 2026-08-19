@@ -99,3 +99,61 @@ test('ピッカーは App ID を渡す（drive.file の per-file 権限に必要
     assert.match(source, /setAppId\(appId\)/, `${file} のピッカーが setAppId を呼んでいない`);
   }
 });
+
+test('ファイルのコピー漏れを起動時に名指しで知らせる', () => {
+  // 手で配置する運用なので、増えたファイルの貼り忘れが起きる。そのとき
+  // 「〇〇 is not defined」だけが出ると原因に辿り着けない。
+  const utils = fs.readFileSync('99_Utils.gs', 'utf8');
+  const check = utils.slice(utils.indexOf('function checkDeploymentIntegrity_'),
+    utils.indexOf('// ===== クリーニング・保守関連 ====='));
+
+  // 名指しするファイルは、実在していなければ意味がない
+  const named = [...check.matchAll(/outdated\.push\('([^']+)'\)/g)].map(m => m[1]);
+  assert.ok(named.length >= 5, '必須ファイルの確認が少なすぎます');
+  for (const file of named) {
+    assert.ok(fs.existsSync(file), `存在しないファイルを名指ししています: ${file}`);
+  }
+  // 移行の要である Sheets ファサードは必ず見る
+  assert.ok(named.includes('18_SheetsApi.gs'));
+  // 「ファイルはあるが古い」も捕まえる必要がある。07_WebApp.gs の旧 getSs_() は
+  // SpreadsheetApp を呼ぶため、古いまま残ると権限エラーになる。
+  assert.ok(named.includes('07_WebApp.gs'));
+  assert.match(check, /getMyTriggersForWebApp/,
+    '「今の版にしか無い」関数で見ていない（getSs_ の有無では古い版を見逃す）');
+  assert.match(check, /古いまま/);
+
+  // 起動時に一番はじめに呼ばれる経路で止める
+  const tenant = fs.readFileSync('11_Tenant.gs', 'utf8');
+  assert.match(tenant, /checkDeploymentIntegrity_\(\)/);
+  assert.match(tenant, /deploymentError/);
+  const core = fs.readFileSync('App_Js_01_Core.html', 'utf8');
+  assert.match(core, /status\.deploymentError/);
+  assert.match(core, /function showDeploymentError/);
+  // 99_Utils.gs 自体が古いと確認用の関数も無い。そのときも配置の問題として扱う
+  assert.match(tenant, /typeof checkDeploymentIntegrity_ !== 'function'/);
+});
+
+test('API がオンになっていないエラーを、権限の問題と取り違えないように言い換える', () => {
+  // 組み込みサービスを使っていた頃は API の有効化が要らなかったため、
+  // REST へ移した初回デプロイで必ずここに引っかかる。Google の英文だけだと
+  // スコープや権限の問題と紛らわしい。
+  const utils = fs.readFileSync('99_Utils.gs', 'utf8');
+  assert.match(utils, /function describeApiDisabledError_\(/);
+  assert.match(utils, /has not been used in project/);
+  assert.match(utils, /it is disabled/);
+  // 「権限ではなくプロジェクト側の設定」だと明示する
+  assert.match(utils, /権限の問題ではなく/);
+
+  for (const [file, apiName] of [['18_SheetsApi.gs', 'Google Sheets API'],
+                                 ['17_DriveApi.gs', 'Google Drive API']]) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.ok(source.includes(`describeApiDisabledError_('${apiName}'`),
+      `${file} が API 無効化の案内を使っていない`);
+  }
+
+  // 有効化が要る API は手順書にも載っている必要がある
+  const setup = fs.readFileSync('docs/C1_GCP_PROJECT_SETUP.md', 'utf8');
+  for (const api of ['Google Sheets API', 'Google Drive API', 'Google Picker API']) {
+    assert.ok(setup.includes(api), `C1 に ${api} の有効化手順がありません`);
+  }
+});
