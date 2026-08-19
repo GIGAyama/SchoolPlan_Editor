@@ -231,7 +231,7 @@
                     if (!res || !res.success) { Swal.fire('復元失敗', (res && res.error) || '不明', 'error'); return; }
                     Swal.fire('復元完了', res.message, 'success').then(function () {
                         if (res.mondayDateStr) STATE.mondayStr = res.mondayDateStr;
-                        if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
+                        p2InvalidateWeekCache();
                         doLoadWeeklyPlan();
                         p3LoadProtectionStatus(false);
                     });

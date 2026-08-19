@@ -30,7 +30,8 @@ test('batch autofill and shift lessons use the protected save and clear the week
   assert.match(plan, /'batch-autofill'/);
   assert.match(plan, /'shift-lessons'/);
   // 複数週を書き換える処理の後は他週のクライアントキャッシュを破棄する
-  const clears = plan.match(/STATE\.performance\.weekCache = \{\}/g) || [];
+  // (破棄は p2InvalidateWeekCache に集約してある。App_Js_14_MultiClass 参照)
+  const clears = plan.match(/p2InvalidateWeekCache\(\)/g) || [];
   assert.ok(clears.length >= 2, `expected weekCache clears after batch operations, got ${clears.length}`);
 });
 

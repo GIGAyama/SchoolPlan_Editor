@@ -366,6 +366,9 @@
         });
         // 編集モード中の再描画は入力内容を壊すため行わない（次回描画時に反映される）
         if (hit && !STATE.editMode) renderWeekGrid(STATE.weekData.days);
+        // 週キャッシュも更新する。しないと週を移動して戻ったときに、
+        // キャッシュにある保存前の振り返り状態へ表示が巻き戻る。
+        if (hit && typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
     }
 
     /** 表示中の週の振り返り進捗（授業日数と完了数）をローカルデータから算出します。 */

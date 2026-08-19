@@ -34,6 +34,7 @@
         showSun: true,            // 週案グリッドの日曜列 表示/非表示
         // 各ビューの遅延ロード制御フラグ／キャッシュ（旧・散在グローバルを集約）
         timetableLoaded: false,        // 固定時間割エディタ 読込済み
+        timetableSaved: null,          // 固定時間割エディタの保存済み内容（未保存判定の基準）
         vacationDatesLoaded: false,    // 長期休業期間設定 読込済み
         stdHoursLoaded: false,         // 教科別標準時数 読込済み
         umDataLoaded: false,           // 単元マスタ 読込済み
@@ -430,7 +431,9 @@
 
     // ===== ブラウザ閉じ/リロード時の警告 =====
     window.addEventListener('beforeunload', function (e) {
-        if (hasUnsavedChanges()) {
+        // 固定時間割の未保存は「保存したつもりで転記して前の時間割が入る」原因になるため、
+        // 週案の未保存と同じように離脱前に知らせる。
+        if (hasUnsavedChanges() || hasUnsavedTimetableChanges()) {
             e.preventDefault();
             e.returnValue = '';
         }
@@ -450,8 +453,11 @@
             if (viewName === 'integration') {
                 checkProcessingStatus();
             }
-            if (viewName === 'settings' && !STATE.timetableLoaded) {
-                loadTimetableEditor();
+            if (viewName === 'settings') {
+                // 固定時間割は別タブ・別端末からも変わりうる。開くたびに取り直さないと、
+                // 古い内容を表示したまま保存し直して変更を巻き戻してしまう。
+                // ただし入力途中の内容は消さない（未保存のときは転記時に警告する）。
+                if (!STATE.timetableLoaded || !hasUnsavedTimetableChanges()) loadTimetableEditor();
             }
             if (viewName === 'settings' && !STATE.vacationDatesLoaded) {
                 loadVacationDates();

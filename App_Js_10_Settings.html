@@ -17,9 +17,25 @@
             .getTimetableForEditor();
     }
 
+    /**
+     * 固定時間割エディタに未保存の変更があるか。
+     *
+     * 転記（今の週に展開／年間一括転記）が書き込むのは「保存済みの固定時間割」であって、
+     * エディタに表示中の内容ではない。保存し忘れたまま転記すると1つ前の時間割が入るため、
+     * 転記の前にこれで検出して知らせる。
+     * @returns {boolean} エディタ未読込・未描画なら false
+     */
+    function hasUnsavedTimetableChanges() {
+        if (!STATE.timetableLoaded || STATE.timetableSaved === null) return false;
+        if (!document.getElementById('tt_0_time')) return false;
+        return JSON.stringify(gatherTimetableData()) !== STATE.timetableSaved;
+    }
+
     function renderTimetableEditor(data) {
         var tbody = document.getElementById('timetableBody');
         tbody.innerHTML = '';
+        // 描画直後 = サーバーの保存済み内容。以後の未保存判定はこれと比べる
+        STATE.timetableSaved = null;
         data.forEach(function (dayData, dayIndex) {
             var tr = document.createElement('tr');
             // 曜日ラベル
@@ -36,6 +52,7 @@
             }
             tbody.appendChild(tr);
         });
+        STATE.timetableSaved = JSON.stringify(gatherTimetableData());
     }
 
     function makeEditorCell(id, value, isSubjectCell) {
@@ -71,10 +88,8 @@
         return data;
     }
 
-    function saveTimetable() {
-        var data = gatherTimetableData();
-
-        // 教科セルの検証: 「教科名+分数」形式は分数の合計が必ず1
+    /** 教科セルの検証: 「教科名+分数」形式は分数の合計が必ず1。 */
+    function validateTimetableData(data) {
         var errors = [];
         data.forEach(function (dayData, d) {
             dayData.periods.forEach(function (value, p) {
@@ -85,23 +100,172 @@
                 }
             });
         });
-        if (errors.length > 0) {
-            showToast('error', '教科名の入力に誤りがあります: ' + errors[0]
-                + (errors.length > 1 ? '（他' + (errors.length - 1) + '件）' : ''));
-            return;
+        return errors;
+    }
+
+    /**
+     * エディタの内容を1回だけ保存し、成否を Promise で返します。
+     * 「保存してから転記する」経路から完了を待つために使います。
+     * @returns {Promise<boolean>}
+     */
+    function saveTimetableOnce() {
+        return new Promise(function (resolve) {
+            var data = gatherTimetableData();
+            var errors = validateTimetableData(data);
+            if (errors.length > 0) {
+                showToast('error', '教科名の入力に誤りがあります: ' + errors[0]
+                    + (errors.length > 1 ? '（他' + (errors.length - 1) + '件）' : ''));
+                resolve(false);
+                return;
+            }
+
+            showToast('info', '保存中...');
+            google.script.run
+                .withSuccessHandler(function (res) {
+                    if (res.success) {
+                        // 保存が通った時点の内容が新しい基準になる
+                        STATE.timetableSaved = JSON.stringify(data);
+                        showToast('success', '' + res.message);
+                        resolve(true);
+                    } else {
+                        showToast('error', 'エラー: ' + res.error);
+                        resolve(false);
+                    }
+                })
+                .withFailureHandler(function (e) { _onCommError(e); resolve(false); })
+                .saveTimetableFromEditor(data);
+        });
+    }
+
+    function saveTimetable() {
+        saveTimetableOnce();
+    }
+
+    /**
+     * 「再読み込み」ボタン。サーバーの保存済み内容で編集中の表を置き換えます。
+     * 未保存の入力があるときは黙って捨てず、先に確認します。
+     */
+    async function reloadTimetableEditor() {
+        if (hasUnsavedTimetableChanges()) {
+            var ask = await Swal.fire({
+                icon: 'warning',
+                title: '未保存の変更を破棄しますか？',
+                text: '編集中の内容を捨てて、保存済みの固定時間割を読み直します。',
+                showCancelButton: true,
+                confirmButtonText: '破棄して読み直す',
+                cancelButtonText: 'キャンセル',
+                confirmButtonColor: '#ea4335'
+            });
+            if (!ask.isConfirmed) return;
+        }
+        loadTimetableEditor();
+    }
+
+    // ===== 転記の前に「実際に書き込まれる時間割」を確かめる =====
+    // 転記が書き込むのは保存済みの固定時間割で、エディタに表示中の内容ではない。
+    // 週案タブの「入力支援」から転記するときはエディタが見えないため、
+    // 保存し忘れ・別端末での変更に気づけず「前の時間割が入った」となりやすい。
+    // 実行前に必ずサーバーから取り直し、中身を見せてから転記する。
+
+    /** 保存済みの固定時間割をサーバーから取得します（失敗時は null）。 */
+    function fetchSavedTimetable() {
+        return new Promise(function (resolve) {
+            google.script.run
+                .withSuccessHandler(function (res) { resolve(res && res.success ? res.data : null); })
+                .withFailureHandler(function () { resolve(null); })
+                .getTimetableForEditor();
+        });
+    }
+
+    /** 固定時間割が全欄空かどうか（空のまま転記すると対象週の教科が消える）。 */
+    function isTimetableEmpty(timetable) {
+        return (timetable || []).every(function (d) {
+            var periods = (d && d.periods) || [];
+            return !String((d && d.time) || '').trim()
+                && !String((d && d.morning) || '').trim()
+                && periods.every(function (p) { return !String(p || '').trim(); });
+        });
+    }
+
+    /** 確認ダイアログ用に、書き込まれる固定時間割を表形式で組み立てます。 */
+    function renderTimetablePreviewHtml(timetable) {
+        var headers = ['', '時程', '朝', '1', '2', '3', '4', '5', '6'];
+        var cellCss = 'border:1px solid var(--border);padding:3px 5px;white-space:nowrap;';
+        var headCss = cellCss + 'background:var(--surface-hover);font-weight:600;text-align:center;';
+        var html = '<div style="overflow-x:auto;margin-top:10px;">'
+            + '<table style="width:100%;border-collapse:collapse;font-size:0.76rem;"><tbody>'
+            + '<tr>' + headers.map(function (h) {
+                return '<th style="' + headCss + '">' + escHtml(h) + '</th>';
+            }).join('') + '</tr>';
+        (timetable || []).forEach(function (d, i) {
+            var periods = (d && d.periods) || [];
+            var cells = [(d && d.time) || '', (d && d.morning) || ''].concat(
+                [0, 1, 2, 3, 4, 5].map(function (p) { return periods[p] || ''; }));
+            html += '<tr><th style="' + headCss + '">' + escHtml(DAY_NAMES[i] || '') + '</th>'
+                + cells.map(function (v) { return '<td style="' + cellCss + '">' + escHtml(v) + '</td>'; }).join('')
+                + '</tr>';
+        });
+        return html + '</tbody></table>'
+            + '<p style="margin:6px 0 0;font-size:0.74rem;color:var(--text-sub);">'
+            + '↑ これが実際に書き込まれる「保存済みの固定時間割」です。</p></div>';
+    }
+
+    /**
+     * 転記の前に、未保存の変更を知らせて保存させ、書き込まれる時間割を確認させます。
+     * @param {string} title 確認ダイアログの見出し
+     * @param {string} descriptionHtml 何が起こるかの説明（HTML）
+     * @returns {Promise<?Array>} 転記してよければ保存済み時間割、中止なら null
+     */
+    async function confirmTimetableBeforeTransfer(title, descriptionHtml) {
+        if (hasUnsavedTimetableChanges()) {
+            var ask = await Swal.fire({
+                icon: 'warning',
+                title: '固定時間割が未保存です',
+                html: '<div style="text-align:left;font-size:0.88rem;">'
+                    + 'エディタの変更がまだ保存されていません。このまま転記すると、'
+                    + '<b>保存済みの（変更前の）固定時間割</b>が書き込まれます。</div>',
+                showCancelButton: true,
+                showDenyButton: true,
+                confirmButtonText: '保存してから転記',
+                denyButtonText: '保存せずに転記',
+                cancelButtonText: 'キャンセル',
+                confirmButtonColor: '#1a73e8',
+                denyButtonColor: '#f9ab00'
+            });
+            if (ask.isConfirmed) {
+                var saved = await saveTimetableOnce();
+                if (!saved) return null;
+            } else if (!ask.isDenied) {
+                return null;
+            }
         }
 
-        showToast('info', '保存中...');
-        google.script.run
-            .withSuccessHandler(function (res) {
-                if (res.success) {
-                    showToast('success', '' + res.message);
-                } else {
-                    showToast('error', 'エラー: ' + res.error);
-                }
-            })
-            .withFailureHandler(_onCommError)
-            .saveTimetableFromEditor(data);
+        var timetable = await fetchSavedTimetable();
+        if (!timetable) {
+            showToast('error', '固定時間割を取得できませんでした。通信状況を確かめて、もう一度お試しください。');
+            return null;
+        }
+
+        var empty = isTimetableEmpty(timetable);
+        var warning = empty
+            ? '<div style="margin-top:10px;padding:8px;border-radius:6px;background:var(--surface-hover);'
+              + 'font-size:0.84rem;">⚠ 固定時間割が空です。このまま転記すると、対象週の'
+              + '<b>時程・朝学習・各校時がすべて空になります</b>。<br>'
+              + '設定タブの「固定時間割エディタ」で入力し、<b>保存</b>してから転記してください。</div>'
+            : '';
+
+        var result = await Swal.fire({
+            title: title,
+            width: 620,
+            icon: empty ? 'warning' : 'question',
+            html: '<div style="text-align:left;font-size:0.88rem;">' + descriptionHtml + '</div>'
+                + warning + renderTimetablePreviewHtml(timetable),
+            showCancelButton: true,
+            confirmButtonText: '転記する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: empty ? '#ea4335' : '#1a73e8'
+        });
+        return result.isConfirmed ? timetable : null;
     }
 
     async function applyTimetableToCurrentWeek() {
@@ -109,16 +273,12 @@
             showToast('error', '表示中の週が設定されていません。');
             return;
         }
-        var result = await Swal.fire({
-            title: '時間割の転記',
-            text: STATE.mondayStr + ' 週に固定時間割を転記します。既存データは上書きされます。よろしいですか？',
-            icon: 'question',
-            showCancelButton: true,
-            confirmButtonText: '転記する',
-            cancelButtonText: 'キャンセル',
-            confirmButtonColor: '#1a73e8'
-        });
-        if (!result.isConfirmed) return;
+        var timetable = await confirmTimetableBeforeTransfer(
+            '時間割の転記',
+            '<p style="margin:0;">' + escHtml(STATE.mondayStr) + ' 週の月〜金に、保存済みの固定時間割を転記します。'
+            + '対象の時程・朝学習・各校時は上書きされます。</p>');
+        if (!timetable) return;
+
         showToast('info', '転記中...');
         google.script.run
             .withSuccessHandler(function (res) {
@@ -126,6 +286,10 @@
                     showToast('success', '' + res.message);
                     STATE.editMode = false;
                     updateEditUI();
+                    // 転記でサーバーの週が書き換わったので、転記前の週キャッシュを必ず捨てる。
+                    // 残したままだと doLoadWeeklyPlan() が転記前の内容を先に描いてしまい、
+                    // それを保存すると転記した時間割が古い内容で上書きされて消える。
+                    p2InvalidateWeekCache();
                     doLoadWeeklyPlan(); // 転記後、週案を再読み込み（自動保存をスキップ）
                 } else {
                     showToast('error', 'エラー: ' + res.error);
@@ -166,16 +330,11 @@
             springEnd: document.getElementById('vacSpringEnd').value
         };
 
-        var swalResult = await Swal.fire({
-            title: '年間一括転記',
-            text: '長期休業期間を除外し、今後のすべての週に固定時間割を一括転記します。既存のデータは上書きされます。',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: '実行する',
-            cancelButtonText: 'キャンセル',
-            confirmButtonColor: '#b45309'
-        });
-        if (!swalResult.isConfirmed) return;
+        var timetable = await confirmTimetableBeforeTransfer(
+            '年間一括転記',
+            '<p style="margin:0;">長期休業期間を除外し、来週以降のすべての週に保存済みの固定時間割を転記します。'
+            + '対象週の時程・朝学習・各校時は上書きされます。</p>');
+        if (!timetable) return;
 
         var statusEl = document.getElementById('bulkTransferStatus');
         statusEl.textContent = '一括転記を実行中...（数分かかることがあります）';
@@ -185,6 +344,8 @@
             .withSuccessHandler(function (msg) {
                 statusEl.textContent = '';
                 showToast('success', '' + (msg || '一括転記が完了しました。'));
+                // 多数の週を書き換えるため、手元の週キャッシュを全て捨てて表示中の週も読み直す
+                p2InvalidateWeekCache(true);
             })
             .withFailureHandler(function (e) {
                 statusEl.textContent = '';
