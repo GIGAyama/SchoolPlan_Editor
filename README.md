@@ -449,3 +449,5 @@ npm run quality # 上の2つをまとめて実行
 ## 📄 ライセンス (License)
 
 このプロジェクトは [MIT License](LICENSE) の下で公開されています。 詳細は `LICENSE` ファイルをご確認ください。
+
+同梱している第三者ソフトウェア（Bootstrap／Bootstrap Icons／Material Symbols／SweetAlert2／qrcode-generator）の著作権表示と許諾表示は [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) にまとめています。同じ内容は各 `Vendor_*.html` の先頭にも焼き込まれており、アプリを配信したときにも一緒に届きます。
