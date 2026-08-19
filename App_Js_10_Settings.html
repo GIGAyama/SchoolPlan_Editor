@@ -906,7 +906,7 @@
                         resolve(null);
                         return;
                     }
-                    var open = function () { showDatabasePicker_(res.token, resolve); };
+                    var open = function () { showDatabasePicker_(res.token, res.appId, resolve); };
                     if (!STATE.pickerApiLoaded) {
                         gapi.load('picker', {
                             callback: function () { STATE.pickerApiLoaded = true; open(); }
@@ -926,15 +926,20 @@
     /**
      * スプレッドシートだけを出すピッカーを開きます。
      * @param {string} oauthToken
+     * @param {string} appId Cloud プロジェクト番号
      * @param {function(string|null)} resolve
      */
-    function showDatabasePicker_(oauthToken, resolve) {
+    function showDatabasePicker_(oauthToken, appId, resolve) {
         var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS);
         view.setMimeTypes('application/vnd.google-apps.spreadsheet');
-        var picker = new google.picker.PickerBuilder()
+        var builder = new google.picker.PickerBuilder()
             .addView(view)
+            .setOAuthToken(oauthToken);
+        // drive.file では、選んだファイルの権限をどのアプリに与えるかを App ID で示す。
+        // これが無いと、選んでもサーバー側から開けない（403）。
+        if (appId) builder.setAppId(appId);
+        var picker = builder
             // resolvePickerOrigin_ は App_Js_08_Events.html で定義している共通処理
-            .setOAuthToken(oauthToken)
             .setCallback(function (data) {
                 if (data.action === google.picker.Action.PICKED) {
                     var doc = (data.docs || [])[0];

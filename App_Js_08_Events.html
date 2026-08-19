@@ -135,11 +135,11 @@
                     gapi.load('picker', {
                         callback: function () {
                             STATE.pickerApiLoaded = true;
-                            createEventPdfPicker_(res.token);
+                            createEventPdfPicker_(res.token, res.appId);
                         }
                     });
                 } else {
-                    createEventPdfPicker_(res.token);
+                    createEventPdfPicker_(res.token, res.appId);
                 }
             })
             .withFailureHandler(_onCommError)
@@ -169,13 +169,17 @@
         return 'https://script.google.com';
     }
 
-    function createEventPdfPicker_(oauthToken) {
+    function createEventPdfPicker_(oauthToken, appId) {
         var view = new google.picker.DocsView(google.picker.ViewId.DOCS);
         view.setMimeTypes('application/pdf');
-        var picker = new google.picker.PickerBuilder()
+        var builder = new google.picker.PickerBuilder()
             .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
             .addView(view)
-            .setOAuthToken(oauthToken)
+            .setOAuthToken(oauthToken);
+        // drive.file では、選んだファイルの権限をどのアプリに与えるかを App ID で示す。
+        // これが無いと、選んでもサーバー側から読めない（403）。
+        if (appId) builder.setAppId(appId);
+        var picker = builder
             .setCallback(eventPdfPickerCallback_)
             .setOrigin(resolvePickerOrigin_())
             .setTitle('行事予定PDFを選択（複数可）')

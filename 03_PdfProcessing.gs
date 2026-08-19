@@ -1047,10 +1047,52 @@ function getPickerAuthInfo() {
   try {
     return {
       success: true,
-      token: ScriptApp.getOAuthToken()
+      token: ScriptApp.getOAuthToken(),
+      // drive.file では、ピッカーで選んだファイルの権限を「どのアプリに与えるか」を
+      // App ID（Cloud プロジェクト番号）で指定する必要がある。これが無いと、
+      // 選んでも per-file 権限が付かず、直後の読み書きが 403 になる。
+      appId: getPickerAppId_()
     };
   } catch(e) {
     logError("getPickerAuthInfo", e);
     return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Google ピッカーに渡す App ID（Cloud プロジェクト番号）を返します。
+ *
+ * 手で設定させると環境ごとにずれるため、OAuth トークンの発行先（クライアントID）から
+ * 導き出します。クライアントIDは「プロジェクト番号-ランダム.apps.googleusercontent.com」
+ * という形なので、先頭の数字がプロジェクト番号です。
+ * 一度求めたらスクリプトプロパティに覚えておき、毎回問い合わせないようにします。
+ * スクリプトプロパティ `sp_pickerAppId` を手で設定した場合はそちらを優先します。
+ * @returns {string} プロジェクト番号。求められなければ空文字
+ */
+function getPickerAppId_() {
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty(SP_KEY_PICKER_APP_ID);
+  if (cached) return cached;
+
+  try {
+    const response = UrlFetchApp.fetch(
+      'https://www.googleapis.com/oauth2/v3/tokeninfo?access_token='
+      + encodeURIComponent(ScriptApp.getOAuthToken()),
+      { muteHttpExceptions: true });
+    if (response.getResponseCode() !== 200) {
+      logInfo('ピッカーの App ID を取得できませんでした (HTTP ' + response.getResponseCode() + ')');
+      return '';
+    }
+    const audience = String((JSON.parse(response.getContentText()) || {}).aud || '');
+    const projectNumber = (audience.match(/^(\d+)-/) || [])[1] || '';
+    if (!projectNumber) {
+      logInfo('ピッカーの App ID をクライアントIDから読み取れませんでした: ' + audience);
+      return '';
+    }
+    props.setProperty(SP_KEY_PICKER_APP_ID, projectNumber);
+    return projectNumber;
+  } catch (e) {
+    logError('getPickerAppId_', e);
+    return '';
   }
 }

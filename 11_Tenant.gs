@@ -152,6 +152,7 @@ function getTenantStatus() {
     // ピッカーで選び直すまで開けない）。ここを一緒くたにすると、既存の先生に
     // 「新しく作成する」を押させてしまい、これまでのデータが消えたように見える。
     let needsReauthorize = false;
+    let openError = '';
     if (id) {
       try {
         const ss = sheetsOpenById_(id);
@@ -160,7 +161,9 @@ function getTenantStatus() {
       } catch (openErr) {
         linked = false;
         needsReauthorize = true;
-        logInfo('紐付け済みのデータベースを開けませんでした。選び直しが必要です: ' + id);
+        openError = (openErr && openErr.message) ? openErr.message : String(openErr);
+        logInfo('紐付け済みのデータベースを開けませんでした。選び直しが必要です: ' + id
+          + ' / ' + openError);
       }
     }
     let email = '';
@@ -173,6 +176,8 @@ function getTenantStatus() {
       linked: linked,
       // 紐付け先はあるのに開けない状態。フロントは「選び直し」を促す画面を出す。
       needsReauthorize: needsReauthorize,
+      // 開けなかった理由。切り分けのため画面の「詳しい情報」に出す。
+      openError: openError,
       spreadsheetId: linked ? id : '',
       spreadsheetName: name,
       email: email,
@@ -202,8 +207,11 @@ function linkMyDatabase(input) {
     } catch (openErr) {
       // drive.file 運用では、URL や ID を打ち込む方法で開けるのは
       // 「このアプリが作ったファイル」だけ。それ以外はピッカーで選んでもらう必要がある。
+      // 原因の切り分けができるよう、API が返した理由も添える。
+      const reason = (openErr && openErr.message) ? openErr.message : String(openErr);
       throw new Error('スプレッドシートを開けませんでした。'
-        + '「ドライブから選ぶ」で選び直してください（このアプリは、あなたが選んだファイルだけにアクセスできます）。');
+        + '「ドライブから選ぶ」で選び直してください（このアプリは、あなたが選んだファイルだけにアクセスできます）。'
+        + '\n\n詳しい情報: ' + reason);
     }
 
     // 「データベース」シートの有無を確認（無くても紐付けは許可するが警告を返す）

@@ -11,6 +11,10 @@ const SP_KEY_PDF_FOLDER_ID      = 'sp_pdfFolderId';
 const SP_KEY_EVENT_PDF_FOLDER_ID = 'sp_eventPdfFolderId';
 const SP_KEY_GEMINI_API_KEY     = 'sp_geminiApiKey';
 const SP_KEY_GEMINI_MODEL_NAME  = 'sp_geminiModelName';
+// Google ピッカーに渡す App ID（Cloud プロジェクト番号）。
+// 通常は OAuth トークンから自動で求めて覚える（03_PdfProcessing.gs の getPickerAppId_）。
+// 自動で求められない環境では、この値を手で設定すると使われる。
+const SP_KEY_PICKER_APP_ID      = 'sp_pickerAppId';
 
 
 
