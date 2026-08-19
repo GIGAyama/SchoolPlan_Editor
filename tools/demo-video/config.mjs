@@ -4,6 +4,7 @@
  * appUrl は docs/config.js（PWAシェルの設定）から読み取ります。
  * 撮影用に別のデプロイを使いたいときは環境変数で上書きできます。
  *
+ *   DEMO_SITE_BASE    公開ページの基点（既定は docs/CNAME の独自ドメイン）
  *   DEMO_APP_URL      GAS Web アプリの /exec URL（同意画面が出るのはここ）
  *   DEMO_HOME_URL     紹介ページ（同意画面のホームページ欄と一致させること）
  *   DEMO_PRIVACY_URL  プライバシーポリシー
@@ -24,17 +25,22 @@ function readConfiguredAppUrl() {
   return matched ? matched[1] : '';
 }
 
-/** docs/ の公開 URL の既定値。GitHub Pages の所有者名は環境変数で差し替える */
-const pagesOwner = process.env.DEMO_PAGES_OWNER || 'GIGAyama';
-const pagesBase = `https://${pagesOwner.toLowerCase()}.github.io/SchoolPlan_Editor`;
+/**
+ * 公開ページの既定値。**必ず自分が所有するドメイン**（docs/CNAME）を使う。
+ * 2026-08 の差し戻しで「ホームページとプライバシーポリシーを、所有を確認できない
+ * 第三者ホスティングに置かないこと」と指摘されたため、`*.github.io` の既定は使わない。
+ * 別ドメインで撮る場合だけ DEMO_SITE_BASE で差し替える。
+ */
+const siteBase = (process.env.DEMO_SITE_BASE || 'https://schoolplan-editor.giga-school.com')
+  .replace(/\/+$/, '');
 
 export function resolveUrls() {
   const appUrl = process.env.DEMO_APP_URL || readConfiguredAppUrl();
   return {
     APP_URL: appUrl,
-    HOME_URL: process.env.DEMO_HOME_URL || `${pagesBase}/about.html`,
-    PRIVACY_URL: process.env.DEMO_PRIVACY_URL || `${pagesBase}/privacy-policy.html`,
-    TERMS_URL: process.env.DEMO_TERMS_URL || `${pagesBase}/terms.html`,
+    HOME_URL: process.env.DEMO_HOME_URL || `${siteBase}/about.html`,
+    PRIVACY_URL: process.env.DEMO_PRIVACY_URL || `${siteBase}/privacy-policy.html`,
+    TERMS_URL: process.env.DEMO_TERMS_URL || `${siteBase}/terms.html`,
     SHEET_URL: process.env.DEMO_SHEET_URL || '',
   };
 }

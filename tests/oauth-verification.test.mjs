@@ -157,3 +157,64 @@ test('API がオンになっていないエラーを、権限の問題と取り�
     assert.ok(setup.includes(api), `C1 に ${api} の有効化手順がありません`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// デモ動画の台本（C5 と scenes.mjs）が、いまのアプリとスコープに追いついているか
+// ---------------------------------------------------------------------------
+// 撮影台本は「文書」だが、審査に出す成果物そのものなので実装と一緒に腐る。
+// playwright を入れずに走る範囲だけをここで固定し、詳しい下見は
+// `npm run demo:verify`（セレクタの実在確認・尺の見積もり）に任せる。
+
+const { SCENES, SCOPE_COVERAGE } = await import('../tools/demo-video/scenes.mjs');
+const c5 = fs.readFileSync('docs/C5_DEMO_VIDEO_SCRIPT.md', 'utf8');
+const manifest = JSON.parse(fs.readFileSync('appsscript.json', 'utf8'));
+
+test('要求スコープが、台本のシーンと C5 の両方で実演されている', () => {
+  const demonstrated = new Set(SCENES.flatMap(scene => scene.scopes));
+  for (const scope of manifest.oauthScopes) {
+    const shortName = SCOPE_COVERAGE[scope];
+    assert.ok(shortName, `${scope} が SCOPE_COVERAGE に未登録です`);
+    assert.ok(demonstrated.has(shortName),
+      `${shortName} を実演するシーンが scenes.mjs にありません`);
+    assert.ok(c5.includes(shortName), `C5 の台本に ${shortName} の記載がありません`);
+  }
+  // 逆向き: 使っていないスコープの台本が残っていないか（spreadsheets の再来を防ぐ）
+  for (const scope of Object.keys(SCOPE_COVERAGE)) {
+    assert.ok(manifest.oauthScopes.includes(scope),
+      `${scope} は要求していないのに台本に残っています`);
+  }
+});
+
+test('C5 とシーン定義のシーン数が一致している', () => {
+  const headings = c5.match(/^### シーン/gm) || [];
+  assert.equal(headings.length, SCENES.length,
+    `C5 のシーン数(${headings.length})と scenes.mjs(${SCENES.length})が食い違っています`);
+});
+
+test('差し戻しで名指しされた実演が台本から落ちていない', () => {
+  const captions = SCENES.flatMap(scene => scene.steps)
+    .filter(step => step.kind === 'caption').map(step => step.text).join('\n');
+
+  // 「アプリが作ったファイル」だけでなく「利用者が選んだファイル」も見せる（Google 推奨の導線）
+  assert.match(captions, /Google Picker/,
+    'ピッカーを見せるシーンが台本にありません（drive.file の最小スコープ根拠）');
+  // 書き込み・削除の source account impact
+  assert.match(captions, /Drive trash/, '削除が Drive のごみ箱に映るシーンがありません');
+  assert.match(captions, /Gmail inbox/, '受信トレイで実物を見せるシーンがありません');
+  assert.match(captions, /not full Drive access/, 'drive.file の明言が台本にありません');
+  // ホームページ・ポリシーの配信ドメイン（第三者ホスティングの指摘）
+  const cname = fs.readFileSync('docs/CNAME', 'utf8').trim();
+  assert.ok(captions.includes(cname), `台本が独自ドメイン ${cname} に触れていません`);
+  assert.ok(c5.includes(cname), `C5 が独自ドメイン ${cname} に触れていません`);
+});
+
+test('リマインダーメールの署名が紹介ページのアプリ名と一致している', () => {
+  // 動画のシーン8でメール本文が映る。ここだけ別名だと「アプリ名が違う」で差し戻される。
+  const about = fs.readFileSync('docs/about.html', 'utf8');
+  const appName = (about.match(/<h1>([^<]*)<\/h1>/) || [])[1] || '';
+  assert.ok(appName, '紹介ページからアプリ名を読み取れません');
+  const webApp = fs.readFileSync('07_WebApp.gs', 'utf8');
+  const mail = webApp.slice(webApp.indexOf('function sendTaskReminderMail'));
+  assert.ok(mail.includes(appName),
+    `リマインダーメールの署名が「${appName}」と一致していません`);
+});

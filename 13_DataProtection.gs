@@ -5,7 +5,7 @@
  * - 既存の週案・シート列を勝手に移動しない
  * - 破壊的操作の前に復元可能な状態を残す
  * - 機密情報を監査ログやバックアップ設定へ保存しない
- * - OAuthスコープを追加せず、spreadsheets + drive.file の範囲で動作する
+ * - OAuthスコープを追加せず、drive.file の範囲だけで動作する（spreadsheets は要求しない）
  */
 
 const P3_SCHEMA_VERSION_ = 4;

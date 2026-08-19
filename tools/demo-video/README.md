@@ -11,12 +11,13 @@ OAuth 審査用デモ動画（[C5 台本](../../docs/C5_DEMO_VIDEO_SCRIPT.md)）
 | 区間 | 誰がやるか | 理由 |
 |---|---|---|
 | 紹介ページ・ポリシーの表示 | 自動 | ただの画面遷移 |
-| 週案の入力／学級通信の生成／PDF 出力 | 自動 | 自分のアプリの DOM を叩くだけ |
+| 週案の入力／学級通信の生成／バックアップ | 自動 | 自分のアプリの DOM を叩くだけ |
 | リマインダー設定・テスト送信 | 自動 | 同上 |
 | Classroom のクラス一覧取得・投稿 | 自動 | 同上 |
 | 字幕のタイミング記録・`.srt` 生成 | 自動 | 実時刻から起こす |
 | **Google のログイン・同意画面** | **手動** | Google は自動操作のログインを拒否します。また同意は本人が行った本物である必要があります |
-| Gmail の受信箱、Classroom のストリーム、スプレッドシートのメニュー | 手動 | 他社（Google）の画面を自動操作しないため |
+| Google ピッカー、Drive の一覧・ごみ箱、Gmail の受信箱、Classroom のストリーム、スプレッドシート | 手動 | Google 側の画面を自動操作しないため |
+| アプリ内のダイアログ（SweetAlert の確認・入力） | 手動 | 撮影者が内容を読んで判断する場面のため |
 
 手動区間ではスクリプトが一時停止し、ターミナルに操作内容を出します。
 操作を終えて Enter を押すと、続きが自動で流れます。**録画は止まりません**。
@@ -41,7 +42,7 @@ npx playwright install chromium
 
 ```bash
 export DEMO_SHEET_URL="https://docs.google.com/spreadsheets/d/…/edit"
-# 別のデプロイで撮るなら DEMO_APP_URL、Pages の所有者が違うなら DEMO_PAGES_OWNER も指定
+# 別のデプロイで撮るなら DEMO_APP_URL、別ドメインで公開しているなら DEMO_SITE_BASE も指定
 ```
 
 ### 2. 撮影前チェック（Google に一切アクセスしません）
@@ -50,9 +51,9 @@ export DEMO_SHEET_URL="https://docs.google.com/spreadsheets/d/…/edit"
 npm run demo:verify
 ```
 
-- 要求スコープ 9 個すべてが、どこかのシーンで実演されるか
+- 要求スコープ 7 個（`appsscript.json` の `oauthScopes`）すべてが、どこかのシーンで実演されるか
 - 台本が指すボタン・セレクタが実際に App.html に存在するか
-- 想定尺（8分を超えていないか）
+- 想定尺（14分を超えていないか）
 - アプリ名の表記ゆれ
 
 ### 3. 段取りの確認（ブラウザも開きません）
@@ -111,8 +112,8 @@ node tools/demo-video/record-demo.mjs --scene=classroom
 |---|---|
 | `DEMO_APP_URL` | `docs/config.js` の `appUrl` |
 | `DEMO_SHEET_URL` | （必須。撮影用スプレッドシート） |
-| `DEMO_PAGES_OWNER` | `GIGAyama` |
-| `DEMO_HOME_URL` / `DEMO_PRIVACY_URL` / `DEMO_TERMS_URL` | GitHub Pages 上の各ページ |
+| `DEMO_SITE_BASE` | `https://schoolplan-editor.giga-school.com`（`docs/CNAME` の独自ドメイン） |
+| `DEMO_HOME_URL` / `DEMO_PRIVACY_URL` / `DEMO_TERMS_URL` | 上のドメイン上の各ページ |
 | `DEMO_FFMPEG` | `ffmpeg` |
 | `DEMO_CHROMIUM` | Playwright 管理の Chromium |
 
@@ -127,5 +128,6 @@ node tools/demo-video/record-demo.mjs --scene=classroom
 | `capture.mjs` | ffmpeg での画面録画 |
 | `overlay.mjs` | 画面内の字幕帯・強調表示 |
 | `srt.mjs` | 実測タイミングから `.srt` を起こす |
+| `build-srt.mjs` | 手撮り用。`--from-scenes` で台本から字幕の下書きを作る |
 | `browser.mjs` | Chromium の起動設定 |
 | `config.mjs` | URL の解決 |
