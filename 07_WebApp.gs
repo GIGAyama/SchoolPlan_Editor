@@ -695,63 +695,6 @@ function getNewsletterData(mondayDateStr) {
 }
 
 /**
- * [Webアプリ API] 「学級通信」シートをPDF化してDrive保存し、ダウンロードURLを返します。
- * @param {string} mondayDateStr 対象週の月曜日の日付
- * @returns {Object} { success, downloadUrl, viewUrl, fileName }
- */
-function generateNewsletterPdf(mondayDateStr) {
-  try {
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER);
-    if (!sheet) throw new Error(`「${SHEET_NAME_NEWSLETTER}」シートが見つかりません`);
-
-    // DBから当該週の週番号を取得
-    const dbSheet = getDbSheet_(ss);
-    if (!dbSheet) throw new Error('データベースシートが見つかりません');
-    const dbCols = getDbColumns();
-    const dbData = dbSheet.getDataRange().getValues();
-    const monday = parseDate_(mondayDateStr);
-
-    let weekNum = null;
-    for (const row of dbData.slice(1)) {
-      const date = row[dbCols.DATE - 1];
-      if (date instanceof Date && isSameDate(date, monday)) {
-        weekNum = row[dbCols.WEEK_NUM - 1];
-        break;
-      }
-    }
-
-    // 学級通信シートのA1に直接書き込む
-    if (weekNum !== null && weekNum !== undefined) {
-      sheet.getRange('A1').setValue(weekNum);
-      Utilities.sleep(3000); // 描画待ち
-    } else {
-      logInfo('警告: DBに該当日付の週番号が見つかりませんでした。mondayDateStr=' + mondayDateStr);
-    }
-
-    const formattedDate = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd');
-    const fileName = `学級通信_${formattedDate}.pdf`;
-    const blob = sheetsExportSheetAsPdf_(ss.getId(), sheet.getSheetId(), fileName);
-
-    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
-    driveTrashByName_(fileName);
-    const pdfFile = driveCreateFile_(fileName, blob);
-    driveShareAnyoneWithLink_(pdfFile.id);
-
-    logInfo(`学級通信PDF生成: ${fileName}`);
-    return {
-      success: true,
-      downloadUrl: `https://drive.google.com/uc?export=download&id=${pdfFile.id}`,
-      viewUrl: `https://drive.google.com/file/d/${pdfFile.id}/view`,
-      fileName
-    };
-  } catch (e) {
-    logError('generateNewsletterPdf', e);
-    return { success: false, error: e.message };
-  }
-}
-
-/**
  * [Webアプリ API] 学級通信HTMLをGoogleドキュメントに変換してClassroomへ投稿します。
  * Drive REST API (v3) を UrlFetchApp 経由で呼び出し、
  * HTMLをGoogleドキュメントに変換してそのまま添付します。
