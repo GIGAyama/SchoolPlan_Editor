@@ -9,16 +9,11 @@
 
 | 同梱先 | パッケージ | 版 | ライセンス |
 |---|---|---|---|
-| `Vendor_Bootstrap.html` | bootstrap | 5.3.3 ※ | MIT |
+| `Vendor_Bootstrap.html` | bootstrap | 5.3.8 | MIT |
 | `Vendor_Icons.html` | @material-symbols/font-400 | 0.45.10 | Apache-2.0（改変あり） |
 | `Vendor_Icons.html` | bootstrap-icons | 1.11.3 | MIT（改変あり） |
 | `Vendor_Sweetalert.html` | sweetalert2 | 11.14.5 | MIT |
 | `Vendor_Qrcode.html` | qrcode-generator | 2.0.4 | MIT |
-
-※ `package.json` は `bootstrap: ^5.3.8` を指していますが、
-コミット済みの `Vendor_Bootstrap.html` は 5.3.3 のままです（本ファイル作成時点）。版を上げると
-アプリ全体の CSS が変わるため、ライセンス表示の整備とは切り離し、表示確認を伴う別の変更として
-扱います。それまでは上表のとおり 5.3.3 が実際に配信されている版です。
 
 ## 改変について
 
