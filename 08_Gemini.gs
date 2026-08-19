@@ -178,7 +178,7 @@ function callGeminiJsonArray_(prompt, itemSchema, description, logLabel, tempera
  * @returns {string} 整形済みのスケジュールテキスト
  */
 function buildScheduleContextText_(startDateStr, endDateStr) {
-  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSs_();
   const dbSheet = getDbSheet_(ss);
   if (!dbSheet) throw new Error('データベースシートが見つかりません');
 

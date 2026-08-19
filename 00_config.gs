@@ -90,7 +90,7 @@ function getClassList_() {
  * @returns {GoogleAppsScript.Spreadsheet.Sheet|null}
  */
 function resolveDbSheet_(ss) {
-  ss = ss || (typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet());
+  ss = ss || getSs_();
   if (isMultiClassEnabled_()) {
     const active = tGetProp_(SCRIPT_PROP_ACTIVE_CLASS);
     if (active && active !== SHEET_NAME_DATABASE) {

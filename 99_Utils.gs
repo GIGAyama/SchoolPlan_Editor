@@ -447,7 +447,7 @@ function logError(message, error) {
  */
 function writeToLog_(level, message) {
   try {
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     let logSheet = ss.getSheetByName(SHEET_NAME_LOG);
     if (!logSheet) {
       logSheet = ss.insertSheet(SHEET_NAME_LOG, ss.getSheets().length);

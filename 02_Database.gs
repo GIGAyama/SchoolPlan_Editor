@@ -140,7 +140,7 @@ function dbApplyTimetableEntries_(sheet, cols, entries) {
  * 週案の保存と同じ ScriptLock で直列化する（転記中の保存が消えるのを防ぐ）。
  */
 function transferWeeklyTimetable(targetDate) {
-  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSs_();
   const shData = getDbSheet_(ss);
   if (!shData) throw new Error("データベースシートが見つかりません");
 
@@ -201,7 +201,7 @@ function processBulkTransferWithExclusion(dates) {
 
     validExclusionPeriods.forEach(p => Logger.log(`有効な除外期間: ${p.name} ${formatDate(p.start)} ～ ${formatDate(p.end)}`));
 
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const shData = getDbSheet_(ss);
     if (!shData) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません`);
 
@@ -274,7 +274,7 @@ function processBulkTransferWithExclusion(dates) {
  */
 function getDefaultExclusionDates() {
   try {
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const databaseSheet = getDbSheet_(ss);
     if (!databaseSheet) throw new Error("データベースシートが見つかりません");
     
@@ -359,7 +359,7 @@ function clearDatabaseDataWithConfirmation() {
  * @returns {{cleared: boolean, message: string}}
  */
 function clearDatabaseData_core_() {
-  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSs_();
   const dbSheet = getDbSheet_(ss);
   if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
   return clearDatabaseInputsForSheet_(dbSheet, getDbColumns());
@@ -455,7 +455,7 @@ function initTaskSheet_(ss) {
  */
 function getTaskData() {
   try {
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const sheet = initTaskSheet_(ss);
     const lastRow = sheet.getLastRow();
     if (lastRow < 2) return [];
@@ -500,7 +500,7 @@ function saveTasksBulk(tasks) {
       }
     });
 
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const sheet = initTaskSheet_(ss);
 
     const newRows = tasks.map(t => [
@@ -543,7 +543,7 @@ function isSameTaskId_(a, b) {
  */
 function updateTask(taskId, updates) {
   try {
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const sheet = initTaskSheet_(ss);
     const data = sheet.getDataRange().getValues();
 
@@ -576,7 +576,7 @@ function updateTask(taskId, updates) {
  */
 function updateTaskStatus(taskId, newStatus) {
   try {
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const sheet = initTaskSheet_(ss);
     const data = sheet.getDataRange().getValues();
     
@@ -600,7 +600,7 @@ function updateTaskStatus(taskId, newStatus) {
  */
 function deleteTask(taskId) {
   try {
-    const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSs_();
     const sheet = initTaskSheet_(ss);
     const data = sheet.getDataRange().getValues();
     
@@ -626,7 +626,7 @@ function deleteTask(taskId) {
  * @returns {{ inserted: boolean, message: string }}
  */
 function ensurePreClassColumn() {
-  const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSs_();
   const dbSheet = getDbSheet_(ss);
   if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
 
