@@ -8,14 +8,36 @@
 
 ## 0. 差し戻しの内訳と対応状況
 
-Google が指摘したのは、独立した **4 件**です。1 件でも欠けると審査は再開しません。
+Google が指摘したのは、独立した **5 件**です。1 件でも欠けると審査は再開しません。
 
 | # | Google の指摘 | 対応 | 状態 |
 |---|---------------|------|:---:|
-| 1 | デモ動画が、次の 4 スコープの**機能の全体像**を示していない<br>`script.send_mail` / `spreadsheets` / `script.external_request` / `script.scriptapp`<br>書き込み・削除は**利用者のアカウント側への反映**まで映すこと | [C5](C5_DEMO_VIDEO_SCRIPT.md) の台本を改訂（シーン4・5・7 を拡張、シーン7-2 を新設）。<br>`script.scriptapp` の反映を見せるため、アプリに**「自動実行（トリガー）の状況」画面を新設** | 台本✅／**撮影は未** |
+| 0 | ホームページとプライバシーポリシーを、**所有を確認できない第三者ホスティング**に置かないこと | `docs/CNAME` の独自ドメイン **`schoolplan-editor.giga-school.com`** で配信する。<br>Cloud Console の URL と撮影ツールの既定値もこのドメインに統一（`tools/demo-video/config.mjs`） | リポジトリ✅／**Console 側の確認は人手** |
+| 1 | デモ動画が、次の 4 スコープの**機能の全体像**を示していない<br>`script.send_mail` / `spreadsheets` / `script.external_request` / `script.scriptapp`<br>書き込み・削除は**利用者のアカウント側への反映**まで映すこと | [C5](C5_DEMO_VIDEO_SCRIPT.md) の台本を**全面改訂**（11 シーン構成）。<br>`spreadsheets` は廃止したため `drive.file` の実演に置き換え、**ピッカー**（シーン5）と**Drive のごみ箱**（シーン6）を追加。<br>`script.scriptapp` の反映を見せるため、アプリに**「自動実行（トリガー）の状況」画面を新設** | 台本✅／**撮影は未** |
 | 2 | AI／ML 連携の申告と Limited Use 対応 | プライバシーポリシー §4 に AI 提供者・ティア・送信データを明記。<br>§5 に**英文の Limited Use 宣言**を掲載。<br>アプリの設定画面と初期設定ウィザードに**有料ティア必須**の明示を追加 | ✅ |
 | 3 | プライバシーポリシーに、機微なデータの**保護措置**の記載がない | §7 を「安全管理措置（機微なデータの保護）」として全面的に書き直し、11 項目の具体策を表で明記 | ✅ |
 | 4 | `spreadsheets` は `drive.file` で足りるのではないか（最小スコープ） | **Option 1（移行）を実施済み。**Sheets REST API v4 + `drive.file` へ移行し、`appsscript.json` から `spreadsheets` を削除（[B5](B5_SHEETS_SCOPE_AUDIT.md)） | コード✅／**実機確認とConsole側の削除は未** |
+
+---
+
+## 0-1. 指摘0：ホームページとポリシーのホスティング
+
+> Your homepage and privacy policy should not be hosted on a third-party hosting platform
+> where you can't verify that you own your subdomain.
+
+GitHub Pages を **`*.github.io` のまま**使うと、サブドメインの所有を示せないためこの指摘に該当します。
+本アプリは `docs/CNAME` で独自ドメインを設定済みなので、**参照先をすべてそちらへ寄せる**だけで済みます。
+
+| どこ | 正しい URL |
+|---|---|
+| ホームページ | `https://schoolplan-editor.giga-school.com/about.html` |
+| プライバシーポリシー | `https://schoolplan-editor.giga-school.com/privacy-policy.html` |
+| 利用規約 | `https://schoolplan-editor.giga-school.com/terms.html` |
+
+- [ ] Cloud Console（OAuth 同意画面）のホームページ・プライバシーポリシー・利用規約の URL を上記に直す
+- [ ] そのドメインを **Google Search Console で所有確認**し、同意画面の「承認済みドメイン」に登録する
+- [ ] `*.github.io` の URL がどこにも残っていない（`tools/demo-video/config.mjs` の既定値は独自ドメインに変更済み）
+- [ ] デモ動画のシーン1で、**アドレスバーにこのドメインが読める**状態を映す（[C5](C5_DEMO_VIDEO_SCRIPT.md) §2-1-3）
 
 ---
 
@@ -34,10 +56,11 @@ Google が指摘したのは、独立した **4 件**です。1 件でも欠け�
 
 | スコープ | 実演する機能の全体 | アカウント側で見せるもの |
 |----------|--------------------|--------------------------|
-| `spreadsheets` | 週案の入力（書き込み）／時数集計（読み取り）／タスクの追加・削除 | **スプレッドシート本体**を開き、週案シート・タスクシート・ごみ箱シートで増減を確認 |
-| `script.send_mail` | リマインダーの有効化・時刻設定・テスト送信 | **Gmail の受信トレイ**で実物を開き、宛先（To）＝ログイン中の本人であることを確認 |
-| `script.external_request` | Gemini による生成／Drive REST API の呼び出し／祝日 CSV の取得（送信先の全列挙） | 生成結果の挿入、設定画面の**有料ティア必須の注意書き** |
-| `script.scriptapp` | リマインダーの時限トリガー作成／バックグラウンド処理用トリガー／解除 | 設定タブの**「自動実行（トリガー）の状況」**で、登録された行が増え、解除で消えることを確認 |
+| `drive.file`（旧 `spreadsheets` の置き換え） | 週案の入力（書き込み）／時数集計（読み取り）／タスクの追加・削除／**ピッカーでのファイル選択**／学級通信ファイルの作成と削除／完全バックアップの作成 | **スプレッドシート本体**（データベース・タスク・`_週案_ごみ箱` の各シート）と、**Drive のファイル一覧・ごみ箱** |
+| `script.send_mail` | リマインダーの有効化・時刻設定・テスト送信（送るメールはこの1種類だけ） | **Gmail の受信トレイ**で実物を開き、宛先（To）＝ログイン中の本人であることを確認 |
+| `script.external_request` | Gemini による生成／モデル一覧の取得／Drive・Sheets REST API／`tokeninfo`／祝日 CSV（送信先の全列挙） | 生成結果の挿入、設定画面の**有料ティア必須の注意書き** |
+| `script.scriptapp` | リマインダーと Classroom 自動投稿の時限トリガー作成／PDF 取り込みの一時トリガー／夜間の自動整理／解除 | 設定タブの**「自動実行（トリガー）の状況」**で、登録された行が増え、解除で消えることを確認 |
+| `classroom.announcements` | **本文だけの投稿**と、**Drive に作った PDF を添付した投稿**の2経路／時刻を設定したときの自動投稿 | **Classroom のストリーム**で2件のお知らせと添付ファイルを確認 |
 
 ### そのために入れたコード変更
 
@@ -175,7 +198,20 @@ Hello,
 Thank you for the detailed review. We have addressed every point below.
 
 --------------------------------------------------------------------
-1) New demonstration video
+1) Homepage and privacy policy URLs
+--------------------------------------------------------------------
+Our homepage, privacy policy, and terms of service are now served from a
+domain we own and have verified, not from a third-party subdomain:
+
+  Homepage:       https://schoolplan-editor.giga-school.com/about.html
+  Privacy policy: https://schoolplan-editor.giga-school.com/privacy-policy.html
+  Terms:          https://schoolplan-editor.giga-school.com/terms.html
+
+These are the URLs now configured on the OAuth consent screen, and the new
+demonstration video opens with the address bar showing that domain.
+
+--------------------------------------------------------------------
+2) New demonstration video
 --------------------------------------------------------------------
 New video (unlisted): {{YOUTUBE_URL}}
 
@@ -183,35 +219,60 @@ The video now demonstrates the full operational functionality of every
 requested scope, and for every write or delete operation it also shows the
 resulting change inside the user's own Google account:
 
-- drive.file ({{TIMESTAMP}}): entering a weekly lesson plan (write), the
-  annual lesson-hour summary calculated from the same file (read), and
+- drive.file, part 1 ({{TIMESTAMP}}): entering a weekly lesson plan (write),
+  the annual lesson-hour summary calculated from the same file (read), and
   adding and deleting a task (write/delete). We then open the teacher's own
   spreadsheet and show the new cell, the added row, and the deleted row that
-  was moved to the recycle-bin sheet inside the same file. The same scope
-  covers the PDFs the app exports, shown later in the video. The app can
-  reach only the files it created or the teacher picked.
+  was moved to the recycle-bin sheet inside the same file.
+- drive.file, part 2 ({{TIMESTAMP}}): the Google Picker. A teacher who
+  already has a lesson plan file selects it, which is the only way the app
+  can reach a file it did not create. We also show the picker used for
+  school-calendar PDFs, filtered to PDF files with multiple selection
+  enabled. Nothing else in the teacher's Drive is reachable by the app.
+- drive.file, part 3 ({{TIMESTAMP}}): the files the app creates. Saving a
+  newsletter creates a file in the teacher's Drive; deleting it moves that
+  file to the teacher's Drive trash; a full backup copies the database into
+  a new spreadsheet. We then open the teacher's Drive and their Drive trash
+  and show both the created files and the deleted one.
 - script.send_mail ({{TIMESTAMP}}): enabling the daily task reminder,
   choosing the delivery time, and sending a test message. We then open the
   signed-in teacher's Gmail inbox and show the delivered message and its
-  To: field, which is the signed-in account itself. The app has no other
-  recipients and cannot read mail.
+  To: field, which is the signed-in account itself. This reminder is the
+  only message the application can send. It has no recipient list and
+  cannot read mail.
 - script.external_request ({{TIMESTAMP}}): generating a class newsletter
-  with the Gemini API. We enumerate every outbound request the app makes:
-  the Gemini API, the Google Drive REST API v3 (we call Drive over REST so
-  that drive.file is sufficient), and a public holiday CSV published by the
-  Japanese Cabinet Office. No other host is contacted.
+  with the Gemini API, and loading the list of models the teacher's own key
+  can use. We enumerate every host the app contacts: the Gemini API, the
+  Google Drive and Google Sheets REST APIs (we call both over REST so that
+  drive.file is sufficient), Google's tokeninfo endpoint, which we use to
+  read our own Cloud project number for the file picker, and a public
+  holiday CSV published by the Japanese Cabinet Office. No user data is sent
+  to that last one, and no server of ours appears in the list.
+- classroom.courses.readonly and classroom.announcements ({{TIMESTAMP}}):
+  listing the teacher's own active courses, then both kinds of post — an
+  announcement with text only, and an announcement with a PDF the app
+  created in the teacher's Drive attached to it. We then open Google
+  Classroom and show both announcements in the teacher's own course. A
+  teacher may also set a posting time, in which case the post is made by a
+  trigger in their own account; clearing the field removes it.
 - script.scriptapp ({{TIMESTAMP}}): the app creates time-based triggers for
-  the daily reminder and for background PDF parsing. We added an in-app
-  panel, "Scheduled automation", that lists every trigger the app has created
-  in the signed-in user's account. The video shows the reminder trigger
-  appearing in that list after it is enabled, and disappearing from the list
-  after the user deletes it, so the effect on the source account is visible.
+  the daily reminder, for the scheduled Classroom post, for background PDF
+  parsing, and for a nightly cleanup of triggers that are no longer needed.
+  We added an in-app panel, "Scheduled automation", that lists every trigger
+  the app has created in the signed-in user's account. The video shows the
+  triggers appearing in that list after they are enabled, and disappearing
+  from the list after the user deletes them, so the effect on the source
+  account is visible.
+- userinfo.email ({{TIMESTAMP}}): the settings panel showing which account
+  is signed in and which single spreadsheet is in use. We use the address
+  only to keep one teacher's database separate from another's, and to send
+  the reminder to that same teacher.
 
 Our application is not an integration platform; each scope maps to one
 teacher-facing feature, as shown above.
 
 --------------------------------------------------------------------
-2) AI / ML integrations
+3) AI / ML integrations
 --------------------------------------------------------------------
 - Third-party AI providers: none. The only AI service the application
   integrates with is Google's own Gemini API (Google AI for Developers).
@@ -233,7 +294,7 @@ The Limited Use compliance statement is published here:
 {{PRIVACY_URL}}#s5
 
 --------------------------------------------------------------------
-3) Privacy policy — protection of sensitive data
+4) Privacy policy — protection of sensitive data
 --------------------------------------------------------------------
 We rewrote the security section of our privacy policy so that it states the
 specific protections applied to sensitive data:
@@ -256,7 +317,7 @@ The scope descriptions in section 2 of the same policy match the scopes
 configured in the Cloud Console exactly.
 
 --------------------------------------------------------------------
-4) Minimum scope — spreadsheets
+5) Minimum scope — spreadsheets
 --------------------------------------------------------------------
 Confirming narrower scopes.
 
@@ -278,7 +339,7 @@ The consent screen now shows seven scopes, and the new demonstration video
 was recorded against that configuration.
 
 --------------------------------------------------------------------
-5) Test credentials and navigation
+6) Test credentials and navigation
 --------------------------------------------------------------------
 The application has no local login and no paywall: the only authentication
 is Google Sign-In, and any Google account can use it. There is no phone
@@ -294,14 +355,23 @@ their own test account:
 5. "Tasks" tab: add a task, then delete it (drive.file, write/delete).
    At the bottom of the same tab, enable "Reminder" and press "Send a test
    message now" (script.send_mail, script.scriptapp).
-6. "Settings" tab: "Scheduled automation" lists the triggers created in the
+6. "Settings" tab, "Database in use": "Switch to another sheet" opens the
+   Google Picker, which is how a teacher grants access to a file the app
+   did not create (drive.file). The same panel shows the signed-in address
+   (userinfo.email).
+7. "Settings" tab, "Data protection": "Back up now" creates a backup
+   spreadsheet in your Drive (drive.file, write). "Newsletter" tab: saving
+   creates a file, deleting moves it to your Drive trash (drive.file,
+   delete).
+8. "Settings" tab: "Scheduled automation" lists the triggers created in the
    account and lets you delete them (script.scriptapp).
-7. "Newsletter" tab: the AI draft button calls the Gemini API
+9. "Newsletter" tab: the AI draft button calls the Gemini API
    (script.external_request). This step needs a Gemini API key entered in
    Settings; if you prefer, we can supply a key for the review — please let
    us know and we will send it through a channel you specify.
-8. "Settings" tab, Google Classroom section: choose one of your own courses
-   and post (classroom.courses.readonly, classroom.announcements).
+10. "Settings" tab, Google Classroom section: choose one of your own courses,
+   then use both "Post tomorrow's schedule" and "Post the newsletter sheet"
+   (classroom.courses.readonly, classroom.announcements).
 
 Publishing status remains "In production".
 
@@ -316,8 +386,10 @@ GIGAyama
 
 ## 6. Cloud Console 側でやること
 
-- [ ] OAuth 同意画面の**プライバシーポリシー URL** が `privacy-policy.html` を指している
-- [ ] 登録スコープと `appsscript.json` の `oauthScopes` が一致している
+- [ ] OAuth 同意画面の**ホームページ・プライバシーポリシー・利用規約の URL** が、
+      独自ドメイン `schoolplan-editor.giga-school.com` を指している（`*.github.io` を残さない）
+- [ ] そのドメインを Search Console で所有確認し、「承認済みドメイン」に登録した
+- [ ] 登録スコープと `appsscript.json` の `oauthScopes` が一致している（7 個）
 - [ ] **`spreadsheets` を登録スコープから外す**（リポジトリ側は削除済み。Console 側は人手）
 - [ ] 公開ステータスは **In production** のまま（テストに戻さない）
 - [ ] 変更を保存して送信し、そのうえで**メールに直接返信**する
@@ -327,8 +399,10 @@ GIGAyama
 ## 7. 送信前チェック ✅
 
 - [ ] 新しい動画を YouTube に**限定公開**でアップし、シークレットウィンドウで再生確認した
-- [ ] 動画に、4 スコープすべての「全体像」と「アカウント側の反映」が映っている
-- [ ] `npm run demo:verify` が問題なしで通った
+- [ ] 動画に、**7 スコープすべて**の「全体像」と「アカウント側の反映」が映っている
+      （[C5](C5_DEMO_VIDEO_SCRIPT.md) §4-1 の最終確認をすべて消し込む）
+- [ ] 動画のシーン1で、独自ドメインがアドレスバーに読める
+- [ ] `npm run demo:verify` が問題なしで通った（`npm test` の台本チェックも通っている）
 - [ ] プライバシーポリシーを公開し、`#s5` と `#s7` のアンカーが実際に飛ぶことを確認した
 - [ ] `drive.file` だけで週案が動くことを**実機で確認した**（[B5](B5_SHEETS_SCOPE_AUDIT.md) §6 のチェックリスト）
 - [ ] 返信は**元のメールへの直接返信**（新規メールにしない）
