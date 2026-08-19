@@ -147,14 +147,20 @@ function getTenantStatus() {
     const id = resolveSpreadsheetId_();
     let linked = false;
     let name = '';
+    // 「一度も紐付けていない」のか「紐付け先が開けなくなった」のかを区別する。
+    // drive.file へ移行した直後は後者が起きうる（アプリ作成物として認識されず、
+    // ピッカーで選び直すまで開けない）。ここを一緒くたにすると、既存の先生に
+    // 「新しく作成する」を押させてしまい、これまでのデータが消えたように見える。
+    let needsReauthorize = false;
     if (id) {
       try {
         const ss = sheetsOpenById_(id);
         name = ss.getName();
         linked = true;
       } catch (openErr) {
-        // アクセス権が無い／削除された等でIDが無効。オンボーディングを促す。
         linked = false;
+        needsReauthorize = true;
+        logInfo('紐付け済みのデータベースを開けませんでした。選び直しが必要です: ' + id);
       }
     }
     let email = '';
@@ -165,6 +171,8 @@ function getTenantStatus() {
     return {
       success: true,
       linked: linked,
+      // 紐付け先はあるのに開けない状態。フロントは「選び直し」を促す画面を出す。
+      needsReauthorize: needsReauthorize,
       spreadsheetId: linked ? id : '',
       spreadsheetName: name,
       email: email,

@@ -195,6 +195,14 @@
      */
     async function showOnboardingChoice(status) {
         status = status || {};
+
+        // 紐付け先はあるのに開けない場合は、初めての人とは別の案内を出す。
+        // ここで「新しく作成する」を押されると、これまでのデータとは別の空の
+        // データベースに切り替わってしまい、消えたように見えるため。
+        if (status.needsReauthorize) {
+            return showReauthorizeChoice(status);
+        }
+
         var email = status.email || '';
         var canCreate = !!status.canCreate;
 
@@ -227,6 +235,98 @@
             // 閉じられた場合は再表示（この画面は完了するまで必須）
             showOnboardingChoice(status);
         }
+    }
+
+    /**
+     * これまで使っていたデータベースが開けなくなったときの案内。
+     *
+     * アプリが扱えるファイルを「利用者が選んだものだけ」に絞った（drive.file）ため、
+     * 以前から使っている先生は、同じファイルを一度だけ選び直す必要があります。
+     * データは消えていないので、まずそれを伝えます。
+     * @param {Object} status getTenantStatus() の結果
+     */
+    async function showReauthorizeChoice(status) {
+        var email = (status && status.email) || '';
+        var res = await Swal.fire({
+            icon: 'info',
+            title: 'データベースを選び直してください',
+            html: '<div style="text-align:left;font-size:0.9rem;line-height:1.8;">'
+                + '<strong>これまでのデータは消えていません。</strong>'
+                + 'Google ドライブにそのまま残っています。<br><br>'
+                + 'このアプリが扱えるファイルを「あなたが選んだものだけ」に絞ったため、'
+                + 'これまで使っていたスプレッドシートを<strong>一度だけ選び直す</strong>必要があります。<br><br>'
+                + '<span style="color:#b26a00;">「新しく作る」を選ぶと、空のデータベースになります。'
+                + 'これまでの週案を続けて使うなら、必ず「ドライブから選び直す」を選んでください。</span>'
+                + (email ? ('<div style="margin-top:10px;color:var(--secondary-text);font-size:0.8rem;">ログイン中: ' + escHtml(email) + '</div>') : '')
+                + '</div>',
+            width: 580,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            confirmButtonText: 'ドライブから選び直す',
+            confirmButtonColor: '#1a73e8',
+            showDenyButton: true,
+            denyButtonText: '新しく作る',
+            denyButtonColor: '#9aa0a6'
+        });
+
+        if (res.isDenied) {
+            var sure = await Swal.fire({
+                icon: 'warning',
+                title: '本当に新しく作りますか？',
+                html: 'これまでの週案は引き継がれません。<br>'
+                    + '空のデータベースから始めることになります。',
+                showCancelButton: true,
+                confirmButtonText: '空のまま新しく作る',
+                confirmButtonColor: '#ea4335',
+                cancelButtonText: 'やめる',
+                allowOutsideClick: false
+            });
+            if (sure.isConfirmed) { onboardingCreate(); return; }
+            return showReauthorizeChoice(status);
+        }
+
+        // ピッカーで選ばせる。キャンセルされたらこの画面へ戻す。
+        var picked = await pickDatabaseFromDrive_();
+        if (!picked) return showReauthorizeChoice(status);
+
+        Swal.fire({
+            title: '確認中...',
+            html: 'スプレッドシートを確認しています。',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: function () { Swal.showLoading(); }
+        });
+
+        google.script.run
+            .withSuccessHandler(function (r) {
+                if (r && r.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '再開できます',
+                        html: '「' + escHtml(r.spreadsheetName || '') + '」を読み込みます。',
+                        confirmButtonColor: '#1a73e8',
+                        allowOutsideClick: false
+                    }).then(function () { startAppInit(); });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '選び直しに失敗しました',
+                        html: escHtml((r && r.error) || '不明なエラーが発生しました。'),
+                        confirmButtonColor: '#1a73e8',
+                        allowOutsideClick: false
+                    }).then(function () { showReauthorizeChoice(status); });
+                }
+            })
+            .withFailureHandler(function (e) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '通信エラー',
+                    html: escHtml(e && e.message ? e.message : String(e)),
+                    confirmButtonColor: '#1a73e8',
+                    allowOutsideClick: false
+                }).then(function () { showReauthorizeChoice(status); });
+            })
+            .linkMyDatabase(picked);
     }
 
     /** 新規作成フロー: 名前を入力してテンプレートから自分専用DBを作成します。 */
