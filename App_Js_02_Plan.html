@@ -176,18 +176,34 @@
                         selectCell(i, rowIdx, rowDef.key);
                         if (isDoubleTap) startEditAtSelectedCell();
                     });
-                }
-                // UX: 右クリックコンテキストメニュー（校時セルのみ）。
-                // タッチ端末では右クリックが使えないため、閲覧モードでは長押しでも開けるようにする。
-                if (rowDef.multi) {
-                    cell.addEventListener('contextmenu', function (e) {
-                        e.preventDefault();
-                        selectCell(i, rowIdx, rowDef.key);
-                        showContextMenu(e, i, parseInt(rowDef.key.replace('period', '')));
+                } else {
+                    // UX: 編集モード — セルの余白をクリックしたら、そのセルの入力欄へ入る。
+                    // 入力欄にフォーカスが移れば focusin 経由でセル選択も追従するので、
+                    // コピー／ペーストの対象は常に「いま編集しているセル」になる。
+                    cell.addEventListener('click', function (e) {
+                        if (e.target !== cell) return;
+                        var firstInput = cell.querySelector('input, textarea');
+                        if (firstInput) firstInput.focus();
+                        else selectCell(i, rowIdx, rowDef.key, { keepFocus: true });
                     });
-                    if (!isEdit) {
-                        attachTouchLongPress(cell, i, rowIdx, rowDef.key, parseInt(rowDef.key.replace('period', '')));
-                    }
+                }
+                // UX: 右クリックコンテキストメニュー（コピー / ペースト / クリア / 元に戻す）。
+                // 閲覧モードだけでなく編集モードでも同じ操作を出す。ただし編集モードで
+                // 文字を選択している時は、ブラウザ標準のテキストメニューを優先して邪魔しない。
+                var ctxPeriod = rowDef.multi ? parseInt(rowDef.key.replace('period', '')) : null;
+                cell.addEventListener('contextmenu', function (e) {
+                    // セル内のリンクは「新しいタブで開く」等が必要なのでブラウザ標準に任せる
+                    if (e.target.closest && e.target.closest('a')) return;
+                    if (isEdit && hasTextSelection(e.target)) return;
+                    e.preventDefault();
+                    selectCell(i, rowIdx, rowDef.key, { keepFocus: isEdit });
+                    showContextMenu(e, i, ctxPeriod);
+                });
+                // タッチ端末には右クリックが無いため、閲覧モードでは長押しを代替にする。
+                // 編集モードの長押しは文字選択・標準の貼り付けに使うので奪わず、
+                // 代わりに選択中セルへ出る「セル操作」ハンドル（⋮）を入口にする。
+                if (rowDef.multi && !isEdit) {
+                    attachTouchLongPress(cell, i, rowIdx, rowDef.key, ctxPeriod);
                 }
 
                 grid.appendChild(cell);
@@ -205,6 +221,9 @@
         if (!isEdit) {
             grid.focus({ preventScroll: true });
         }
+
+        // 再描画でセルごと作り直されるため、選択中セルの「セル操作」ハンドルを付け直す
+        refreshCellActionHandle();
     }
 
     // UX: textarea の自動リサイズ
@@ -776,18 +795,44 @@
 
     // ===== 編集モード制御 =====
     function toggleEditMode() {
-        STATE.editMode = !STATE.editMode;
+        if (STATE.editMode) { exitEditMode(); return; }
+        STATE.editMode = true;
         updateEditUI();
         renderWeekGrid(STATE.weekData.days);
         // 編集モードに入った時点で単元の進捗を先読みしておく（ピッカーを開いた時の待ちを消す）
-        if (STATE.editMode && typeof prefetchUnitProgress === 'function') prefetchUnitProgress();
+        if (typeof prefetchUnitProgress === 'function') prefetchUnitProgress();
     }
     function cancelEdit() {
+        exitEditMode();
+    }
+
+    /**
+     * 編集モードを抜け、編集中の変更を破棄します。
+     * 編集モードのコピー＆ペースト等のセル操作は STATE.weekData.days を直接書き換えるため、
+     * 入力欄を捨てるだけでは元に戻りません。編集開始時のスナップショットへ明示的に戻します。
+     */
+    function exitEditMode() {
+        var baseline = STATE.editBaseline; // updateEditUI() が捨てる前に受け取る
+        if (baseline && STATE.weekData) STATE.weekData.days = baseline;
         STATE.editMode = false;
         updateEditUI();
-        renderWeekGrid(STATE.weekData.days);
+        if (STATE.weekData && STATE.weekData.days) renderWeekGrid(STATE.weekData.days);
     }
+
+    /**
+     * 編集開始時の週データのスナップショットを取り／捨てします。
+     * updateEditUI() は編集モードの出入り全経路（切替・キャンセル・自動保存・競合処理）から
+     * 呼ばれるため、ここに置くのがいちばん取りこぼしがありません。
+     */
+    function syncEditBaseline() {
+        if (!STATE.editMode) { STATE.editBaseline = null; return; }
+        if (!STATE.editBaseline && STATE.weekData && STATE.weekData.days) {
+            STATE.editBaseline = JSON.parse(JSON.stringify(STATE.weekData.days));
+        }
+    }
+
     function updateEditUI() {
+        syncEditBaseline();
         var dot = document.querySelector('.mode-dot');
         var label = document.getElementById('modeLabel');
         var editBtn = document.getElementById('editToggleBtn');
@@ -798,9 +843,14 @@
         var shiftLessonBtn = document.getElementById('shiftLessonBtn');
         var saveBtn = document.getElementById('saveBtn');
         var cancelBtn = document.getElementById('cancelBtn');
+        var hint = document.getElementById('modeHint');
         if (STATE.editMode) {
             dot.className = 'mode-dot edit-dot';
             label.textContent = '編集モード';
+            if (hint) {
+                hint.style.display = '';
+                hint.textContent = '右クリック / ⋮ でコピー・ペースト';
+            }
             editBtn.style.display = 'none';
             if (pdfBtn) pdfBtn.style.display = 'none';
             if (timetableBtn) timetableBtn.style.display = 'flex';
@@ -812,6 +862,7 @@
         } else {
             dot.className = 'mode-dot view-dot';
             label.textContent = '閲覧モード';
+            if (hint) hint.style.display = 'none';
             editBtn.style.display = '';
             if (pdfBtn) pdfBtn.style.display = '';
             if (timetableBtn) timetableBtn.style.display = 'none';
@@ -852,10 +903,14 @@
     }
 
     // ===== 未保存チェック =====
+    // 編集モードのセル操作（ペースト・クリア・入れ替え・自動入力）は STATE.weekData.days を
+    // 書き換えるので、比較相手は「編集を始めた時のスナップショット」でなければならない。
+    // days と比べると、それらの操作の結果が“変更なし”に見えて保存されずに消える。
     function hasUnsavedChanges() {
         if (!STATE.editMode || !STATE.weekData) return false;
         var current = collectCurrentEditData();
-        return JSON.stringify(current) !== JSON.stringify(STATE.weekData.days);
+        var baseline = STATE.editBaseline || STATE.weekData.days;
+        return JSON.stringify(current) !== JSON.stringify(baseline);
     }
 
     // ===== 保存系の状態変数 =====
@@ -919,6 +974,9 @@
         var saved = (result && result.days && result.days.length) ? result.days : fallbackDays;
         var normalized = JSON.stringify(saved) !== JSON.stringify(target.days);
         target.days = saved;
+        // 保存が通った時点で「編集を始めた時の内容」は保存済みの内容に置き換わる。
+        // ここで捨てておかないと、直後の cancelEdit() が保存前の状態へ巻き戻してしまう。
+        if (target === STATE.weekData) STATE.editBaseline = null;
         return normalized;
     }
 
@@ -1115,8 +1173,170 @@
         });
     }
 
+    // ===== 編集モードでもセル操作を使えるようにするための土台 =====
+    // 編集モードでは「本当の値」は STATE.weekData.days ではなく画面の入力欄にある。
+    // そのままセル操作（コピー / ペースト / クリア / 入れ替え / Undo）を走らせると、
+    //   1) 古い値をコピーしてしまう
+    //   2) 再描画で入力途中の内容が丸ごと消える
+    //   3) 入力中だったカーソル位置が飛ぶ
+    // という3つの壊れ方をする。以下の3つの関数がそれぞれを塞ぐ。
+
+    /**
+     * 編集中の入力欄の内容を STATE.weekData.days へ取り込みます（編集モード時のみ）。
+     * セル操作は必ずこれを通してから days を読み書きすること。
+     * @returns {boolean} 取り込んだら true
+     */
+    function syncEditBufferToState() {
+        if (!STATE.editMode || !STATE.weekData) return false;
+        var current = collectCurrentEditData();
+        if (!current) return false;
+        STATE.weekData.days = current;
+        return true;
+    }
+
+    /** いまフォーカスしているグリッド入力欄の位置とカーソル位置を控えます。 */
+    function captureGridFocus() {
+        var el = document.activeElement;
+        if (!isGridInput(el)) return null;
+        var snap = {
+            field: el.getAttribute('data-field'),
+            day: el.getAttribute('data-day'),
+            period: el.getAttribute('data-period'),
+            start: 0,
+            end: 0
+        };
+        if (!snap.field || snap.day === null) return null;
+        try {
+            snap.start = el.selectionStart;
+            snap.end = el.selectionEnd;
+        } catch (e) { /* 選択位置を取れない入力型はカーソル復元をあきらめる */ }
+        return snap;
+    }
+
+    /** captureGridFocus() で控えた入力欄へフォーカスとカーソル位置を戻します。 */
+    function restoreGridFocus(snap) {
+        if (!snap) return;
+        var sel = '#weekGrid [data-field="' + snap.field + '"][data-day="' + snap.day + '"]';
+        if (snap.period !== null && snap.period !== undefined) sel += '[data-period="' + snap.period + '"]';
+        var el = document.querySelector(sel);
+        if (!el) return;
+        el.focus({ preventScroll: true });
+        try {
+            var len = (el.value || '').length;
+            el.setSelectionRange(Math.min(snap.start, len), Math.min(snap.end, len));
+        } catch (e) { /* カーソル復元は失敗しても操作自体は成立している */ }
+    }
+
+    /** セル操作の後の再描画。編集モードでは入力位置を保ったまま描き直します。 */
+    function rerenderGridPreservingFocus() {
+        if (!STATE.weekData || !STATE.weekData.days) return;
+        var snap = STATE.editMode ? captureGridFocus() : null;
+        renderWeekGrid(STATE.weekData.days);
+        restoreGridFocus(snap);
+    }
+
+    /** グリッド内の入力欄（input / textarea）かどうか。 */
+    function isGridInput(el) {
+        if (!el) return false;
+        var tag = (el.tagName || '').toLowerCase();
+        if (tag !== 'input' && tag !== 'textarea') return false;
+        var grid = document.getElementById('weekGrid');
+        return !!(grid && grid.contains(el));
+    }
+
+    /** input / textarea の中で文字が選択されているか（＝標準のコピー等が意味を持つ状態か）。 */
+    function hasTextSelection(el) {
+        if (!el) return false;
+        var tag = (el.tagName || '').toLowerCase();
+        if (tag !== 'input' && tag !== 'textarea') return false;
+        try {
+            return el.selectionStart !== el.selectionEnd;
+        } catch (e) { return false; }
+    }
+
+    /**
+     * 要素が属するグリッドセルを選択状態にします（編集モードではフォーカスを奪わない）。
+     * @returns {boolean} 選択できたら true
+     */
+    function selectCellFromElement(el, opts) {
+        var cell = (el && el.closest) ? el.closest('.grid-cell') : null;
+        if (!cell || cell.dataset.row === undefined) return false;
+        var day = parseInt(cell.dataset.day, 10);
+        var row = parseInt(cell.dataset.row, 10);
+        if (isNaN(day) || isNaN(row)) return false;
+        var s = STATE.selectedCell;
+        if (s && s.day === day && s.row === row) return true;
+        selectCell(day, row, cell.dataset.key, opts || { keepFocus: true });
+        return true;
+    }
+
+    // 編集モード: 入力欄にフォーカスが入ったら、そのセルを選択状態にする。
+    // これでコピー / ペースト / クリアの対象が、いま編集しているセルと必ず一致する。
+    document.addEventListener('focusin', function (e) {
+        if (!STATE.editMode) return;
+        if (!isGridInput(e.target)) return;
+        selectCellFromElement(e.target, { keepFocus: true });
+    });
+
+    /**
+     * 編集モードで選択中のセルに「セル操作」ハンドル（⋮）を1つだけ表示します。
+     * 編集モードでは右クリック＝文字メニュー・長押し＝文字選択が本来の役割なので、
+     * タッチ端末からでもコピー / ペースト / クリアへ確実にたどり着ける入口を用意する。
+     * 選択中の1セルにしか出ないため、編集画面が散らからない。
+     */
+    function updateCellActionHandle(cell) {
+        var existing = document.getElementById('cellActionHandle');
+        if (existing) existing.remove();
+        if (!STATE.editMode || !cell) return;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = 'cellActionHandle';
+        btn.className = 'cell-action-handle';
+        btn.tabIndex = -1;
+        btn.title = 'このセルの操作（コピー / ペースト / クリア）';
+        btn.setAttribute('aria-label', 'このセルの操作');
+        btn.textContent = '⋮';
+        // 日課・宿題などの行はセル右上に既存ボタン（リンク挿入・タスク選択）が並ぶ。
+        // その数だけ左へ寄せて重ならないようにする（ボタン1つあたり 14px のアイコン＋余白で約24px）。
+        var offset = 1;
+        if (cell.querySelector(':scope > .link-insert-btn')) offset += 24;
+        if (cell.querySelector(':scope > .field-task-btn')) offset += 24;
+        btn.style.right = offset + 'px';
+        // 入力中のフォーカスとカーソル位置を奪わない
+        btn.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
+        btn.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            openCellMenuForSelection(btn);
+        });
+        cell.appendChild(btn);
+    }
+
+    /** 再描画などで消えたハンドルを、選択中セルへ付け直します。 */
+    function refreshCellActionHandle() {
+        updateCellActionHandle(document.querySelector('.grid-cell.selected'));
+    }
+
+    /** 「セル操作」ハンドルの位置に、選択中セル向けのメニューを開きます。 */
+    function openCellMenuForSelection(anchor) {
+        var s = STATE.selectedCell;
+        if (!s) return;
+        var rowDef = GRID_ROWS[s.row];
+        var pIdx = (rowDef && rowDef.multi) ? parseInt(rowDef.key.replace('period', '')) : null;
+        var r = anchor.getBoundingClientRect();
+        showContextMenu({
+            pageX: r.left + window.pageXOffset,
+            pageY: r.bottom + window.pageYOffset
+        }, s.day, pIdx);
+    }
+
     // ===== Phase B: セル選択 =====
-    function selectCell(day, row, key) {
+    /**
+     * セルを選択状態にします。
+     * @param {Object} [opts] opts.keepFocus=true で現在のフォーカスを奪わない
+     *   （編集モードでは入力欄にフォーカスが必要なため、グリッドへ移してはいけない）
+     */
+    function selectCell(day, row, key, opts) {
         // 以前の選択を解除
         var prev = document.querySelector('.grid-cell.selected');
         if (prev) prev.classList.remove('selected');
@@ -1124,14 +1344,18 @@
         // 新しいセルをハイライト
         var cell = document.querySelector('.grid-cell[data-day="' + day + '"][data-row="' + row + '"]');
         if (cell) cell.classList.add('selected');
+        updateCellActionHandle(cell);
         // グリッドにフォーカスを当ててキーボードショートカットを確実に有効化
-        var grid = document.getElementById('weekGrid');
-        if (grid) grid.focus({ preventScroll: true });
+        if (!(opts && opts.keepFocus)) {
+            var grid = document.getElementById('weekGrid');
+            if (grid) grid.focus({ preventScroll: true });
+        }
     }
 
     function clearSelection() {
         var prev = document.querySelector('.grid-cell.selected');
         if (prev) prev.classList.remove('selected');
+        updateCellActionHandle(null);
         STATE.selectedCell = null;
     }
 
@@ -1153,8 +1377,13 @@
     }
 
     // ===== Phase E: Undo / Redo =====
+    // 履歴を積む前に必ず入力欄の内容を取り込む。編集モードで取り込まずに積むと、
+    // 入力途中の内容が履歴に入らず、元に戻した瞬間に消えてしまう。
+    // 注意: syncEditBufferToState() は days を新しい配列に差し替えるため、
+    // 呼び出し側は pushUndo() の「後」に days から day オブジェクトを取り直すこと。
     function pushUndo() {
         if (!STATE.weekData || !STATE.weekData.days) return;
+        syncEditBufferToState();
         STATE.undoStack.push(JSON.parse(JSON.stringify(STATE.weekData.days)));
         if (STATE.undoStack.length > 30) STATE.undoStack.shift();
         STATE.redoStack = [];
@@ -1162,18 +1391,20 @@
 
     function undo() {
         if (STATE.undoStack.length === 0) { showToast('info', '元に戻せる操作がありません'); return; }
+        syncEditBufferToState();
         STATE.redoStack.push(JSON.parse(JSON.stringify(STATE.weekData.days)));
         STATE.weekData.days = STATE.undoStack.pop();
-        renderWeekGrid(STATE.weekData.days);
+        rerenderGridPreservingFocus();
         showToast('info', '↩ 元に戻しました');
         persistViewMutation();
     }
 
     function redo() {
         if (STATE.redoStack.length === 0) { showToast('info', 'やり直す操作がありません'); return; }
+        syncEditBufferToState();
         STATE.undoStack.push(JSON.parse(JSON.stringify(STATE.weekData.days)));
         STATE.weekData.days = STATE.redoStack.pop();
-        renderWeekGrid(STATE.weekData.days);
+        rerenderGridPreservingFocus();
         showToast('info', '↪ やり直しました');
         persistViewMutation();
     }
@@ -1181,6 +1412,8 @@
     // ===== Phase D: コピー＆ペースト =====
     function copyCellData() {
         if (!STATE.selectedCell || !STATE.weekData) return;
+        // 編集モードでは入力欄の値が最新。取り込まないと1つ前の内容をコピーしてしまう
+        syncEditBufferToState();
         var s = STATE.selectedCell;
         var day = STATE.weekData.days[s.day];
         if (!day) return;
@@ -1195,49 +1428,62 @@
             STATE.clipboard = { type: 'text', key: rowDef.key, data: day[rowDef.key] || '' };
             plainText = day[rowDef.key] || '';
         }
-        // システムクリップボードにもプレーンテキストとして書き込む
+        // システムクリップボードにもプレーンテキストとして書き込む。
+        // 同じ文字列が貼り付けられた時に「セルごとのペースト」と判定するため控えておく。
+        STATE.clipboardText = plainText;
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(plainText).catch(function () { });
         }
-        showToast('info', '📋 コピーしました');
+        showToast('info', rowDef.multi ? '📋 コマをコピーしました' : '📋 コピーしました');
     }
 
-    function pasteCellData() {
-        if (!STATE.clipboard || !STATE.selectedCell || !STATE.weekData) return;
+    /**
+     * コピーしたセルを、選択中のセルへ貼り付けます。
+     * @param {Object} [opts] opts.silent=true で、種類違いのときにエラーを出さず false を返す
+     *   （Ctrl+V の自動判定から呼ぶとき、通常の文字貼り付けへ静かに引き返すため）
+     * @returns {boolean} 貼り付けたら true
+     */
+    function pasteCellData(opts) {
+        if (!STATE.clipboard || !STATE.selectedCell || !STATE.weekData) return false;
         var s = STATE.selectedCell;
-        var day = STATE.weekData.days[s.day];
-        if (!day) return;
         var rowDef = GRID_ROWS[s.row];
+        var asPeriod = (STATE.clipboard.type === 'period' && rowDef.multi);
+        var asText = (STATE.clipboard.type === 'text' && !rowDef.multi);
+        if (!asPeriod && !asText) {
+            if (!(opts && opts.silent)) showToast('error', '異なる種類のセルにはペーストできません');
+            return false;
+        }
+        // pushUndo() が入力欄の内容を取り込み、days を差し替える。day はその後に取り直す
         pushUndo();
-        if (STATE.clipboard.type === 'period' && rowDef.multi) {
+        var day = STATE.weekData.days[s.day];
+        if (!day) return false;
+        if (asPeriod) {
             var pIdx = parseInt(rowDef.key.replace('period', ''));
             day.periods[pIdx] = JSON.parse(JSON.stringify(STATE.clipboard.data));
-        } else if (STATE.clipboard.type === 'text' && !rowDef.multi) {
-            day[rowDef.key] = STATE.clipboard.data;
         } else {
-            showToast('error', '異なる種類のセルにはペーストできません');
-            return;
+            day[rowDef.key] = STATE.clipboard.data;
         }
-        renderWeekGrid(STATE.weekData.days);
-        showToast('success', '📋 ペーストしました');
+        rerenderGridPreservingFocus();
+        showToast('success', asPeriod ? '📋 コマをペーストしました' : '📋 ペーストしました');
         persistViewMutation();
+        return true;
     }
 
     // ===== Phase B: セルクリア =====
     function clearCellData() {
         if (!STATE.selectedCell || !STATE.weekData) return;
         var s = STATE.selectedCell;
-        var day = STATE.weekData.days[s.day];
-        if (!day) return;
         var rowDef = GRID_ROWS[s.row];
         pushUndo();
+        var day = STATE.weekData.days[s.day];
+        if (!day) return;
         if (rowDef.multi) {
             var pIdx = parseInt(rowDef.key.replace('period', ''));
             day.periods[pIdx] = { subject: '', unit: '', content: '' };
         } else {
             day[rowDef.key] = '';
         }
-        renderWeekGrid(STATE.weekData.days);
+        rerenderGridPreservingFocus();
         showToast('info', '🗑 クリアしました');
         persistViewMutation();
     }
@@ -1284,10 +1530,7 @@
 
         if (srcDay === dstDay && srcPeriod === dstPeriod) return;
 
-        // 編集中の入力データを先に回収
-        var currentDays = collectCurrentEditData();
-        if (currentDays) STATE.weekData.days = currentDays;
-
+        // pushUndo() の中で編集中の入力データを取り込む
         pushUndo();
 
         // スワップ
@@ -1296,7 +1539,7 @@
         STATE.weekData.days[srcDay].periods[srcPeriod] = dst || { subject: '', unit: '', content: '' };
         STATE.weekData.days[dstDay].periods[dstPeriod] = src || { subject: '', unit: '', content: '' };
 
-        renderWeekGrid(STATE.weekData.days);
+        rerenderGridPreservingFocus();
         showToast('success', '🔄 コマを入れ替えました');
         persistViewMutation();
     }
@@ -1309,19 +1552,42 @@
     }
 
     // ===== Phase F: 右クリックコンテキストメニュー =====
+    /** コンテキストメニューの1項目を組み立てます。icon が英字ならアイコンフォント、それ以外は文字をそのまま使う。 */
+    function ctxItem(action, icon, label, disabled) {
+        var iconClass = /^[a-z0-9_]+$/.test(icon) ? 'ctx-icon material-symbols-outlined' : 'ctx-icon';
+        return '<div class="ctx-item' + (disabled ? ' disabled' : '') + '" data-action="' + action + '"'
+            + (disabled ? ' aria-disabled="true"' : '') + '>'
+            + '<span class="' + iconClass + '">' + icon + '</span>' + escHtml(label) + '</div>';
+    }
+
+    /**
+     * セルのコンテキストメニューを表示します。
+     * 閲覧モード・編集モードのどちらからでも同じ操作を出す（編集モードでは
+     * 右クリックのほか、選択中セルの「⋮」ハンドルからも開ける）。
+     * @param {number|null} pIdx 校時セルなら校時番号、それ以外の行なら null
+     */
     function showContextMenu(e, dayIdx, pIdx) {
         hideContextMenu();
+        var isPeriod = (pIdx !== null && pIdx !== undefined && !isNaN(pIdx));
         var menu = document.createElement('div');
         menu.className = 'context-menu';
         menu.id = 'uxContextMenu';
-        menu.innerHTML = [
-            '<div class="ctx-item" data-action="copy"><span class="material-symbols-outlined" style="font-size:16px">content_copy</span> コピー</div>',
-            '<div class="ctx-item" data-action="paste"><span class="material-symbols-outlined" style="font-size:16px">content_paste</span> ペースト</div>',
+        var items = [
+            ctxItem('copy', 'content_copy', isPeriod ? 'コマをコピー' : 'コピー', false),
+            ctxItem('paste', 'content_paste', isPeriod ? 'コマをペースト' : 'ペースト', !STATE.clipboard),
             '<div class="ctx-sep"></div>',
-            '<div class="ctx-item" data-action="clear"><span class="material-symbols-outlined" style="font-size:16px">delete</span> このコマをクリア</div>',
-            '<div class="ctx-item" data-action="clearDay"><span class="material-symbols-outlined" style="font-size:16px">delete_sweep</span> この日の全コマをクリア</div>',
-            '<div class="ctx-item" data-action="clearPeriod"><span class="material-symbols-outlined" style="font-size:16px">playlist_remove</span> この校時を全曜日クリア</div>',
-        ].join('');
+            ctxItem('clear', 'delete', isPeriod ? 'このコマをクリア' : 'このセルをクリア', false)
+        ];
+        if (isPeriod) {
+            items.push(ctxItem('clearDay', 'delete_sweep', 'この日の全コマをクリア', false));
+            items.push(ctxItem('clearPeriod', 'playlist_remove', 'この校時を全曜日クリア', false));
+        }
+        // 編集モードでは Ctrl+Z が入力欄の文字取り消しに使われるため、
+        // セル操作のやり直しはここから行えるようにしておく。
+        items.push('<div class="ctx-sep"></div>');
+        items.push(ctxItem('undo', '↩', '元に戻す', STATE.undoStack.length === 0));
+        items.push(ctxItem('redo', '↪', 'やり直す', STATE.redoStack.length === 0));
+        menu.innerHTML = items.join('');
         document.body.appendChild(menu);
 
         // 位置調整
@@ -1337,7 +1603,7 @@
 
         menu.addEventListener('click', function (ev) {
             var item = ev.target.closest('.ctx-item');
-            if (!item) return;
+            if (!item || item.classList.contains('disabled')) return;
             var action = item.dataset.action;
             handleContextAction(action, dayIdx, pIdx);
             hideContextMenu();
@@ -1356,6 +1622,7 @@
 
     function handleContextAction(action, dayIdx, pIdx) {
         if (!STATE.weekData || !STATE.weekData.days) return;
+        var isPeriod = (pIdx !== null && pIdx !== undefined && !isNaN(pIdx));
         switch (action) {
             case 'copy':
                 copyCellData();
@@ -1366,21 +1633,30 @@
             case 'clear':
                 clearCellData();
                 break;
+            case 'undo':
+                undo();
+                break;
+            case 'redo':
+                redo();
+                break;
             case 'clearDay':
+                if (!isPeriod) break;
+                // pushUndo() が編集中の入力欄を取り込んでから履歴を積む
                 pushUndo();
                 for (var p = 0; p < 6; p++) {
                     STATE.weekData.days[dayIdx].periods[p] = { subject: '', unit: '', content: '' };
                 }
-                renderWeekGrid(STATE.weekData.days);
+                rerenderGridPreservingFocus();
                 showToast('info', '🗑 ' + DAY_LABELS_JP[dayIdx] + '曜の全コマをクリアしました');
                 persistViewMutation();
                 break;
             case 'clearPeriod':
+                if (!isPeriod) break;
                 pushUndo();
                 for (var d = 0; d < 7; d++) {
                     STATE.weekData.days[d].periods[pIdx] = { subject: '', unit: '', content: '' };
                 }
-                renderWeekGrid(STATE.weekData.days);
+                rerenderGridPreservingFocus();
                 showToast('info', '🗑 ' + (pIdx + 1) + '校時を全曜日クリアしました');
                 persistViewMutation();
                 break;
@@ -1424,14 +1700,27 @@
             return;
         }
 
-        // Ctrl+C: コピー
-        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !isInput) {
-            e.preventDefault();
-            copyCellData();
-            return;
+        // Ctrl+C: セル（コマ）のコピー。
+        // 編集モードでは入力欄にフォーカスがあるが、文字を選択していなければ標準のコピーは
+        // 何も起こらない。その空振りをコマのコピーに充てることで、閲覧モードと同じキーが
+        // そのまま使える。文字を選択している時はブラウザ標準のコピーを邪魔しない。
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+            if (!isInput) {
+                e.preventDefault();
+                copyCellData();
+                return;
+            }
+            if (isGridInput(e.target) && !hasTextSelection(e.target)) {
+                e.preventDefault();
+                selectCellFromElement(e.target, { keepFocus: true });
+                copyCellData();
+                return;
+            }
         }
 
-        // Ctrl+V: ペースト
+        // Ctrl+V: ペースト。
+        // 編集モードの入力欄内での Ctrl+V は paste イベント側で処理する
+        // （貼り付ける文字がコピーしたコマと同じならセルごと、違えば通常の文字貼り付け）。
         if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !isInput) {
             e.preventDefault();
             pasteCellData();
@@ -1529,17 +1818,19 @@
                 + '<tr><td style="padding:4px 6px"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></td><td>セル移動（閲覧モード）</td></tr>'
                 + '<tr><td style="padding:4px 6px"><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>セル間フォーカス移動（編集モード）</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>←</kbd><kbd>→</kbd></td><td>前週 / 翌週へ移動</td></tr>'
-                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>セルをコピー</td></tr>'
-                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>セルをペースト</td></tr>'
-                + '<tr><td style="padding:4px 6px"><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>セルをクリア</td></tr>'
-                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す</td></tr>'
+                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>セル（コマ）をコピー<br><span style="color:#999;font-size:0.78rem">編集モードでは、文字を選択していない時にコマ全体のコピーになります</span></td></tr>'
+                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>セル（コマ）をペースト<br><span style="color:#999;font-size:0.78rem">編集モードでは、コピーしたコマならセルごと・他アプリの文字なら文字として貼り付きます</span></td></tr>'
+                + '<tr><td style="padding:4px 6px"><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>セルをクリア（閲覧モード）<br><span style="color:#999;font-size:0.78rem">編集モードでは右クリック / <kbd>⋮</kbd> メニューの「クリア」を使います</span></td></tr>'
+                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す<br><span style="color:#999;font-size:0.78rem">入力欄では文字の取り消しが優先。セル操作の取り消しは右クリック / <kbd>⋮</kbd> メニューから</span></td></tr>'
                 + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>やり直し</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>印刷</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>?</kbd></td><td>このヘルプを表示</td></tr>'
-                + '<tr style="border-bottom:2px solid #e0e0e0"><th style="padding:6px;color:var(--primary)">タッチ操作</th><th style="padding:6px">アクション</th></tr>'
-                + '<tr><td style="padding:4px 6px">ダブルタップ<br>（ダブルクリック）</td><td>そのセルの編集を開始</td></tr>'
-                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px">コマを長押し<br>（右クリック）</td><td>メニュー表示（コピー / ペースト / クリア）</td></tr>'
-                + '<tr><td colspan="2" style="padding:8px 6px;color:#999;font-size:0.78rem">💡 編集モードではドラッグ＆ドロップでコマの入れ替えが可能です</td></tr>'
+                + '<tr style="border-bottom:2px solid #e0e0e0"><th style="padding:6px;color:var(--primary)">マウス / タッチ操作</th><th style="padding:6px">アクション</th></tr>'
+                + '<tr><td style="padding:4px 6px">ダブルタップ<br>（ダブルクリック）</td><td>そのセルの編集を開始（閲覧モード）</td></tr>'
+                + '<tr><td style="padding:4px 6px">右クリック</td><td>セル操作メニュー（コピー / ペースト / クリア / 元に戻す）<br><span style="color:#999;font-size:0.78rem">閲覧モード・編集モードのどちらでも使えます。編集モードで文字を選択している時はブラウザ標準のメニューになります</span></td></tr>'
+                + '<tr><td style="padding:4px 6px">コマを長押し</td><td>セル操作メニュー（閲覧モード）</td></tr>'
+                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>⋮</kbd>（選択中セルの右上）</td><td>セル操作メニュー（編集モード）<br><span style="color:#999;font-size:0.78rem">タブレットなど右クリックできない端末はここから開きます</span></td></tr>'
+                + '<tr><td colspan="2" style="padding:8px 6px;color:#999;font-size:0.78rem">💡 ドラッグ＆ドロップによるコマの入れ替えは、閲覧モード・編集モードのどちらでも使えます</td></tr>'
                 + '</table>',
             width: 520,
             confirmButtonText: '閉じる',
@@ -1554,25 +1845,45 @@
         if (m && !m.contains(e.target)) hideContextMenu();
     });
 
-    // weekGrid内のinput/textareaへのペースト時にHTMLを除去しプレーンテキストのみ挿入
+    /**
+     * 貼り付けようとしている文字が「直前にコピーしたセルの中身そのもの」かどうか。
+     * コピー時に控えた文字列と一致する時だけ true にすることで、
+     * 他のアプリからコピーした文字の貼り付け（通常の文字入力）を巻き込まない。
+     */
+    function isCellClipboardText(text) {
+        if (!STATE.clipboard) return false;
+        if (!STATE.clipboardText) return false;
+        return text === STATE.clipboardText;
+    }
+
+    // weekGrid内のinput/textareaへのペースト処理。
+    //  1) コピーしたコマをそのまま貼る場合は、セルごと（教科・単元名・学習内容）を差し替える
+    //  2) それ以外は HTML を除去してプレーンテキストだけをカーソル位置に挿入する
     document.addEventListener('paste', function (e) {
         var grid = document.getElementById('weekGrid');
         if (!grid || !grid.contains(e.target)) return;
         var tag = (e.target.tagName || '').toLowerCase();
-        if (tag === 'input' || tag === 'textarea') {
-            e.preventDefault();
-            var text = (e.clipboardData || window.clipboardData).getData('text/plain') || '';
-            // カーソル位置にプレーンテキストを挿入
-            var el = e.target;
-            var start = el.selectionStart;
-            var end = el.selectionEnd;
-            var before = el.value.substring(0, start);
-            var after = el.value.substring(end);
-            el.value = before + text + after;
-            el.selectionStart = el.selectionEnd = start + text.length;
-            // input イベントを発火（サジェスト等の連動用）
-            el.dispatchEvent(new Event('input', { bubbles: true }));
+        if (tag !== 'input' && tag !== 'textarea') return;
+        e.preventDefault();
+        var text = (e.clipboardData || window.clipboardData).getData('text/plain') || '';
+
+        // コピーしたセルをそのまま貼る時は、セル単位のペーストに切り替える。
+        // 種類の合わないセル（例: コマ→宿題）へは静かに文字の貼り付けへ引き返す。
+        if (isCellClipboardText(text)) {
+            selectCellFromElement(e.target, { keepFocus: true });
+            if (pasteCellData({ silent: true })) return;
         }
+
+        // カーソル位置にプレーンテキストを挿入
+        var el = e.target;
+        var start = el.selectionStart;
+        var end = el.selectionEnd;
+        var before = el.value.substring(0, start);
+        var after = el.value.substring(end);
+        el.value = before + text + after;
+        el.selectionStart = el.selectionEnd = start + text.length;
+        // input イベントを発火（サジェスト等の連動用）
+        el.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
 

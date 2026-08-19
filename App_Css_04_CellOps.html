@@ -1,0 +1,95 @@
+<style>
+    /* =========================================================
+       セル操作（コピー / ペースト / クリア / 元に戻す）まわりのスタイル。
+
+       閲覧モード専用だったこれらの操作を編集モードでも使えるようにしたときに
+       足したもの。App_Css.html が保守性の警告閾値（5000行）を超えないよう
+       別ファイルにしている。App_Css.html のあとに読み込むこと。
+       ========================================================= */
+
+    /* 編集モード中に出す操作ヒント（狭い画面では省略する） */
+    .mode-hint {
+        font-size: 0.72rem;
+        color: var(--text-hint);
+        white-space: nowrap;
+    }
+
+    @media (max-width: 900px) {
+        .mode-hint {
+            display: none !important;
+        }
+    }
+
+    /* 編集モードの選択セルは背景を塗らない。
+       入力中の文字が読みにくくなるため、外側のリングだけで「いまここ」を示す。 */
+    .edit-mode .grid-cell.selected {
+        background: white !important;
+        box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.18);
+    }
+
+    /* 編集モードの選択セルにだけ出る「セル操作」ハンドル。
+       編集モードでは右クリック＝文字メニュー・長押し＝文字選択が本来の役割なので、
+       タッチ端末からセル操作メニューへ入る唯一の入口として1つだけ表示する。 */
+    .cell-action-handle {
+        position: absolute;
+        top: 1px;
+        right: 1px;
+        z-index: 3;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg-card);
+        color: var(--text-sub);
+        font-size: 0.95rem;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0.9;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+    }
+
+    .cell-action-handle:hover,
+    .cell-action-handle:focus {
+        opacity: 1;
+        color: var(--primary-text);
+        border-color: var(--primary);
+    }
+
+    /* タッチ端末では指で押せる大きさにする */
+    @media (pointer: coarse) {
+        .cell-action-handle {
+            width: 26px;
+            height: 26px;
+            font-size: 1.1rem;
+        }
+    }
+
+    /* 選択中の校時セルは、教科名がハンドルの下に潜り込まないよう右側を空ける */
+    .edit-mode .grid-cell.selected .period-subject-input {
+        padding-right: 22px;
+    }
+
+    /* アイコンフォントの項目と文字（↩ / ↪）の項目でラベル位置をそろえる */
+    .ctx-icon {
+        flex: 0 0 16px;
+        width: 16px;
+        font-size: 16px;
+        line-height: 1;
+        text-align: center;
+    }
+
+    /* いま実行できない項目（ペースト対象なし・戻す履歴なし）は押せないことを見せる */
+    .ctx-item.disabled {
+        opacity: 0.4;
+        cursor: default;
+    }
+
+    .ctx-item.disabled:hover {
+        background: transparent;
+        color: var(--text-main);
+    }
+</style>
