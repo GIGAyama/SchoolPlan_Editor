@@ -99,3 +99,28 @@ test('ピッカーは App ID を渡す（drive.file の per-file 権限に必要
     assert.match(source, /setAppId\(appId\)/, `${file} のピッカーが setAppId を呼んでいない`);
   }
 });
+
+test('ファイルのコピー漏れを起動時に名指しで知らせる', () => {
+  // 手で配置する運用なので、増えたファイルの貼り忘れが起きる。そのとき
+  // 「〇〇 is not defined」だけが出ると原因に辿り着けない。
+  const utils = fs.readFileSync('99_Utils.gs', 'utf8');
+  const check = utils.slice(utils.indexOf('function checkDeploymentIntegrity_'),
+    utils.indexOf('// ===== クリーニング・保守関連 ====='));
+
+  // 名指しするファイルは、実在していなければ意味がない
+  const named = [...check.matchAll(/missing\.push\('([^']+)'\)/g)].map(m => m[1]);
+  assert.ok(named.length >= 3, '必須ファイルの確認が少なすぎます');
+  for (const file of named) {
+    assert.ok(fs.existsSync(file), `存在しないファイルを名指ししています: ${file}`);
+  }
+  // 移行の要である Sheets ファサードは必ず見る
+  assert.ok(named.includes('18_SheetsApi.gs'));
+
+  // 起動時に一番はじめに呼ばれる経路で止める
+  const tenant = fs.readFileSync('11_Tenant.gs', 'utf8');
+  assert.match(tenant, /checkDeploymentIntegrity_\(\)/);
+  assert.match(tenant, /deploymentError/);
+  const core = fs.readFileSync('App_Js_01_Core.html', 'utf8');
+  assert.match(core, /status\.deploymentError/);
+  assert.match(core, /function showDeploymentError/);
+});

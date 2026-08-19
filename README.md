@@ -289,7 +289,13 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
     
 2.  **Google スプレッドシートの準備** 新規でGoogleスプレッドシートを作成し、「拡張機能」>「Apps Script」を開きます。
     
-3.  **ソースコードの配置** GASのエディタ（または `clasp` を使用）に、本リポジトリの `.gs` および `.html` ファイルをすべてコピーして保存します。`clasp` を使う場合は、必要なOAuthスコープ（メール送信 `script.send_mail` などを含む）を宣言した `appsscript.json` も一緒に反映してください。GASエディタで直接編集する場合は「プロジェクトの設定」で「`appsscript.json` マニフェスト ファイルをエディタで表示する」を有効にし、本リポジトリの `appsscript.json` の `oauthScopes` と `dependencies` を反映します。
+3.  **ソースコードの配置** GASのエディタ（または `clasp` を使用）に、本リポジトリの `.gs` および `.html` ファイルをすべてコピーして保存します。
+
+    > ⚠️ **更新するときは、増えたファイル・消えたファイルにも合わせてください。**
+    > 既存ファイルだけ貼り替えると、新しく増えたファイル（例: `18_SheetsApi.gs`）が無いまま動き、
+    > 「`sheetsOpenById_ is not defined`」のような原因の分かりにくいエラーになります。
+    > 起動時に不足・残存を検出して名指しで知らせますが、`clasp push` を使うのがいちばん確実です。
+`clasp` を使う場合は、必要なOAuthスコープ（メール送信 `script.send_mail` などを含む）を宣言した `appsscript.json` も一緒に反映してください。GASエディタで直接編集する場合は「プロジェクトの設定」で「`appsscript.json` マニフェスト ファイルをエディタで表示する」を有効にし、本リポジトリの `appsscript.json` の `oauthScopes` と `dependencies` を反映します。
     
 4.  **Google サービスの有効化** GASエディタの「サービス」から **Google Classroom API**（`Classroom` / v1）を追加します。前の手順で `appsscript.json` の `dependencies` を反映していれば、この追加はすでに済んでいます。
     メール送信は組み込みサービス（`MailApp`）、スプレッドシートは Sheets REST API v4（`18_SheetsApi.gs`）、Drive は REST API v3（`17_DriveApi.gs`）の直接呼び出しで扱うため、「サービス」への追加は不要です（`appsscript.json` の `oauthScopes` だけで動作します）。

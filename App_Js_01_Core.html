@@ -93,6 +93,12 @@
         // 状態取得に失敗した場合（旧バックエンド・バインド型など）は既存動作を妨げず通常起動する。
         google.script.run
             .withSuccessHandler(function (status) {
+                // ファイルのコピー漏れ・消し忘れは、ここで止めて名指しで伝える。
+                // このまま進めても、意味の分からないエラーが出るだけなので。
+                if (status && status.deploymentError) {
+                    showDeploymentError(status.deploymentError);
+                    return;
+                }
                 if (status && status.success && status.linked === false) {
                     showOnboardingChoice(status);
                 } else {
@@ -102,6 +108,29 @@
             .withFailureHandler(function () { startAppInit(); })
             .getTenantStatus();
     };
+
+    /**
+     * GAS プロジェクトのファイルがそろっていないことを伝えます。
+     * 先生ではなく、配置した人（管理者）に向けた案内です。
+     * @param {string} message checkDeploymentIntegrity_() のメッセージ
+     */
+    function showDeploymentError(message) {
+        Swal.fire({
+            icon: 'error',
+            title: 'アプリの配置が不完全です',
+            html: '<div style="text-align:left;font-size:0.9rem;line-height:1.8;">'
+                + escHtml(message)
+                + '<br><br><span style="color:var(--secondary-text);font-size:0.82rem;">'
+                + 'これは設定の問題ではなく、<strong>ファイルの貼り付け漏れ</strong>です。'
+                + 'アプリを配布した方に、この画面のまま伝えてください。</span>'
+                + '</div>',
+            width: 580,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            confirmButtonText: '閉じる',
+            confirmButtonColor: '#1a73e8'
+        });
+    }
 
     /** アプリ本体の初期化（DB紐付け済みのときに実行）。 */
     function startAppInit() {

@@ -462,6 +462,49 @@ function writeToLog_(level, message) {
 }
 
 // ============================================================
+// ===== デプロイの取りこぼし検出 =====
+// ============================================================
+
+/**
+ * GAS プロジェクトに必要なファイルがそろっているかを確かめます。
+ *
+ * このアプリはファイルを手で（または clasp で）コピーして配置するため、
+ * **新しく増えたファイルのコピー漏れ**が起きます。漏れたまま動かすと
+ * 「sheetsOpenById_ is not defined」のような、原因の見当がつかない
+ * エラーだけが出て止まります。何が足りないのかを名指しで返します。
+ *
+ * 消したはずのファイルが残っている場合も見つけます。古い版の関数が
+ * 残っていると、消したはずの挙動が生き返るためです。
+ *
+ * @returns {{ok: boolean, missing: string[], stale: string[], message: string}}
+ */
+function checkDeploymentIntegrity_() {
+  // 「このファイルにしか無い関数」を1つずつ見る。typeof は未定義でも例外にならない。
+  const missing = [];
+  if (typeof sheetsOpenById_ !== 'function') missing.push('18_SheetsApi.gs');
+  if (typeof driveCreateFile_ !== 'function') missing.push('17_DriveApi.gs');
+  if (typeof getSs_ !== 'function') missing.push('07_WebApp.gs');
+  if (typeof resolveSpreadsheetId_ !== 'function') missing.push('11_Tenant.gs');
+  if (typeof getDbColumns !== 'function') missing.push('00_config.gs');
+
+  // 削除済みのファイルが残っていないか（それぞれのファイルにしか無かった関数で見る）
+  const stale = [];
+  if (typeof onOpen === 'function') stale.push('01_Main.gs');
+  if (typeof executeServerFunctionForModal === 'function') stale.push('LoadingModal.html の中継関数');
+
+  let message = '';
+  if (missing.length) {
+    message = 'GAS プロジェクトに次のファイルが入っていません: ' + missing.join(' / ')
+      + '。リポジトリから貼り付けて保存し直してください。';
+  } else if (stale.length) {
+    message = '削除されたはずの次のファイルが残っています: ' + stale.join(' / ')
+      + '。GAS エディタから削除してください。';
+  }
+
+  return { ok: missing.length === 0, missing: missing, stale: stale, message: message };
+}
+
+// ============================================================
 // ===== クリーニング・保守関連 =====
 // ============================================================
 

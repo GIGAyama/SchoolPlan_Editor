@@ -144,6 +144,14 @@ function extractSpreadsheetId_(input) {
  */
 function getTenantStatus() {
   try {
+    // ファイルのコピー漏れは「〇〇 is not defined」としか出ず原因が分からない。
+    // 起動時に一番はじめに呼ばれるここで、名指しで知らせる。
+    const deployment = checkDeploymentIntegrity_();
+    if (!deployment.ok) {
+      logError('checkDeploymentIntegrity_', new Error(deployment.message));
+      return { success: false, error: deployment.message, deploymentError: deployment.message };
+    }
+
     const id = resolveSpreadsheetId_();
     let linked = false;
     let name = '';
