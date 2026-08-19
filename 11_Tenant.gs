@@ -17,6 +17,8 @@ const UP_KEY_SPREADSHEET_ID = 'up_spreadsheetId';
 const SP_KEY_LEGACY_SPREADSHEET_ID = 'SPREADSHEET_ID';
 // ScriptProperties: 新規DB作成時に複製するテンプレートのスプレッドシートID（配布元が設定）
 const SP_KEY_DB_TEMPLATE_ID = 'sp_dbTemplateId';
+// ScriptProperties: 1つのURLを多数の先生に配る運用かどうか（配布元が 'true' を設定）
+const SP_KEY_SHARED_DEPLOYMENT = 'sp_sharedDeployment';
 
 // ===================================================
 // ===== テナント（ユーザー別）プロパティ・アクセサ =====
@@ -37,10 +39,38 @@ function tGetProp_(key) {
     const v = PropertiesService.getUserProperties().getProperty(key);
     if (v !== null && v !== undefined) return v;
   } catch (e) { /* UserProperties 不可時はフォールバックへ */ }
+  // 共有デプロイでは、スクリプト全体の設定へ落ちない（下の isSharedDeployment_ 参照）
+  if (isSharedDeployment_()) return null;
   try {
     return PropertiesService.getScriptProperties().getProperty(key);
   } catch (e) {
     return null;
+  }
+}
+
+/**
+ * 1つのURLを多数の先生に配る「共有デプロイ」かどうかを返します。
+ *
+ * ScriptProperties はスクリプト全体で1つしかないため、共有デプロイでは
+ * **そこに置かれた値が全員に効いてしまいます**。まだ自分の設定を持っていない先生が、
+ * 配布元のデータベースへ合流したり、配布元の Gemini API キーで送信したりする経路になります
+ * （docs/LEGAL_RISK_AUDIT_JP.md の C-1）。
+ *
+ * 既定は false。先生が各自でデプロイする従来の使い方（＝ScriptProperties も各自のもの）と、
+ * 過去にバインド型で使っていた方の設定引き継ぎを壊さないためです。
+ * 1つのURLを配る運用にするときは、スクリプトプロパティに
+ * `sp_sharedDeployment` = `true` を設定してください。
+ *
+ * なお配布者向けの設定（`sp_dbTemplateId`）は ScriptProperties から直接読んでいるため、
+ * この切り替えの影響を受けません。
+ * @returns {boolean}
+ */
+function isSharedDeployment_() {
+  try {
+    return String(PropertiesService.getScriptProperties()
+      .getProperty(SP_KEY_SHARED_DEPLOYMENT) || '').toLowerCase() === 'true';
+  } catch (e) {
+    return false;
   }
 }
 
@@ -105,8 +135,16 @@ function clearUserSpreadsheetId_() {
  * @returns {string}
  */
 function getLegacySpreadsheetId_() {
+  // 共有デプロイでは使わない。全員が配布元の1つのDBへ合流してしまうため。
+  if (isSharedDeployment_()) return '';
   try {
-    return PropertiesService.getScriptProperties().getProperty(SP_KEY_LEGACY_SPREADSHEET_ID) || '';
+    const id = PropertiesService.getScriptProperties().getProperty(SP_KEY_LEGACY_SPREADSHEET_ID) || '';
+    if (id) {
+      // めったに通らない経路なので、通ったことが分かるようにしておく。
+      // 「自分のDBを作ったつもりが、別のDBを開いていた」ときの手がかりになる。
+      logInfo('スクリプト全体の設定（旧バインド）に記録されたデータベースを使用しています。');
+    }
+    return id;
   } catch (e) {
     return '';
   }

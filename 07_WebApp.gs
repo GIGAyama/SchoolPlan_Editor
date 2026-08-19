@@ -26,6 +26,15 @@ function doGet(e) {
   //
   // 祝日データの定期取得は onOpen が担っていたので、ここへ移した。
   // 更新間隔内なら中で早々に返るため、毎回の起動が重くなることはない。
+  // デプロイ設定の取り違えを、先生のデータが混ざる前に止める。
+  // 「次のユーザーとして実行」を「自分（オーナー）」にしてしまうと、全員がオーナーの
+  // 権限で動き、UserProperties もオーナーのものになる。結果、**全員が同じ1つの
+  // データベースを共有し、他学級の児童に関する記述が相互に見える**
+  // （docs/LEGAL_RISK_AUDIT_JP.md の C-2）。README と docs/D1 で警告しているが、
+  // 設定を間違えたことに気づく手立てがコード側に無かった。
+  const deployWarning = describeWrongExecuteAsDeployment_();
+  if (deployWarning) return renderDeploymentErrorPage_(deployWarning);
+
   try { fetchAndStoreHolidays(); } catch (ignore) { /* 祝日が無くても週案は開ける */ }
 
   return HtmlService.createTemplateFromFile('App')
@@ -41,6 +50,84 @@ function doGet(e) {
     // 拡大の禁止（user-scalable=no / maximum-scale）は入れない。見えづらい人が拡大できなくなる害のほうが大きい。
     .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, viewport-fit=cover')
     .setFaviconUrl('https://drive.google.com/uc?id=1zNSkBUKrzxX4TDeDpcXZ-jKtDtv0c4Yn&.png');
+}
+
+/**
+ * ウェブアプリが「自分（オーナー）として実行」でデプロイされていないかを調べます。
+ *
+ * 正しい設定（「ウェブアプリケーションにアクセスしているユーザー」）なら、
+ * 実行ユーザーとアクセスユーザーは同じ人になります。食い違っていれば、
+ * オーナーの権限で全員が動いている＝データが混ざる状態です。
+ *
+ * **判定できないときは通す。** 別ドメインの利用者や権限未付与では
+ * getActiveUser() が空文字を返すため、そこで止めると正しく設定されている人まで
+ * アプリを開けなくなります。誤検知で締め出すほうが害が大きいので、確実なときだけ止めます。
+ * @returns {string} 問題があるときの説明文。問題なし・判定できないときは空文字
+ */
+function describeWrongExecuteAsDeployment_() {
+  try {
+    const effective = Session.getEffectiveUser().getEmail() || '';
+    const active = Session.getActiveUser().getEmail() || '';
+    // どちらかが取れないときは判定しない（別ドメイン利用時など）
+    if (!effective || !active) return '';
+    if (effective === active) return '';
+    return `いま開いている方（${active}）と、実際に動いている権限（${effective}）が違います。`;
+  } catch (e) {
+    // 権限の付与状況によっては例外になる。ここで止めない。
+    return '';
+  }
+}
+
+/**
+ * デプロイ設定が誤っているときに出す案内ページを返します。
+ * 週案の画面は出しません（出すと、その時点で他の先生のデータへ書き込みうるため）。
+ * @param {string} detail 検知した内容の説明
+ * @returns {HtmlOutput}
+ */
+function renderDeploymentErrorPage_(detail) {
+  const html = `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --text:#1b2430; --accent:#124a94; --border:#c9d2dd; --surface:#f4f7fb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171b; --text:#e8ebef; --accent:#8ab4f8; --border:#3a424c; --surface:#1e232a; }
+  }
+  body { margin:0; padding:24px; background:var(--bg); color:var(--text); line-height:1.9;
+    font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic UI","Meiryo",-apple-system,"Segoe UI",sans-serif; }
+  .box { max-width:640px; margin:0 auto; }
+  h1 { font-size:1.3rem; color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+  ol { padding-left:1.4em; }
+  li { margin-bottom:.5em; }
+  .note { background:var(--surface); border:1px solid var(--border); border-left:5px solid var(--accent);
+    border-radius:8px; padding:14px 18px; margin:18px 0; }
+  code { background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:2px 6px; }
+</style></head><body><div class="box">
+<h1>デプロイの設定を直してください</h1>
+<p>このウェブアプリは「<strong>自分（オーナー）として実行</strong>」で公開されています。
+${escapeHtmlForPage_(detail)}</p>
+<div class="note"><strong>このままだと、先生方のデータが混ざります。</strong>
+全員がオーナーの権限で動くため、同じ1つのデータベースを共有してしまい、
+他の学級の児童に関する記述が相互に見える状態になります。
+そのため、週案の画面は開かないようにしています。</div>
+<p>Apps Script の「デプロイ」→「デプロイを管理」→ 鉛筆アイコンから、次のように直してください。</p>
+<ol>
+  <li><strong>次のユーザーとして実行</strong>：<code>ウェブアプリケーションにアクセスしているユーザー</code></li>
+  <li><strong>アクセスできるユーザー</strong>：配布先に合わせて設定</li>
+  <li>「デプロイ」を押して、新しい版として反映</li>
+</ol>
+<p>手順の詳細は <code>docs/D1_STANDALONE_DEPLOY.md</code> と README にあります。</p>
+</div></body></html>`;
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('週案エディタ｜デプロイ設定の確認')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+}
+
+/** 案内ページに差し込む文字列を安全にします（メールアドレスを含むため）。 */
+function escapeHtmlForPage_(text) {
+  return String(text == null ? '' : text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 /**

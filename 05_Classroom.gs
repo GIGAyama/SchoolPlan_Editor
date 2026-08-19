@@ -483,8 +483,10 @@ function createAndSavePDF(sheetName) {
     const pdfFileName = `${sheetName}_${formattedDate}.pdf`;
     const blob = sheetsExportSheetAsPdf_(ss.getId(), sheet.getSheetId(), pdfFileName);
     // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
-    driveTrashByName_(pdfFileName);
     const file = driveCreateFile_(pdfFileName, blob);
+    // 前回この用途で作ったPDFだけを片づける。名前で探して消すと、先生が自分で作った
+    // 同名のファイルまで巻き込む（17_DriveApi.gs 参照）。
+    driveReplacePreviousAppFile_(`classroom-pdf:${sheetName}`, file.id);
     logInfo(`PDF「${pdfFileName}」保存完了 (ID: ${file.id})`);
     return file;
   } catch (e) {

@@ -117,19 +117,6 @@ function driveCreateConverted_(name, content, sourceContentType, targetMimeType)
 }
 
 /**
- * 名前でファイルを検索します。
- * `drive.file` では**アプリが作った／ユーザーが選んだファイルだけ**が対象になるため、
- * 先生の他のファイルが引っかかることはありません。
- * @param {string} name ファイル名（完全一致）
- * @returns {{id: string, name: string}[]}
- */
-function driveFindByName_(name) {
-  const query = encodeURIComponent(`name = '${String(name).replace(/'/g, "\\'")}' and trashed = false`);
-  const result = driveFetch_(`${DRIVE_API_BASE}/files?q=${query}&fields=files(id,name)&pageSize=100`);
-  return result.files || [];
-}
-
-/**
  * ファイルのメタデータを取得します。
  * @param {string} fileId
  * @param {string} [fields] 例 'id,name,webViewLink,webContentLink'
@@ -240,17 +227,49 @@ function driveShareReaderWithGroup_(fileId, groupEmail) {
     });
 }
 
+// このアプリが作ったファイルの控え（用途名 → 直近のファイルID）。
+// 利用者ごとに分けるため UserProperties に置く。
+const UP_KEY_APP_CREATED_FILES = 'up_appCreatedFileIds';
+
 /**
- * 同じ名前の古いファイルをごみ箱へ送ります（作り直し前の後始末）。
+ * このアプリが作り直したファイルについて、前回のものをごみ箱へ送り、今回のものを控えます。
+ *
+ * 以前は「同じ名前のファイルを探して全部ごみ箱へ」という作り方だった。
+ * `drive.file` では見えるのが「アプリが作った／利用者が選んだファイル」に限られるため、
+ * 先生の無関係なファイルまで消える心配は無い。ただし**利用者がピッカーで選んだファイル**
+ * （行事予定のPDFなど）は見える範囲に入るので、名前がたまたま一致すれば対象になり得る。
+ * 消えるのが児童の情報を含む成果物である以上、範囲は狭いほうがよい。
+ * 名前ではなく、自分が作ったファイルのIDだけを対象にする
+ * （docs/LEGAL_RISK_AUDIT_JP.md の C-3）。
+ *
+ * 控えが無いとき（この修正より前に作られたファイル）は、何も消さない。
+ * 消し損ねて同名ファイルが並ぶほうが、他人のファイルを消すよりずっとましなので。
  * 失敗しても処理は続けます。
- * @param {string} name
+ * @param {string} slot 用途を表す名前（例: '学級通信PDF'）。ファイル名そのものでなくてよい
+ * @param {string} newFileId 今回作ったファイルのID
  */
-function driveTrashByName_(name) {
+function driveReplacePreviousAppFile_(slot, newFileId) {
+  let map = {};
   try {
-    driveFindByName_(name).forEach(function (file) {
-      try { driveSetTrashed_(file.id, true); } catch (ignore) { /* 個別の失敗は無視 */ }
-    });
+    map = JSON.parse(tGetProp_(UP_KEY_APP_CREATED_FILES) || '{}');
   } catch (e) {
-    logInfo(`古いファイルの整理をスキップしました: ${name} (${e.message})`);
+    map = {};
+  }
+
+  const previousId = map[slot];
+  if (previousId && previousId !== newFileId) {
+    try {
+      driveSetTrashed_(previousId, true);
+    } catch (e) {
+      // 利用者が自分で消していた場合など。控えは更新して先へ進む。
+      logInfo(`前回のファイルを整理できませんでした（${slot}）: ${e.message}`);
+    }
+  }
+
+  try {
+    map[slot] = newFileId;
+    tSetProp_(UP_KEY_APP_CREATED_FILES, JSON.stringify(map));
+  } catch (e) {
+    logInfo(`作成したファイルの控えを保存できませんでした（${slot}）: ${e.message}`);
   }
 }
