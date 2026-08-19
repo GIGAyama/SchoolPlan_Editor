@@ -4,6 +4,10 @@
         // 進行中の保存があるうちに別経路の保存を投げると、後着の要求が古いリビジョンを
         // 持ったまま届き、自分の保存が競合として弾かれてしまうため。
         window.autoSaveAndThen = function (callback) {
+            // 週移動・学級切替・画面切替の直前は、待たせてある閲覧モードの保存を先に送る。
+            // 保存先はサーバ側の「アクティブな学級」で決まるため、切替後に届いた保存は
+            // 別の学級のシートへ書かれてしまう。
+            flushPendingViewSave();
             if (isSaveInFlight()) {
                 // 進行中の保存の完了後に再判定する（多くはその保存で解消し、そのまま callback へ）
                 whenSaveIdle(function () { window.autoSaveAndThen(callback); });
@@ -35,7 +39,7 @@
                     });
                 } else showToast('error', '自動保存失敗: ' + result.error + ' 手動で保存してください。');
             }).withFailureHandler(function (e) { _autoSaving = false; endSaveRequest(); showToast('error', '自動保存エラー: ' + e.message); })
-                .saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, 'auto-save');
+                .saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, 'auto-save', expectedClassSheetName());
         };
 
         window.saveWeeklyPlan = function () {
@@ -71,7 +75,7 @@
                 endSaveRequest();
                 btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 showToast('error', '通信エラー: ' + e.message);
-            }).saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, 'manual-save');
+            }).saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, 'manual-save', expectedClassSheetName());
         };
 
         // 閲覧モードのセル操作（右クリックメニュー・D&D）の自動保存（保護版）。
@@ -83,12 +87,15 @@
             if (STATE.editMode || !STATE.weekData || !STATE.mondayStr) return;
             var weekData = STATE.weekData;
             var mondayStr = STATE.mondayStr;
-            clearTimeout(_viewSaveTimer);
-            _viewSaveTimer = setTimeout(runViewSave, 450);
+            // 学級を切り替えたあとでも「その週・その学級」のキャッシュを更新できるよう、
+            // キーは要求を組み立てた時点のものを使う。
+            var cacheKey = p2WeekCacheKey(mondayStr);
+            var expectedSheet = expectedClassSheetName();
+            scheduleViewSave(runViewSave);
 
             function runViewSave() {
                 if (!weekData.days) return;
-                if (!beginSaveRequest()) { queueViewSave(mondayStr, runViewSave); return; }
+                if (!beginSaveRequest()) { queueViewSave(cacheKey, runViewSave); return; }
                 var mutationSeq = weekDaysMutationSeq();
                 var days = JSON.parse(JSON.stringify(weekData.days));
                 google.script.run.withSuccessHandler(function (result) {
@@ -103,6 +110,7 @@
                             : false;
                         // 保存が通れば時数・単元進捗のキャッシュは作り直しが要る（編集中でも同じ）
                         if (sameWeek && typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
+                        else p2CacheWeekByKey(cacheKey, mondayStr, weekData);
                         if (normalized) renderWeekGrid(weekData.days);
                     } else if (result.conflict) {
                         handleSaveConflict(result, days, function (revision) {
@@ -110,7 +118,7 @@
                         });
                     } else showToast('error', '変更の保存に失敗: ' + result.error);
                 }).withFailureHandler(function (e) { endSaveRequest(); showToast('error', '変更の保存に失敗: ' + e.message); })
-                    .saveWeeklyPlanDataProtected(mondayStr, days, weekData.revision, 'view-mutation');
+                    .saveWeeklyPlanDataProtected(mondayStr, days, weekData.revision, 'view-mutation', expectedSheet);
             }
         };
 

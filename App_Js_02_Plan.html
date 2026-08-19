@@ -923,6 +923,47 @@
     // 以下の変数はそれらの実装から参照されるため、宣言はここに残す。
     var _autoSaving = false;
     var _viewSaveTimer = null;
+    // ディレイ待ちの保存処理。週移動・学級切替・画面切替の直前に前倒しで送るために持つ。
+    var _viewSaveRunner = null;
+    // 閲覧モードのセル操作をまとめるための待ち時間。
+    var VIEW_SAVE_DELAY_MS = 450;
+
+    /**
+     * 閲覧モードの自動保存を仕掛け直します（同時に1本だけ）。
+     * 続けて操作したときは最後の1回にまとまります。
+     */
+    function scheduleViewSave(run) {
+        clearTimeout(_viewSaveTimer);
+        _viewSaveRunner = run;
+        _viewSaveTimer = setTimeout(function () {
+            _viewSaveRunner = null;
+            run();
+        }, VIEW_SAVE_DELAY_MS);
+    }
+
+    /**
+     * 待たせてある自動保存を今すぐ送ります。
+     * 週移動・学級切替・画面切替の前に必ず通すこと。サーバ側の保存先は
+     * 「いまアクティブな学級シート」で決まるため、切替後に届いた保存は
+     * 別の学級のシートへ書かれてしまう。
+     */
+    function flushPendingViewSave() {
+        var run = _viewSaveRunner;
+        if (!run) return;
+        clearTimeout(_viewSaveTimer);
+        _viewSaveRunner = null;
+        run();
+    }
+
+    /** 閲覧モードの変更が、まだサーバへ届いていない状態か（離脱警告に使う）。 */
+    function hasPendingViewSave() {
+        if (_viewSaveRunner) return true;
+        if (_saveInFlight) return true;
+        for (var key in _viewSaveQueue) {
+            if (Object.prototype.hasOwnProperty.call(_viewSaveQueue, key)) return true;
+        }
+        return false;
+    }
 
     // ===== 手元の週データを書き換えた回数 =====
     // 保存はGASの往復に数秒かかることがある。その間に次のセル操作をすると、
@@ -1065,7 +1106,7 @@
                         showToast('error', '通信エラー: ' + e.message);
                         resolve(false);
                     })
-                    .saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, source);
+                    .saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, source, expectedClassSheetName());
             };
             whenSaveIdle(run);
         });
@@ -1429,12 +1470,40 @@
     }
 
     // ===== Phase E: Undo / Redo =====
+    // 履歴の中身は days 配列そのもの。別の週・別の学級へ移ったあとに使うと、
+    // 表示中の週がまるごと別の週・学級の内容に置き換わってしまう。
+    // （同じ週の別学級なら日付が一致するため、そのまま保存されて上書きにもなる）
+    // そのため履歴には「どの学級のどの週のものか」を持たせ、食い違ったら捨てる。
+
+    /** 表示中の週・学級を表すキー。履歴の有効範囲の判定に使う。 */
+    function currentHistoryScope() {
+        var sheet = (STATE.multiClass && STATE.multiClass.activeSheet)
+            ? STATE.multiClass.activeSheet : 'default';
+        var monday = (STATE.weekData && STATE.weekData.mondayDateStr)
+            ? STATE.weekData.mondayDateStr : (STATE.mondayStr || '');
+        return sheet + '::' + monday;
+    }
+
+    /**
+     * 表示中の週・学級の履歴でなければ捨てます。
+     * 履歴を積む・使う・メニューの有効無効を決める、すべての入口から通すこと。
+     * 週の読み込み側で捨て忘れても、ここで必ず食い止められる。
+     */
+    function ensureHistoryScope() {
+        var scope = currentHistoryScope();
+        if (STATE.historyScope === scope) return;
+        STATE.historyScope = scope;
+        STATE.undoStack = [];
+        STATE.redoStack = [];
+    }
+
     // 履歴を積む前に必ず入力欄の内容を取り込む。編集モードで取り込まずに積むと、
     // 入力途中の内容が履歴に入らず、元に戻した瞬間に消えてしまう。
     // 注意: syncEditBufferToState() は days を新しい配列に差し替えるため、
     // 呼び出し側は pushUndo() の「後」に days から day オブジェクトを取り直すこと。
     function pushUndo() {
         if (!STATE.weekData || !STATE.weekData.days) return;
+        ensureHistoryScope();
         syncEditBufferToState();
         STATE.undoStack.push(JSON.parse(JSON.stringify(STATE.weekData.days)));
         if (STATE.undoStack.length > 30) STATE.undoStack.shift();
@@ -1442,6 +1511,7 @@
     }
 
     function undo() {
+        ensureHistoryScope();
         if (STATE.undoStack.length === 0) { showToast('info', '元に戻せる操作がありません'); return; }
         syncEditBufferToState();
         STATE.redoStack.push(JSON.parse(JSON.stringify(STATE.weekData.days)));
@@ -1453,6 +1523,7 @@
     }
 
     function redo() {
+        ensureHistoryScope();
         if (STATE.redoStack.length === 0) { showToast('info', 'やり直す操作がありません'); return; }
         syncEditBufferToState();
         STATE.undoStack.push(JSON.parse(JSON.stringify(STATE.weekData.days)));
@@ -1625,6 +1696,8 @@
      */
     function showContextMenu(e, dayIdx, pIdx) {
         hideContextMenu();
+        // 別の週・学級から持ち越した履歴は、ここで捨ててから有効無効を決める
+        ensureHistoryScope();
         var isPeriod = (pIdx !== null && pIdx !== undefined && !isNaN(pIdx));
         var menu = document.createElement('div');
         menu.className = 'context-menu';

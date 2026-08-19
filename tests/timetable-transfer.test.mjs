@@ -33,7 +33,8 @@ test('週キャッシュの破棄は共通関数に集約されている', () =>
   assert.match(body, /STATE\.performance\.weekCache = \{\}/);
   // 週の内容が変われば単元進捗も変わる（同じ時間を二重に入力しないため）
   assert.match(body, /STATE\.unitProgress = null/);
-  assert.match(body, /reloadCurrentWeek[\s\S]*doLoadWeeklyPlan\(\)/);
+  // サーバ側を書き換えた直後の読み直しなので、手元の編集より読み直しを優先する
+  assert.match(body, /reloadCurrentWeek[\s\S]*doLoadWeeklyPlan\(\{ force: true \}\)/);
   // 生の代入が散らばると「呼び忘れ」に気づけない。定義箇所以外には残さない
   for (const [name, source] of Object.entries({ plan, settings, pdfImport, core })) {
     assert.doesNotMatch(source, /STATE\.performance\.weekCache = \{\}/,

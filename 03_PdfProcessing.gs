@@ -189,58 +189,12 @@ ${items}
     const ss = typeof getSs_ === 'function' ? getSs_() : SpreadsheetApp.getActiveSpreadsheet();
     const dbSheet = getDbSheet_(ss);
 
-    // パフォーマンス改善：DBシートを配列として取得
+    // 該当日の行だけを読み、行事・放課後の列だけを書く（数式列を壊さないため）
     const dbCols = getDbColumns();
-    const dbData = dbSheet.getDataRange().getValues();
-    const dateMap = new Map();
-    for(let i = 1; i < dbData.length; i++){
-      if(dbData[i][dbCols.DATE - 1] instanceof Date){
-        dateMap.set(formatDate(dbData[i][dbCols.DATE - 1]), i); // array index
-      }
-    }
-    
-    let updatedCount = 0;
-    let pastDateSkippedCount = 0;
-    let duplicateSkippedCount = 0; 
-    let isDbModified = false;
-
-    extractedEvents.forEach(item => {
-      if (!item.date || !/^\d{4}-\d{2}-\d{2}$/.test(item.date) || !item.content) return;
-      
-      const targetDate = new Date(item.date.replace(/-/g, '/'));
-      targetDate.setHours(0, 0, 0, 0);
-      const targetDateStr = formatDate(targetDate);
-
-      if (dateMap.has(targetDateStr)) {
-        if (targetDate >= today) {
-          const rowIdx = dateMap.get(targetDateStr);
-          let targetCol;
-          if (item.type === 'event') {
-            targetCol = dbCols.EVENT;
-          } else if (item.type === 'meeting') {
-            targetCol = dbCols.AFTERSCHOOL;
-          }
-
-          if (targetCol) {
-             const currentValue = (dbData[rowIdx][targetCol - 1] || "").toString();
-             const newContent = item.content.toString().trim();
-             if (!currentValue.includes(newContent)) {
-                 dbData[rowIdx][targetCol - 1] = currentValue ? `${currentValue}\n${newContent}` : newContent;
-                 updatedCount++;
-                 isDbModified = true;
-             } else {
-                 duplicateSkippedCount++;
-             }
-          }
-        } else {
-          pastDateSkippedCount++; 
-        }
-      }
-    });
-
-    if(isDbModified){
-         dbSheet.getDataRange().setValues(dbData);
-    }
+    const counts = dbAppendExtractedEvents_(dbSheet, dbCols, extractedEvents, today);
+    const updatedCount = counts.updated;
+    const pastDateSkippedCount = counts.skippedPast;
+    const duplicateSkippedCount = counts.skippedDuplicate;
 
     let logMessage = `${updatedCount} 件の予定をPDF「${file.getName()}」(${month}月分)から転記。`;
     if (pastDateSkippedCount > 0) logMessage += ` ${pastDateSkippedCount} 件(過去),`;
@@ -907,6 +861,69 @@ function getDatabaseDateSet_() {
 }
 
 /**
+ * 抽出した予定（行事・会議）をデータベースの該当日へ追記します。
+ *
+ * 書き込むのは行事・放課後の列だけ。以前はシート全体を setValues で書き戻していたため、
+ * 曜日・週番号などの数式列が計算結果の静的な値に置き換わっていた。
+ * 行の引き当ても日付で行うため、行の抜け・並び替えがあっても正しい日に入る。
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} dbSheet データベースシート
+ * @param {Object} dbCols 論理列マップ
+ * @param {Object[]} events [{date:"YYYY-MM-DD", content, type:'event'|'meeting'}]
+ * @param {Date} today これより前の日付は転記しない
+ * @returns {{updated:number, skippedPast:number, skippedDuplicate:number, notInDb:number}}
+ */
+function dbAppendExtractedEvents_(dbSheet, dbCols, events, today) {
+  const counts = { updated: 0, skippedPast: 0, skippedDuplicate: 0, notInDb: 0 };
+
+  // 対象日だけを読む（年間シート全体を読まない）
+  const wanted = [];
+  const parsed = [];
+  (events || []).forEach(item => {
+    if (!item || !item.date || !/^\d{4}-\d{2}-\d{2}$/.test(item.date) || !item.content) return;
+    const targetDate = new Date(item.date.replace(/-/g, '/'));
+    if (isNaN(targetDate.getTime())) return;
+    targetDate.setHours(0, 0, 0, 0);
+    const content = String(item.content).trim();
+    if (!content) return;
+    const dateStr = formatDate(targetDate);
+    wanted.push(dateStr);
+    parsed.push({ dateStr, date: targetDate, content, type: item.type });
+  });
+  if (parsed.length === 0) return counts;
+
+  const rowState = p2ReadRowsForDates_(dbSheet, dbCols, wanted);
+  // 列ごとに「行番号 → 書き込む値」を組み立ててからまとめて書く
+  const pendingByColumn = new Map();
+
+  parsed.forEach(item => {
+    const rowNumber = rowState.rowNumberByDate.get(item.dateStr);
+    const row = rowNumber ? rowState.rowByNumber.get(rowNumber) : null;
+    if (!row) { counts.notInDb++; return; }
+    if (item.date < today) { counts.skippedPast++; return; }
+
+    const targetCol = (item.type === 'meeting') ? dbCols.AFTERSCHOOL : dbCols.EVENT;
+    if (!targetCol) return;
+
+    // 同じ実行内で同じセルへ複数件追記する場合も取りこぼさない
+    const pending = pendingByColumn.get(targetCol) || new Map();
+    const currentValue = pending.has(rowNumber)
+      ? String(pending.get(rowNumber))
+      : String(row[targetCol - 1] || '');
+    if (currentValue.includes(item.content)) { counts.skippedDuplicate++; return; }
+
+    pending.set(rowNumber, currentValue ? `${currentValue}\n${item.content}` : item.content);
+    pendingByColumn.set(targetCol, pending);
+    counts.updated++;
+  });
+
+  pendingByColumn.forEach((valueByRowNumber, column) => {
+    p2WriteColumnValues_(dbSheet, column, valueByRowNumber);
+  });
+  return counts;
+}
+
+/**
  * [Webアプリ API] プレビューで確認・修正済みの行事予定をデータベースに反映します。
  * @param {{date: string, content: string, type: string}[]} events
  * @returns {{success: boolean, updated?: number, skippedPast?: number, skippedDuplicate?: number, notInDb?: number, error?: string}}
@@ -929,44 +946,8 @@ function applyExtractedEventsFromWeb(events) {
     if (!dbSheet) throw new Error(`シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
 
     const dbCols = getDbColumns();
-    const dbData = dbSheet.getDataRange().getValues();
-    const dateMap = new Map();
-    for (let i = 1; i < dbData.length; i++) {
-      if (dbData[i][dbCols.DATE - 1] instanceof Date) {
-        dateMap.set(formatDate(dbData[i][dbCols.DATE - 1]), i);
-      }
-    }
-
-    let updated = 0, skippedPast = 0, skippedDuplicate = 0, notInDb = 0;
-    let isDbModified = false;
-
-    events.forEach(item => {
-      if (!item || !item.date || !/^\d{4}-\d{2}-\d{2}$/.test(item.date) || !item.content) return;
-      const targetDate = new Date(item.date.replace(/-/g, '/'));
-      if (isNaN(targetDate.getTime())) return;
-      targetDate.setHours(0, 0, 0, 0);
-      const targetDateStr = formatDate(targetDate);
-
-      if (!dateMap.has(targetDateStr)) { notInDb++; return; }
-      if (targetDate < today) { skippedPast++; return; }
-
-      const rowIdx = dateMap.get(targetDateStr);
-      const targetCol = (item.type === 'meeting') ? dbCols.AFTERSCHOOL : dbCols.EVENT;
-      if (!targetCol) return;
-
-      const currentValue = (dbData[rowIdx][targetCol - 1] || '').toString();
-      const newContent = String(item.content).trim();
-      if (!newContent) return;
-      if (currentValue.includes(newContent)) { skippedDuplicate++; return; }
-
-      dbData[rowIdx][targetCol - 1] = currentValue ? `${currentValue}\n${newContent}` : newContent;
-      updated++;
-      isDbModified = true;
-    });
-
-    if (isDbModified) {
-      dbSheet.getDataRange().setValues(dbData);
-    }
+    const { updated, skippedPast, skippedDuplicate, notInDb } =
+      dbAppendExtractedEvents_(dbSheet, dbCols, events, today);
 
     logInfo(`行事予定プレビュー反映: ${updated} 件転記（過去: ${skippedPast}, 重複: ${skippedDuplicate}, DB対象外: ${notInDb}）。`);
     return { success: true, updated, skippedPast, skippedDuplicate, notInDb };

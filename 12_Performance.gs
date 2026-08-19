@@ -119,6 +119,51 @@ function p2BuildWeekDays_(rowState, dbCols, weekDateStrs, holidayMap) {
   });
 }
 
+/**
+ * 1列分の値を、行番号を指定して書き戻します。連続する行はまとめて1回で書きます。
+ *
+ * シート全体を読み込んで丸ごと setValues で書き戻すと、曜日・週番号などの数式列が
+ * 計算結果の静的な値に置き換わり、以降まったく再計算されなくなる。
+ * 読み込んだ値の書き戻しは必ずこの関数（または p2WriteChangedWeekRows_）を通すこと。
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet 対象シート
+ * @param {number} column 1始まりの列番号
+ * @param {Map<number, *>} valueByRowNumber 1始まりの行番号 → 書き込む値
+ */
+function p2WriteColumnValues_(sheet, column, valueByRowNumber) {
+  if (!column || !valueByRowNumber || valueByRowNumber.size === 0) return;
+  const rowNumbers = [...valueByRowNumber.keys()];
+  for (const group of p2GroupConsecutiveNumbers_(rowNumbers)) {
+    const values = group.map(rowNumber => [valueByRowNumber.get(rowNumber)]);
+    sheet.getRange(group[0], column, group.length, 1).setValues(values);
+  }
+}
+
+// 単元・学習内容だけを書き換える処理（一括自動入力・単元のずらし）が使う列。
+const P2_UNIT_CONTENT_KEYS_ = [
+  'UNIT1', 'CONTENT1', 'UNIT2', 'CONTENT2', 'UNIT3', 'CONTENT3',
+  'UNIT4', 'CONTENT4', 'UNIT5', 'CONTENT5', 'UNIT6', 'CONTENT6'
+];
+
+/**
+ * シート全体を読んだ配列から、変更した行の指定列だけを書き戻します。
+ *
+ * シート全体を丸ごと書き戻すと、曜日・週番号などの数式列が計算結果の静的な値に
+ * 置き換わり、さらに書き換えていない列まで「読んだ時点の値」で上書きしてしまう
+ * （読み込み中に他から入った変更が消える）。
+ *
+ * @param {Array[]} dbData シート全体の値（0始まり・先頭がヘッダー行）
+ * @param {number[]} changedRowNumbers 1始まりの行番号
+ * @param {string[]} writeKeys 書き戻す論理列キー
+ */
+function p2WriteRowsFromSheetArray_(sheet, cols, dbData, changedRowNumbers, writeKeys) {
+  const unique = [...new Set(changedRowNumbers)].sort((a, b) => a - b);
+  if (unique.length === 0) return;
+  const rowByNumber = new Map();
+  unique.forEach(rowNumber => rowByNumber.set(rowNumber, dbData[rowNumber - 1]));
+  p2WriteChangedWeekRows_(sheet, cols, { rowByNumber }, unique, writeKeys);
+}
+
 function p2Cell_(row, cols, key) {
   const col = cols[key];
   if (!row || !col) return '';
@@ -276,13 +321,15 @@ function p2ApplyDayToRow_(row, cols, day) {
 }
 
 /**
- * 更新対象の週案列だけを書き戻します。
+ * 更新対象の列だけを書き戻します。
  * 列順が異なっていても、論理列マップを物理列へ変換して連続範囲ごとに保存します。
+ * 曜日・週番号などの数式列は書き戻さない（値で塗り潰すと数式が失われる）。
+ * @param {string[]} [writeKeys] 書き戻す論理列キー。省略時は週案の入力列すべて。
  */
-function p2WriteChangedWeekRows_(sheet, cols, rowState, changedRowNumbers) {
+function p2WriteChangedWeekRows_(sheet, cols, rowState, changedRowNumbers, writeKeys) {
   if (changedRowNumbers.length === 0) return;
 
-  const writeColumns = P2_WEEK_READ_KEYS_
+  const writeColumns = (writeKeys || P2_WEEK_READ_KEYS_)
     .map(key => cols[key])
     .filter(Boolean);
   const columnGroups = p2GroupConsecutiveNumbers_(writeColumns);
@@ -303,18 +350,32 @@ function p2WriteChangedWeekRows_(sheet, cols, rowState, changedRowNumbers) {
 }
 
 /**
- * 対象週7日分だけを読み書きする週案保存API。
+ * [Web API] 対象週7日分だけを書き込む週案保存API。
  *
- * データ保全(保存前スナップショット+監査ログ)はこの関数自身が行う。
- * 以前はクライアント側のオーバーライドが saveWeeklyPlanDataProtected を選ぶ設計で、
- * オーバーライド読込前の保存や直接呼び出しが保護をすり抜けられた。
+ * 保存前スナップショットと監査ログは必ず作成される。省略できるのはサーバ内部の
+ * 復元処理だけで、その経路はクライアントから呼べない saveWeeklyPlanWeek_ を使う。
+ *
+ * @param {string} [expectedSheetName] クライアントが書き込むつもりだった学級シート名。
+ *   保存先はサーバ側の「アクティブな学級」で決まるため、学級を切り替えた直後に
+ *   前の学級の保存が届くと別の学級のシートへ書かれてしまう。食い違いを弾く。
+ */
+function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, expectedSheetName) {
+  return saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, {
+    source: 'web',
+    expectedSheetName: expectedSheetName
+  });
+}
+
+/**
+ * 週案保存の実装本体。
  *
  * ロック順序の規約: ScriptLock(保存・クリア) → UserLock(migration)。逆順で取らないこと。
  *
- * @param {Object} [options] 内部用。{ protect:false } でスナップショット省略(復元処理用)、
- *   { source } で監査ログの操作元を指定。クライアントからの3引数呼び出しは常に保護される。
+ * @param {Object} [options] { protect:false } でスナップショット省略(サーバ内部の復元専用)、
+ *   { source } で監査ログの操作元、{ expectedSheetName } で保存先学級の照合。
+ *   末尾のアンダースコアによりクライアントからは呼び出せない。
  */
-function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
+function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
   const startedAt = Date.now();
   const lock = LockService.getScriptLock();
   let locked = false;
@@ -339,6 +400,18 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
     const ss = getSs_();
     const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
+
+    // 保存先の学級が、クライアントが書き込むつもりだった学級と同じか確かめる。
+    // 学級を切り替えた直後に前の学級の保存が届くと、別の学級の週案を壊してしまう。
+    const expectedSheetName = options && options.expectedSheetName;
+    if (expectedSheetName && expectedSheetName !== dbSheet.getName()) {
+      return {
+        success: false,
+        error: `保存先の学級が「${dbSheet.getName()}」に切り替わっているため、`
+          + `「${expectedSheetName}」の変更を保存できませんでした。`
+          + '元の学級へ戻してから、もう一度保存してください。'
+      };
+    }
     const dbCols = getDbColumns();
     p2AssertWritableSchema_(dbCols, dbSheet.getName());
 
@@ -351,6 +424,21 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
     // p2ApplyDayToRow_ は rowState の行配列を直接書き換えるため、
     // スナップショット用の保存前状態はここで確定しておく。
     const beforeDays = p2BuildWeekDays_(rowState, dbCols, weekDateStrs, holidayMap);
+
+    // 送られてきた日付が対象週のものか確かめる。画面側の状態がずれて別の週の内容が
+    // 届いた場合、そのまま「保存しました」と返すと、実際には保存されていないのに
+    // 保存できたように見えてしまう。
+    const weekDateSet = new Set(weekDateStrs);
+    const foreignDates = (days || [])
+      .map(day => (day && day.date) ? String(day.date) : '')
+      .filter(date => date && !weekDateSet.has(date));
+    if (foreignDates.length > 0) {
+      return {
+        success: false,
+        error: `${mondayDateStr} の週に含まれない日付が送られました（${foreignDates.join(', ')}）。`
+          + '画面を再読み込みしてから、もう一度お試しください。'
+      };
+    }
 
     const changedRowNumbers = [];
     const notFoundDates = [];
@@ -457,7 +545,7 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, options) {
       }
     };
   } catch (e) {
-    logError('saveWeeklyPlanDataV2', e);
+    logError('saveWeeklyPlanWeek_', e);
     return { success: false, error: e.message, performance: { api: 'v2', elapsedMs: Date.now() - startedAt } };
   } finally {
     if (locked) lock.releaseLock();

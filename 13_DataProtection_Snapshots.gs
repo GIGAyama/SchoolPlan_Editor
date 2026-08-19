@@ -257,10 +257,13 @@ function p3ComparableDays_(days) {
   }));
 }
 
-function saveWeeklyPlanDataProtected(mondayDateStr, days, baseRevision, source) {
-  // 保存前スナップショットと監査ログは saveWeeklyPlanDataV2 側で常時実施される。
-  // クライアント互換(4引数シグネチャ)のため薄い委譲として残す。
-  return saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, { source: source || 'web' });
+function saveWeeklyPlanDataProtected(mondayDateStr, days, baseRevision, source, expectedSheetName) {
+  // 保存前スナップショットと監査ログは保存本体で常時実施される。
+  // ここは監査ログの操作元と、保存先学級の照合を渡すための入口。
+  return saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, {
+    source: source || 'web',
+    expectedSheetName: expectedSheetName
+  });
 }
 
 function p3RestoreReflections_(mondayDateStr, snapshotDays) {
@@ -368,7 +371,7 @@ function restoreWeekSnapshotFromWeb(snapshotId) {
     );
 
     // 復元直前スナップショットは上で作成済みのため、保存側の自動スナップショットは省略する
-    const result = saveWeeklyPlanDataV2(mondayDateStr, week.days || [], current.revision, { protect: false, source: 'restore' });
+    const result = saveWeeklyPlanWeek_(mondayDateStr, week.days || [], current.revision, { protect: false, source: 'restore' });
     if (!result || !result.success) {
       throw new Error((result && result.error) || '週案の復元に失敗しました');
     }

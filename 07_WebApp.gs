@@ -1015,8 +1015,14 @@ function applyTimetableToWeek(mondayStr) {
   try {
     if (!mondayStr) throw new Error('対象週が指定されていません。');
     const targetDate = new Date(mondayStr.replace(/-/g, '/'));
-    transferWeeklyTimetable(targetDate);
-    return { success: true, message: mondayStr + ' 週に固定時間割を転記しました。' };
+    const result = transferWeeklyTimetable(targetDate) || { updatedRows: 0, missingDates: [] };
+    // DBに行が無い日は転記できない。黙って成功にすると「転記したのに入らない」ことになる。
+    const missing = (result.missingDates && result.missingDates.length)
+      ? `（DB未登録日: ${result.missingDates.join(', ')}）` : '';
+    return {
+      success: true,
+      message: `${mondayStr} 週に固定時間割を転記しました（${result.updatedRows}日分）${missing}`
+    };
   } catch (e) {
     logError('applyTimetableToWeek', e);
     return { success: false, error: e.message };
