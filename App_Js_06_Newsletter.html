@@ -672,6 +672,40 @@
         return wrapper;
     };
 
+    /**
+     * QRコードを、この端末の中だけで作って data URI で返す。
+     *
+     * 以前は先生が入れたURLを外部サービス（api.qrserver.com）へ送って画像を作らせていた。
+     * QRに貼るのは保護者アンケートのフォームや写真フォルダなど、URL自体が鍵になっている
+     * ものが多いため、送信そのものをやめた（docs/LEGAL_RISK_AUDIT_JP.md の A-2）。
+     * 学校のフィルタリングで外部が塞がれても出るようになる、という副次的な利点もある。
+     *
+     * 同期で返すこと。renderContent が同期関数なので、非同期にすると描画順が崩れる。
+     * 生成できなかったときは空文字を返し、呼び出し側でプレースホルダに落とす
+     * （ここで例外を投げると学級通信の編集画面ごと描画できなくなる）。
+     * @param {string} url QRに埋め込むURL
+     * @param {number} sizePx 表示したい一辺のピクセル数
+     * @returns {string} data URI（失敗時は空文字）
+     */
+    NW.qrDataUrl_ = function (url, sizePx) {
+        try {
+            if (!url || typeof qrcode !== 'function') return '';
+            var size = parseInt(sizePx, 10) || 200;
+            var qr = qrcode(0, 'M');   // 0 = 型番はデータ量に応じて自動
+            qr.addData(String(url));   // 既定の Byte モード。日本語URLもUTF-8で入る
+            qr.make();
+            // 静粛域（quiet zone）は規格どおり4モジュール分あける。
+            // セルの大きさは「出来上がりが指定サイズ以上」になるよう切り上げる。
+            // 拡大されてぼやけるより、縮小されるほうが読み取りやすい。
+            var margin = 4;
+            var modules = qr.getModuleCount() + margin * 2;
+            var cell = Math.max(1, Math.ceil(size / modules));
+            return qr.createDataURL(cell, margin);
+        } catch (e) {
+            return '';
+        }
+    };
+
     NW.renderContent = function (block) {
         var div = document.createElement('div');
         switch (block.type) {
@@ -875,9 +909,10 @@
 
             case 'qrcode':
                 div.className = 'nw-qrcode-block';
-                if (block.url) {
+                var qrSrc = block.url ? NW.qrDataUrl_(block.url, block.qrSize) : '';
+                if (qrSrc) {
                     var qrImg = document.createElement('img');
-                    qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=' + block.qrSize + 'x' + block.qrSize + '&data=' + encodeURIComponent(block.url);
+                    qrImg.src = qrSrc;
                     qrImg.alt = 'QR Code';
                     qrImg.style.width = block.qrSize + 'px';
                     qrImg.style.cursor = 'pointer';
@@ -2048,25 +2083,40 @@
     };
 
     // ---- localStorage auto-save / restore ----
+
+    /**
+     * localStorage へ保存するために、画像そのものを落としたブロックを作る。
+     *
+     * 学級通信には児童の顔写真が入る。この下書きはブラウザに残るため、
+     * 職員室の共用端末では次に同じブラウザを使う人が開ける状態になる
+     * （docs/LEGAL_RISK_AUDIT_JP.md の B-2）。
+     * 以前は容量が足りなくなったときだけ画像を落としていたが、
+     * **写真は常に置かない**ことにした。落ちるのは画像だけで、
+     * 文章・見出し・時間割はそのまま復元できる。
+     */
+    NW.stripImagesForLocalSave_ = function (blocks) {
+        var copy = JSON.parse(JSON.stringify(blocks || []));
+        copy.forEach(function (b) {
+            if (b.src) b.src = '';
+            if (b.images) b.images.forEach(function (img) { if (img.src) img.src = ''; });
+            if (b.colData) b.colData.forEach(function (col) { if (col.src) col.src = ''; });
+        });
+        return copy;
+    };
+
     NW.autoSave = function () {
         clearTimeout(NW._saveTimer);
         NW._saveTimer = setTimeout(function () {
             try {
-                var data = { blocks: NW.blocks, nextId: NW.nextId, mondayStr: NW.mondayStr };
-                localStorage.setItem('nw_autosave', JSON.stringify(data));
+                localStorage.setItem('nw_autosave', JSON.stringify({
+                    blocks: NW.stripImagesForLocalSave_(NW.blocks),
+                    nextId: NW.nextId, mondayStr: NW.mondayStr
+                }));
             } catch (e) {
-                // Quota exceeded - try without base64 images
                 try {
-                    var stripped = JSON.parse(JSON.stringify(NW.blocks));
-                    stripped.forEach(function (b) {
-                        if (b.src && b.src.length > 1000) b.src = '';
-                        if (b.images) b.images.forEach(function (img) {
-                            if (img.src && img.src.length > 1000) img.src = '';
-                        });
-                    });
-                    localStorage.setItem('nw_autosave', JSON.stringify({
-                        blocks: stripped, nextId: NW.nextId, mondayStr: NW.mondayStr
-                    }));
+                    // 画像を落としてもなお入らない場合（文章が非常に長いなど）は、
+                    // 古い下書きを残さないよう消す。中途半端な復元より分かりやすい。
+                    localStorage.removeItem('nw_autosave');
                 } catch (ignore) { }
             }
         }, 800);
@@ -2085,6 +2135,14 @@
                     document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
                 }
                 NW.render();
+                // 写真はブラウザに残していないので、復元しても空のままになる。
+                // 黙っていると「消えた」と見えるため、入れ直しが要ることを伝える。
+                var needsPhotos = data.blocks.some(function (b) {
+                    return b.type === 'image' || b.type === 'gallery' || b.type === 'columns';
+                });
+                if (needsPhotos && typeof showToast === 'function') {
+                    showToast('info', '編集中の内容を復元しました。写真は端末に残していないため、入れ直してください。');
+                }
                 return true;
             }
         } catch (e) { }
@@ -2448,10 +2506,11 @@
                     body += wrapOpen + schedHtml + wrapClose;
                     break;
                 case 'qrcode':
-                    if (block.url) {
-                        body += wrapOpen + '<p style="text-align:center;margin:4px 0;"><img src="https://api.qrserver.com/v1/create-qr-code/?size='
-                            + (block.qrSize || 200) + 'x' + (block.qrSize || 200)
-                            + '&data=' + encodeURIComponent(block.url) + '" width="' + (block.qrSize || 200) + '"></p>';
+                    // 画像ブロックと同じく data URI を埋める（Docs への変換はその形で実績がある）
+                    var qrExportSrc = block.url ? NW.qrDataUrl_(block.url, block.qrSize || 200) : '';
+                    if (qrExportSrc) {
+                        body += wrapOpen + '<p style="text-align:center;margin:4px 0;"><img src="' + qrExportSrc
+                            + '" width="' + (block.qrSize || 200) + '"></p>';
                         if (block.label) body += '<p style="text-align:center;font-size:10px;margin:2px 0;">' + block.label + '</p>';
                         body += wrapClose;
                     }
@@ -2504,7 +2563,9 @@
             google.script.run
                 .withSuccessHandler(function (res) {
                     if (!res) { showToast('error', '投稿失敗: サーバーから応答がありません'); return; }
-                    if (res.success) showToast('success', res.message);
+                    // 共有できなかった場合は投稿自体は成功しているが、児童が開けない
+                    // おそれがあるので、成功ではなく警告として見せる。
+                    if (res.success) showToast(res.warning ? 'warning' : 'success', res.message);
                     else showToast('error', '投稿失敗: ' + res.error);
                 })
                 .withFailureHandler(_onCommError)

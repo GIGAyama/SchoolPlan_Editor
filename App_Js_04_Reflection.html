@@ -48,7 +48,8 @@
     // ===== 音声入力（Web Speech API） =====
 
     // 音声認識の状態（同時に1つのテキストエリアのみ対象）
-    var SPEECH = { rec: null, targetId: null, base: '', finalText: '' };
+    // noticeShown … 送信先の案内を出したかどうか（1回だけ出す）
+    var SPEECH = { rec: null, targetId: null, base: '', finalText: '', noticeShown: false };
 
     /** このブラウザで音声入力が利用できるかを返します（Chrome/Edge等で対応）。 */
     function isSpeechSupported() {
@@ -124,6 +125,14 @@
         try {
             rec.start();
             setMicBtnState(targetId, true);
+            // Web Speech API は、ブラウザ（Chrome など）が音声を認識サーバーへ送って
+            // 文字にする仕組み。振り返りの発話には児童の名前や評価が入り得るため、
+            // どこへ送られるかを最初に一度だけ伝える
+            // （docs/LEGAL_RISK_AUDIT_JP.md の B-3）。
+            if (!SPEECH.noticeShown) {
+                SPEECH.noticeShown = true;
+                showToast('info', '音声はブラウザの音声認識サービスへ送られて文字になります。');
+            }
         } catch (e) {
             showToast('error', '音声入力を開始できませんでした: ' + e.message);
             stopSpeechInput();

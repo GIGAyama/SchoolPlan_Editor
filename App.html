@@ -52,10 +52,12 @@
          　Bootstrap CSS      … 届かないとレイアウトが崩れる
          　SweetAlert2        … 届かないと確認ダイアログが ReferenceError で止まる
          　Material Symbols   … 届かないとアイコンが "calendar_month" という英単語で出る
+         　QRコード生成       … 学級通信のQRを、外部サービスへURLを送らずに手元で作る
          生成物なので手で編集しないこと。直すときは npm run build:vendor。 -->
     <?!= include('Vendor_Bootstrap'); ?>
     <?!= include('Vendor_Icons'); ?>
     <?!= include('Vendor_Sweetalert'); ?>
+    <?!= include('Vendor_Qrcode'); ?>
 
     <?!= include('App_Css'); ?>
     <!-- 単元進捗ピッカー・整合性チェックのスタイル。App_Css.html が
@@ -799,10 +801,17 @@
                                         自動投稿時刻（時）</label>
                                     <input type="number" id="sysPostHour" min="0" max="23" placeholder="例：16"
                                         style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
+                                    <!-- 自動投稿に何が含まれるかを明示する。かつてはAIが書いた「今日の様子」が
+                                         教員の確認なしにここから毎日配信されていたため、その旨をはっきり書く。 -->
+                                    <p style="margin:6px 0 0; font-size:0.75rem; color:var(--text-sub);">
+                                        自動投稿に含まれるのは予定（時間割・宿題・持ち物）だけです。<br>
+                                        「今日の様子」は下の<strong>「今日の様子をつけて投稿」</strong>から、内容を確認してから投稿します。
+                                    </p>
                                 </div>
                             </div>
                             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:14px;">
                                 <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="postScheduleToClassroomWeb(this)"><span class="material-symbols-outlined fs-6">send</span> 明日の予定を投稿</button>
+                                <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="postScheduleWithSituationWeb(this)"><span class="material-symbols-outlined fs-6">rate_review</span> 今日の様子をつけて投稿</button>
                                 <button class="btn btn-outline d-flex align-items-center justify-content-center gap-1" onclick="autoPostNewsletterSheetWeb(this)"><span class="material-symbols-outlined fs-6">picture_as_pdf</span> 学級通信シートを投稿</button>
                             </div>
                         </div>

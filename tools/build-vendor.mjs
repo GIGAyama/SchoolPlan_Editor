@@ -15,14 +15,20 @@
  *   Vendor_Icons.html       Material Symbols（使っているアイコンだけに絞ったサブセット）
  *                           + Bootstrap Icons（使っている8個だけ）
  *   Vendor_Sweetalert.html  SweetAlert2 の CSS と JS
+ *   Vendor_Qrcode.html      QRコード生成（学級通信のQRを外部へ送らずに作るため）
  *
  * 原本
  *   node_modules 配下の各パッケージ（package.json で版を固定している）と、
  *   リポジトリ内で実際に使われているアイコン名。
  *
+ * ライセンス表示は必ず一緒に焼き込む（banner 参照）。同じ内容を
+ * THIRD_PARTY_NOTICES.md にもまとめてある。
+ *
  * 使い方
- *   npm install && npm run build:vendor
+ *   npm install && npm run build:vendor          … 全部を作り直す
+ *   npm install && npm run build:vendor -- icons … 対象を選ぶ（icons/bootstrap/sweetalert/qrcode）
  *   フォントのサブセットには Python の fonttools が要る（無い場合は full を埋め込まず中止する）。
+ *   fonttools を入れずに他の生成物だけ作りたいときは、対象を選んで実行すること。
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -32,7 +38,37 @@ import { tmpdir } from 'node:os';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const NM = join(ROOT, 'node_modules');
-const banner = (src) => `<!-- このファイルは tools/build-vendor.mjs が生成しています。手で編集しないでください。\n     原本: ${src} -->\n`;
+/**
+ * 生成物の先頭に置くコメント。
+ *
+ * ライセンス表示を必ず一緒に焼き込む。MIT は「著作権表示と許諾表示を、複製物または
+ * 重要な部分すべてに含めること」を条件にしており、Apache-2.0 はライセンス全文の同梱と
+ * 改変の明示を求める。ここを手作業に任せると次のビルドでまた落ちるため、
+ * スクリプト側で必ず付ける（実際、SweetAlert2 は焼き込みの過程で表示が完全に消えていた。
+ * docs/LEGAL_RISK_AUDIT_JP.md の D-1）。
+ *
+ * @param {string} src 原本の npm パス
+ * @param {{pkg?: string, notice?: string, modified?: string}} [license]
+ *   pkg      … node_modules 配下のパッケージ名。LICENSE を読んで丸ごと焼き込む
+ *   notice   … LICENSE ファイルを持たないパッケージ用の、手書きの著作権・許諾表示
+ *   modified … 改変している場合にその内容（Apache-2.0 が求める「改変の明示」）
+ */
+const banner = (src, license) => {
+  let text = '<!-- このファイルは tools/build-vendor.mjs が生成しています。手で編集しないでください。\n'
+    + `     原本: ${src}\n`;
+  if (license && license.modified) {
+    text += `\n     【改変】${license.modified}\n`;
+  }
+  const body = license && (license.notice
+    || (license.pkg ? readFileSync(join(NM, license.pkg, 'LICENSE'), 'utf8') : ''));
+  if (body) {
+    // コメントを閉じてしまう "--" がライセンス本文に混ざっても壊れないようにする
+    text += '\n     --- ライセンス ---\n'
+      + body.trim().split('\n').map(line => '     ' + line.replace(/--/g, '- -')).join('\n')
+      + '\n';
+  }
+  return text + '-->\n';
+};
 
 // --- 1. アプリが実際に使っているアイコン名を集める -------------------------
 // 静的な <span class="material-symbols-outlined">name</span> だけでなく、
@@ -173,7 +209,14 @@ function buildIconsHtml(iconNames) {
 }
 ${biNames.map(n => `.bi-${n}::before { content: "\\${biJson[n].toString(16)}"; }`).join('\n')}
 `;
-  return { html: banner('@material-symbols/font-400, bootstrap-icons（npm）') + '<style>\n' + css + '\n</style>\n', iconCount: iconNames.length, biNames, woff2Bytes: Buffer.from(b64, 'base64').length, biBytes: Buffer.from(biB64, 'base64').length };
+  const iconsLicense = {
+    notice: readFileSync(join(NM, '@material-symbols/font-400/LICENSE'), 'utf8')
+      + '\n\n========================================\n\nBootstrap Icons\n\n'
+      + readFileSync(join(NM, 'bootstrap-icons/LICENSE'), 'utf8'),
+    modified: 'Material Symbols … 使用中のアイコンだけを残すサブセット化と、可変軸 FILL の 0 固定。'
+      + ' Bootstrap Icons … 使用中の 8 個だけを残すサブセット化。'
+  };
+  return { html: banner('@material-symbols/font-400, bootstrap-icons（npm）', iconsLicense) + '<style>\n' + css + '\n</style>\n', iconCount: iconNames.length, biNames, woff2Bytes: Buffer.from(b64, 'base64').length, biBytes: Buffer.from(biB64, 'base64').length };
 }
 
 // --- 3. Bootstrap CSS ------------------------------------------------------
@@ -181,7 +224,8 @@ function buildBootstrapHtml() {
   const css = readFileSync(join(NM, 'bootstrap/dist/css/bootstrap.min.css'), 'utf8')
     // 配布物に含まれる sourceMappingURL は、CDN を塞がれた環境で404を出すだけなので落とす
     .replace(/\/\*# sourceMappingURL=.*?\*\//g, '');
-  return banner('bootstrap/dist/css/bootstrap.min.css（npm）') + '<style>\n' + css + '\n</style>\n';
+  return banner('bootstrap/dist/css/bootstrap.min.css（npm）', { pkg: 'bootstrap' })
+    + '<style>\n' + css + '\n</style>\n';
 }
 
 // --- 4. SweetAlert2 --------------------------------------------------------
@@ -190,20 +234,58 @@ function buildSweetalertHtml() {
     .replace(/\/\*# sourceMappingURL=.*?\*\//g, '');
   const js = readFileSync(join(NM, 'sweetalert2/dist/sweetalert2.min.js'), 'utf8')
     .replace(/\/\/# sourceMappingURL=.*$/gm, '');
-  return banner('sweetalert2/dist（npm）') + '<style>\n' + css + '\n</style>\n<script>\n' + js + '\n</script>\n';
+  return banner('sweetalert2/dist（npm）', { pkg: 'sweetalert2' })
+    + '<style>\n' + css + '\n</style>\n<script>\n' + js + '\n</script>\n';
+}
+
+// --- 5. QRコード生成 -------------------------------------------------------
+// 学級通信のQRは、以前は外部サービス（api.qrserver.com）へ先生が入れたURLを送って
+// 画像を作らせていた。QRに貼るのは保護者アンケートのフォームなど、URL自体が鍵に
+// なっているものが多いため、送信そのものをやめてブラウザ内で作る
+// （docs/LEGAL_RISK_AUDIT_JP.md の A-2）。
+// 同期APIであることが選定理由。NW.renderContent は同期関数なので、非同期の生成では描画順が崩れる。
+function buildQrcodeHtml() {
+  // ブラウザで <script> として読むとグローバル `qrcode` が生える（末尾のUMD判定は
+  // define も exports も無い環境では何もしない）。原本の先頭に MIT の著作権表示が
+  // 入っているので、そのまま焼き込めばライセンス条件を満たす。
+  const js = readFileSync(join(NM, 'qrcode-generator/dist/qrcode.js'), 'utf8')
+    .replace(/\/\/# sourceMappingURL=.*$/gm, '');
+  // このパッケージは LICENSE ファイルを持たないが、原本の先頭に著作権表示と許諾表示が
+  // 入っているので、そのまま焼き込めば MIT の条件を満たす。
+  return banner('qrcode-generator/dist/qrcode.js（npm）',
+    { notice: '著作権表示と MIT ライセンスの本文は、下の原本の先頭にそのまま含まれています。' })
+    + '<script>\n' + js + '\n</script>\n';
 }
 
 // --- 実行 ------------------------------------------------------------------
-const icons = collectIconNames();
-const iconsOut = buildIconsHtml(icons);
-writeFileSync(join(ROOT, 'Vendor_Icons.html'), iconsOut.html);
-writeFileSync(join(ROOT, 'Vendor_Bootstrap.html'), buildBootstrapHtml());
-writeFileSync(join(ROOT, 'Vendor_Sweetalert.html'), buildSweetalertHtml());
+// 引数で作るものを選べる。指定が無ければ従来どおり全部作る。
+//   node tools/build-vendor.mjs            … 全部
+//   node tools/build-vendor.mjs qrcode     … Vendor_Qrcode.html だけ
+// アイコンのサブセットには Python の fonttools が要るため、それを持っていない環境でも
+// 他の生成物だけは作れるようにしてある。
+const targets = process.argv.slice(2);
+const wants = (name) => targets.length === 0 || targets.includes(name);
 
 const kb = (n) => (n / 1024).toFixed(1) + ' KB';
 const size = (f) => readFileSync(join(ROOT, f)).length;
-console.log('Material Symbols:', iconsOut.iconCount, '個 →', kb(iconsOut.woff2Bytes), '(元 488.7 KB)');
-console.log('Bootstrap Icons :', iconsOut.biNames.length, '個 →', kb(iconsOut.biBytes));
-console.log('Vendor_Icons.html     ', kb(size('Vendor_Icons.html')));
-console.log('Vendor_Bootstrap.html ', kb(size('Vendor_Bootstrap.html')));
-console.log('Vendor_Sweetalert.html', kb(size('Vendor_Sweetalert.html')));
+
+if (wants('icons')) {
+  const icons = collectIconNames();
+  const iconsOut = buildIconsHtml(icons);
+  writeFileSync(join(ROOT, 'Vendor_Icons.html'), iconsOut.html);
+  console.log('Material Symbols:', iconsOut.iconCount, '個 →', kb(iconsOut.woff2Bytes), '(元 488.7 KB)');
+  console.log('Bootstrap Icons :', iconsOut.biNames.length, '個 →', kb(iconsOut.biBytes));
+  console.log('Vendor_Icons.html     ', kb(size('Vendor_Icons.html')));
+}
+if (wants('bootstrap')) {
+  writeFileSync(join(ROOT, 'Vendor_Bootstrap.html'), buildBootstrapHtml());
+  console.log('Vendor_Bootstrap.html ', kb(size('Vendor_Bootstrap.html')));
+}
+if (wants('sweetalert')) {
+  writeFileSync(join(ROOT, 'Vendor_Sweetalert.html'), buildSweetalertHtml());
+  console.log('Vendor_Sweetalert.html', kb(size('Vendor_Sweetalert.html')));
+}
+if (wants('qrcode')) {
+  writeFileSync(join(ROOT, 'Vendor_Qrcode.html'), buildQrcodeHtml());
+  console.log('Vendor_Qrcode.html    ', kb(size('Vendor_Qrcode.html')));
+}

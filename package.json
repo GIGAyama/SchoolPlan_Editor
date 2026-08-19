@@ -13,6 +13,7 @@
     "test": "node --test",
     "quality": "npm run check && npm test",
     "build:vendor": "node tools/build-vendor.mjs",
+    "build:vendor:qrcode": "node tools/build-vendor.mjs qrcode",
     "verify:icons": "node tools/verify-icons.mjs",
     "demo:verify": "node tools/demo-video/verify-scenes.mjs",
     "demo:dry": "node tools/demo-video/record-demo.mjs --dry-run",
@@ -23,6 +24,7 @@
     "bootstrap": "^5.3.8",
     "bootstrap-icons": "^1.11.3",
     "playwright": "^1.62.1",
+    "qrcode-generator": "^2.0.4",
     "sweetalert2": "^11.14.5"
   }
 }

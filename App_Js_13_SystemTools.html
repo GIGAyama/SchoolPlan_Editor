@@ -124,6 +124,84 @@
         });
     }
 
+    /**
+     * 「今日の様子」をつけて投稿する。下書き取得 → 教員が確認・修正 → 投稿の2段構え。
+     *
+     * AIが書いた文章をそのまま保護者へ流さないための導線なので、
+     * 「確認をとばして投稿する」経路を作らないこと。
+     * 下書きが作れなかったときもダイアログは出す（自分で書くか、予定だけ投稿するかを選べる）。
+     */
+    function postScheduleWithSituationWeb(btn) {
+        var orig = btn ? btn.innerHTML : '';
+        function restore() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 下書きを作成中...';
+        }
+
+        _callServerAsync('proposeTodaySituationFromWeb')
+            .then(function (res) { return res || {}; })
+            .catch(function (e) {
+                // 下書きが取れなくても、予定だけの投稿はできる。手を止めない。
+                return { available: false, draft: '', message: '下書きを作れませんでした（' + (e && e.message ? e.message : e) + '）。' };
+            })
+            .then(function (res) {
+                restore();
+                var note = res.available
+                    ? 'AIが「今日の予定」から作った<strong>下書き</strong>です。実際に見ていない出来事が混ざっていないか確認し、事実と違うところは必ず直してから投稿してください。'
+                    : escHtml(res.message || '下書きは作れませんでした。') + '<br>ご自分で入力するか、「今日の様子なしで投稿」を選んでください。';
+
+                return Swal.fire({
+                    title: '今日の様子をつけて投稿',
+                    html: '<p style="font-size:0.85rem;text-align:left;margin-bottom:8px;">' + note + '</p>'
+                        + '<textarea id="swalSituation" rows="6" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;font-size:0.9rem;" '
+                        + 'placeholder="保護者へ伝える「今日の様子」を入力してください"></textarea>',
+                    width: 560,
+                    showCancelButton: true,
+                    showDenyButton: true,
+                    confirmButtonText: '確認したので投稿',
+                    denyButtonText: '今日の様子なしで投稿',
+                    cancelButtonText: 'キャンセル',
+                    confirmButtonColor: '#1a73e8',
+                    reverseButtons: true,
+                    didOpen: function () {
+                        // 下書きはHTMLに埋め込まず、値として入れる（生成結果に < が混ざっても安全）
+                        var el = document.getElementById('swalSituation');
+                        if (el) { el.value = res.draft || ''; el.focus(); }
+                    },
+                    preConfirm: function () {
+                        var el = document.getElementById('swalSituation');
+                        var text = el ? el.value.trim() : '';
+                        if (!text) {
+                            Swal.showValidationMessage('本文が空です。入力するか「今日の様子なしで投稿」を選んでください。');
+                            return false;
+                        }
+                        return text;
+                    }
+                });
+            })
+            .then(function (result) {
+                if (!result) return;
+                if (result.isConfirmed) {
+                    _runToolAction(btn, {
+                        method: 'postScheduleToClassroomFromWeb',
+                        args: [result.value],
+                        busyLabel: '投稿中...'
+                    });
+                } else if (result.isDenied) {
+                    _runToolAction(btn, {
+                        method: 'postScheduleToClassroomFromWeb',
+                        args: [''],
+                        busyLabel: '投稿中...'
+                    });
+                }
+            })
+            .catch(function (e) {
+                restore();
+                showToast('error', '投稿できませんでした: ' + (e && e.message ? e.message : e));
+            });
+    }
+
     function autoPostNewsletterSheetWeb(btn) {
         _runToolAction(btn, {
             method: 'autoPostToClassroomFromWeb',
