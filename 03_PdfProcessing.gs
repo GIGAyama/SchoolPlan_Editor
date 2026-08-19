@@ -3,77 +3,6 @@
  */
 
 /** 
- * 行事予定PDFをフォルダから読み込みます（UI起点）。
- */
-function importEventsFromFolder_UI() {
-  const ui = SpreadsheetApp.getUi();
-  try {
-    // 設定はスクリプトプロパティ経由で取得
-    const folderId = getSetting(SP_KEY_EVENT_PDF_FOLDER_ID);
-    if (!folderId) throw new Error(`行事予定PDFフォルダIDが未設定です。設定ダッシュボードから設定してください。`);
-
-    const yearResponse = ui.prompt('年度の入力', '処理対象の年度（4月始まり）を西暦で入力してください。\n例: 2025', ui.ButtonSet.OK_CANCEL);
-    if (yearResponse.getSelectedButton() !== ui.Button.OK || !yearResponse.getResponseText()) {
-      ui.alert('処理をキャンセルしました。');
-      return;
-    }
-    const fiscalYear = parseInt(yearResponse.getResponseText().trim(), 10);
-
-    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）
-    const fileIds = driveListPdfsInFolder_(folderId).map(function (f) { return f.id; });
-    if (fileIds.length === 0) {
-      throw new Error('指定されたフォルダにPDFファイルが見つかりませんでした。');
-    }
-
-    const today = new Date();
-    const firstDayOfCurrentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    
-    const allMonths = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3]; // 年度内の全ての月
-    const monthsToProcess = allMonths.filter(month => {
-      const yearForMonth = (month >= 4) ? fiscalYear : fiscalYear + 1;
-      const firstDayOfMonth = new Date(yearForMonth, month - 1, 1);
-      return firstDayOfMonth >= firstDayOfCurrentMonth;
-    });
-
-    if (monthsToProcess.length === 0) {
-      ui.alert('処理対象となる月（今月以降）がありませんでした。');
-      return;
-    }
-    
-    const processingQueue = [];
-    fileIds.forEach(fileId => {
-      monthsToProcess.forEach(month => {
-        processingQueue.push({ fileId: fileId, month: month });
-      });
-    });
-
-    const confirmResponse = ui.alert('処理の開始', 
-      `${fileIds.length} 個のPDFファイルから、**${monthsToProcess.join('月, ')}月**の予定を読み込みます。（合計 ${processingQueue.length} タスク）\n` +
-      `処理はバックグラウンドで自動的に中断・再開されます。\n\n` +
-      `実行しますか？`, 
-      ui.ButtonSet.YES_NO);
-    if (confirmResponse !== ui.Button.YES) {
-      ui.alert('処理をキャンセルしました。');
-      return;
-    }
-
-    resetEventPdfProcessing(); 
-
-    tSetProp_(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(processingQueue));
-    tSetProp_(SCRIPT_PROP_EVENT_PDF_TOTAL, processingQueue.length);
-    tSetProp_(SCRIPT_PROP_EVENT_PDF_YEAR, fiscalYear.toString());
-
-    SpreadsheetApp.getActiveSpreadsheet().toast(`行事予定PDFの読み込みを開始しました。(0/${processingQueue.length})`, '処理開始', -1);
-    
-    ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME_EVENT).timeBased().after(1000).create();
-
-  } catch (e) {
-    logError("importEventsFromFolder_UI", e);
-    ui.alert(`エラーが発生しました。\n\n詳細: ${e.message}\n\n「ログ」シートもご確認ください。`);
-  }
-}
-
-/** 
  *  [トリガー] 行事予定PDF処理
  */
 function processNextEventPdf() {
@@ -91,7 +20,6 @@ function processNextEventPdf() {
   const year = tGetProp_(SCRIPT_PROP_EVENT_PDF_YEAR);
 
   if (!queueJson || !year) {
-    SpreadsheetApp.getActiveSpreadsheet().toast("行事予定PDFの読み込みがすべて完了しました。", "処理完了", 10);
     logInfo("すべての行事予定PDFの処理が完了しました。");
     resetEventPdfProcessing();
     return;
@@ -99,7 +27,6 @@ function processNextEventPdf() {
 
   const queue = JSON.parse(queueJson);
   if (queue.length === 0) {
-    SpreadsheetApp.getActiveSpreadsheet().toast("行事予定PDFの読み込みがすべて完了しました。", "処理完了", 10);
     logInfo("キューが空です。すべての行事予定PDFの処理が完了しました。");
     resetEventPdfProcessing();
     return;
@@ -110,13 +37,13 @@ function processNextEventPdf() {
   
   const totalTasks = parseInt(tGetProp_(SCRIPT_PROP_EVENT_PDF_TOTAL), 10);
   const processedCount = totalTasks - queue.length;
-  SpreadsheetApp.getActiveSpreadsheet().toast(`行事予定PDF 処理中... (${processedCount}/${totalTasks})\nファイル名: ${file.getName()} (${task.month}月)`, `処理中`, -1);
+  logInfo(`行事予定PDF 処理中... (${processedCount}/${totalTasks})\nファイル名: ${file.getName()} (${task.month}月)`);
 
   try {
     processEventPdf(task.fileId, year, task.month);
   } catch (e) {
     logError(`行事予定PDFの処理中にエラーが発生しました: ${file.getName()} (${task.month}月)`, e);
-    SpreadsheetApp.getActiveSpreadsheet().toast(`⚠ エラー: ${file.getName()} (${task.month}月) - ${e.message}`, 'PDF処理エラー', 15);
+    logInfo(`⚠ エラー: ${file.getName()} (${task.month}月) - ${e.message}`);
   }
 
   tSetProp_(SCRIPT_PROP_EVENT_PDF_QUEUE, JSON.stringify(queue));
@@ -125,7 +52,6 @@ function processNextEventPdf() {
     rescheduleQueueTrigger_(TRIGGER_FUNCTION_NAME_EVENT, startTime,
       `時間切れのため行事予定PDFの処理を中断・再開します。残り: ${queue.length} タスク`);
   } else {
-    SpreadsheetApp.getActiveSpreadsheet().toast("行事予定PDFの読み込みがすべて完了しました。", "処理完了", 10);
     logInfo("すべての行事予定PDFの処理が完了しました。");
     resetEventPdfProcessing();
   }
@@ -215,42 +141,6 @@ ${items}
 }
 
 /** 
- * 指導計画PDFの読込（UI起点）
- */
-function createUnitMasterFromPdfs_UI() {
-  const ui = SpreadsheetApp.getUi();
-  const response = ui.alert( '指導計画PDFの読み込み', '設定で指定されたフォルダ内のPDFをAIが読み取り、「単元マスタ」シートを作成・更新します。\n' + '処理はバックグラウンドで自動的に中断・再開され、完了まで数分～数十分かかる場合があります。\n\n' + '実行しますか？', ui.ButtonSet.YES_NO );
-  if (response == ui.Button.YES) {
-    resetUnitMasterProcessing();
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    // 設定はスクリプトプロパティ経由で取得
-    const folderId = getSetting(SP_KEY_PDF_FOLDER_ID);
-    if (!folderId) {
-      ui.alert('指導計画PDFフォルダIDが未設定です。設定ダッシュボードから設定してください。');
-      return;
-    }
-    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）
-    const fileIds = driveListPdfsInFolder_(folderId).map(function (f) { return f.id; });
-    if (fileIds.length === 0) {
-      ui.alert("指定されたフォルダにPDFファイルが見つかりませんでした。");
-      return;
-    }
-    
-    tSetProp_(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
-    tSetProp_(SCRIPT_PROP_PDF_TOTAL, fileIds.length);
-    
-    let masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
-    if (!masterSheet) {
-        masterSheet = ss.insertSheet(SHEET_NAME_UNIT_MASTER);
-        masterSheet.getRange("A1:E1").setValues([["教科", "単元名", "総時間数", "何時間目", "時間ごとの学習活動"]]).setFontWeight("bold");
-    }
-    ss.toast(`PDF読み込み処理を開始しました。(0/${fileIds.length})`, '処理開始', -1);
-    
-    ScriptApp.newTrigger(TRIGGER_FUNCTION_NAME).timeBased().after(1000).create();
-  }
-}
-
-/** 
  *  [トリガー] 指導計画PDFの処理
  */
 function createUnitMasterFromPdfs() {
@@ -267,14 +157,12 @@ function createUnitMasterFromPdfs() {
 
     if (!queueJson) {
       logInfo("すべてのPDF処理が完了しました。");
-      SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
       resetUnitMasterProcessing();
       return;
     }
     const fileIds = JSON.parse(queueJson);
     if (fileIds.length === 0) {
       logInfo("キューが空です。すべてのPDF処理が完了しました。");
-      SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
       resetUnitMasterProcessing();
       return;
     }
@@ -283,13 +171,13 @@ function createUnitMasterFromPdfs() {
     const fileId = fileIds.shift();
     const file = driveOpenFile_(fileId);
     const processedCount = totalFiles - fileIds.length;
-    SpreadsheetApp.getActiveSpreadsheet().toast(`PDF処理中... (${processedCount}/${totalFiles}) \nファイル名: ${file.getName()}`, `処理中`, -1);
+    logInfo(`PDF処理中... (${processedCount}/${totalFiles}) \nファイル名: ${file.getName()}`);
 
     try {
       processSinglePdf(file);
     } catch (e) {
       logError(`PDF処理中に致命的なエラーが発生しました: ${file.getName()}`, e);
-      SpreadsheetApp.getActiveSpreadsheet().toast(`⚠ エラー: ${file.getName()} - ${e.message}`, 'PDF処理エラー', 15);
+      logInfo(`⚠ エラー: ${file.getName()} - ${e.message}`);
     }
     tSetProp_(SCRIPT_PROP_PDF_QUEUE, JSON.stringify(fileIds));
 
@@ -298,7 +186,6 @@ function createUnitMasterFromPdfs() {
         `時間切れのため処理を中断・再開します。残り: ${fileIds.length}件`);
     } else {
       logInfo("すべてのPDF処理が完了しました。");
-      SpreadsheetApp.getActiveSpreadsheet().toast("PDFの読み込みがすべて完了しました。", "処理完了", 10);
       resetUnitMasterProcessing();
     }
   } finally {
@@ -396,24 +283,6 @@ ${names}
   } catch (e) {
     logError(`PDF解析エラー: ${file.getName()}`, e);
     throw new Error(`${file.getName()}: ${e.message}`);
-  }
-}
-
-/** 
- * すべてのPDF処理を強制停止(UI起点)
- */
-function resetAllPdfProcessing_UI() {
-  const ui = SpreadsheetApp.getUi();
-  const response = ui.alert(
-    '処理の強制停止',
-    '実行中のすべてのPDF読み込み処理（指導計画・行事予定）を停止し、待機状態を解除します。\nよろしいですか？',
-    ui.ButtonSet.YES_NO);
-  
-  if (response == ui.Button.YES) {
-    resetUnitMasterProcessing();
-    resetEventPdfProcessing();
-
-    ui.alert('すべてのPDF読み込み処理を停止しました。');
   }
 }
 

@@ -2,77 +2,6 @@
  * @fileoverview 固定時間割一括転記・長期休業排除処理など、データベースシート関連処理
  */
 
-/**
- * [シンプルトリガー] データベースシートの教科セル（1〜6校時）を直接編集した際の検証。
- * 「教科名+分数」形式（例: 国語1/3行事2/3）の分数合計が1になっていない入力を検知し、
- * セルを赤色表示+メモで警告します。正しい入力に修正されると表示を元に戻します。
- * ※ シンプルトリガーは認可済みサービスに触れられないため、getDbColumns() ではなく
- *    ヘッダー行を直接読み取って校時列を特定します。
- */
-function onEdit(e) {
-  try {
-    if (!e || !e.range) return;
-    const sheet = e.range.getSheet();
-    // 複数学級モードでは各学級のデータベースシートも対象にする
-    if (!isDbSheetName_(sheet.getName())) return;
-
-    const editStartRow = e.range.getRow();
-    const editStartCol = e.range.getColumn();
-    const numRows = e.range.getNumRows();
-    const numCols = e.range.getNumColumns();
-    // ヘッダー行のみの編集は対象外
-    if (editStartRow + numRows - 1 < 2) return;
-
-    // ヘッダー行から校時列（1〜6校時）を特定
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const periodColSet = {};
-    headers.forEach((h, idx) => {
-      if (/^[1-6]校時$/.test(String(h).trim())) periodColSet[idx + 1] = true;
-    });
-
-    // 編集範囲と校時列の交差を調べる
-    const targetCols = [];
-    for (let c = editStartCol; c < editStartCol + numCols; c++) {
-      if (periodColSet[c]) targetCols.push(c);
-    }
-    if (targetCols.length === 0) return;
-
-    // データ行のみ対象（行全体・列全体の編集でも実データ範囲に収める）
-    const firstDataRow = Math.max(editStartRow, 2);
-    const lastEditRow = Math.min(editStartRow + numRows - 1, sheet.getLastRow());
-    if (lastEditRow < firstDataRow) return;
-    const rowCount = lastEditRow - firstDataRow + 1;
-
-    const values = e.range.getValues();
-    const invalidMessages = [];
-    // 列ごとに背景色・メモを一括適用してAPI呼び出し回数を抑える
-    for (const c of targetCols) {
-      const backgrounds = [];
-      const notes = [];
-      for (let rowNum = firstDataRow; rowNum <= lastEditRow; rowNum++) {
-        const value = values[rowNum - editStartRow][c - editStartCol];
-        const check = validateSubjectCellValue_(value);
-        if (check.valid) {
-          backgrounds.push([null]);
-          notes.push(['']);
-        } else {
-          backgrounds.push(['#f4cccc']);
-          notes.push(['⚠ ' + check.message]);
-          invalidMessages.push('R' + rowNum + ': 「' + value + '」 ' + check.message);
-        }
-      }
-      sheet.getRange(firstDataRow, c, rowCount, 1).setBackgrounds(backgrounds).setNotes(notes);
-    }
-
-    if (invalidMessages.length > 0) {
-      e.source.toast(invalidMessages.slice(0, 3).join('\n'), '教科セルの入力エラー（分数の合計は必ず1）', 10);
-    }
-  } catch (err) {
-    // シンプルトリガー内の例外は編集操作を妨げないよう握りつぶす
-    Logger.log('onEdit validation error: ' + err.message);
-  }
-}
-
 // 固定時間割が書き込む列。曜日・週番号などの数式列には触れない。
 // (以前は読み込んだシート全体を setValues で書き戻していたため、数式列が
 //  計算結果の静的な値に置き換わって二度と再計算されなくなっていた)
@@ -324,34 +253,6 @@ function getDefaultExclusionDates() {
   }
 }
 
-
-/** 
- * データベースシートのデータ範囲をクリアします（確認付き）。
- */
-function clearDatabaseDataWithConfirmation() {
-  const ui = SpreadsheetApp.getUi();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const dbSheet = getDbSheet_(ss);
-
-  if (!dbSheet) {
-    ui.alert(`エラー: シート「${SHEET_NAME_DATABASE}」が見つかりません。`);
-    return;
-  }
-
-  const dbCols = getDbColumns();
-  const confirmationMessage = `「${dbSheet.getName()}」シートの入力内容（D2以降）を全てクリアします。\n元に戻せません。よろしいですか？`;
-  const response = ui.alert('データクリア確認', confirmationMessage, ui.ButtonSet.YES_NO);
-
-  if (response == ui.Button.YES) {
-    try {
-      const r = clearDatabaseData_core_();
-      Browser.msgBox(r.message, Browser.Buttons.OK);
-    } catch (e) {
-      logError("clearDatabaseDataWithConfirmation", e);
-      Browser.msgBox(`クリアエラー: ${e.message}`, Browser.Buttons.OK);
-    }
-  }
-}
 
 /**
  * データベースシートの入力内容（時程〜放課後の列、2行目以降）をクリアするコアロジック。
@@ -607,8 +508,6 @@ function deleteTask(taskId) {
     for (let i = 1; i < data.length; i++) {
       if (isSameTaskId_(data[i][0], taskId)) {
         sheet.deleteRow(i + 1);
-        // 行削除を即座にスプレッドシートへ反映してから成功を返す
-        SpreadsheetApp.flush();
         return true;
       }
     }
@@ -663,15 +562,3 @@ function ensurePreClassColumn() {
   return { inserted: true, message: '「登校前タスク」列を行事列の直後に追加しました。' };
 }
 
-/**
- * [メニュー用] 登校前タスク列を追加し、結果をダイアログで通知します。
- */
-function ensurePreClassColumn_UI() {
-  try {
-    const result = ensurePreClassColumn();
-    SpreadsheetApp.getUi().alert(result.message);
-  } catch (e) {
-    logError('ensurePreClassColumn_UI', e);
-    SpreadsheetApp.getUi().alert(`エラー: ${e.message}`);
-  }
-}

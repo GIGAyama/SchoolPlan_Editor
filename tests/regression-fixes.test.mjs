@@ -120,10 +120,12 @@ test('save response revision is computed from the sheet after the write', () => 
   const perf = read('12_Performance.gs');
   const fn = perf.slice(perf.indexOf('function saveWeeklyPlanDataV2'), perf.indexOf('function getDbSchemaDiagnosticsFromWeb'));
   const writeAt = fn.indexOf('p2WriteChangedWeekRows_(dbSheet');
-  const flushAt = fn.indexOf('SpreadsheetApp.flush()', writeAt);
   const rereadAt = fn.indexOf('p2ReadRowsForDates_(dbSheet', writeAt);
   const revisionAt = fn.indexOf('const newRevision =');
-  assert.ok(writeAt >= 0 && flushAt > writeAt && rereadAt > writeAt,
+  // かつては SpreadsheetApp.flush() で確定させてから読み直していた。REST では
+  // 書き込みは即時に確定し、読み直しはファサードが「書いたら次の読みで取り直す」
+  // 仕組みで保証する（tests/sheets-api.test.mjs）。
+  assert.ok(writeAt >= 0 && rereadAt > writeAt,
     'the week rows must be re-read from the sheet after writing');
   assert.ok(revisionAt > rereadAt, 'newRevision must be derived from the re-read rows');
   assert.match(fn.slice(revisionAt, revisionAt + 160), /afterState/);

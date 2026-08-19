@@ -58,3 +58,28 @@ test('自動実行（トリガー）の一覧と解除がアプリから使え�
   assert.match(webApp, /function deleteMyTriggerForWebApp\(/);
   assert.ok(appHtml.includes('id="triggerList"'), '設定タブに自動実行の一覧がありません');
 });
+
+test('紐付け先が開けないときは「未紐付け」と区別して選び直しを促す', () => {
+  // drive.file へ移行した直後、既存の先生は自分のDBを一度選び直す必要がある。
+  // ここを「初めて使う人」と同じ画面にすると、既定ボタンの「新しく作成する」を
+  // 押してしまい、これまでの週案が消えたように見える。
+  const tenant = fs.readFileSync('11_Tenant.gs', 'utf8');
+  const status = tenant.slice(tenant.indexOf('function getTenantStatus'),
+    tenant.indexOf('function linkMyDatabase'));
+  assert.match(status, /needsReauthorize\s*=\s*true/,
+    '開けなかったことを needsReauthorize で伝えていない');
+  assert.match(status, /needsReauthorize:\s*needsReauthorize/,
+    'needsReauthorize を戻り値に含めていない');
+
+  const core = fs.readFileSync('App_Js_01_Core.html', 'utf8');
+  assert.match(core, /status\.needsReauthorize/, 'フロントが needsReauthorize を見ていない');
+  assert.match(core, /function showReauthorizeChoice/, '選び直し専用の画面がない');
+
+  const dialog = core.slice(core.indexOf('function showReauthorizeChoice'),
+    core.indexOf('/** 新規作成フロー'));
+  // 「データは消えていない」ことと、新規作成の危険を必ず伝える
+  assert.match(dialog, /これまでのデータは消えていません/);
+  assert.match(dialog, /空のデータベース/);
+  // 新規作成は二段階の確認を挟む
+  assert.match(dialog, /本当に新しく作りますか/);
+});

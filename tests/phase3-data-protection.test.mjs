@@ -106,7 +106,9 @@ test('week restore creates a safety restore point before overwriting', () => {
 });
 
 test('full backup copies spreadsheet sheets without requesting broad Drive scope', () => {
-  assert.match(backend, /SpreadsheetApp\.create\(backupName\)/);
+  // 作成は Sheets REST のファサード経由。SpreadsheetApp を使うと spreadsheets
+  // スコープを要求してしまう（18_SheetsApi.gs 冒頭の説明を参照）。
+  assert.match(backend, /sheetsCreate_\(backupName\)/);
   assert.match(backend, /sourceSheet\.copyTo\(backup\)/);
   assert.doesNotMatch(manifest, /auth\/drive"/);
   assert.match(manifest, /auth\/drive\.file/);

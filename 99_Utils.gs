@@ -512,60 +512,11 @@ function setupTriggerCleaner() {
   deleteTriggers_("cleanupOrphanedTriggers");
   ScriptApp.newTrigger("cleanupOrphanedTriggers").timeBased().everyDays(1).atHour(2).create();
   logInfo("毎晩深夜2時の孤立トリガー自動掃除機能をセットアップしました。");
-  SpreadsheetApp.getActiveSpreadsheet().toast('保守用機能（毎晩のトリガー掃除）を登録しました', 'セットアップ完了', 5);
 }
 
 // ============================================================
 // ===== UI/UX コンポーネント・フィードバック関連 =====
 // ============================================================
-
-/**
- * リッチなローディングモーダルを表示しつつ、裏側で指定した関数を実行します。
- * モーダル表示中はUIがロックされ、関数完了後に自動的に閉じます。
- * 
- * @param {string} title モーダルの見出し文字
- * @param {string} message モーダルの説明文字
- * @param {string} functionNameGAS 実行したいGASの関数名文字列
- */
-function showProcessingModal(title, message, functionNameGAS) {
-  const template = HtmlService.createTemplateFromFile('LoadingModal');
-  template.title = title || '処理中...';
-  template.message = message || 'しばらくお待ちください。';
-  template.functionName = functionNameGAS || 'null';
-  
-  const htmlOutput = template.evaluate()
-      .setWidth(450)
-      .setHeight(280);
-      
-  SpreadsheetApp.getUi().showModalDialog(htmlOutput, '進捗状況');
-}
-
-/**
- * モーダル内のJavaScriptから呼び出される中継関数。
- * 対象の関数をホワイトリストで制限し安全に実行します。
- */
-function executeServerFunctionForModal(functionName) {
-  // セキュリティ: 実行可能な関数をホワイトリストで明示的に制限
-  const ALLOWED_MODAL_FUNCTIONS = {
-    'createUnitMasterFromPdfs': createUnitMasterFromPdfs,
-    'processNextEventPdf': processNextEventPdf,
-    'processBulkTransferWithExclusion': processBulkTransferWithExclusion,
-    'postScheduleToClassroom': postScheduleToClassroom,
-    'autoPostToClassroom': autoPostToClassroom,
-  };
-
-  try {
-    const fn = ALLOWED_MODAL_FUNCTIONS[functionName];
-    if (typeof fn === 'function') {
-      return fn();
-    } else {
-      throw new Error(`関数名「${functionName}」は実行が許可されていません。`);
-    }
-  } catch (e) {
-    logError(`executeServerFunctionForModal(${functionName})`, e);
-    throw new Error(e.message);
-  }
-}
 
 /**
  * 固定時間割データを2次元配列（5行×8列）で返します。

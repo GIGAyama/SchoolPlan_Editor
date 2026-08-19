@@ -68,8 +68,7 @@ Classroom への投稿など「重い機能（sensitive スコープ）」を使
 
 | スコープ | 説明の例 |
 |----------|----------|
-| `drive.file` | 先生が選んだ／アプリが作ったPDF・出力ファイルだけを扱うため。Drive全体は見ません。 |
-| `spreadsheets` | 各先生専用の週案データベース（本人所有）を読み書きするため。 |
+| `drive.file` | 先生が選んだ／アプリが作ったファイルだけを扱うため。週案データベース（スプレッドシート）の読み書きもこの範囲で行います。Drive全体は見ません。 |
 | `classroom.courses.readonly` | 連携するクラスの一覧を取得するため。 |
 | `classroom.announcements` | 先生が自分のクラスに予定や学級通信を投稿するため。 |
 | `script.send_mail` | 先生が設定したタスクのリマインダーを本人宛に送るため。 |
@@ -87,7 +86,7 @@ Classroom の機能を含むので、**操作のデモ動画**が求められま
 - **同意画面を映すときはアドレスバーごと映し、URL の `client_id` が読める**ようにします。
 - 同意画面は **English 表示**に切り替え、動画には**英語字幕またはナレーション**を付けます。
 - 同意画面に表示されるアプリ名と、動画内のアプリ名を一致させます。
-- **要求する sensitive スコープ 6 個すべて**（`spreadsheets` / `drive.file` / `classroom.courses.readonly` / `classroom.announcements` / `script.send_mail` / `userinfo.email`）の実演が必要です。
+- **要求する sensitive スコープ 5 個すべて**（`drive.file` / `classroom.courses.readonly` / `classroom.announcements` / `script.send_mail` / `userinfo.email`）の実演が必要です。
 
 ---
 

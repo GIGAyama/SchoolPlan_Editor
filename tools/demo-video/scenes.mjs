@@ -70,7 +70,7 @@ export const SCENES = [
       {
         kind: 'caption',
         ms: 9000,
-        text: 'The application creates this spreadsheet itself the first time a teacher signs in, and it reads and writes only this one file.',
+        text: 'The application creates this spreadsheet itself the first time a teacher signs in. That is why the drive.file scope alone is enough to read and write it.',
       },
       {
         kind: 'caption',
@@ -126,7 +126,7 @@ export const SCENES = [
       {
         kind: 'caption',
         ms: 11000,
-        text: 'The application requests the following scopes: Google Sheets, Drive file access, Classroom courses read-only, Classroom announcements, sending email on the user’s behalf, and the user’s email address.',
+        text: 'The application requests the following scopes: per-file Drive access, Classroom courses read-only, Classroom announcements, sending email on the user’s behalf, and the user’s email address.',
       },
       {
         kind: 'caption',
@@ -140,8 +140,8 @@ export const SCENES = [
   // ---------------------------------------------------------------- シーン4
   {
     id: 'spreadsheets',
-    title: '週案の入力 = spreadsheets',
-    scopes: ['spreadsheets'],
+    title: '週案の入力（データベースの読み書き） = drive.file',
+    scopes: ['drive.file'],
     steps: [
       { kind: 'click', selector: 'header .nav-btn[data-view="plan"]' },
       { kind: 'expect', selector: '#view-plan.active' },
@@ -169,7 +169,7 @@ export const SCENES = [
       {
         kind: 'caption',
         ms: 9000,
-        text: 'The same scope is used to read the data back: this annual lesson-hour summary is calculated from the rows stored in that spreadsheet.',
+        text: 'The same file is read back through the same scope: this annual lesson-hour summary is calculated from the rows stored in it.',
       },
       { kind: 'wait', ms: 2500 },
 
@@ -211,7 +211,7 @@ export const SCENES = [
       {
         kind: 'caption',
         ms: 11000,
-        text: 'We use the spreadsheets scope only to read and write this single database file, which is owned by the teacher. We never access any other spreadsheet.',
+        text: 'We hold no spreadsheets scope. This file is read and written through the drive.file scope, because the app created it. We cannot open any other spreadsheet.',
       },
       { kind: 'wait', ms: 3000 },
       { kind: 'goto', url: '{{APP_URL}}' },
@@ -258,7 +258,7 @@ export const SCENES = [
       {
         kind: 'caption',
         ms: 12000,
-        text: 'This is every outbound request the app makes: the Gemini API for the AI features, the Google Drive REST API to handle the files it creates, and a public holiday calendar file published by the Japanese government.',
+        text: 'This is every outbound request the app makes: the Gemini API for the AI features, the Google Drive and Google Sheets REST APIs to handle the files it creates, and a public holiday calendar file published by the Japanese government.',
       },
       {
         kind: 'caption',
@@ -482,7 +482,6 @@ export const SCENES = [
 
 /** appsscript.json の oauthScopes と、それを実演するシーンの対応表 */
 export const SCOPE_COVERAGE = {
-  'https://www.googleapis.com/auth/spreadsheets': 'spreadsheets',
   'https://www.googleapis.com/auth/drive.file': 'drive.file',
   'https://www.googleapis.com/auth/script.scriptapp': 'script.scriptapp',
   'https://www.googleapis.com/auth/script.external_request': 'script.external_request',

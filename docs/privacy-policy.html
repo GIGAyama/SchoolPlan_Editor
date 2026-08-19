@@ -433,12 +433,8 @@
             <td data-label="利用目的">ログイン中の利用者を識別し、利用者ごとにデータベースを分離するため。メールアドレスを運用者へ送信することはありません。</td>
           </tr>
           <tr>
-            <th scope="row"><code>spreadsheets</code></th>
-            <td data-label="利用目的">利用者本人のスプレッドシート（週案データベース）の読み書き。</td>
-          </tr>
-          <tr>
             <th scope="row"><code>drive.file</code></th>
-            <td data-label="利用目的"><strong>本アプリが作成した、または利用者が明示的に選択したファイルのみ</strong>を対象とする Drive 操作（PDF の取り込み・出力、行事予定 PDF の保存）。利用者の Drive 全体にはアクセスしません。</td>
+            <td data-label="利用目的"><strong>本アプリが作成した、または利用者が明示的に選択したファイルのみ</strong>を対象とします。週案データベース（スプレッドシート）の読み書き、PDF の取り込み・出力、行事予定 PDF の保存に使用します。利用者の Drive 全体にはアクセスしません。</td>
           </tr>
           <tr>
             <th scope="row"><code>script.scriptapp</code></th>
@@ -464,7 +460,7 @@
       </table>
     </div>
 
-    <p>なお、本アプリは Google ドライブ全体への広範なアクセス権（<code>drive</code>）や、メールボックスの読み取り権限を<strong>要求しません</strong>。</p>
+    <p>なお、本アプリは Google ドライブ全体への広範なアクセス権（<code>drive</code>）や、メールボックスの読み取り権限を<strong>要求しません</strong>。スプレッドシート全体への権限（Google Sheets の spreadsheets スコープ）も要求せず、週案データベースの読み書きも <code>drive.file</code> の範囲だけで行います。</p>
 
     <h2 id="s3">3. 端末内に保存する情報</h2>
     <p>本アプリの入口となるページ（PWA シェル）は、利便性のためにブラウザの <code>localStorage</code> に次の情報を保存します。いずれも<strong>利用者の端末内にとどまり、外部へ送信されません</strong>。</p>

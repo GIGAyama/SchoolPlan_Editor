@@ -909,7 +909,6 @@ function shiftSubjectLessons(subject, startDateStr, endDateStr, direction, count
     // 書き戻すのは単元・学習内容の列だけ（数式列を壊さないため）
     if (changedRowNumbers.length > 0) {
       p2WriteRowsFromSheetArray_(dbSheet, dbCols, dbData, changedRowNumbers, P2_UNIT_CONTENT_KEYS_);
-      SpreadsheetApp.flush();
       invalidateUnitProgressCache_();
     }
 

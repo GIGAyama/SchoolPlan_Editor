@@ -40,15 +40,18 @@
 | # | スコープ | 種別 | 動画で証明するシーン |
 |---|----------|------|----------------------|
 | 1 | `userinfo.email` | sensitive | シーン7（リマインダーがログイン中の本人宛に届く）／シーン3（「設定」タブの「使用中のデータベース」に表示されるログイン中アカウント） |
-| 2 | `spreadsheets` | sensitive | シーン4（入力＝書き込み／時数集計＝読み取り／タスクの追加・削除、**すべてスプレッドシート側で確認**） |
-| 3 | `drive.file` | sensitive | シーン6（学級通信のPDF出力 → アプリが作成したファイルだけが Drive にできる） |
-| 4 | `script.send_mail` | sensitive | シーン7（「今すぐテスト送信」→ **Gmail の受信トレイで実物と宛先を確認**） |
-| 5 | `classroom.courses.readonly` | sensitive | シーン8前半（クラス一覧の読み込み） |
-| 6 | `classroom.announcements` | sensitive | シーン8後半（Classroom へ投稿 → Classroom 側のストリームで確認） |
-| 7 | `script.external_request` | 非 sensitive | シーン5（Gemini 生成＋**送信先の全列挙**：Gemini API／Drive REST API／内閣府の祝日 CSV） |
-| 8 | `script.scriptapp` | 非 sensitive | シーン7-2（設定タブ「自動実行（トリガー）の状況」で**登録と解除がアカウントに反映される**ところ） |
+| 2 | `drive.file` | sensitive | シーン4（週案データベースの読み書き＝入力・時数集計・タスクの追加と削除、**すべてスプレッドシート側で確認**）／シーン6（学級通信の PDF 出力） |
+| 3 | `script.send_mail` | sensitive | シーン7（「今すぐテスト送信」→ **Gmail の受信トレイで実物と宛先を確認**） |
+| 4 | `classroom.courses.readonly` | sensitive | シーン8前半（クラス一覧の読み込み） |
+| 5 | `classroom.announcements` | sensitive | シーン8後半（Classroom へ投稿 → Classroom 側のストリームで確認） |
+| 6 | `script.external_request` | 非 sensitive | シーン5（Gemini 生成＋**送信先の全列挙**：Gemini API／Drive REST API／Sheets REST API／内閣府の祝日 CSV） |
+| 7 | `script.scriptapp` | 非 sensitive | シーン7-2（設定タブ「自動実行（トリガー）の状況」で**登録と解除がアカウントに反映される**ところ） |
 
-> ⚠️ **7・8 は sensitive ではありませんが、2026-08 の差し戻しで名指しされました。**
+> 💡 **`spreadsheets` は要求しなくなりました。** 週案データベースはアプリ自身が作るスプレッドシートなので、
+> Sheets REST API v4 を `drive.file` で呼べば足ります（[B5](B5_SHEETS_SCOPE_AUDIT.md)）。
+> 動画でもこの点を明言してください。差し戻しの4件目への回答そのものになります。
+
+> ⚠️ **6・7 は sensitive ではありませんが、2026-08 の差し戻しで名指しされました。**
 > 「同意画面に出るから十分」ではなく、**専用のシーンで実演**してください（シーン5・シーン7-2）。
 > **どのシーンも 1 つでも欠けると差し戻しの原因**になります。
 
@@ -176,23 +179,25 @@
 **English caption**（同意画面が出ている間に順に表示）：
 > This is the OAuth consent screen for our application.
 > The address bar shows the client ID of the OAuth client submitted for verification.
-> The application requests the following scopes: Google Sheets, Drive file access, Classroom courses read-only, Classroom announcements, sending email on the user's behalf, and the user's email address.
+> The application requests the following scopes: per-file Drive access, Classroom courses read-only, Classroom announcements, sending email on the user's behalf, and the user's email address.
 > Each of these scopes is demonstrated in the following sections of this video.
 
 > ⚠️ **チェック**：
 > - アドレスバーの `client_id=` が読めるか（撮影後に一時停止して必ず確認）
 > - 同意画面が English になっているか
-> - 表示スコープ数が `appsscript.json` の `oauthScopes`（8個）と対応しているか
+> - 表示スコープ数が `appsscript.json` の `oauthScopes`（7個）と対応しているか
 
 ---
 
-### シーン4：スプレッドシートの読み書き＝`spreadsheets`（約1分45秒）★書き込み・削除の反映を見せる★
+### シーン4：データベースの読み書き＝`drive.file`（約1分45秒）★書き込み・削除の反映を見せる★
 
 **映すもの**：週案の入力（書き込み）→ 時数集計（読み取り）→ タスクの追加と削除（書き込み・削除）→ **スプレッドシート本体での確認**。
 
 > 📌 このシーンは「セルに1つ入力して終わり」では**足りません**。
-> 2026-08 の差し戻しでは `spreadsheets` が名指しされ、「機能の全体像を見せること」と
+> 2026-08 の差し戻しでは、当時要求していた `spreadsheets` が名指しされ、「機能の全体像を見せること」と
 > 「変更が Google アカウント側に反映されるところまで見せること」を求められています。
+> その後 `spreadsheets` は外し、**このデータベースも `drive.file` だけで読み書き**するようになりました。
+> 動画では「アプリが作ったファイルだから `drive.file` で足りる」と明言してください。
 
 **操作**：
 1. 「週案」タブでセルをダブルクリックして編集し、教科・単元・学習活動を入力（**書き込み**）
@@ -208,14 +213,14 @@
 **English caption**：
 > Teachers enter their weekly lesson plan in this grid.
 > The data is written to the teacher's own spreadsheet, shown here.
-> The same scope is used to read the data back: this annual lesson-hour summary is calculated from the rows stored in that spreadsheet.
+> The same file is read back through the same scope: this annual lesson-hour summary is calculated from the rows stored in it.
 > Creating and deleting a task writes to, and removes rows from, the same spreadsheet. Deleted rows are moved to a recycle-bin sheet inside the same file.
 > Here is the teacher's spreadsheet in their own Google account, showing exactly the changes made in the app a moment ago.
-> We use the `spreadsheets` scope only to read and write this single database file, which is owned by the teacher.
-> We never access any other spreadsheet.
+> We hold no `spreadsheets` scope. This file is read and written through the `drive.file` scope, because the app created it.
+> We cannot open any other spreadsheet.
 
-> 💡 シーン2で「このスプレッドシートは**アプリ自身が初回に作る**」と述べておくと、
-> 「なぜ `drive.file` ではなく `spreadsheets` なのか」という追加質問への布石になります。
+> 💡 シーン2で「このスプレッドシートは**アプリ自身が初回に作る**」と述べておくのが効きます。
+> 「だから `drive.file` で足りる」という結論に自然につながります。
 
 ---
 
@@ -231,14 +236,15 @@
 3. 「設定」タブを開き、**Gemini API 設定の注意書き（有料ティア必須）**を映す
 4. 外部通信の送信先が次の3つだけであることを字幕で明示する
    - Gemini API（AI 機能）
-   - Google Drive REST API（アプリが作ったファイルの操作。`DriveApp` を使わないため）
+   - Google Drive REST API / Google Sheets REST API（アプリが作った・利用者が選んだファイルの操作。
+     `DriveApp` と `SpreadsheetApp` を使わず `drive.file` だけで動かすため）
    - 内閣府「国民の祝日」CSV（公開データの取得のみ。利用者データは送らない）
 
 **English caption**：
 > The app calls the Gemini API to draft the class newsletter from the teacher's lesson plan.
 > This external HTTPS request requires the `script.external_request` scope.
 > The API key is supplied and stored by each teacher in their own Apps Script user properties. We never receive it.
-> This is every outbound request the app makes: the Gemini API for the AI features, the Google Drive REST API to handle the files it creates, and a public holiday calendar file published by the Japanese government.
+> This is every outbound request the app makes: the Gemini API for the AI features, the Google Drive and Google Sheets REST APIs to handle the files it creates, and a public holiday calendar file published by the Japanese government.
 > We require a paid-tier Gemini key, shown in this notice, because free-tier content may be used to improve Google's models — which our Limited Use commitment does not allow.
 
 ---
@@ -361,7 +367,7 @@
 - [ ] シーン3で**アドレスバーの `client_id` が一時停止して読める**
 - [ ] 同意画面が **English** で表示されている
 - [ ] 同意画面のアプリ名が申請するアプリ名と一致
-- [ ] シーン4〜8で **要求スコープ 8 個すべて**が実演されている（`script.external_request` と `script.scriptapp` も専用シーンで）
+- [ ] シーン4〜8で **要求スコープ 7 個すべて**が実演されている（`script.external_request` と `script.scriptapp` も専用シーンで）
 - [ ] **書き込み・削除の反映**が、それぞれ Google アカウント側で映っている
       （スプレッドシート本体／Gmail の受信トレイ／Classroom のストリーム／Drive のファイル／自動実行の一覧）
 - [ ] 実在の児童・保護者・教職員の氏名、写真、メールアドレスが**一切映っていない**

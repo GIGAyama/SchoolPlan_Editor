@@ -33,13 +33,43 @@ test('Drive 操作に DriveApp を使っていない（drive.file で動かな�
     `DriveApp は drive.file では動きません。17_DriveApi.gs のラッパーを使ってください:\n${offenders.join('\n')}`);
 });
 
+test('スプレッドシート操作に SpreadsheetApp を使っていない（spreadsheets スコープを要求するため）', () => {
+  // SpreadsheetApp は drive.file では動かず、sensitive な spreadsheets スコープを要求する。
+  // Google の審査で「drive.file で足りるのでは」と差し戻された経緯があるので、
+  // 18_SheetsApi.gs の REST ファサード以外で復活しないよう固定する。
+  const offenders = [];
+  for (const file of gsFiles) {
+    // 18_SheetsApi.gs は「なぜ SpreadsheetApp を使わないか」の説明で名前に触れる
+    if (file === '18_SheetsApi.gs') continue;
+    const source = fs.readFileSync(file, 'utf8');
+    source.split('\n').forEach((line, index) => {
+      // コメント行での言及は許す（方針の説明のため）
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+      if (/\bSpreadsheetApp\s*\./.test(line)) offenders.push(`${file}:${index + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(offenders, [],
+    `SpreadsheetApp は drive.file では動きません。18_SheetsApi.gs のファサードを使ってください:\n${offenders.join('\n')}`);
+});
+
+test('Sheets ラッパーは OAuth トークン付きで REST API v4 を呼ぶ', () => {
+  const api = fs.readFileSync('18_SheetsApi.gs', 'utf8');
+  assert.match(api, /https:\/\/sheets\.googleapis\.com\/v4\/spreadsheets/);
+  assert.match(api, /ScriptApp\.getOAuthToken\(\)/);
+  // 2xx 以外を握りつぶすと、権限不足が「成功」に見えてしまう
+  assert.match(api, /muteHttpExceptions:\s*true/);
+  assert.match(api, /throw new Error\(`Sheets API/);
+});
+
 test('マニフェストがフル drive スコープを要求していない', () => {
   const scopes = manifest.oauthScopes || [];
   assert.ok(scopes.includes('https://www.googleapis.com/auth/drive.file'),
     'drive.file が要求されていません');
   for (const forbidden of [
     'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/drive.readonly'
+    'https://www.googleapis.com/auth/drive.readonly',
+    // spreadsheets は sensitive。Sheets REST API v4 は drive.file を受け付けるので要らない。
+    'https://www.googleapis.com/auth/spreadsheets'
   ]) {
     assert.ok(!scopes.includes(forbidden), `${forbidden} を要求してはいけません`);
   }
@@ -78,7 +108,7 @@ test('appsscript.json とドキュメントのスコープ一覧が一致して�
         `${page} に ${scope} の説明がありません`);
     }
     // 要求していないスコープを載せたままにしない
-    for (const stale of ['script.container.ui', 'drive.readonly']) {
+    for (const stale of ['script.container.ui', 'drive.readonly', 'spreadsheets']) {
       if (scopes.includes(stale)) continue;
       assert.ok(!html.includes(`<code>${stale}</code>`),
         `${page} に、要求していない ${stale} が残っています`);
