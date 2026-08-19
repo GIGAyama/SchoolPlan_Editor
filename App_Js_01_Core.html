@@ -258,6 +258,11 @@
                 + '<span style="color:#b26a00;">「新しく作る」を選ぶと、空のデータベースになります。'
                 + 'これまでの週案を続けて使うなら、必ず「ドライブから選び直す」を選んでください。</span>'
                 + (email ? ('<div style="margin-top:10px;color:var(--secondary-text);font-size:0.8rem;">ログイン中: ' + escHtml(email) + '</div>') : '')
+                + ((status && status.openError)
+                    ? ('<details style="margin-top:10px;"><summary style="font-size:0.8rem;color:var(--secondary-text);cursor:pointer;">詳しい情報（うまくいかないときの手がかり）</summary>'
+                        + '<div style="font-size:0.75rem;color:var(--secondary-text);word-break:break-all;margin-top:6px;">'
+                        + escHtml(status.openError) + '</div></details>')
+                    : '')
                 + '</div>',
             width: 580,
             allowOutsideClick: false,

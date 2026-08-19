@@ -83,3 +83,19 @@ test('紐付け先が開けないときは「未紐付け」と区別して選�
   // 新規作成は二段階の確認を挟む
   assert.match(dialog, /本当に新しく作りますか/);
 });
+
+test('ピッカーは App ID を渡す（drive.file の per-file 権限に必要）', () => {
+  // setAppId が無いと、ピッカーで選んでも「どのアプリに権限を与えるか」が定まらず、
+  // 選んだ直後のサーバー側アクセスが 403 になる。
+  const pdf = fs.readFileSync('03_PdfProcessing.gs', 'utf8');
+  assert.match(pdf, /appId:\s*getPickerAppId_\(\)/,
+    'getPickerAuthInfo が appId を返していない');
+  assert.match(pdf, /function getPickerAppId_\(\)/);
+  // クライアントIDの先頭がプロジェクト番号
+  assert.match(pdf, /oauth2\/v3\/tokeninfo/);
+
+  for (const file of ['App_Js_08_Events.html', 'App_Js_10_Settings.html']) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.match(source, /setAppId\(appId\)/, `${file} のピッカーが setAppId を呼んでいない`);
+  }
+});
