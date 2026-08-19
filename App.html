@@ -1402,6 +1402,19 @@
                             年間指導計画のPDFをAIが解析し、単元情報を抽出します。<br>
                             抽出結果は<strong>教科ごとのプレビュー</strong>で確認・修正・除外してから反映できます（反映時に同じ教科の既存データは置き換えられます）。
                         </p>
+                        <!-- 著作権への注意（docs/LEGAL_RISK_AUDIT_JP.md の D-2）。
+                             教科書会社の指導書・指導計画は著作物で、解析のための送信自体は
+                             著作権法30条の4（情報解析）でおおむね許容されると考えられるが、
+                             抽出した文言をそのまま配布物へ転載すると35条の範囲を外れ得る。 -->
+                        <p style="font-size:0.75rem; color:var(--text-sub); background:var(--surface-2);
+                                  border:1px solid var(--border); border-left:4px solid var(--primary);
+                                  border-radius:6px; padding:8px 12px; margin:8px 0 4px; line-height:1.8;">
+                            <span class="material-symbols-outlined"
+                                style="font-size:1rem; vertical-align:text-bottom;">info</span>
+                            読み込むのは、<strong>自校で作成・編集した指導計画</strong>を基本にしてください。
+                            教科書会社の指導書などをもとにした資料を取り込んだ場合、その文言を
+                            <strong>学級通信やClassroomの投稿へそのまま転載しない</strong>ようご注意ください。
+                        </p>
                         <div class="pdf-drop-zone" id="unitDropZone" tabindex="0" role="button"
                             aria-label="指導計画PDFを選択">
                             <span class="material-symbols-outlined pdf-drop-icon">upload_file</span>
