@@ -307,7 +307,10 @@
                     return wizFieldHtml('wizApiKey', 'Gemini APIキー' + (status.hasApiKey ? '（設定済み・変更する場合のみ入力）' : ''),
                         'password', wiz.apiKey, 'AIza...',
                         'PDF自動読み取り・AIタスク抽出・週報の自動生成などのAI機能に必要です。'
-                        + '<a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a> で無料で取得できます。'
+                        + '<a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a> で取得します。'
+                        + '<br><strong>課金を有効にした（有料ティアの）キーを使ってください。</strong>'
+                        + '無料ティアは送信内容がGoogleのモデル改善に使われる場合があり、'
+                        + '<a href="https://schoolplan-editor.giga-school.com/privacy-policy.html#s4-ai" target="_blank" rel="noopener">本アプリのデータ取り扱い方針</a>に反します。'
                         + '空欄のままでもAI以外の機能（週案入力・時数集計など）は利用できます。');
                 },
                 collect: function (popup) {

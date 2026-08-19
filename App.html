@@ -838,6 +838,20 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- 有料ティア必須の明示。無料ティアは送信内容が Google のモデル改善に使われる場合があり、
+                                 Google Workspace API の Limited Use 要件（学習に使わせない）と両立しないため。
+                                 プライバシーポリシー §4「生成AI サービスの利用」と対応する。 -->
+                            <div id="geminiTierNotice"
+                                style="margin-top:12px; padding:8px 12px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; font-size:0.78rem; color:#856404; line-height:1.7;">
+                                <span class="material-symbols-outlined"
+                                    style="font-size:1rem; vertical-align:text-bottom;">info</span>
+                                <strong>課金を有効にした（有料ティアの）API キーを使ってください。</strong><br>
+                                無料ティアでは、送信した週案や PDF の内容が Google のモデル改善（機械学習）に使われる場合があります。
+                                本アプリは Google ユーザーデータを AI の学習に使わせない方針（Limited Use）のため、有料ティアのキーを前提としています。
+                                <a href="https://schoolplan-editor.giga-school.com/privacy-policy.html#s4-ai" target="_blank"
+                                    rel="noopener">データの取り扱いについて</a>
+                            </div>
                         </div>
 
                         <!-- 保存ボタン -->
@@ -845,6 +859,34 @@
                             <button class="btn btn-primary" onclick="saveSystemSettings()"><span
                                     class="material-symbols-outlined fs-6"
                                     style="vertical-align:text-bottom;">save</span> システム設定を保存</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 自動実行（トリガー）の状況。
+                 script.scriptapp で作られたトリガーが「いま自分のアカウントに何個あるか」を
+                 見えるようにし、その場で解除もできるようにする。 -->
+            <div style="padding: 0 20px 20px;">
+                <div class="integration-section">
+                    <div class="integration-header">
+                        <span class="integration-icon"><span
+                                class="material-symbols-outlined fs-6">schedule</span></span>
+                        <span class="integration-title">自動実行（トリガー）の状況</span>
+                    </div>
+                    <div class="integration-body" style="display:flex; flex-direction:column; gap:12px;">
+                        <p style="font-size:0.85rem; color:var(--text-sub); margin:0;">
+                            リマインダーや PDF の読み取りのために、このアプリがあなたの Google
+                            アカウントへ登録した自動実行の一覧です。<br>
+                            登録されるのはあなた自身のアカウントにだけで、ほかの先生の設定は見えません。不要なものはここで解除できます。
+                        </p>
+                        <div id="triggerList" style="font-size:0.85rem;">
+                            <span style="color:var(--text-sub);">読み込み中...</span>
+                        </div>
+                        <div style="display:flex; justify-content:flex-end;">
+                            <button class="btn btn-outline" onclick="loadMyTriggers()"><span
+                                    class="material-symbols-outlined fs-6"
+                                    style="vertical-align:text-bottom;">refresh</span> 再読み込み</button>
                         </div>
                     </div>
                 </div>

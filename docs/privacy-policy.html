@@ -182,7 +182,8 @@
       margin: 20px 0;
     }
 
-    .callout h2 {
+    .callout h2,
+    .callout h3 {
       margin-top: 0;
       font-size: 1.1rem;
     }
@@ -350,7 +351,7 @@
   <main>
     <h1>プライバシーポリシー</h1>
     <p class="meta">
-      <span>最終更新日: 2026-08-14</span><span>運用者: GIGAyama</span><span>連絡先: <a href="mailto:basstar.1102@gmail.com">basstar.1102@gmail.com</a></span>
+      <span>最終更新日: 2026-08-19</span><span>運用者: GIGAyama</span><span>連絡先: <a href="mailto:basstar.1102@gmail.com">basstar.1102@gmail.com</a></span>
     </p>
 
     <p>本ポリシーは、週案作成支援アプリ「週案エディタ（School Plan Note）」（以下「本アプリ」）における利用者情報の取り扱いを定めるものです。</p>
@@ -361,6 +362,7 @@
         <li>入力したデータは<strong>利用者本人の Google アカウント内（Google ドライブ／スプレッドシート）にのみ保存</strong>されます。</li>
         <li>運用者は、利用者のデータを<strong>受け取らず、保存せず、閲覧しません</strong>。運用者側のサーバーやデータベースは存在しません。</li>
         <li>取得する権限（OAuth スコープ）は、本アプリの機能に必要な範囲に限定しています。</li>
+        <li>生成AI へ送られるのは、利用者が AI 機能を実行したときの対象データだけです。送信先は Google の Gemini API のみで、<strong>内容が AI モデルの学習に使われることはありません</strong>。</li>
       </ul>
     </div>
 
@@ -370,10 +372,10 @@
         <li><a href="#s1">基本方針とデータの保存先</a></li>
         <li><a href="#s2">アクセス範囲（OAuth スコープ）と利用目的</a></li>
         <li><a href="#s3">端末内に保存する情報</a></li>
-        <li><a href="#s4">第三者サービスの利用</a></li>
+        <li><a href="#s4">外部サービス・生成AI の利用</a></li>
         <li><a href="#s5">Google ユーザーデータの取り扱い（Limited Use）</a></li>
         <li><a href="#s6">データの保存期間と削除・権限の取り消し</a></li>
-        <li><a href="#s7">安全管理措置</a></li>
+        <li><a href="#s7">安全管理措置（機微なデータの保護）</a></li>
         <li><a href="#s8">児童生徒に関する情報の取り扱い</a></li>
         <li><a href="#s9">お問い合わせ</a></li>
         <li><a href="#s10">本ポリシーの改定</a></li>
@@ -474,21 +476,85 @@
     <p>また、オフラインでも起動できるようにするため、Service Worker がページの表示に必要なファイルを端末のキャッシュへ保存します。これらはブラウザの「サイトデータの削除」でいつでも消去できます。</p>
     <p>本アプリは、広告・アクセス解析・行動追跡を目的とした Cookie やトラッキング技術を<strong>一切使用しません</strong>。</p>
 
-    <h2 id="s4">4. 第三者サービスの利用</h2>
+    <h2 id="s4">4. 外部サービス・生成AI の利用</h2>
     <ul>
       <li><strong>Google（Apps Script / ドライブ / スプレッドシート / Classroom / Gmail 送信基盤）</strong>：データの保存・処理は Google の基盤上で行われ、<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google のプライバシーポリシー</a>が適用されます。</li>
-      <li><strong>生成AI（Gemini API 等）</strong>：PDF 解析・タスク抽出・文章生成などの機能を利用者が実行した場合に限り、対象の PDF やテキストを AI サービスへ送信します。使用される API キーは<strong>利用者自身が設定し、利用者ごとのユーザープロパティに保存</strong>されるもので、運用者は取得も保持もしません。送信内容の取り扱いには、当該 AI 提供者の利用規約・プライバシーポリシーが適用されます。</li>
+      <li><strong>内閣府「国民の祝日」CSV</strong>：カレンダー表示のために公開データを取得するだけで、利用者のデータを送信することはありません。</li>
     </ul>
-    <p>生成AI 機能は任意です。API キーを設定しなければ、外部の AI サービスへデータが送信されることはありません。</p>
+    <p>上記以外の外部サービスへ、利用者のデータを送信することはありません。広告・アクセス解析・行動追跡のサービスは利用していません。</p>
+
+    <h3 id="s4-ai">生成AI（AI／ML）サービスの利用</h3>
+    <p>本アプリが連携する生成AI サービスは、<strong>Google の Gemini API（Google AI for Developers）ただ 1 つ</strong>です。Google 以外の第三者 AI 提供者、AI アグリゲータ／ゲートウェイ／モデルハブ、および自己ホスト・オフラインのモデルは<strong>一切利用していません</strong>。</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">項目</th>
+            <th scope="col">内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">AI 提供者</th>
+            <td data-label="内容">Google（Gemini API / Google AI for Developers）のみ</td>
+          </tr>
+          <tr>
+            <th scope="row">利用プラン（ティア）</th>
+            <td data-label="内容">利用者自身が用意する API キーを使用します。本アプリは<strong>課金を有効にした有料ティア（paid tier）のキーの利用を必須</strong>とし、設定画面でもその旨を明示しています。</td>
+          </tr>
+          <tr>
+            <th scope="row">第三者 AI 提供者</th>
+            <td data-label="内容">なし</td>
+          </tr>
+          <tr>
+            <th scope="row">アグリゲータ／ゲートウェイ／モデルハブ</th>
+            <td data-label="内容">なし（Gemini API のエンドポイントを直接呼び出します）</td>
+          </tr>
+          <tr>
+            <th scope="row">自己ホスト・オフラインのモデル</th>
+            <td data-label="内容">なし</td>
+          </tr>
+          <tr>
+            <th scope="row">送信されるデータ</th>
+            <td data-label="内容">利用者が AI 機能を実行したときに限り、その対象となるデータ（週案の記述、取り込む行事予定・指導計画の PDF、学級通信の下書き等）</td>
+          </tr>
+          <tr>
+            <th scope="row">送信されないデータ</th>
+            <td data-label="内容">利用者のメールアドレス、Classroom のクラス情報、他の利用者のデータ、API キー以外の設定値</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><strong>なぜ有料ティアを必須にしているか</strong>：Gemini API の無料ティアでは、送信した内容が Google による製品・モデルの改善（機械学習）に利用される場合があります。これは Google Workspace API のユーザーデータに関するポリシーの <strong>Limited Use</strong> 要件（Google ユーザーデータを汎用的な AI／ML モデルの学習に使わせない）と両立しません。そのため本アプリは、課金を有効にした有料ティアのキーを使う前提とし、その場合 <a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener">Gemini API の追加利用規約</a>により、送信内容がモデルの学習に使われることはありません。</p>
+
+    <p>生成AI 機能は<strong>任意</strong>です。API キーを設定しなければ、外部の AI サービスへデータが送信されることは一切ありません。API キーは<strong>利用者自身が設定し、利用者ごとのユーザープロパティに保存</strong>されるもので、運用者は取得も保持もしません。</p>
 
     <h2 id="s5">5. Google ユーザーデータの取り扱い（Limited Use）</h2>
-    <p>本アプリによる Google ユーザーデータの取得・利用・保存・共有は、<a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API サービスのユーザーデータに関するポリシー</a>（Limited Use 要件を含む）に準拠します。具体的には次のとおりです。</p>
+    <p>本アプリによる Google ユーザーデータの取得・利用・保存・共有は、<a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API サービスのユーザーデータに関するポリシー</a>および <a href="https://developers.google.com/workspace/workspace-api-user-data-developer-policy" target="_blank" rel="noopener">Google Workspace API のユーザーデータおよびデベロッパー ポリシー</a>（いずれも Limited Use 要件を含む）に準拠します。具体的には次のとおりです。</p>
     <ul>
       <li>取得したデータは、本ポリシーに記載した<strong>機能提供の目的にのみ</strong>利用します。</li>
       <li>広告目的での利用、および第三者への販売・譲渡は行いません。</li>
       <li>人間による内容の閲覧は行いません（運用者はそもそもデータを受け取りません）。</li>
-      <li>Google ユーザーデータを、汎用的な AI／機械学習モデルの学習に利用することはありません。</li>
+      <li><strong>Google Workspace API から取得したユーザーデータ（生データ・集約データ・匿名化データ・そこから派生したデータを含む）を、基盤モデルその他の汎用的な AI／機械学習モデルの作成・学習・改善のために使用・転送・販売することはありません。</strong></li>
+      <li><strong>そのような学習を行う第三者の AI／ML サービスへ、Google ユーザーデータを転送することもありません。</strong>本アプリが連携する生成AI は Google の Gemini API のみで、かつ学習に利用されない有料ティアの利用を前提としています（<a href="#s4-ai">4. 生成AI サービスの利用</a>）。</li>
     </ul>
+
+    <div class="callout" lang="en">
+      <h3>Limited Use compliance statement</h3>
+      <p>School Plan Note&rsquo;s use and transfer of information received from Google APIs to any other app
+        will adhere to the
+        <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>,
+        including the Limited Use requirements.</p>
+      <p>We do not use, transfer, or sell any raw, aggregated, anonymized, or derived Google Workspace API
+        user data to develop, train, or improve foundational or generalized AI/ML models, and we do not
+        transfer such data to any third-party service that would do so. The only AI service this application
+        integrates with is Google&rsquo;s own Gemini API, called directly with a paid-tier API key supplied by
+        the user, under terms which state that the submitted content is not used to improve Google&rsquo;s
+        models. We use no third-party AI providers, no AI aggregators, gateways, or model hubs, and no
+        self-hosted or offline models.</p>
+    </div>
 
     <h2 id="s6">6. データの保存期間と削除・権限の取り消し</h2>
     <p>データはすべて利用者の管理下にあるため、保存期間と削除は利用者自身が制御できます。</p>
@@ -529,14 +595,81 @@
     </ul>
     <p>運用者側にデータの複製は存在しないため、運用者に対して削除を依頼する必要はありません。</p>
 
-    <h2 id="s7">7. 安全管理措置</h2>
+    <h2 id="s7">7. 安全管理措置（機微なデータの保護）</h2>
+
+    <h3>本アプリが「機微」として扱う情報</h3>
+    <p>本アプリでは、次の情報を機微なデータとして扱い、以下の保護措置を適用します。</p>
     <ul>
-      <li>本アプリは Google Apps Script の Web アプリとして<strong>「アクセスしているユーザーとして実行」</strong>する構成を前提としており、利用者どうしのデータは Google アカウント単位で分離されます。</li>
-      <li>設定値や API キーは、利用者ごとに分離されたユーザープロパティに保存し、ソースコードへ記載しません。</li>
-      <li>Google との通信はすべて HTTPS で暗号化されます。保存されるデータには Google の基盤による暗号化が適用されます。</li>
-      <li>要求する OAuth スコープは必要最小限にとどめ、広範な Drive アクセス権は要求しません。</li>
-      <li>ソースコードは公開されており、第三者による検証が可能です。脆弱性の報告手順は <a href="https://github.com/GIGAyama/SchoolPlan_Editor/blob/main/SECURITY.md" target="_blank" rel="noopener">SECURITY.md</a> に定めています。</li>
+      <li>週案・学級通信・タスク等に入力された記述（<strong>児童生徒に関する記述が含まれ得る</strong>ため）</li>
+      <li>Google Classroom から取得したクラス（コース）の情報</li>
+      <li>ログイン中の利用者のメールアドレス</li>
+      <li>利用者が設定した Gemini API キー（認証情報）</li>
+      <li>OAuth アクセストークン</li>
     </ul>
+
+    <h3>保護の仕組み</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">観点</th>
+            <th scope="col">具体的な措置</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">保存場所の限定</th>
+            <td data-label="具体的な措置">機微なデータは<strong>利用者本人の Google アカウント内（スプレッドシート／ドライブ／ユーザープロパティ）にのみ</strong>保存します。運用者側のサーバー・データベース・ログ基盤は存在せず、運用者へ送信する仕組みもありません。したがって運用者側での漏えい・二次利用は構造的に発生しません。</td>
+          </tr>
+          <tr>
+            <th scope="row">通信の暗号化</th>
+            <td data-label="具体的な措置">ブラウザ・Apps Script・Google API・Gemini API の間の通信はすべて <strong>TLS（HTTPS）</strong>で暗号化されます。平文の HTTP 通信は行いません。</td>
+          </tr>
+          <tr>
+            <th scope="row">保存時の暗号化</th>
+            <td data-label="具体的な措置">Google ドライブ／スプレッドシートおよび Apps Script のプロパティサービスに保存されるデータには、<a href="https://cloud.google.com/docs/security/encryption/default-encryption" target="_blank" rel="noopener">Google の既定の保存時暗号化</a>（AES による暗号化）が適用されます。</td>
+          </tr>
+          <tr>
+            <th scope="row">利用者ごとの分離</th>
+            <td data-label="具体的な措置">Web アプリは<strong>「アクセスしているユーザーとして実行」</strong>する構成で動作します。各処理は実行中の利用者本人の権限でしか動かず、他の利用者のスプレッドシート・ドライブ・Classroom へは技術的に到達できません。設定値は利用者ごとに分離された<strong>ユーザープロパティ</strong>に保存します。</td>
+          </tr>
+          <tr>
+            <th scope="row">認証情報の取り扱い</th>
+            <td data-label="具体的な措置">Gemini API キーはユーザープロパティに保存し、ソースコードには記載しません。画面上は<strong>マスク表示</strong>し、ログ・エラーメッセージ・PDF などの出力物にも記録しません。利用者はいつでも設定画面から削除できます。</td>
+          </tr>
+          <tr>
+            <th scope="row">OAuth トークンの取り扱い</th>
+            <td data-label="具体的な措置">アクセストークンは Apps Script の実行コンテキスト内でのみ使用し、保存しません。Google ピッカー（ファイル選択）に渡す場合も、その場限りの短命なトークンで、到達できる範囲は <code>drive.file</code>（アプリが作成した／利用者が選んだファイル）に限られます。</td>
+          </tr>
+          <tr>
+            <th scope="row">最小権限</th>
+            <td data-label="具体的な措置">要求する OAuth スコープは機能に必要な最小限にとどめます。Drive 全体へのアクセス権（フルの <code>drive</code> スコープや Drive 全体の読み取り権限）、メールの読み取り、児童生徒の名簿・課題・成績にあたる Classroom の権限は<strong>要求しません</strong>。スコープが広がらないよう、リポジトリの自動テストで継続的に検査しています。</td>
+          </tr>
+          <tr>
+            <th scope="row">第三者への提供</th>
+            <td data-label="具体的な措置">機微なデータを第三者へ提供・販売・譲渡しません。外部送信は<a href="#s4">4. 外部サービス・生成AI の利用</a>に列挙したものに限られ、そのうち利用者データを含むのは、利用者が明示的に AI 機能を実行したときの Gemini API への送信のみです。</td>
+          </tr>
+          <tr>
+            <th scope="row">保持期間の制限</th>
+            <td data-label="具体的な措置">復元用のバックアップ・スナップショット・ごみ箱は、<a href="#s6">6. データの保存期間</a>に定めた期間を過ぎたものから自動的に削除されます。いずれも利用者本人のファイル内にとどまります。</td>
+          </tr>
+          <tr>
+            <th scope="row">削除と権限取り消し</th>
+            <td data-label="具体的な措置">利用者はいつでも、データの削除・API キーの削除・<a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">アプリの認可取り消し</a>を自分で行えます（<a href="#s6">6</a>）。</td>
+          </tr>
+          <tr>
+            <th scope="row">脆弱性への対応</th>
+            <td data-label="具体的な措置">ソースコードは公開されており、第三者による検証が可能です。報告の手順・受付窓口・対応方針は <a href="https://github.com/GIGAyama/SchoolPlan_Editor/blob/main/SECURITY.md" target="_blank" rel="noopener">SECURITY.md</a> に定めています。</td>
+          </tr>
+          <tr>
+            <th scope="row">インシデント時の対応</th>
+            <td data-label="具体的な措置">本アプリに起因する情報漏えいのおそれを認識した場合、運用者は速やかに原因を調査して修正版を公開し、影響範囲を本ページおよびリポジトリで公表します。運用者はデータを保持しないため、通知が必要な事象は「アプリの不具合により利用者本人のデータが意図せず露出し得た場合」に限られます。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>なお、本アプリの利用にあたっては、所属機関の情報管理規程に従い、端末のロック・アカウントの二段階認証など、利用者側の基本的な安全対策も併せて実施してください。</p>
 
     <h2 id="s8">8. 児童生徒に関する情報の取り扱い</h2>
     <p>本アプリは<strong>教職員が業務に用いることを想定</strong>したツールであり、児童生徒本人に向けて提供されるものではありません。児童生徒に関する情報が入力される場合であっても、そのデータは入力した教職員本人の Google アカウント内にのみ保存され、運用者はこれを取得しません。</p>

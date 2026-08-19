@@ -593,11 +593,102 @@
                 document.getElementById('sysModuleEnabled').checked = !!res.moduleEnabled;
 
                 STATE.isSystemSettingsLoaded = true;
+
+                // 自動実行（トリガー）の状況もあわせて読み直す
+                loadMyTriggers();
             })
             .withFailureHandler(function (e) {
                 showToast('error', '設定の読み込みに失敗しました: ' + e.message);
             })
             .getAppSettings();
+    }
+
+    // ===== 自動実行（トリガー）の状況 =====
+    //
+    // script.scriptapp で作られたトリガーは Google アカウント側に残るのに、
+    // これまでアプリ内から確認する手段がなかった。「何が登録されているか分からない」
+    // 状態を作らないため、一覧と解除をここに置く。
+
+    /**
+     * このアカウントに登録されている自動実行を読み込み、一覧を描画します。
+     */
+    function loadMyTriggers() {
+        var box = document.getElementById('triggerList');
+        if (!box) return;
+        box.innerHTML = '<span style="color:var(--text-sub);">読み込み中...</span>';
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res || !res.success) {
+                    box.innerHTML = '<span style="color:#c5221f;">'
+                        + escHtml((res && res.error) || '取得に失敗しました') + '</span>';
+                    return;
+                }
+                renderMyTriggers(res.triggers || []);
+            })
+            .withFailureHandler(function (e) {
+                box.innerHTML = '<span style="color:#c5221f;">取得に失敗しました: '
+                    + escHtml(e.message) + '</span>';
+            })
+            .getMyTriggersForWebApp();
+    }
+
+    /**
+     * 自動実行の一覧を描画します。
+     * @param {Object[]} triggers getMyTriggersForWebApp() の戻り値
+     */
+    function renderMyTriggers(triggers) {
+        var box = document.getElementById('triggerList');
+        if (!box) return;
+
+        if (!triggers.length) {
+            box.innerHTML = '<span style="color:var(--text-sub);">'
+                + '現在、登録されている自動実行はありません。</span>';
+            return;
+        }
+
+        box.innerHTML = triggers.map(function (t) {
+            var meta = [t.schedule, t.detail].filter(Boolean).join(' / ');
+            return '<div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;'
+                + ' padding:8px 0; border-bottom:1px solid var(--border);">'
+                + '<div><div style="font-weight:600;">' + escHtml(t.label) + '</div>'
+                + (meta ? '<div style="font-size:0.78rem; color:var(--text-sub);">' + escHtml(meta) + '</div>' : '')
+                + '</div>'
+                + '<button class="btn btn-outline" style="flex:none; font-size:0.78rem; padding:4px 10px;"'
+                + ' onclick="deleteMyTrigger(\'' + escAttr(t.id) + '\')">解除</button>'
+                + '</div>';
+        }).join('');
+    }
+
+    /**
+     * 自動実行を1件解除します。
+     * @param {string} triggerId トリガーの一意 ID
+     */
+    async function deleteMyTrigger(triggerId) {
+        var ask = await Swal.fire({
+            icon: 'warning',
+            title: 'この自動実行を解除しますか？',
+            text: '解除すると、この自動実行は動かなくなります。設定画面からいつでも登録し直せます。',
+            showCancelButton: true,
+            confirmButtonText: '解除する',
+            cancelButtonText: 'キャンセル',
+            confirmButtonColor: '#ea4335'
+        });
+        if (!ask.isConfirmed) return;
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res && res.success) {
+                    showToast('success', res.message || '解除しました');
+                } else {
+                    showToast('error', 'エラー: ' + ((res && res.error) || '解除に失敗しました'));
+                }
+                loadMyTriggers();
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', '解除に失敗しました: ' + e.message);
+            })
+            .deleteMyTriggerForWebApp(triggerId);
     }
 
     function saveSystemSettings() {
