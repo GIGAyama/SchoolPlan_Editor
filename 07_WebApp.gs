@@ -1015,8 +1015,14 @@ function applyTimetableToWeek(mondayStr) {
   try {
     if (!mondayStr) throw new Error('対象週が指定されていません。');
     const targetDate = new Date(mondayStr.replace(/-/g, '/'));
-    transferWeeklyTimetable(targetDate);
-    return { success: true, message: mondayStr + ' 週に固定時間割を転記しました。' };
+    const result = transferWeeklyTimetable(targetDate) || { updatedRows: 0, missingDates: [] };
+    // DBに行が無い日は転記できない。黙って成功にすると「転記したのに入らない」ことになる。
+    const missing = (result.missingDates && result.missingDates.length)
+      ? `（DB未登録日: ${result.missingDates.join(', ')}）` : '';
+    return {
+      success: true,
+      message: `${mondayStr} 週に固定時間割を転記しました（${result.updatedRows}日分）${missing}`
+    };
   } catch (e) {
     logError('applyTimetableToWeek', e);
     return { success: false, error: e.message };
@@ -1387,7 +1393,10 @@ function getHoursSummary(mondayStr) {
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
     const dbCols = getDbColumns();
-    const dbData = dbSheet.getDataRange().getValues();
+    // 集計に使うのは日付・各校時・朝学習だけ。学習内容などの長い列まで読むと、
+    // 年度が進んで行が増えるほど週移動のたびの待ち時間が延びる。
+    const dbData = p2ReadColumnsForAllRows_(dbSheet, dbCols,
+      ['DATE', 'PERIOD1', 'PERIOD2', 'PERIOD3', 'PERIOD4', 'PERIOD5', 'PERIOD6', 'MORNING']);
 
     // モジュール学習設定
     const moduleEnabled = tGetProp_('moduleEnabled') === 'true';

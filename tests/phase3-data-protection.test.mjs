@@ -67,7 +67,7 @@ test('weekly save creates a restore point inside the lock before writing', () =>
 
 test('protected and V1 save endpoints delegate to the protected V2 save', () => {
   const protectedFn = between(backend, 'function saveWeeklyPlanDataProtected', 'function p3RestoreReflections_');
-  assert.match(protectedFn, /saveWeeklyPlanDataV2\(/);
+  assert.match(protectedFn, /saveWeeklyPlanWeek_\(/);
   assert.doesNotMatch(protectedFn, /p3CreateSnapshot_\(/);
 
   const v1 = between(webApp, 'function saveWeeklyPlanData(', 'function getUnitMasterForSuggest');
@@ -101,7 +101,7 @@ test('manual restore points are never evicted by the snapshot count cap', () => 
 
 test('week restore creates a safety restore point before overwriting', () => {
   const fn = between(backend, 'function restoreWeekSnapshotFromWeb', 'function p3GetBackupIndex_');
-  assert.ok(fn.indexOf("'自動: 復元直前'") < fn.indexOf('saveWeeklyPlanDataV2('));
+  assert.ok(fn.indexOf("'自動: 復元直前'") < fn.indexOf('saveWeeklyPlanWeek_('));
   assert.match(fn, /p3RestoreReflections_/);
 });
 

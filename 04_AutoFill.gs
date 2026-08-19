@@ -631,6 +631,12 @@ function callGeminiUnitAllocation_(prompt) {
  * @returns {Object} { success, message, updatedCells, warnings }
  */
 function batchAutoFillFromWeek(baseMondayStr) {
+  // 週案の保存と同じ ScriptLock で直列化する。
+  // 年間分を読み書きするため、保存と重なると読んだ時点の内容で上書きしてしまう。
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) {
+    return { success: false, error: '他の処理が実行中です。しばらく待ってから再度お試しください。' };
+  }
   try {
     const ss = getSs_();
     const dbSheet = getDbSheet_(ss);
@@ -665,7 +671,7 @@ function batchAutoFillFromWeek(baseMondayStr) {
     }
 
     let updatedCells = 0;
-    let isModified = false;
+    const changedRowNumbers = [];
 
     // 翌週月曜以降の全DB行を前方走査
     for (let i = 1; i < dbData.length; i++) {
@@ -707,7 +713,7 @@ function batchAutoFillFromWeek(baseMondayStr) {
           if (row[pc.unit - 1] !== newUnit || row[pc.content - 1] !== newContent) {
             row[pc.unit - 1] = newUnit;
             row[pc.content - 1] = newContent;
-            isModified = true;
+            changedRowNumbers.push(i + 1);
             updatedCells++;
           }
         } catch (e) {
@@ -716,9 +722,10 @@ function batchAutoFillFromWeek(baseMondayStr) {
       }
     }
 
-    // 変更があればDB一括書き戻し
-    if (isModified) {
-      dbSheet.getRange(1, 1, dbData.length, dbData[0].length).setValues(dbData);
+    // 書き戻すのは単元・学習内容の列だけ。シート全体を書き戻すと数式列が失われ、
+    // 読み込み中に他から入った変更も巻き戻してしまう。
+    if (changedRowNumbers.length > 0) {
+      p2WriteRowsFromSheetArray_(dbSheet, dbCols, dbData, changedRowNumbers, P2_UNIT_CONTENT_KEYS_);
       invalidateUnitProgressCache_();
     }
 
@@ -731,6 +738,8 @@ function batchAutoFillFromWeek(baseMondayStr) {
   } catch (e) {
     logError('batchAutoFillFromWeek', e);
     return { success: false, error: e.message };
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -887,16 +896,19 @@ function shiftSubjectLessons(subject, startDateStr, endDateStr, direction, count
     }
 
     // DBへ反映
-    let changed = false;
+    const changedRowNumbers = [];
     for (let i = 0; i < n; i++) {
       const r = refs[i];
       const nv = newVals[i];
+      let changed = false;
       if (dbData[r.rowIdx][r.uIdx] !== nv.unit) { dbData[r.rowIdx][r.uIdx] = nv.unit; changed = true; }
       if (dbData[r.rowIdx][r.cIdx] !== nv.content) { dbData[r.rowIdx][r.cIdx] = nv.content; changed = true; }
+      if (changed) changedRowNumbers.push(r.rowIdx + 1);
     }
 
-    if (changed) {
-      dbSheet.getRange(1, 1, dbData.length, dbData[0].length).setValues(dbData);
+    // 書き戻すのは単元・学習内容の列だけ（数式列を壊さないため）
+    if (changedRowNumbers.length > 0) {
+      p2WriteRowsFromSheetArray_(dbSheet, dbCols, dbData, changedRowNumbers, P2_UNIT_CONTENT_KEYS_);
       SpreadsheetApp.flush();
       invalidateUnitProgressCache_();
     }

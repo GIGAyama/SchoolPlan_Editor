@@ -22,6 +22,11 @@
         clipboardText: null,      // 上記をシステムクリップボードへ書き出したときのテキスト
         undoStack: [],            // Undo履歴
         redoStack: [],            // Redo履歴
+        // 上記の履歴が属するデータの範囲（学級シート名::月曜日）。
+        // 履歴の中身は days 配列そのものなので、別の週・別の学級へ移ったあとに
+        // 「元に戻す」を使うと、その週の内容が丸ごと別の週・学級の内容に置き換わる。
+        // 表示中の範囲と食い違ったら履歴は捨てる（ensureHistoryScope）。
+        historyScope: null,
         dragSource: null,         // D&Dソース {day, period}
         helpModalOpen: false,     // ショートカットヘルプ表示中
         taskViewMode: 'list',     // タスク表示モード: 'list' or 'card'
@@ -433,7 +438,9 @@
     window.addEventListener('beforeunload', function (e) {
         // 固定時間割の未保存は「保存したつもりで転記して前の時間割が入る」原因になるため、
         // 週案の未保存と同じように離脱前に知らせる。
-        if (hasUnsavedChanges() || hasUnsavedTimetableChanges()) {
+        // 閲覧モードのセル操作は少し待ってから自動保存するため、操作直後に閉じると
+        // まだサーバへ届いていない。その分も未保存として扱う。
+        if (hasUnsavedChanges() || hasUnsavedTimetableChanges() || hasPendingViewSave()) {
             e.preventDefault();
             e.returnValue = '';
         }
@@ -751,6 +758,9 @@
             autoSaveAndThen(function () { doLoadWeeklyPlan(); });
             return;
         }
+        // 閲覧モードのセル操作は少し待ってから保存する。待っている分を先に送っておかないと、
+        // 移動先の週を読んでいるあいだに保存が飛び、移動元の週のキャッシュが古いまま残る。
+        flushPendingViewSave();
         doLoadWeeklyPlan();
     }
 
