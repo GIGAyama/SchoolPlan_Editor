@@ -47,6 +47,12 @@ const OK_TREE = {
   'docs/manifest.webmanifest': JSON.stringify({ id: '/Demo_App/', scope: '/Demo_App/', start_url: '/Demo_App/' }),
   'docs/offline.html': '<p>つながっていません</p>',
   'docs/install-hook.js': 'window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); });',
+  // 公開ページ（ポータル・OAuth のホームページ欄からの入口）。
+  // アプリ本体と同じ manifest とアイコンを持ち、インストールの合図も受ける。
+  'docs/about.html': `<head><script src="install-hook.js"></script>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png"></head>
+<body><a href="./">アプリを開く</a></body>`,
   'docs/index.html': `<head><script src="install-hook.js"></script></head>
 <body><img src="a.png" width="64" height="64">
 <script>
@@ -318,4 +324,132 @@ test('stripComments はコメントだけを落とす', () => {
   assert.doesNotMatch(stripComments('<!-- localStorage -->'), /localStorage/);
   // URL の // を壊さない
   assert.match(stripComments('const u = "https://example.com/x";'), /https:\/\/example\.com/);
+});
+
+// ---- 公開ページ（紹介ページ）のインストール導線 ----
+//
+// 公開ページをアプリ本体から紹介ページに差し替えたとき、
+// iOS Safari の「ホーム画面に追加」がアプリではなくブックマークを作るようになった。
+// 目に見える壊れ方をしない（ページは普通に開く）ので、検査で押さえておく。
+
+test('正しい公開ページは拾わない', () => {
+  assert.deepEqual(check(OK_TREE).filter(i => i.code.startsWith('GIGA_LANDING')), []);
+});
+
+test('公開ページに manifest が無ければ拾う', () => {
+  const tree = {
+    ...OK_TREE,
+    'docs/about.html': OK_TREE['docs/about.html']
+      .replace('<link rel="manifest" href="manifest.webmanifest">\n', '')
+  };
+  const found = check(tree).filter(i => i.code === 'GIGA_LANDING_NO_MANIFEST');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'error');
+});
+
+test('コメントアウトされた manifest は「ある」と数えない', () => {
+  const tree = {
+    ...OK_TREE,
+    'docs/about.html': OK_TREE['docs/about.html']
+      .replace('<link rel="manifest" href="manifest.webmanifest">',
+        '<!-- <link rel="manifest" href="manifest.webmanifest"> -->')
+  };
+  assert.ok(codes(check(tree)).includes('GIGA_LANDING_NO_MANIFEST'));
+});
+
+test('公開ページが install-hook.js を読んでいなければ拾う', () => {
+  const tree = {
+    ...OK_TREE,
+    'docs/about.html': OK_TREE['docs/about.html'].replace('<script src="install-hook.js"></script>', '')
+  };
+  assert.ok(codes(check(tree)).includes('GIGA_LANDING_NO_INSTALL_HOOK'));
+});
+
+test('公開ページに apple-touch-icon が無ければ警告する', () => {
+  const tree = {
+    ...OK_TREE,
+    'docs/about.html': OK_TREE['docs/about.html']
+      .replace('<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">', '')
+  };
+  const found = check(tree).filter(i => i.code === 'GIGA_LANDING_NO_APPLE_ICON');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'warning');
+});
+
+test('公開ページの apple-mobile-web-app-capable を拾う', () => {
+  // 古い iOS では manifest を読まないため、この指定があると
+  // 「紹介ページが枠なしで開くだけ」の行き止まりがホーム画面に出来る。
+  const tree = {
+    ...OK_TREE,
+    'docs/about.html': OK_TREE['docs/about.html']
+      .replace('<head>', '<head><meta name="apple-mobile-web-app-capable" content="yes">')
+  };
+  assert.ok(codes(check(tree)).includes('GIGA_LANDING_STANDALONE_META'));
+});
+
+test('「あえて書かない」と説明したコメントは拾わない', () => {
+  const tree = {
+    ...OK_TREE,
+    'docs/about.html': OK_TREE['docs/about.html']
+      .replace('<head>', '<head><!-- apple-mobile-web-app-capable はあえて書かない -->')
+  };
+  assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_LANDING_STANDALONE_META'), []);
+});
+
+// ---- 中央寄せで文字が潰れる ----
+//
+// 実際に「ホーム画面に追加」の案内が iPhone で縦一列の帯になり、読めなくなっていた。
+// 要素は出ていて色も形も正しいので、目視では見落とす。
+
+test('left:50% + translateX(-50%) で幅を決めていなければ拾う', () => {
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+#banner { position: fixed; left: 50%; transform: translateX(-50%); bottom: 12px; max-width: 560px; }
+</style>`
+  };
+  const found = check(tree).filter(i => i.code === 'GIGA_FIXED_CENTER_SQUEEZE');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'error');
+});
+
+test('max-width だけでは「幅を決めた」ことにならない', () => {
+  // max-width は上限を決めるだけで、使える幅（包む枠 − left）は半分のまま。
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+#toast { position: absolute; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 24px); }
+</style>`
+  };
+  assert.ok(codes(check(tree)).includes('GIGA_FIXED_CENTER_SQUEEZE'));
+});
+
+test('left と right の両方を決めていれば拾わない', () => {
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+#banner { position: fixed; left: 12px; right: 12px; margin: 0 auto; max-width: 560px; }
+</style>`
+  };
+  assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_FIXED_CENTER_SQUEEZE'), []);
+});
+
+test('width を決めてあれば拾わない', () => {
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+#banner { position: fixed; left: 50%; transform: translateX(-50%); width: 320px; }
+</style>`
+  };
+  assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_FIXED_CENTER_SQUEEZE'), []);
+});
+
+test('position を指定していない中央寄せは拾わない', () => {
+  const tree = {
+    ...OK_TREE,
+    'App.html': OK_TREE['App.html'] + `<style>
+.centered { left: 50%; transform: translateX(-50%); }
+</style>`
+  };
+  assert.deepEqual(check(tree).filter(i => i.code === 'GIGA_FIXED_CENTER_SQUEEZE'), []);
 });

@@ -73,6 +73,138 @@
 
 <body>
 
+    <!-- ===== 入口ページへ戻す案内（PWAシェルの外で開かれたときだけ出る） =====
+         iOS Safari の「ホーム画面に追加」は *いま開いているページ* を登録する。
+         この /exec ページを追加してもアプリにはならない ── アイコンが付かず
+         （タイトルの一文字が出るだけ）、開いてもアドレスバーと
+         「Google ではなく他のユーザーが作成した」表示が残ったままになる。
+         外枠は Google のページなので、GAS 側から apple-touch-icon も manifest も
+         差し込めない。つまりここでは直せず、入口ページへ戻ってもらうしかない。
+         ログイン用に「新しいタブで開く」を押した先生が、そのタブのまま使い続け、
+         そこからホーム画面に追加してしまうのが実際に起きた経路。
+         URL は 00_config.gs の PWA_SHELL_URL。空なら出さない。 -->
+    <div id="shellHintBar" hidden data-shell-url="<?= PWA_SHELL_URL ?>">
+        <!-- アイコンは素の SVG で置く。Material Symbols は「実際に使われている名前」だけを
+             抜き出したサブセットなので、ここで新しい名前を使うと
+             フォントを作り直すまで合字が成立せず、画面に "install_mobile" と
+             英単語がそのまま出てしまう。 -->
+        <svg class="shell-hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="6" y="2" width="12" height="20" rx="2.5" />
+            <path d="M12 7v7" />
+            <path d="M9 11l3 3 3-3" />
+        </svg>
+        <div class="shell-hint-text">
+            このページをホーム画面に追加しても、<b>アプリにはなりません</b>。<br>
+            アプリのように全画面で使うには、入口ページから追加してください。
+        </div>
+        <a class="shell-hint-open" id="shellHintOpenBtn" href="#">入口ページを開く</a>
+        <button class="shell-hint-close" id="shellHintCloseBtn" type="button" aria-label="この案内を閉じる">×</button>
+    </div>
+    <style>
+        #shellHintBar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            padding-top: calc(10px + env(safe-area-inset-top, 0px));
+            background: #fef7e0;
+            color: #3c2f00;
+            border-bottom: 1px solid #f0d9a0;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        /* hidden 属性が display:flex に負けないようにする。
+           これが無いと、出す条件を満たしていなくても常に表示されてしまう。 */
+        #shellHintBar[hidden] {
+            display: none;
+        }
+
+        .shell-hint-icon {
+            flex: none;
+            width: 22px;
+            height: 22px;
+            color: #9a6a00;
+        }
+
+        .shell-hint-text {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        /* 指で押せる大きさ（44px）を守る。 */
+        .shell-hint-open {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            min-height: 44px;
+            padding: 0 14px;
+            border-radius: 8px;
+            background: #1a73e8;
+            color: #fff;
+            font-weight: 700;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .shell-hint-close {
+            flex: none;
+            width: 44px;
+            height: 44px;
+            border: 0;
+            border-radius: 8px;
+            background: transparent;
+            color: #5f4b00;
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        @media (max-width: 560px) {
+            #shellHintBar {
+                flex-wrap: wrap;
+            }
+
+            .shell-hint-text {
+                flex: 1 1 100%;
+                order: 2;
+            }
+        }
+    </style>
+    <script>
+        (function () {
+            var bar = document.getElementById('shellHintBar');
+            if (!bar) return;
+            var shellUrl = bar.getAttribute('data-shell-url') || '';
+            if (!/^https:\/\//.test(shellUrl)) return;   // 未設定なら何もしない
+
+            // iPadOS 13 以降の Safari は UA が Mac と同じになるため、
+            // タッチ対応（maxTouchPoints）との組み合わせで iPad と判定する。
+            var isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+            // iOS だけに出す。「ホーム画面に追加」しか道が無く、しかも必ず成功して
+            // しまうため、黙って壊れたショートカットが出来るのは iOS だけだから。
+            if (!isIos) return;
+
+            var HIDE_KEY = 'schoolPlanNote.shellHintDismissed';
+            try { if (localStorage.getItem(HIDE_KEY) === '1') return; } catch (e) { }
+
+            document.getElementById('shellHintOpenBtn').href = shellUrl;
+            document.getElementById('shellHintCloseBtn').addEventListener('click', function () {
+                bar.hidden = true;
+                try { localStorage.setItem(HIDE_KEY, '1'); } catch (e) { }
+            });
+
+            // シェルの中にいるかは、シェルからの応答（shellAck）で分かる。
+            // 応答は非同期に届くので、少し待ってから決める。待たずに判定すると、
+            // 正しくシェルで開いている先生にも案内を出してしまう。
+            setTimeout(function () {
+                if (window.__hasPwaShell) return;
+                bar.hidden = false;
+            }, 2500);
+        })();
+    </script>
+
     <!-- ===== アプリシェル ===== -->
     <div id="app">
 

@@ -168,6 +168,27 @@ export function runGigaV5Checks(rootDir, files, options = {}) {
         'rt（ふりがな）の色を決め打ちしています。色のついた面では継がせてください（§4）。',
         file, lineNumberAt(body, match.index ?? 0)));
     }
+    // 中央寄せの決まり文句 left:50% + translateX(-50%) は、幅を決めないと文字を潰す（§2-6）
+    //
+    // position:fixed/absolute で width が auto のとき、使える幅は「包む枠 − left」で決まる。
+    // left:50% だと画面の半分しか使えず、そこへ収めようとして日本語が
+    // 1文字ずつ改行される。transform は見た目をずらすだけで、この計算には効かない。
+    // 実際に「ホーム画面に追加」の案内が縦一列の帯になり、読めなくなっていた。
+    // 見た目では気づきにくい（要素は出ているし、色も形も正しい）ので検査で押さえる。
+    // left と right の両方を決めて margin:auto で寄せるか、width を決めれば直る。
+    for (const match of withoutFallback.matchAll(/\{[^{}]*\}/g)) {
+      const block = match[0];
+      if (!/position\s*:\s*(fixed|absolute)/.test(block)) continue;
+      if (!/(?:^|[;{\s])left\s*:\s*50%/.test(block)) continue;
+      if (!/transform\s*:[^;]*translateX\(\s*-\s*50%/.test(block)) continue;
+      // width か right が決まっていれば潰れない（max-width は幅を決めないので除く）
+      if (/(?:^|[;{\s])(?:width|inline-size|right)\s*:/.test(block)) continue;
+      issues.push(issue('error', 'GIGA_FIXED_CENTER_SQUEEZE',
+        'position:fixed/absolute を left:50% + translateX(-50%) で中央に置きながら、幅を決めていません。'
+        + '使える幅が画面の半分になり、文章が1文字ずつ改行されます。'
+        + 'left と right の両方を決めて margin:auto で寄せてください（§2-6）。',
+        file, lineNumberAt(withoutFallback, match.index ?? 0)));
+    }
     // prefers-reduced-motion で 0 にすると fill-mode: forwards が壊れ、中身が消える
     for (const match of body.matchAll(/prefers-reduced-motion[\s\S]{0,400}?animation-duration\s*:\s*0m?s/g)) {
       issues.push(issue('error', 'GIGA_REDUCED_MOTION_ZERO',
@@ -305,6 +326,46 @@ export function runGigaV5Checks(rootDir, files, options = {}) {
           '<img> に width/height がありません（読み込み中に画面がガタつきます・§2-6）。',
           shellIndex, lineNumberAt(source, match.index ?? 0)));
       }
+    }
+  }
+
+  // 公開ページ（紹介ページ）にもインストールの導線を残す（§3-2）
+  //
+  // ポータルや OAuth の「アプリのホームページ」欄からの入口が、アプリ本体
+  // （index.html）ではなく紹介ページ（about.html）になった。先生が最初に開くのが
+  // このページなのに manifest が無いと、iOS Safari の「ホーム画面に追加」は
+  // *紹介ページのブックマーク* を作る。アイコンはページの縮小画像、開いても
+  // Safari の中の紹介ページで、アプリにはならない。Chromium 系でも manifest が
+  // 無ければ beforeinstallprompt が出ないため、インストールの導線がまるごと消える。
+  // 公開ページを差し替えるたびに同じ事故が起きるので、検査で押さえる。
+  const landingPage = path.posix.join(docsDir, 'about.html');
+  if (fileSet.has(landingPage)) {
+    // コメントは落として見る。「なぜ書かないか」の注意書きに反応してしまうし、
+    // コメントアウトされた <link> を「ある」と数えてもいけない。
+    const source = stripComments(read(landingPage));
+    if (!/<link\b[^>]*rel\s*=\s*["']manifest["']/i.test(source)) {
+      issues.push(issue('error', 'GIGA_LANDING_NO_MANIFEST',
+        '公開ページ（紹介ページ）に manifest がありません。iOS Safari の「ホーム画面に追加」が'
+        + 'アプリではなくこのページのブックマークを作ります（§3-2）。', landingPage));
+    }
+    if (!/<script[^>]+src=["'][^"']*install-hook\.js["']/.test(source)) {
+      issues.push(issue('error', 'GIGA_LANDING_NO_INSTALL_HOOK',
+        '公開ページ（紹介ページ）が install-hook.js を読み込んでいません。'
+        + 'Chromium 系のインストールの合図を取りこぼします（§3-2）。', landingPage));
+    }
+    if (!/rel\s*=\s*["']apple-touch-icon["']/i.test(source)) {
+      issues.push(issue('warning', 'GIGA_LANDING_NO_APPLE_ICON',
+        '公開ページ（紹介ページ）に apple-touch-icon がありません。'
+        + 'iOS でホーム画面に載るアイコンがページの縮小画像になります（§3-2）。', landingPage));
+    }
+    // apple-mobile-web-app-capable は、manifest を読まない古い iOS では
+    // 「いま開いているページを枠なしで開く」指定になる。紹介ページに書くと、
+    // ホーム画面のアイコンが紹介ページの行き止まりになる。
+    if (/name\s*=\s*["']apple-mobile-web-app-capable["']/i.test(source)) {
+      issues.push(issue('error', 'GIGA_LANDING_STANDALONE_META',
+        '公開ページ（紹介ページ）に apple-mobile-web-app-capable があります。'
+        + '古い iOS では紹介ページ自体が枠なしで開く行き止まりになります。'
+        + 'アプリの入口（index.html）へ案内してください（§3-2）。', landingPage));
     }
   }
 
