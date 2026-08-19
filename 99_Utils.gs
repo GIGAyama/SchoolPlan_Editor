@@ -461,6 +461,33 @@ function writeToLog_(level, message) {
   }
 }
 
+/**
+ * Google API のエラー本文から「Cloud プロジェクトで API がオンになっていない」を
+ * 見分け、何をすればよいかを日本語で添えます。
+ *
+ * 組み込みサービス（SpreadsheetApp / DriveApp）を使っていた頃は、Apps Script が
+ * 裏で処理していたためプロジェクト側の有効化が要りませんでした。REST を直接
+ * 呼ぶようになったので、初回デプロイでここに引っかかります。Google が返す英文
+ * だけだと権限やスコープの問題と紛らわしいので、言い換えて案内します。
+ *
+ * @param {string} apiName 画面に出す API 名（例: 'Google Sheets API'）
+ * @param {number} code HTTP ステータス
+ * @param {string} message API が返した本文
+ * @returns {string} 利用者・管理者向けのメッセージ
+ */
+function describeApiDisabledError_(apiName, code, message) {
+  const text = String(message || '');
+  const disabled = code === 403
+    && (/has not been used in project/i.test(text) || /it is disabled/i.test(text));
+  if (!disabled) return `${apiName} (${code}): ${text}`;
+
+  return `${apiName} が Google Cloud プロジェクトでオンになっていません。`
+    + 'Cloud Console の「API とサービス」→「ライブラリ」で ' + apiName + ' を有効にしてから、'
+    + '数分待って開き直してください。'
+    + '（これは権限の問題ではなく、プロジェクト側の設定です。利用者に求める権限は増えません）'
+    + `\n\n元のメッセージ: ${text}`;
+}
+
 // ============================================================
 // ===== デプロイの取りこぼし検出 =====
 // ============================================================

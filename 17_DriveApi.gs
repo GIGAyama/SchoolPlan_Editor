@@ -47,7 +47,8 @@ function driveFetch_(url, options, raw) {
       const parsed = JSON.parse(message);
       if (parsed && parsed.error && parsed.error.message) message = parsed.error.message;
     } catch (ignore) { /* JSON でなければ本文をそのまま使う */ }
-    throw new Error(`Drive API (${code}): ${message}`);
+    // 「API がオンになっていない」は権限の問題と紛らわしいので言い換える
+    throw new Error(describeApiDisabledError_('Google Drive API', code, message));
   }
   if (raw) return response;
   const text = response.getContentText();

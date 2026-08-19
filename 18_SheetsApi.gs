@@ -90,7 +90,8 @@ function sheetsFetch_(url, options) {
         const parsed = JSON.parse(message);
         if (parsed && parsed.error && parsed.error.message) message = parsed.error.message;
       } catch (ignore) { /* JSON でなければ本文をそのまま使う */ }
-      throw new Error(`Sheets API (${code}): ${message}`);
+      // 「API がオンになっていない」は権限の問題と紛らわしいので言い換える
+      throw new Error(describeApiDisabledError_('Google Sheets API', code, message));
     }
     Utilities.sleep(Math.pow(2, attempt) * 1000);
   }

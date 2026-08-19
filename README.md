@@ -298,8 +298,12 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 `clasp` を使う場合は、必要なOAuthスコープ（メール送信 `script.send_mail` などを含む）を宣言した `appsscript.json` も一緒に反映してください。GASエディタで直接編集する場合は「プロジェクトの設定」で「`appsscript.json` マニフェスト ファイルをエディタで表示する」を有効にし、本リポジトリの `appsscript.json` の `oauthScopes` と `dependencies` を反映します。
     
 4.  **Google サービスの有効化** GASエディタの「サービス」から **Google Classroom API**（`Classroom` / v1）を追加します。前の手順で `appsscript.json` の `dependencies` を反映していれば、この追加はすでに済んでいます。
-    メール送信は組み込みサービス（`MailApp`）、スプレッドシートは Sheets REST API v4（`18_SheetsApi.gs`）、Drive は REST API v3（`17_DriveApi.gs`）の直接呼び出しで扱うため、「サービス」への追加は不要です（`appsscript.json` の `oauthScopes` だけで動作します）。
+    メール送信は組み込みサービス（`MailApp`）、スプレッドシートは Sheets REST API v4（`18_SheetsApi.gs`）、Drive は REST API v3（`17_DriveApi.gs`）の直接呼び出しで扱うため、Apps Script の「サービス」への追加は不要です。
     組み込みの `SpreadsheetApp` / `DriveApp` は使いません。使うと `spreadsheets` / `drive` という広いスコープを要求してしまうためです。
+
+    > ⚠️ **ただし Cloud Console 側では、REST で呼ぶ API を有効にする必要があります。**
+    > **Google Sheets API** と **Google Drive API**、および **Google Picker API** をオンにしてください（[C1](docs/C1_GCP_PROJECT_SETUP.md) ステップ2）。
+    > オンにし忘れると「`Sheets API (403): ... has not been used in project ... or it is disabled`」で止まります。
     
 5.  **Webアプリとしてデプロイ** 「デプロイ」>「新しいデプロイ」を選択し、種類を「ウェブアプリ」にしてデプロイします。発行されたURLにアクセスしてアプリを起動します。
     

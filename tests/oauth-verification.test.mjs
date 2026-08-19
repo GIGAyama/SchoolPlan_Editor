@@ -124,3 +124,28 @@ test('ファイルのコピー漏れを起動時に名指しで知らせる', ()
   assert.match(core, /status\.deploymentError/);
   assert.match(core, /function showDeploymentError/);
 });
+
+test('API がオンになっていないエラーを、権限の問題と取り違えないように言い換える', () => {
+  // 組み込みサービスを使っていた頃は API の有効化が要らなかったため、
+  // REST へ移した初回デプロイで必ずここに引っかかる。Google の英文だけだと
+  // スコープや権限の問題と紛らわしい。
+  const utils = fs.readFileSync('99_Utils.gs', 'utf8');
+  assert.match(utils, /function describeApiDisabledError_\(/);
+  assert.match(utils, /has not been used in project/);
+  assert.match(utils, /it is disabled/);
+  // 「権限ではなくプロジェクト側の設定」だと明示する
+  assert.match(utils, /権限の問題ではなく/);
+
+  for (const [file, apiName] of [['18_SheetsApi.gs', 'Google Sheets API'],
+                                 ['17_DriveApi.gs', 'Google Drive API']]) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.ok(source.includes(`describeApiDisabledError_('${apiName}'`),
+      `${file} が API 無効化の案内を使っていない`);
+  }
+
+  // 有効化が要る API は手順書にも載っている必要がある
+  const setup = fs.readFileSync('docs/C1_GCP_PROJECT_SETUP.md', 'utf8');
+  for (const api of ['Google Sheets API', 'Google Drive API', 'Google Picker API']) {
+    assert.ok(setup.includes(api), `C1 に ${api} の有効化手順がありません`);
+  }
+});

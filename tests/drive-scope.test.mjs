@@ -58,7 +58,8 @@ test('Sheets ラッパーは OAuth トークン付きで REST API v4 を呼ぶ',
   assert.match(api, /ScriptApp\.getOAuthToken\(\)/);
   // 2xx 以外を握りつぶすと、権限不足が「成功」に見えてしまう
   assert.match(api, /muteHttpExceptions:\s*true/);
-  assert.match(api, /throw new Error\(`Sheets API/);
+  // 「API がオンになっていない」は権限の問題と紛らわしいので言い換えて投げる
+  assert.match(api, /throw new Error\(describeApiDisabledError_\('Google Sheets API'/);
 });
 
 test('マニフェストがフル drive スコープを要求していない', () => {
@@ -82,7 +83,7 @@ test('Drive ラッパーは OAuth トークン付きで REST API v3 を呼ぶ', 
   assert.match(api, /ScriptApp\.getOAuthToken\(\)/);
   // 2xx 以外を握りつぶすと、権限不足が「成功」に見えてしまう
   assert.match(api, /muteHttpExceptions:\s*true/);
-  assert.match(api, /throw new Error\(`Drive API/);
+  assert.match(api, /throw new Error\(describeApiDisabledError_\('Google Drive API'/);
 });
 
 test('バイナリのアップロードを文字列連結で組み立てていない', () => {
