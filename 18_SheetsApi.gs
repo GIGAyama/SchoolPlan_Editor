@@ -53,6 +53,52 @@ function sheetsResetCache_() {
   SHEETS_CACHE_ = {};
 }
 
+// --- シート構成の持ち越しキャッシュ ---------------------------------------
+//
+// シート構成（どんな名前のシートが何番目にあるか）は、画面の操作1つごとに
+// 必ず1回取りに行っていた。google.script.run は呼び出しごとに実行が分かれるので、
+// 上の SHEETS_CACHE_ は次の呼び出しには残らないためである。
+//
+// これが「1分あたりの読み取り回数」の上限に効いていた。週の移動・時数の集計・
+// 単元の進捗・タスクの件数……と画面が裏で何度もサーバを呼ぶため、
+// 短時間に操作すると 429（Quota exceeded）が出る（実際に報告があった）。
+//
+// シート構成はめったに変わらないので、実行をまたいで持ち越す。
+// **利用者ごとのキャッシュに入れる**こと。スクリプト全体のキャッシュに入れると、
+// 1つのURLを多数の先生へ配る運用で他人のシート構成が見えてしまう。
+const SHEETS_META_CACHE_TTL_SEC = 300; // 5分
+const SHEETS_META_CACHE_MAX_BYTES = 90000; // CacheService の上限（100KB）に余裕を持たせる
+
+function sheetsMetaCacheKey_(id) {
+  return 'sheetsMeta:' + id;
+}
+
+/** 持ち越したシート構成を読みます。無ければ null。 */
+function sheetsReadCachedMeta_(id) {
+  try {
+    const raw = CacheService.getUserCache().get(sheetsMetaCacheKey_(id));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null; // キャッシュが使えなくても、取りに行けば動く
+  }
+}
+
+/** シート構成を持ち越します。 */
+function sheetsWriteCachedMeta_(id, meta) {
+  try {
+    const text = JSON.stringify(meta);
+    if (text.length > SHEETS_META_CACHE_MAX_BYTES) return;
+    CacheService.getUserCache().put(sheetsMetaCacheKey_(id), text, SHEETS_META_CACHE_TTL_SEC);
+  } catch (e) { /* 入らなくても動作に影響しない */ }
+}
+
+/** 持ち越したシート構成を捨てます（構成を変えた後始末）。 */
+function sheetsDropCachedMeta_(id) {
+  try {
+    CacheService.getUserCache().remove(sheetsMetaCacheKey_(id));
+  } catch (e) { /* 消せなくても、TTL で消える */ }
+}
+
 // ============================================================
 // ===== 通信 =====
 // ============================================================
@@ -64,6 +110,30 @@ function sheetsResetCache_() {
  * @param {Object} [options] UrlFetchApp のオプション（headers は上書きされます）
  * @returns {Object} パース済みのレスポンス
  */
+/**
+ * 再試行までの待ち時間を決めます。
+ *
+ * 429 は「1分あたりの読み取り回数」の上限に当たったもので、**待たないと直りません。**
+ * 1秒・2秒・4秒では上限の窓が明けないまま4回とも失敗し、先生には
+ * 英語の "Quota exceeded" だけが出ていました（実際にこの報告がありました）。
+ * 5xx（サーバ側の一時的な不調）は短い待ちで直ることが多いので、従来どおりにします。
+ *
+ * Apps Script の実行時間には上限（6分）があるため、待ちは長くしすぎないこと。
+ * Retry-After がある場合はそれを尊重します。
+ * @param {number} code HTTP ステータス
+ * @param {GoogleAppsScript.URL_Fetch.HTTPResponse} response
+ * @param {number} attempt 0 始まりの試行回数
+ * @returns {number} 待つミリ秒
+ */
+function sheetsRetryWaitMs_(code, response, attempt) {
+  const headers = (response && response.getHeaders && response.getHeaders()) || {};
+  const retryAfter = parseInt(headers['Retry-After'] || headers['retry-after'], 10);
+  if (!isNaN(retryAfter) && retryAfter > 0) return Math.min(retryAfter * 1000, 30000);
+  // 429 は分単位の枠が空くまで待つ必要がある（5秒 → 15秒 → 30秒）
+  if (code === 429) return [5000, 15000, 30000][Math.min(attempt, 2)];
+  return Math.pow(2, attempt) * 1000;
+}
+
 function sheetsFetch_(url, options) {
   const opts = options || {};
   const MAX_ATTEMPTS = 4;
@@ -90,10 +160,10 @@ function sheetsFetch_(url, options) {
         const parsed = JSON.parse(message);
         if (parsed && parsed.error && parsed.error.message) message = parsed.error.message;
       } catch (ignore) { /* JSON でなければ本文をそのまま使う */ }
-      // 「API がオンになっていない」は権限の問題と紛らわしいので言い換える
+      // 「API がオンになっていない」「混み合っている」は、権限の問題と紛らわしいので言い換える
       throw new Error(describeApiDisabledError_('Google Sheets API', code, message));
     }
-    Utilities.sleep(Math.pow(2, attempt) * 1000);
+    Utilities.sleep(sheetsRetryWaitMs_(code, response, attempt));
   }
   throw new Error('Sheets API: 再試行の上限に達しました');
 }
@@ -317,18 +387,28 @@ function sheetsExportSheetAsPdf_(spreadsheetId, sheetId, fileName) {
  */
 function sheetsOpenById_(spreadsheetId) {
   const id = String(spreadsheetId);
-  if (!SHEETS_CACHE_[id]) SHEETS_CACHE_[id] = { meta: null, grids: {} };
+  // metaFromCache … シート構成を持ち越しキャッシュから読んだか（古い可能性があるか）
+  if (!SHEETS_CACHE_[id]) SHEETS_CACHE_[id] = { meta: null, metaFromCache: false, grids: {} };
   const state = SHEETS_CACHE_[id];
 
-  /** シート構成を取り直します。 */
+  /** シート構成をサーバから取り直します。 */
   function loadMeta() {
     const fields = encodeURIComponent(
       'spreadsheetId,properties(title,timeZone),sheets.properties(sheetId,title,index,hidden,gridProperties)');
     state.meta = sheetsFetch_(`${SHEETS_API_BASE}/${encodeURIComponent(id)}?fields=${fields}`);
+    state.metaFromCache = false;
+    sheetsWriteCachedMeta_(id, state.meta);
     return state.meta;
   }
   function meta() {
-    return state.meta || loadMeta();
+    if (state.meta) return state.meta;
+    const cached = sheetsReadCachedMeta_(id);
+    if (cached) {
+      state.meta = cached;
+      state.metaFromCache = true;
+      return state.meta;
+    }
+    return loadMeta();
   }
   function timeZone() {
     return (meta().properties && meta().properties.timeZone) || Session.getScriptTimeZone() || 'Asia/Tokyo';
@@ -336,6 +416,22 @@ function sheetsOpenById_(spreadsheetId) {
   /** 構成が変わったので、次に触ったときに取り直させます。 */
   function invalidateMeta() {
     state.meta = null;
+    state.metaFromCache = false;
+    sheetsDropCachedMeta_(id);
+  }
+  /**
+   * 持ち越したシート構成が古いせいで「見つからない」と誤判定していないか確かめます。
+   *
+   * アプリの外（スプレッドシートを直接開いて）シートを足したり名前を変えたりすると、
+   * 持ち越した構成は古くなります。**「無い」と答える前に一度だけ取り直す**ことで、
+   * 古いまま「シートが見つかりません」と言い切ってしまうのを防ぎます。
+   * @returns {boolean} 取り直したなら true
+   */
+  function refreshIfStale() {
+    if (!state.metaFromCache) return false;
+    sheetsDropCachedMeta_(id);
+    loadMeta();
+    return true;
   }
 
   const spreadsheet = {
@@ -356,7 +452,10 @@ function sheetsOpenById_(spreadsheetId) {
      * @returns {Object|null} Sheet 相当のオブジェクト
      */
     getSheetByName: function (name) {
-      const found = (meta().sheets || []).filter(s => s.properties.title === name)[0];
+      const pick = () => (meta().sheets || []).filter(s => s.properties.title === name)[0];
+      let found = pick();
+      // 見つからないときだけ、持ち越した構成が古い可能性を潰してから答える
+      if (!found && refreshIfStale()) found = pick();
       return found ? sheetsMakeSheet_(spreadsheet, state, found.properties, invalidateMeta) : null;
     },
 

@@ -481,6 +481,16 @@ function writeToLog_(level, message) {
  */
 function describeApiDisabledError_(apiName, code, message) {
   const text = String(message || '');
+
+  // 429（レート制限）は、待てば直る一時的なもの。原文は英語で
+  // 「Quota exceeded for quota metric 'Read requests' ...」とだけ出るため、
+  // 先生には「壊れた」ようにしか見えない。何をすればよいかを日本語で先に書く。
+  if (code === 429) {
+    return `${apiName} への読み書きが一時的に混み合っています（短時間に多く操作したときに出ます）。`
+      + '**1分ほど待ってから、もう一度お試しください。** データは失われていません。'
+      + `\n\n元のメッセージ: ${text}`;
+  }
+
   const disabled = code === 403
     && (/has not been used in project/i.test(text) || /it is disabled/i.test(text));
   if (!disabled) return `${apiName} (${code}): ${text}`;

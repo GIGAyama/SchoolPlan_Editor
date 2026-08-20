@@ -593,7 +593,7 @@
                 endSaveRequest();
                 showToast('error', '自動保存エラー: ' + e.message + ' 手動で保存してください。');
             })
-            .saveWeeklyPlanDataV2(STATE.mondayStr, days, STATE.weekData.revision);
+            .saveWeeklyPlanDataV2(displayedWeekMondayStr(), days, STATE.weekData.revision);
     }
 
     function saveWeeklyPlan() {
@@ -643,7 +643,7 @@
                 btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 showToast('error', '通信エラー: ' + e.message);
             })
-            .saveWeeklyPlanDataV2(STATE.mondayStr, days, STATE.weekData.revision);
+            .saveWeeklyPlanDataV2(displayedWeekMondayStr(), days, STATE.weekData.revision);
     }
 
     // 閲覧モードのセル操作（右クリックメニュー・D&D）の自動保存。
@@ -656,7 +656,8 @@
     function persistViewMutation() {
         if (STATE.editMode || !STATE.weekData || !STATE.mondayStr) return;
         var weekData = STATE.weekData;
-        var mondayStr = STATE.mondayStr;
+        // 送るのは画面に出ているデータなので、送り先もそのデータの週にする
+        var mondayStr = displayedWeekMondayStr();
         // 学級を切り替えたあとでも「その週・その学級」のキャッシュを更新できるよう、
         // キーは要求を組み立てた時点のものを使う。
         var cacheKey = p2WeekCacheKey(mondayStr);
