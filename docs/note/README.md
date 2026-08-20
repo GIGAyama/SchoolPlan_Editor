@@ -12,7 +12,7 @@ docs/note/
 ## 貼るまえに直すところ
 
 - タイトル行の `#◯` が連載番号のままです。ここだけ実際の番号に直してください。推測で埋めていません。
-- 記事に出てくるURLは `https://gigayama.github.io/SchoolPlan_Editor/` です。GitHub Pages を有効にしていない場合は、GASのウェブアプリURLに差しかえてください。
+- 記事に出てくるURLは `https://schoolplan-editor.giga-school.com/` です。GitHub Pages を有効にしていない場合は、GASのウェブアプリURLに差しかえてください。
 
 ## note に貼る手順
 
@@ -65,7 +65,7 @@ docs/note/
 | バックアップは最新4件・30日 | `13_DataProtection.gs` の `P3_BACKUP_MAX_COUNT_` と `P3_BACKUP_RETENTION_DAYS_` |
 | ごみ箱は30日 | `13_DataProtection.gs` の `P3_TRASH_RETENTION_DAYS_` |
 | ドライブへのアクセスは `drive.file` | `appsscript.json` の `oauthScopes` |
-| 許可が必要なアドレス | `docs/index.html`（script.google.com）、`docs/manifest.webmanifest`（gigayama.github.io）、`App.html`（apis.google.com）、`08_Gemini.gs`（generativelanguage.googleapis.com） |
+| 許可が必要なアドレス | `docs/index.html`（script.google.com）、`docs/manifest.webmanifest`（schoolplan-editor.giga-school.com）、`App.html`（apis.google.com）、`08_Gemini.gs`（generativelanguage.googleapis.com） |
 | 3年生の標準時数 | `07_WebApp.gs` の `getStandardHoursMaster` |
 
 画面に映っている学級名、単元名、時数、タスクはすべてサンプルです。実在の学校のデータではありません。
