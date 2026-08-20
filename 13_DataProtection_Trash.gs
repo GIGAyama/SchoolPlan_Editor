@@ -195,7 +195,10 @@ function restoreTrashItemFromWeb(trashId) {
       sheet.getRange(targetRow, 1, 1, 5).setValues([payload.values || ['', '', '', '', '']]);
       invalidateUnitProgressCache_();
     } else if (type === 'newsletter') {
-      const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
+      // シートごと消えていても戻せるように、無ければ作る（07_WebApp.gs 参照）。
+      const sheet = (typeof initNewsletterSheet_ === 'function')
+        ? initNewsletterSheet_(ss)
+        : ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
       if (!sheet) throw new Error('学級通信データシートが見つかりません。');
       const appendRow = sheet.getLastRow() + 1;
       const desiredRow = parseInt(payload.originalRow, 10);

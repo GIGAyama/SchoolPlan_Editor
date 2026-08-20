@@ -48,6 +48,9 @@
         taskDataLoaded: false,         // タスク初期ロード済み
         taskLoading: false,            // タスク二重呼び出し防止フラグ
         aiTaskPdfUIReady: false,       // タスク抽出コンソールのPDF配線済み
+        pdfImportUIReady: false,       // PDF読み込みのドロップゾーン配線済み
+                                       // （起動時に2か所から呼ばれるため。二重に配線すると
+                                       //   ファイル選択のダイアログが二重に開く）
         // 各ビューの作業データ／編集状態（旧・散在グローバルを集約）
         pickerApiLoaded: false,        // Google Picker API 読込済み
         currentPickerType: null,       // 現在開いている Picker の種別

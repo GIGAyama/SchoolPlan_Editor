@@ -379,6 +379,11 @@ function initializeNewDatabase_(ss) {
     if (typeof initTaskSheet_ === 'function') initTaskSheet_(ss);
   } catch (e) { /* タスクシートは遅延生成でも動くため、失敗しても致命的ではない */ }
 
+  // 5) 「学級通信データ」シート（配布用テンプレートにしか無く、作る処理が抜けていた）
+  try {
+    if (typeof initNewsletterSheet_ === 'function') initNewsletterSheet_(ss);
+  } catch (e) { /* 保存時にも作られるため、失敗しても致命的ではない */ }
+
   return dbSheet;
 }
 

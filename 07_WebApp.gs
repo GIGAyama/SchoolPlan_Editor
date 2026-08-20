@@ -835,6 +835,35 @@ function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
 // ===================================================
 
 /**
+ * 「学級通信データ」シートが無ければ作ります。
+ *
+ * このシートは、配布用テンプレートを複製してデータベースを作っていた頃の名残で、
+ * どこにも作る処理がありませんでした。いまはテンプレートが無くても
+ * アプリがデータベースを組み立てられる（11_Tenant.gs の initializeNewDatabase_）ため、
+ * その方法で作ったデータベースにはこのシートがありません。
+ * その状態で学級通信を保存しようとすると
+ *   「学級通信データ」シートが見つかりません
+ * と出て保存できませんでした（実際にこの報告がありました）。
+ *
+ * タスクシート（02_Database.gs の initTaskSheet_）と同じく、使うときに作ります。
+ * @param {Object} ss スプレッドシート（18_SheetsApi.gs のファサード）
+ * @returns {Object} 「学級通信データ」シート
+ */
+function initNewsletterSheet_(ss) {
+  let sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet(SHEET_NAME_NEWSLETTER_DATA);
+  // 5列構成。getNewsletterSaveList() は先頭の見出しが ID かどうかで新旧の形式を見分ける。
+  const headers = ['ID', 'Title', 'Date', 'FileId', 'TargetWeek'];
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, headers.length).setBackground('#1a73e8').setFontColor('white').setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  logInfo(`「${SHEET_NAME_NEWSLETTER_DATA}」シートを新規作成しました。`);
+  return sheet;
+}
+
+/**
  * [Web API] 学級通信のブロックデータをDrive+シートに保存します。
  * シート列構成: ID | Title | Date | FileId | TargetWeek (5列)
  * @param {string} title タイトル
@@ -849,8 +878,8 @@ function saveNewsletterData(title, mondayStr, jsonString) {
       jsonString: { type: 'string', required: true, maxLength: 2000000 }
     });
     const ss = getSs_();
-    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
-    if (!sheet) throw new Error(`「${SHEET_NAME_NEWSLETTER_DATA}」シートが見つかりません`);
+    // 無ければ作る。テンプレートを使わずに作ったデータベースには最初から無いため。
+    const sheet = initNewsletterSheet_(ss);
 
     // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
     // フォルダも作らず、マイドライブ直下にアプリ所有ファイルとして作る
