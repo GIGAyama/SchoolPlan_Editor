@@ -916,6 +916,27 @@
         return JSON.stringify(current) !== JSON.stringify(baseline);
     }
 
+    /**
+     * いま画面に出ているデータが、どの週のものかを返します。**保存先はこれを使うこと。**
+     *
+     * STATE.mondayStr は「これから表示したい週」で、週移動（navigateWeek / jumpToDate /
+     * jumpToWeek / jumpToSearchResult）が読み込みより先に書き換えます。移動先の週が
+     * 届くまでのあいだ、画面には移動元の週が出たままです。
+     *
+     * この期間に保存すると、送り先だけ移動先の週になり、中身は移動元の週のまま届きます。
+     * サーバは「その週に含まれない日付が送られました」と正しく弾くため、保存できません。
+     * しかも編集モードでは、移動時の自動保存がこれで失敗して読み込みまで止まるため、
+     * 画面は移動元の週のまま・STATE.mondayStr は移動先、という食い違いが残り、
+     * 再読み込みするまで保存できなくなります（実際にこの不具合が起きました）。
+     *
+     * 画面に出ているデータの週は、そのデータ自身（サーバ応答の mondayDateStr）が持っています。
+     * @returns {string} 表示中のデータが属する週の月曜日（取れなければ STATE.mondayStr）
+     */
+    function displayedWeekMondayStr() {
+        if (STATE.weekData && STATE.weekData.mondayDateStr) return STATE.weekData.mondayDateStr;
+        return STATE.mondayStr;
+    }
+
     // ===== 保存系の状態変数 =====
     // autoSaveAndThen / saveWeeklyPlan は App_Js_14_MultiClass(V2)で定義され、
     // App_Js_15_DataProtection_Overrides(保護版)が最終実装になる。
@@ -1106,7 +1127,7 @@
                         showToast('error', '通信エラー: ' + e.message);
                         resolve(false);
                     })
-                    .saveWeeklyPlanDataProtected(STATE.mondayStr, days, STATE.weekData.revision, source, expectedClassSheetName());
+                    .saveWeeklyPlanDataProtected(displayedWeekMondayStr(), days, STATE.weekData.revision, source, expectedClassSheetName());
             };
             whenSaveIdle(run);
         });

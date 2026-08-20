@@ -94,7 +94,11 @@ export function bootClient(options = {}) {
     requestAnimationFrame: noop, addEventListener: noop, removeEventListener: noop,
     navigator: {},
     localStorage: { getItem: () => null, setItem: noop },
-    Swal: { fire: () => Promise.resolve({}), close: noop, getHtmlContainer: () => elementStub },
+    Swal: {
+      fire: () => Promise.resolve({}), close: noop, getHtmlContainer: () => elementStub,
+      // App_Js_09_Utils がトースト用に Swal.mixin() を呼ぶ
+      mixin: () => ({ fire: () => Promise.resolve({}) })
+    },
     document: {
       addEventListener: noop, body: elementStub, activeElement: null,
       getElementById: () => Object.create(elementStub),
@@ -123,7 +127,10 @@ export function bootClient(options = {}) {
   sandbox.globalThis = sandbox;
 
   const context = vm.createContext(sandbox);
-  const files = ['App_Js_01_Core.html', 'App_Js_02_Plan.html', 'App_Js_14_MultiClass.html'];
+  // 09_Utils は formatDateLocal など、01_Core が呼ぶ土台の関数を持つ。
+  // 週移動（navigateWeek）が formatDateLocal を使うので、先に読み込む。
+  const files = ['App_Js_09_Utils.html', 'App_Js_01_Core.html', 'App_Js_02_Plan.html',
+    'App_Js_14_MultiClass.html'];
   // 本番では App_Js_15 の保護版が最終実装になる。
   if (options.protectedOverrides) files.push('App_Js_15_DataProtection_Overrides.html');
   for (const file of files) vm.runInContext(scriptBody(file), context, { filename: file });
