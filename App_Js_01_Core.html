@@ -982,6 +982,14 @@
         // 閲覧モードのセル操作は少し待ってから保存する。待っている分を先に送っておかないと、
         // 移動先の週を読んでいるあいだに保存が飛び、移動元の週のキャッシュが古いまま残る。
         flushPendingViewSave();
+        // 送った保存の応答を待ってから読み込む。待たずに読むと、保存がシートへ入る前の
+        // 内容を読み込んでキャッシュに残してしまい、その週へ戻ったときに変更が消えて見える。
+        // 保存が飛んでいるのはセル操作の直後だけなので、通常の週移動は待たされない。
+        if (typeof isSaveInFlight === 'function' && isSaveInFlight()) {
+            if (typeof p2ShowWeekLoading === 'function') p2ShowWeekLoading();
+            whenSaveIdle(function () { loadWeeklyPlan(); });
+            return;
+        }
         doLoadWeeklyPlan();
     }
 

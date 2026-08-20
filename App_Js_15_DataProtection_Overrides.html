@@ -92,6 +92,9 @@
             // キーは要求を組み立てた時点のものを使う。
             var cacheKey = p2WeekCacheKey(mondayStr);
             var expectedSheet = expectedClassSheetName();
+            // 保存がサーバへ届くまでは、この週の内容は手元にしか無い。
+            // 読み込み応答で差し替えられないよう、未確定であることを記録しておく。
+            markViewWeekDirty(cacheKey);
             scheduleViewSave(runViewSave);
 
             function runViewSave() {
@@ -103,6 +106,7 @@
                     endSaveRequest();
                     if (result.success) {
                         weekData.revision = result.revision;
+                        markViewWeekSaved(cacheKey, mutationSeq);
                         // 編集モードに入っていたら入力欄の方が新しいので取り込まない。
                         // 週を移動していたら、この応答はもう画面上の週のものではない。
                         var sameWeek = (STATE.weekData === weekData);
