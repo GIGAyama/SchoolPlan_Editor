@@ -980,8 +980,12 @@
     function hasPendingViewSave() {
         if (_viewSaveRunner) return true;
         if (_saveInFlight) return true;
-        for (var key in _viewSaveQueue) {
-            if (Object.prototype.hasOwnProperty.call(_viewSaveQueue, key)) return true;
+        for (var qKey in _viewSaveQueue) {
+            if (Object.prototype.hasOwnProperty.call(_viewSaveQueue, qKey)) return true;
+        }
+        // 保存に失敗して手元にだけ残っている変更も「まだ届いていない」に含める。
+        for (var dKey in _viewDirtyWeeks) {
+            if (Object.prototype.hasOwnProperty.call(_viewDirtyWeeks, dKey)) return true;
         }
         return false;
     }
@@ -1002,6 +1006,55 @@
     /** いまの書き換え回数。保存要求を出す側が控え、応答時に見比べます。 */
     function weekDaysMutationSeq() {
         return _weekDaysMutationSeq;
+    }
+
+    // ===== 閲覧モードの「まだサーバへ届いていない変更」 =====
+    // 閲覧モードのコマの移動・クリア・ペースト・元に戻すは、編集モードと違って
+    // 入力欄ではなく STATE.weekData.days だけを書き換える。保存はまとめてから送るため、
+    // 実際にサーバへ届くまでには数百ミリ秒＋GASの往復ぶんの間がある。
+    //
+    // その間に週の読み込み応答が届くと、これまでは STATE.weekData ごと差し替えていた。
+    // 週を開くときはキャッシュを先に描いて数秒後にサーバ応答を当てるので、
+    // 「週を開いてすぐコマを動かす」だけでこの重なりが起きる。すると
+    //   1) 動かしたコマが画面から消えて、操作が無かったことになる
+    //   2) 手元のリビジョンが保存前へ巻き戻り、以降の保存が毎回「保存の競合」になる
+    // という壊れ方をした（編集モードでは hasUnsavedChanges() で守られていた経路）。
+    //
+    // どの週に未確定の変更があるかを控えておき、読み込み側（p2ApplyWeekData）が
+    // その週の差し替えを見送れるようにする。
+    var _viewDirtyWeeks = {};
+
+    /**
+     * 閲覧モードの変更を手元に加えたことを、週ごとに記録します。
+     * @param {string} key 週キャッシュキー（学級＋月曜日）
+     */
+    function markViewWeekDirty(key) {
+        if (key) _viewDirtyWeeks[key] = weekDaysMutationSeq();
+    }
+
+    /**
+     * その週の保存が通ったことを記録します。
+     * @param {string} key 週キャッシュキー
+     * @param {number} savedSeq 保存要求を出した時点の weekDaysMutationSeq()。
+     *   そのあとに書き換えていれば未確定のまま残す（後続の保存で改めて解消される）。
+     */
+    function markViewWeekSaved(key, savedSeq) {
+        if (!key || !Object.prototype.hasOwnProperty.call(_viewDirtyWeeks, key)) return;
+        if (_viewDirtyWeeks[key] <= savedSeq) delete _viewDirtyWeeks[key];
+    }
+
+    /** その週に、まだサーバへ届いていない閲覧モードの変更があるか。 */
+    function hasDirtyViewWeek(key) {
+        return !!key && Object.prototype.hasOwnProperty.call(_viewDirtyWeeks, key);
+    }
+
+    /**
+     * 未確定の変更の記録をすべて捨てます。
+     * 手元の内容を捨てて読み直すと決めたとき（競合時の「最新を読み込む」・
+     * サーバ側を書き換えた直後の強制読み直し）だけ呼ぶこと。
+     */
+    function clearViewDirtyWeeks() {
+        _viewDirtyWeeks = {};
     }
 
     // ===== 閲覧モードの自動保存の待ち行列 =====
@@ -1201,7 +1254,9 @@
             if (r.isConfirmed) {
                 STATE.editMode = false;
                 updateEditUI();
-                doLoadWeeklyPlan();
+                // 手元の内容を捨てると決めた読み直しなので、閲覧モードの未確定の変更も
+                // 一緒に捨てる（残すと読み直しそのものが見送られてしまう）。
+                doLoadWeeklyPlan({ force: true });
             } else if (r.isDenied && canOverwrite) {
                 overwrite(current.revision);
             }

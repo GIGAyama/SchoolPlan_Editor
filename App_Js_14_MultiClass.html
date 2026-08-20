@@ -286,6 +286,26 @@
      */
     function p2ApplyWeekData(data, opts) {
         if (!data || !data.success) return false;
+        var force = !!(opts && opts.force);
+
+        // 閲覧モードのセル操作（コマの移動・クリア・ペースト・元に戻す）は、保存が
+        // サーバへ届くまで手元の STATE.weekData.days にしか無い。表示中の週について
+        // その変更が未確定のあいだは、読み込み結果を当ててはいけない。
+        // キャッシュ表示 → 数秒後にサーバ応答、という二段階で描くため、
+        // 「週を開いてすぐコマを動かす」だけでこの重なりが起きる。当ててしまうと
+        // 動かしたコマが消えるうえ、手元のリビジョンが保存前へ巻き戻り、
+        // 以降の保存が毎回「保存の競合」で弾かれるようになる。
+        // 未確定の変更は、進行中の保存が通った時点で解消される。
+        if (!force && data.mondayDateStr
+            && typeof hasDirtyViewWeek === 'function'
+            && typeof displayedWeekMondayStr === 'function'
+            && displayedWeekMondayStr() === data.mondayDateStr
+            && hasDirtyViewWeek(p2WeekCacheKey(data.mondayDateStr))) {
+            // キャッシュも書き換えない。保存前の内容で上書きすると、次にこの週を
+            // 開いたときに変更が消えた状態が描かれてしまう。
+            return true;
+        }
+
         // キャッシュは常に最新にしておく。画面へ反映しない場合でも、次にこの週を
         // 開いたときに古い内容が出ないようにするため。
         p2CacheWeek(data);
@@ -293,7 +313,7 @@
         // 編集中の未保存入力を、あとから届いた読み込み結果で消さない。
         // キャッシュ表示 → 数秒後にサーバ応答、という二段階で描くため、
         // その間に編集を始めていると入力が丸ごと消えてしまう。
-        if (!(opts && opts.force) && STATE.editMode && hasUnsavedChanges()) return true;
+        if (!force && STATE.editMode && hasUnsavedChanges()) return true;
 
         STATE.weekData = data;
         // 別の週・学級を表示したら、セル操作の履歴は引き継がない
@@ -519,6 +539,9 @@
         STATE.editBaseline = null;
         STATE.undoStack = [];
         STATE.redoStack = [];
+        // 閲覧モードのセル操作の未確定分も捨てる。残すと p2ApplyWeekData が
+        // 読み直しを見送ってしまい、書き換えたはずのサーバ側の内容が画面に出ない。
+        if (typeof clearViewDirtyWeeks === 'function') clearViewDirtyWeeks();
         if (STATE.editMode) {
             STATE.editMode = false;
             if (typeof updateEditUI === 'function') updateEditUI();
@@ -526,8 +549,15 @@
     }
 
     function p2UpdateCurrentWeekCache() {
-        if (!STATE.weekData || !STATE.mondayStr) return;
-        STATE.weekData.mondayDateStr = STATE.mondayStr;
+        if (!STATE.weekData) return;
+        // 画面に出ているデータが属する週は、そのデータ自身が持っている。
+        // STATE.mondayStr（＝これから表示したい週）で上書きしてはいけない。
+        // 週を移動した直後は「移動先の週を読み込み中・画面は移動元」という時間があり、
+        // そこで上書きすると移動元の内容が移動先の週としてキャッシュされる。
+        // その状態で保存すると「その週に含まれない日付」としてサーバに弾かれ、
+        // 読み込み直すまで保存できなくなる。
+        if (!STATE.weekData.mondayDateStr) STATE.weekData.mondayDateStr = STATE.mondayStr;
+        if (!STATE.weekData.mondayDateStr) return;
         p2CacheWeek(STATE.weekData);
         // 週案を保存すると単元の進捗も変わる。ここは全ての保存経路が通る合流点なので、
         // クライアント側にキャッシュした進捗インデックスもここで捨てる。
@@ -662,6 +692,9 @@
         // キーは要求を組み立てた時点のものを使う。
         var cacheKey = p2WeekCacheKey(mondayStr);
         var expectedSheet = expectedClassSheetName();
+        // 保存がサーバへ届くまでは、この週の内容は手元にしか無い。
+        // 読み込み応答で差し替えられないよう、未確定であることを記録しておく。
+        markViewWeekDirty(cacheKey);
         scheduleViewSave(runViewSave);
 
         function runViewSave() {
@@ -674,6 +707,7 @@
                     endSaveRequest();
                     if (result.success) {
                         weekData.revision = result.revision;
+                        markViewWeekSaved(cacheKey, mutationSeq);
                         // 編集モードに入っていたら入力欄の方が新しいので取り込まない。
                         // 週を移動していたら、この応答はもう画面上の週のものではない。
                         var sameWeek = (STATE.weekData === weekData);
