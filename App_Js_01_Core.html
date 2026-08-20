@@ -48,6 +48,9 @@
         taskDataLoaded: false,         // タスク初期ロード済み
         taskLoading: false,            // タスク二重呼び出し防止フラグ
         aiTaskPdfUIReady: false,       // タスク抽出コンソールのPDF配線済み
+        pdfImportUIReady: false,       // PDF読み込みのドロップゾーン配線済み
+                                       // （起動時に2か所から呼ばれるため。二重に配線すると
+                                       //   ファイル選択のダイアログが二重に開く）
         // 各ビューの作業データ／編集状態（旧・散在グローバルを集約）
         pickerApiLoaded: false,        // Google Picker API 読込済み
         currentPickerType: null,       // 現在開いている Picker の種別
@@ -390,10 +393,16 @@
         google.script.run
             .withSuccessHandler(function (r) {
                 if (r && r.success) {
+                    // r.alreadyExisted は「前回の作成が実は成功していた」ことを表す。
+                    // 2つ目を作らずにそれを使う（createMyDatabase の説明を参照）。
                     Swal.fire({
                         icon: 'success',
-                        title: '作成しました',
-                        html: 'あなた専用のデータベースを作成しました。アプリを開始します。',
+                        title: r.alreadyExisted ? '作成できていました' : '作成しました',
+                        html: r.alreadyExisted
+                            ? 'データベース'
+                              + (r.spreadsheetName ? '「' + escHtml(r.spreadsheetName) + '」' : '')
+                              + 'はすでに作成できていました。<br>そのまま使います。'
+                            : 'あなた専用のデータベースを作成しました。アプリを開始します。',
                         confirmButtonColor: '#1a73e8',
                         allowOutsideClick: false
                     }).then(function () { startAppInit(); });
@@ -408,15 +417,103 @@
                 }
             })
             .withFailureHandler(function (e) {
-                Swal.fire({
-                    icon: 'error',
-                    title: '通信エラー',
-                    html: escHtml(e && e.message ? e.message : String(e)),
-                    confirmButtonColor: '#1a73e8',
-                    allowOutsideClick: false
-                }).then(function () { reopenOnboarding(); });
+                // 通信が切れても、サーバ側は最後まで動き切っていることが多い（下の説明を参照）
+                recoverFromCreateFailure_(e, '', function () { startAppInit(); },
+                    function () { reopenOnboarding(); });
             })
-            .createMyDatabase(input.value || '');
+            // onlyIfUnlinked: 前回の作成が実は成功していた場合に2つ目を作らせない
+            .createMyDatabase(input.value || '', { onlyIfUnlinked: true });
+    }
+
+    /**
+     * データベースの作成中に通信が切れたときの後始末。
+     *
+     * 作成は、スプレッドシートを作って必要なシートと1年分のカレンダーを組み立てるため
+     * 時間がかかります。その間に接続が切れると、画面には
+     *   networkerror: 次の原因のため接続できませんでした: HTTP 0
+     * とだけ出ます（実際にこの報告がありました）。
+     *
+     * **ここで大事なのは、切れたのは画面との通信だけで、サーバ側の処理は
+     * そのまま最後まで走り切るということです。** つまりデータベースは
+     * たいてい出来上がっています。そのまま「失敗しました」と見せて作成画面へ戻すと、
+     * 先生はもう一度「作成する」を押し、**2つ目のスプレッドシートができて
+     * 1つ目が迷子になります。**
+     *
+     * そこで、あきらめる前にサーバへ「今どうなっているか」を聞き直します。
+     * サーバがまだ組み立て中のこともあるので、少し間を空けて数回試します。
+     *
+     * 「出来ていた」の判定は、**紐付け先が押す前と変わったか**で行います。
+     * 設定画面からの作成では押す前からデータベースが紐付いているので、
+     * 「紐付いているか」だけを見ると必ず「出来ていた」になってしまいます。
+     * @param {Error} rawError 元の通信エラー
+     * @param {string} previousSpreadsheetId 押す前に紐付いていたID（初回作成では空文字）
+     * @param {Function} onRecovered 実は出来ていた場合に呼ぶ。引数に確認できた状態を渡す
+     * @param {Function} onFailed 本当に出来ていなかった場合に呼ぶ
+     */
+    function recoverFromCreateFailure_(rawError, previousSpreadsheetId, onRecovered, onFailed) {
+        var WAITS_MS = [2000, 5000, 10000]; // 組み立てが終わるのを待ちながら聞き直す
+        var attempt = 0;
+
+        Swal.fire({
+            title: '確認しています...',
+            html: '通信が切れました。データベースが作成できているかを確認しています。',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: function () { Swal.showLoading(); }
+        });
+
+        function giveUp() {
+            // 押す前からデータベースがあった＝設定画面からの「もう1つ作る」。
+            // この場合はサーバ側が作り終えるのが遅れているだけのこともあるので、
+            // 押し直す前に確かめてもらう（押すたびにファイルが増えるため）。
+            var caution = previousSpreadsheetId
+                ? '<br>もう一度お試しになる前に、設定タブを開き直して'
+                  + '「使用中のデータベース」をご確認ください。'
+                : '<br>もう一度お試しください。';
+            Swal.fire({
+                icon: 'error',
+                title: '作成できませんでした',
+                html: '通信が切れたため、データベースを作成できたか確認できませんでした。'
+                    + caution + '<br><br>'
+                    + '<span style="font-size:0.85em;color:#5f6368;">'
+                    + escHtml(rawError && rawError.message ? rawError.message : String(rawError))
+                    + '</span>',
+                confirmButtonColor: '#1a73e8',
+                allowOutsideClick: false
+            }).then(function () { onFailed(); });
+        }
+
+        function ask() {
+            google.script.run
+                .withSuccessHandler(function (status) {
+                    var before = String(previousSpreadsheetId || '');
+                    if (status && status.success && status.linked
+                        && status.spreadsheetId && status.spreadsheetId !== before) {
+                        // 出来ていた。作成し直させない（2つ目を作らせない）。
+                        Swal.fire({
+                            icon: 'success',
+                            title: '作成できていました',
+                            html: '通信は切れましたが、データベース'
+                                + (status.spreadsheetName ? '「' + escHtml(status.spreadsheetName) + '」' : '')
+                                + 'は作成できていました。<br>このまま進みます。',
+                            confirmButtonColor: '#1a73e8',
+                            allowOutsideClick: false
+                        }).then(function () { onRecovered(status); });
+                        return;
+                    }
+                    next();
+                })
+                .withFailureHandler(function () { next(); })
+                .getTenantStatus();
+        }
+
+        function next() {
+            if (attempt >= WAITS_MS.length) { giveUp(); return; }
+            var wait = WAITS_MS[attempt++];
+            setTimeout(ask, wait);
+        }
+
+        next();
     }
 
     /** 既存紐付けフロー: 使うスプレッドシートを選んで自分のDBとして紐付けます。 */

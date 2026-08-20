@@ -32,11 +32,20 @@
     }
 
     // ---- 初期化（ドロップゾーン・ファイル入力の配線） ----
+    //
+    // 起動時に2か所から呼ばれる（App_Js_01_Core.html の startAppInit と
+    // App_Js_14_MultiClass.html の window.onload）。素直に addEventListener すると
+    // クリックの受け口が2つ付き、**ファイル選択のダイアログが二重に開きます**
+    // （実際にこの報告がありました）。何回呼ばれても配線は1回だけにします。
+    // タスク抽出側の initAiTaskPdfUI（App_Js_11_Task.html）と同じやり方です。
     function initPdfImportUI() {
+        if (STATE.pdfImportUIReady) return;
+        var wired = 0;
         ['unit', 'event'].forEach(function (type) {
             var zone = document.getElementById(type + 'DropZone');
             var input = document.getElementById(type + 'FileInput');
             if (!zone || !input) return;
+            wired++;
 
             zone.addEventListener('click', function () { input.click(); });
             zone.addEventListener('keydown', function (e) {
@@ -64,6 +73,9 @@
             var now = new Date();
             yearInput.value = (now.getMonth() + 1 <= 3) ? now.getFullYear() - 1 : now.getFullYear();
         }
+
+        // 要素がまだ無いうちに呼ばれた場合は、次の呼び出しで配線し直せるようにする。
+        if (wired > 0) STATE.pdfImportUIReady = true;
     }
 
     // ---- キュー管理 ----

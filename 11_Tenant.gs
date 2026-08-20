@@ -379,6 +379,11 @@ function initializeNewDatabase_(ss) {
     if (typeof initTaskSheet_ === 'function') initTaskSheet_(ss);
   } catch (e) { /* タスクシートは遅延生成でも動くため、失敗しても致命的ではない */ }
 
+  // 5) 「学級通信データ」シート（配布用テンプレートにしか無く、作る処理が抜けていた）
+  try {
+    if (typeof initNewsletterSheet_ === 'function') initNewsletterSheet_(ss);
+  } catch (e) { /* 保存時にも作られるため、失敗しても致命的ではない */ }
+
   return dbSheet;
 }
 
@@ -386,13 +391,41 @@ function initializeNewDatabase_(ss) {
  * [Web API] このユーザー専用のDBを新規作成し紐付けます。
  * 配布元が ScriptProperties「sp_dbTemplateId」にテンプレートIDを設定している場合はそれを複製し、
  * 未設定の場合は空のスプレッドシートを作成して initializeNewDatabase_() で必要シートを構築します。
+ * 初回の作成（オンボーディング）では options.onlyIfUnlinked を渡してください。
+ * すでに紐付いている場合は作らずにそれを返します。理由は下のコメントを参照。
  * @param {string} [name] 作成するスプレッドシートの名前
+ * @param {Object} [options] { onlyIfUnlinked: boolean }
  * @returns {Object} { success, spreadsheetId, spreadsheetName, url, method } / { success:false, error }
  */
-function createMyDatabase(name) {
+function createMyDatabase(name, options) {
   const lock = LockService.getUserLock();
   try {
     lock.waitLock(10000);
+
+    // 作成には時間がかかる（1年分のカレンダーを組み立てるため）。その間に画面との通信が
+    // 切れると先生には「networkerror ... HTTP 0」とだけ出るが、**サーバ側の処理は
+    // 最後まで走り切っているので、データベースはたいてい出来上がっている**。
+    // そこでもう一度「作成する」を押されると、2つ目のスプレッドシートができて
+    // 1つ目が迷子になる。初回作成のときだけ、ここで作り直しを止める。
+    //
+    // 設定画面の「新しく作って切り替える」は意図して2つ目を作る操作なので、
+    // onlyIfUnlinked を渡さない＝この判定を通らない。
+    if (options && options.onlyIfUnlinked) {
+      const existingId = getUserSpreadsheetId_();
+      if (existingId) {
+        logInfo('すでに作成済みのデータベースがあるため、新規作成をやめました: ' + existingId);
+        let existingName = '';
+        try { existingName = sheetsOpenById_(existingId).getName(); } catch (e) { /* 名前が読めなくても紐付けは有効 */ }
+        return {
+          success: true,
+          spreadsheetId: existingId,
+          spreadsheetName: existingName,
+          url: 'https://docs.google.com/spreadsheets/d/' + existingId + '/edit',
+          method: 'existing',
+          alreadyExisted: true
+        };
+      }
+    }
 
     const templateId = PropertiesService.getScriptProperties().getProperty(SP_KEY_DB_TEMPLATE_ID);
     const title = String(name || '').trim()

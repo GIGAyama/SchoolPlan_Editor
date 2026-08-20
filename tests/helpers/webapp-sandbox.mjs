@@ -70,7 +70,8 @@ export function makeDays(opts = {}) {
 
 /**
  * クライアントを起動したサンドボックスを返します。
- * @param {Object} [options] options.protectedOverrides=true で App_Js_15 の保護版を有効にする
+ * @param {Object} [options] options.protectedOverrides=true で App_Js_15 の保護版を有効にする。
+ *   options.extraFiles に include ファイル名を足すと、既定の読み込みのあとに続けて読む。
  */
 export function bootClient(options = {}) {
   const clock = makeClock();
@@ -114,7 +115,8 @@ export function bootClient(options = {}) {
             withFailureHandler(fn) { return makeRunner({ ...handlers, fail: fn }); }
           };
           const methods = ['saveWeeklyPlanDataV2', 'saveWeeklyPlanDataProtected',
-            'getWeeklyPlanDataV2', 'switchActiveClassFromWeb'];
+            'getWeeklyPlanDataV2', 'switchActiveClassFromWeb',
+            'createMyDatabase', 'getTenantStatus'];
           methods.forEach(name => {
             api[name] = (...args) => { inflight.push({ name, args, handlers }); };
           });
@@ -133,6 +135,7 @@ export function bootClient(options = {}) {
     'App_Js_14_MultiClass.html'];
   // 本番では App_Js_15 の保護版が最終実装になる。
   if (options.protectedOverrides) files.push('App_Js_15_DataProtection_Overrides.html');
+  for (const extra of (options.extraFiles || [])) files.push(extra);
   for (const file of files) vm.runInContext(scriptBody(file), context, { filename: file });
   if (options.protectedOverrides) {
     vm.runInContext('p3InjectProtectionCard = function () {}; p3LoadProtectionStatus = function () {};', context);
