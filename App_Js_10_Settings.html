@@ -788,6 +788,11 @@
     // ===== 使用中のデータベース（マルチテナント設定） =====
     // ===================================================
 
+    // いま紐付いているデータベースのID。loadTenantInfo() が描画するたびに控える。
+    // 「新しく作って切り替える」の途中で通信が切れたとき、**押す前と変わったか**で
+    // 実際に作られたかどうかを判断するために使う（recoverFromCreateFailure_ の説明を参照）。
+    var TENANT_CURRENT_SPREADSHEET_ID = '';
+
     /**
      * 設定タブの「使用中のデータベース」セクションに現在のテナント状態を表示します。
      * getTenantStatus()（11_Tenant.gs）の結果を用いてDB名・ID・ログインメールを描画し、
@@ -808,6 +813,8 @@
                 var openWrap = document.getElementById('tenantDbOpenWrap');
                 var openLink = document.getElementById('tenantDbOpenLink');
                 var createBtn = document.getElementById('tenantCreateBtn');
+
+                TENANT_CURRENT_SPREADSHEET_ID = status.spreadsheetId || '';
 
                 if (nameEl) nameEl.textContent = status.linked ? (status.spreadsheetName || '(名称不明)') : '未紐付け';
                 if (idEl) idEl.textContent = status.spreadsheetId || '-';
@@ -1046,7 +1053,13 @@
                 }
             })
             .withFailureHandler(function (e) {
-                Swal.fire({ icon: 'error', title: '通信エラー', html: escHtml(e && e.message ? e.message : String(e)), confirmButtonColor: '#1a73e8' });
+                // 通信が切れても、サーバ側は最後まで動き切っていることが多い。
+                // そのまま「通信エラー」と見せると、先生はもう一度押して
+                // 3つ目のスプレッドシートを作ってしまう。作れていないか確かめてから伝える。
+                // （recoverFromCreateFailure_ は App_Js_01_Core.html にある）
+                recoverFromCreateFailure_(e, TENANT_CURRENT_SPREADSHEET_ID,
+                    function () { reloadApp(); },
+                    function () { /* 文面は recoverFromCreateFailure_ が出す */ });
             })
             .createMyDatabase(input.value || '');
     }
