@@ -663,11 +663,19 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, expectedSheetNa
  */
 function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
   const startedAt = Date.now();
+  // どこで時間を使っているかを段階ごとに測る。
+  // 実測では、保存にかかる時間の半分が Sheets API の外だった（GAS 側の処理）。
+  // 往復の数だけ見ていても、その半分は説明できない。
+  const phase = { lockMs: 0, readMs: 0, protectMs: 0, writeMs: 0, auditMs: 0 };
+  const since = (mark) => Date.now() - mark;
+
+  const lockAt = Date.now();
   const lock = LockService.getScriptLock();
   let locked = false;
   try {
     lock.waitLock(10000);
     locked = true;
+    phase.lockMs = since(lockAt);
   } catch (lockErr) {
     return { success: false, error: '他の保存処理が進行中です。少し待ってから再度お試しください。' };
   }
@@ -698,6 +706,7 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
           + '元の学級へ戻してから、もう一度保存してください。'
       };
     }
+    const readAt = Date.now();
     const weekDateStrs = p2WeekDateStrings_(mondayDateStr);
     // 見出しと対象週の行を1回でまとめて取る（以降の読み取りは通信なしで済む）
     p2PrefetchWeek_(dbSheet, weekDateStrs);
@@ -706,6 +715,7 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
     p2AssertWritableSchema_(dbCols, dbSheet.getName());
 
     const rowState = p2LoadWeekRows_(dbSheet, dbCols, weekDateStrs);
+    phase.readMs = since(readAt);
     const currentRows = [...rowState.rowByDate.values()];
     const currentRevision = computeWeekRevision_(currentRows, dbCols, weekDateStrs);
     const holidayMap = getHolidayMap_();
@@ -764,6 +774,7 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
     const protect = !(options && options.protect === false);
     let restorePointId = '';
 
+    const protectAt = Date.now();
     if (uniqueChangedRows.length > 0 && protect) {
       try {
         ensureDataProtectionReady_();
@@ -782,6 +793,9 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
       }
     }
 
+    phase.protectMs = since(protectAt);
+
+    const writeAt = Date.now();
     const readBackComplete = p2WriteChangedWeekRows_(dbSheet, dbCols, rowState, uniqueChangedRows);
 
     // 新しいリビジョンは「書き込んだ値」ではなく「シートに実際に入った値」から算出する。
@@ -799,7 +813,9 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
     }
     const savedDays = p2BuildWeekDays_(afterState, dbCols, weekDateStrs, holidayMap);
     const newRevision = computeWeekRevision_([...afterState.rowByDate.values()], dbCols, weekDateStrs);
+    phase.writeMs = since(writeAt);
 
+    const auditAt = Date.now();
     if (uniqueChangedRows.length > 0 && protect) {
       // 監査ログには「どの日を変えたか」までを残す。保存前の中身そのものは
       // 復元ポイント（snapshotId）に入っているので、ここへ二重に持たせない。
@@ -816,6 +832,8 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
         'save_' + Utilities.getUuid()
       );
     }
+    phase.auditMs = since(auditAt);
+
     const msgBase = uniqueChangedRows.length > 0
       ? `${uniqueChangedRows.length}日分を保存しました`
       : '変更はありませんでした';
@@ -839,7 +857,7 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
         rowsRead: rowState.rowNumbers.length,
         rowsWritten: uniqueChangedRows.length,
         elapsedMs: Date.now() - startedAt
-      }, sheetsFetchStats_())
+      }, sheetsFetchStats_(), phase)
     };
   } catch (e) {
     logError('saveWeeklyPlanWeek_', e);
