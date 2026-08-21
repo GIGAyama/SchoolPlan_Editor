@@ -1100,8 +1100,7 @@ function protectSheets_core_() {
   const results = [];
 
   const sheetsToProtect = [
-    SHEET_NAME_DATABASE, SHEET_NAME_UNIT_MASTER, SHEET_NAME_LOG,
-    SHEET_NAME_NEWSLETTER
+    SHEET_NAME_DATABASE, SHEET_NAME_UNIT_MASTER, SHEET_NAME_LOG
   ];
   // 複数学級モードの学級シートも保護対象に含める
   getClassList_().forEach(c => {

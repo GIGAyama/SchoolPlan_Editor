@@ -368,51 +368,6 @@ function getCourseIdByName(courseName) {
   }
 }
 
-/** 
- * 「学級通信」シートをPDF化し、Google Classroomに投稿する一連の処理を実行します。 
- */
-function autoPostToClassroom() {
-  try {
-    autoPostToClassroom_core_();
-  } catch (error) {
-    logError("autoPostToClassroom", error);
-  }
-}
-
-/**
- * [Webアプリ API] 「学級通信」シートをPDF化しClassroomへ投稿します（UI非依存・結果を返す）。
- * @returns {{success: boolean, message: string}}
- */
-function autoPostToClassroomFromWeb() {
-  try {
-    const r = autoPostToClassroom_core_();
-    return { success: true, message: r.message };
-  } catch (error) {
-    logError("autoPostToClassroomFromWeb", error);
-    return { success: false, message: error.message };
-  }
-}
-
-/**
- * 「学級通信」シートをPDF化してClassroomへ投稿するコアロジック。
- * @returns {{message: string}}
- */
-function autoPostToClassroom_core_() {
-    // 設定はスクリプトプロパティ経由で取得
-    const classroomName = getCourseNameSafe_();
-    const pdfFile = createAndSavePDF(SHEET_NAME_NEWSLETTER);
-    if (!pdfFile) throw new Error("PDF作成/保存失敗");
-    const warning = postToClassroomStream(classroomName, pdfFile);
-    logInfo(`「${SHEET_NAME_NEWSLETTER}」PDFをクラス「${classroomName}」に投稿完了`);
-    const message = `「${SHEET_NAME_NEWSLETTER}」のPDFをクラス「${classroomName}」へ投稿しました。`;
-    return { message: warning ? `${message}\n※ ${warning}` : message };
-}
-
-/**
- * [Webアプリ API] 連携可能なClassroomクラスの一覧を取得します（UI非依存・結果を返す）。
- * 連携できるクラスの一覧を返します。
- * @returns {{success: boolean, message: string, courses: string[]}}
- */
 function listCoursesFromWeb() {
   try {
     let courses = [];
@@ -468,48 +423,5 @@ function shareFileWithCourse_(fileId, courseId) {
   } catch (e) {
     logError('shareFileWithCourse_', e);
     return `ファイルの共有設定を変更できませんでした。${manualHint}`;
-  }
-}
-
-/**
- * 指定されたシートをPDFとしてGoogleドライブに保存します。
- */
-function createAndSavePDF(sheetName) {
-  try {
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) throw new Error(`シート「${sheetName}」見つからず`);
-    const formattedDate = Utilities.formatDate(new Date(), "JST", "yyyyMMdd");
-    const pdfFileName = `${sheetName}_${formattedDate}.pdf`;
-    const blob = sheetsExportSheetAsPdf_(ss.getId(), sheet.getSheetId(), pdfFileName);
-    // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
-    const file = driveCreateFile_(pdfFileName, blob);
-    // 前回この用途で作ったPDFだけを片づける。名前で探して消すと、先生が自分で作った
-    // 同名のファイルまで巻き込む（17_DriveApi.gs 参照）。
-    driveReplacePreviousAppFile_(`classroom-pdf:${sheetName}`, file.id);
-    logInfo(`PDF「${pdfFileName}」保存完了 (ID: ${file.id})`);
-    return file;
-  } catch (e) {
-    logError(`createAndSavePDF (${sheetName})`, e);
-    return null;
-  }
-}
-
-/** 
- * 指定されたPDFファイルを、Google Classroomのストリームに投稿します。 
- */
-function postToClassroomStream(classroomName, pdfFile) {
-  try {
-    const courseId = getCourseIdByName(classroomName);
-    // 添付するPDFを、そのクラスの参加者が開けるようにしてから投稿する。
-    // 失敗しても投稿は続ける（注意文は戻り値で受け取り、投稿結果に添えて教員へ伝える）。
-    const warning = shareFileWithCourse_(pdfFile.id, courseId);
-    const announcement = { text: '学級通信', materials: [{ driveFile: { driveFile: { id: pdfFile.id } } }] };
-    Classroom.Courses.Announcements.create(announcement, courseId);
-    logInfo(`PDF(${pdfFile.name})をクラス「${classroomName}」に投稿`);
-    return warning;
-  } catch (e) {
-    logError("postToClassroomStream", e);
-    throw e;
   }
 }

@@ -255,8 +255,7 @@ function loadFacade(fake) {
   const factory = new Function(...names, `
     ${SOURCE}
     return { sheetsOpenById_, sheetsCreate_, sheetsParseA1_, sheetsColumnLetter_,
-             sheetsSerialToDate_, sheetsDateToSerial_, sheetsParseColor_, sheetsQuoteTitle_,
-             sheetsExportSheetAsPdf_ };
+             sheetsSerialToDate_, sheetsDateToSerial_, sheetsParseColor_, sheetsQuoteTitle_ };
   `);
   return factory(...names.map(name => globals[name]));
 }
@@ -537,40 +536,6 @@ test('日付列か分からないときは、調べに行かずに表示形式�
   const probes = fake.state.requests.filter(r => r.url.indexOf('includeGridData') >= 0);
   assert.equal(probes.length, 0, '書き込みのために書式を調べに行っている');
   assert.equal(fake.state.formats.length, 1, '日付の表示形式が付いていない');
-});
-
-// ---------------------------------------------------------------- PDF 書き出し
-
-test('PDF 書き出しは、権限で断られたら Drive API に切り替える', () => {
-  // レイアウト指定つきの export は Drive 側の権限で決まり、drive.file だけのトークンで
-  // 通るかは環境に依存する。断られたまま失敗させず、Drive API の書き出しへ移る。
-  const calls = [];
-  const globals = {
-    UrlFetchApp: {
-      fetch: (url) => {
-        calls.push(url);
-        const denied = url.indexOf('docs.google.com') >= 0;
-        return {
-          getResponseCode: () => (denied ? 403 : 200),
-          getContentText: () => (denied ? 'forbidden' : ''),
-          getBlob: () => ({ setName: (name) => ({ name }) })
-        };
-      }
-    },
-    ScriptApp: { getOAuthToken: () => 'test-token' },
-    Session: { getScriptTimeZone: () => 'Asia/Tokyo' },
-    Utilities: { formatDate: () => '+0900', sleep: () => {}, getUuid: () => 'uuid' },
-    logInfo: () => {}
-  };
-  const names = Object.keys(globals);
-  const api = new Function(...names, `${SOURCE}\nreturn { sheetsExportSheetAsPdf_ };`)(
-    ...names.map(name => globals[name]));
-
-  const blob = api.sheetsExportSheetAsPdf_('ss-1', 123, '学級通信.pdf');
-  assert.equal(blob.name, '学級通信.pdf');
-  assert.equal(calls.length, 2, 'フォールバックしていない');
-  assert.match(calls[0], /docs\.google\.com/);
-  assert.match(calls[1], /www\.googleapis\.com\/drive\/v3\/files\/ss-1\/export/);
 });
 
 // ---------------------------------------------------------------- 網羅性

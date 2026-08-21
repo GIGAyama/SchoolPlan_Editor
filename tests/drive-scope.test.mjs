@@ -170,7 +170,6 @@ test('共有に失敗しても Classroom への投稿は続く', () => {
 
 test('Classroom へ添付する経路が共有を通っている', () => {
   const attachSites = [
-    ['05_Classroom.gs', 'function postToClassroomStream'],
     ['07_WebApp.gs', 'function postNewsletterToClassroomFromWeb']
   ];
   for (const [file, marker] of attachSites) {
