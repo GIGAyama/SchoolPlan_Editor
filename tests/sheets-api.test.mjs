@@ -52,14 +52,16 @@ function createFakeSheets(options = {}) {
     const [rawTitle, body] = rangeText.split('!');
     const title = rawTitle.replace(/^'|'$/g, '').replace(/''/g, "'");
     if (!body) return { title, row: 1, column: 1, numRows: null, numColumns: null };
-    const cell = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/.exec(body);
+    // A1 / A1:E1 / A2:E（末尾を開ける）に対応する
+    const cell = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d*))?$/.exec(body);
     const toNumber = (letters) => letters.split('')
       .reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0);
     const column = toNumber(cell[1]);
     const row = parseInt(cell[2], 10);
     return {
       title, row, column,
-      numRows: cell[4] ? parseInt(cell[4], 10) - row + 1 : 1,
+      // 末尾を開けた指定は「行数の指定なし」として扱う
+      numRows: cell[4] ? parseInt(cell[4], 10) - row + 1 : (cell[3] ? null : 1),
       numColumns: cell[3] ? toNumber(cell[3]) - column + 1 : 1
     };
   }

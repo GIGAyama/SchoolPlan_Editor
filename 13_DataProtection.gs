@@ -43,6 +43,17 @@ const P3_TRASH_HEADERS_ = [
   'Label', 'Payload'
 ];
 
+// 内部シートのうち日付を入れる列（1始まり）。
+//
+// REST は日付を数値として書くので、表示形式を付けないと「46253.5」のように見える。
+// 以前は追記のたびに付け直していたが、それだけで1回の通信になっていた。
+// 列構成は決まっているので、シートを作るときに列まるごとへ付けておき、
+// 追記時は「もう付いている」と伝えるだけにする（appendRows の knownDateColumns）。
+const P3_META_DATE_COLUMNS_ = [3];        // UpdatedAt
+const P3_AUDIT_DATE_COLUMNS_ = [2];       // At
+const P3_SNAPSHOT_DATE_COLUMNS_ = [2, 7]; // CreatedAt / ExpiresAt
+const P3_TRASH_DATE_COLUMNS_ = [2, 3];    // DeletedAt / ExpiresAt
+
 function p3NowIso_() {
   return new Date().toISOString();
 }
@@ -77,9 +88,9 @@ function p3HideInternalSheet_(sheet) {
  * @param {string[]} headers 見出し行
  * @param {Object} [options] `options.trustExisting` を立てると、既にあるシートは
  *   見出しの確認も装飾もせずそのまま返します。見出しを1行読むだけでもシート全体の
- *   取得になるため（`18_SheetsApi.gs` は範囲読みを持たない）、監査ログのように
- *   増え続けるシートでは、この確認が保存のたびに重くのしかかります。
- *   確認そのものは `p3EnsureInternalSheets_` が定期的に行います。
+ *   取得になるため、監査ログのように増え続けるシートでは、この確認が保存のたびに
+ *   重くのしかかります。確認そのものは `p3EnsureInternalSheets_` が定期的に行います。
+ *   `options.dateColumns` には日付を入れる列（1始まり）を渡します。
  * @returns {Object} Sheet 相当のオブジェクト
  */
 function p3EnsureSheet_(ss, name, headers, options) {
@@ -112,6 +123,12 @@ function p3EnsureSheet_(ss, name, headers, options) {
     .setBackground('#263238')
     .setFontColor('#ffffff');
   sheet.setFrozenRows(1);
+  // 日付列は、ここで列まるごとに表示形式を付けておく。
+  // 追記のたびに付け直すと、そのぶん通信が増えるため。
+  ((options && options.dateColumns) || []).forEach(column => {
+    sheet.getRange(2, column, Math.max(1, sheet.getMaxRows() - 1), 1)
+      .setNumberFormat('yyyy/MM/dd HH:mm:ss');
+  });
   p3HideInternalSheet_(sheet);
   return sheet;
 }
@@ -164,11 +181,12 @@ function p3EnsureInternalSheets_(ss) {
   if (p3SheetsMemo_ && p3SheetsMemo_.id === ss.getId()) return p3SheetsMemo_.sheets;
   const verification = p3SheetsVerification_(ss.getId());
   const options = { trustExisting: verification.trusted };
+  const withDates = columns => Object.assign({}, options, { dateColumns: columns });
   const sheets = {
-    meta: p3EnsureSheet_(ss, P3_META_SHEET_, P3_META_HEADERS_, options),
-    audit: p3EnsureSheet_(ss, P3_AUDIT_SHEET_, P3_AUDIT_HEADERS_, options),
-    snapshots: p3EnsureSheet_(ss, P3_SNAPSHOT_SHEET_, P3_SNAPSHOT_HEADERS_, options),
-    trash: p3EnsureSheet_(ss, P3_TRASH_SHEET_, P3_TRASH_HEADERS_, options)
+    meta: p3EnsureSheet_(ss, P3_META_SHEET_, P3_META_HEADERS_, withDates(P3_META_DATE_COLUMNS_)),
+    audit: p3EnsureSheet_(ss, P3_AUDIT_SHEET_, P3_AUDIT_HEADERS_, withDates(P3_AUDIT_DATE_COLUMNS_)),
+    snapshots: p3EnsureSheet_(ss, P3_SNAPSHOT_SHEET_, P3_SNAPSHOT_HEADERS_, withDates(P3_SNAPSHOT_DATE_COLUMNS_)),
+    trash: p3EnsureSheet_(ss, P3_TRASH_SHEET_, P3_TRASH_HEADERS_, withDates(P3_TRASH_DATE_COLUMNS_))
   };
   if (!verification.trusted) verification.remember();
   p3SheetsMemo_ = { id: ss.getId(), sheets };
@@ -177,8 +195,9 @@ function p3EnsureInternalSheets_(ss) {
 
 function p3MetaGet_(ss, key) {
   const sheet = p3EnsureInternalSheets_(ss).meta;
-  if (sheet.getLastRow() < 2) return '';
-  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getDisplayValues();
+  // 末尾を開けて読む。getLastRow() はシート全体の読み込みを伴い、
+  // getMaxRows() は追記で伸びた分をすぐには反映しない。
+  const values = sheet.getValuesToEnd(2, 1, 2, { formatted: true });
   for (let i = 0; i < values.length; i++) {
     if (values[i][0] === key) return values[i][1] || '';
   }
@@ -187,9 +206,8 @@ function p3MetaGet_(ss, key) {
 
 function p3MetaSet_(ss, key, value) {
   const sheet = p3EnsureInternalSheets_(ss).meta;
-  const lastRow = sheet.getLastRow();
-  if (lastRow >= 2) {
-    const keys = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
+  {
+    const keys = sheet.getValuesToEnd(2, 1, 1, { formatted: true });
     for (let i = 0; i < keys.length; i++) {
       if (keys[i][0] === key) {
         sheet.getRange(i + 2, 2, 1, 2).setValues([[String(value), new Date()]]);
@@ -197,7 +215,7 @@ function p3MetaSet_(ss, key, value) {
       }
     }
   }
-  sheet.appendRow([key, String(value), new Date()]);
+  sheet.appendRow([key, String(value), new Date()], { knownDateColumns: P3_META_DATE_COLUMNS_ });
 }
 
 function p3GetSchemaVersion_(ss) {
@@ -308,7 +326,7 @@ function p3RecordAudit_(action, entityType, entityId, summary, beforeValue, afte
       p3Json_(p3AuditValue_(beforeValue), P3_AUDIT_VALUE_MAX_),
       p3Json_(p3AuditValue_(afterValue), P3_AUDIT_VALUE_MAX_),
       correlationId || ''
-    ]);
+    ], { knownDateColumns: P3_AUDIT_DATE_COLUMNS_ });
   } catch (e) {
     console.error('監査ログの記録に失敗: ' + e.message);
   }

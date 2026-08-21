@@ -15,7 +15,7 @@ function p3AppendTrash_(entityType, entityId, label, payload) {
     String(entityId || ''),
     String(label || '').substring(0, 500),
     json
-  ]);
+  ], { knownDateColumns: P3_TRASH_DATE_COLUMNS_ });
   return trashId;
 }
 
