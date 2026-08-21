@@ -22,11 +22,14 @@ function load({ userProps = {}, scriptProps = {} } = {}) {
     PropertiesService: {
       getUserProperties: () => ({
         getProperty: (k) => (k in userProps ? userProps[k] : null),
+        // 本物にもある。1回で全部返るので、実装はこちらを使って呼び出し回数を抑える。
+        getProperties: () => ({ ...userProps }),
         setProperty: (k, v) => { userProps[k] = v; },
         deleteProperty: (k) => { delete userProps[k]; }
       }),
       getScriptProperties: () => ({
-        getProperty: (k) => (k in scriptProps ? scriptProps[k] : null)
+        getProperty: (k) => (k in scriptProps ? scriptProps[k] : null),
+        getProperties: () => ({ ...scriptProps })
       })
     },
     logInfo: (m) => logs.push(m),
@@ -118,8 +121,12 @@ test('旧バインドの設定を使ったときは記録が残る', () => {
 });
 
 test('配布者向けの設定は切り替えの影響を受けない', () => {
-  // sp_dbTemplateId は ScriptProperties から直接読む設計。
-  // ここを tGetProp_ 経由に変えると、共有デプロイでテンプレート複製が壊れる。
-  assert.match(SOURCE, /getScriptProperties\(\)[\s\S]{0,40}SP_KEY_DB_TEMPLATE_ID/,
+  // sp_dbTemplateId は ScriptProperties から読む設計。
+  // ここを tGetProp_ 経由に変えると、共有デプロイでは null が返り、
+  // テンプレート複製が壊れる（tGetProp_ は共有デプロイでスクリプト全体の設定へ落ちない）。
+  // 読み方が直接でも tGetScriptProp_（1回で全部読んで覚える版）でも、その性質は変わらない。
+  assert.match(SOURCE, /(getScriptProperties\(\)[\s\S]{0,40}|tGetScriptProp_\()SP_KEY_DB_TEMPLATE_ID/,
+    'テンプレートIDを ScriptProperties から読んでいません');
+  assert.doesNotMatch(SOURCE, /tGetProp_\(\s*SP_KEY_DB_TEMPLATE_ID/,
     'テンプレートIDの読み取りが tGetProp_ 経由に変わっています');
 });

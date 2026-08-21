@@ -1071,7 +1071,7 @@ function getPickerAuthInfo() {
  */
 function getPickerAppId_() {
   const props = PropertiesService.getScriptProperties();
-  const cached = props.getProperty(SP_KEY_PICKER_APP_ID);
+  const cached = tGetScriptProp_(SP_KEY_PICKER_APP_ID);
   if (cached) return cached;
 
   try {
@@ -1090,6 +1090,7 @@ function getPickerAppId_() {
       return '';
     }
     props.setProperty(SP_KEY_PICKER_APP_ID, projectNumber);
+    tScriptProps_()[SP_KEY_PICKER_APP_ID] = String(projectNumber);
     return projectNumber;
   } catch (e) {
     logError('getPickerAppId_', e);

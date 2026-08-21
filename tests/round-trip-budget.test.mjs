@@ -195,18 +195,20 @@ function createTransport(sheets, log) {
  * 実行ごとにトップレベル変数が初期化される点まで合わせるため、毎回作り直す。
  */
 function createRuntime(world) {
+  // PropertiesService も CacheService も、GAS では1回ごとに Google への
+  // リモート呼び出しになる（数十ms）。何回呼んだかを数えておく。
   const properties = store => ({
-    getProperty: key => (store[key] === undefined ? null : store[key]),
-    setProperty: (key, value) => { store[key] = String(value); },
-    setProperties: obj => { Object.assign(store, obj); },
-    deleteProperty: key => { delete store[key]; },
-    getProperties: () => ({ ...store })
+    getProperty: key => { world.rpc.propGet++; return store[key] === undefined ? null : store[key]; },
+    setProperty: (key, value) => { world.rpc.propSet++; store[key] = String(value); },
+    setProperties: obj => { world.rpc.propSet++; Object.assign(store, obj); },
+    deleteProperty: key => { world.rpc.propSet++; delete store[key]; },
+    getProperties: () => { world.rpc.propGetAll++; return { ...store }; }
   });
   const cache = () => ({
-    get: key => (world.cache[key] === undefined ? null : world.cache[key]),
-    put: (key, value) => { world.cache[key] = value; },
-    remove: key => { delete world.cache[key]; },
-    removeAll: keys => keys.forEach(key => delete world.cache[key])
+    get: key => { world.rpc.cacheGet++; return world.cache[key] === undefined ? null : world.cache[key]; },
+    put: (key, value) => { world.rpc.cachePut++; world.cache[key] = value; },
+    remove: key => { world.rpc.cachePut++; delete world.cache[key]; },
+    removeAll: keys => { world.rpc.cachePut++; keys.forEach(key => delete world.cache[key]); }
   });
   const noLock = { waitLock: () => {}, releaseLock: () => {}, tryLock: () => true };
 
@@ -264,6 +266,7 @@ function createWorld() {
     sheets: createWorkbook(),
     log: [],
     cache: {},
+    rpc: { propGet: 0, propGetAll: 0, propSet: 0, cacheGet: 0, cachePut: 0 },
     uuid: 0,
     userProps: {},
     scriptProps: {
@@ -277,8 +280,9 @@ function createWorld() {
 /** 1回の実行として関数を動かし、その間の往復だけを返す。 */
 function measure(world, run) {
   world.log.length = 0;
+  world.rpc = { propGet: 0, propGetAll: 0, propSet: 0, cacheGet: 0, cachePut: 0 };
   const result = run(createRuntime(world));
-  return { result, calls: world.log.slice() };
+  return { result, calls: world.log.slice(), rpc: Object.assign({}, world.rpc) };
 }
 
 /** 週案の1コマを書き換えて保存する（読み込み→編集→保存で1回の操作）。 */
@@ -455,4 +459,19 @@ test('復元ポイントがたまっても、保存の重さが変わらない',
   const bytesOf = run => run.calls.reduce((sum, c) => sum + c.bytes, 0);
   assert.ok(Math.abs(bytesOf(heavy) - bytesOf(light)) < 4096,
     `復元ポイントの量で通信量が変わっている（${bytesOf(light)}B → ${bytesOf(heavy)}B）`);
+});
+
+test('プロパティの読み取りを、1回の実行で何度も繰り返さない', () => {
+  // PropertiesService の getProperty は、GAS では1回ごとに Google への
+  // リモート呼び出しになる（数十ms）。実測では、保存1回で 44 回呼んでいて、
+  // それだけで数秒だった（保存時間の半分が Sheets API の外にあった正体）。
+  // getProperties() なら1回で全部返るので、実行の最初に一度だけ取って覚える。
+  const world = createWorld();
+  warmUp(world);
+  const { rpc } = saveOneCell(world, '編集した学習内容');
+
+  assert.equal(rpc.propGet, 0,
+    `1件ずつのプロパティ読み取りが ${rpc.propGet} 回ある（まとめて読むこと）`);
+  assert.ok(rpc.propGetAll <= 2,
+    `プロパティのまとめ読みが ${rpc.propGetAll} 回ある（利用者ぶんとスクリプトぶんの2回まで）`);
 });
