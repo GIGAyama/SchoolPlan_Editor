@@ -4,6 +4,7 @@ dist/
 coverage/
 
 # clasp（GASのプッシュ設定。スクリプトIDが入るので置かない）
+# scripts/gas-deploy.mjs が GAS_SCRIPT_ID から毎回作り直す。
 .clasp.json
 .clasprc.json
 

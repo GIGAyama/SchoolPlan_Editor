@@ -242,12 +242,16 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 ├── tools/ms-ligatures.py  # アイコン名から残すグリフを引く（合字表を読む）
 ├── tools/verify-icons.mjs # アイコンが絵として描かれるかを実ブラウザで確認
 ├── scripts/check-project.mjs # 静的検査の入口（npm run check）
+├── scripts/gas-deploy.mjs # GASへの反映とデプロイ更新（npm run deploy / docs/D5）
 ├── scripts/lib/          # 静的検査の本体（project-quality / giga-v5-checks）
+├── .claspignore          # GASへ送るのはリポジトリ直下の .gs / .html / appsscript.json だけ
 ├── tests/                # 静的検査・回帰テスト（node --test / npm test）
-│   └── round-trip-budget.test.mjs # 週案の読み書きが Sheets API を何往復・何KB使うかの上限
+│   ├── round-trip-budget.test.mjs # 週案の読み書きが Sheets API を何往復・何KB使うかの上限
+│   └── gas-deploy.test.mjs        # 反映の前に控えを取る・URLを変えない・品質ゲートを先に通す
 ├── quality.config.json   # 静的検査の設定（必須ファイル・禁止スコープ・例外リスト）
 ├── package.json          # 品質ゲートとVendor生成用のnpmスクリプト・開発依存
 ├── .github/workflows/quality.yml # CI: Node 20 / 22 で npm run check と npm test を実行
+├── .github/workflows/deploy.yml  # CI: main へのマージでGASへ反映しデプロイを更新（docs/D5）
 ├── docs/                 # GitHub Pages の PWA シェルと設計・運用ドキュメント
 │   ├── index.html / sw.js / offline.html / install-hook.js / manifest.webmanifest / config.js / icons/
 │   ├── privacy-policy.html / terms.html # OAuth審査用のプライバシーポリシー・利用規約
@@ -300,6 +304,10 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 2.  **Google スプレッドシートの準備** 新規でGoogleスプレッドシートを作成し、「拡張機能」>「Apps Script」を開きます。
     
 3.  **ソースコードの配置** GASのエディタ（または `clasp` を使用）に、本リポジトリの `.gs` および `.html` ファイルをすべてコピーして保存します。
+
+    > 💡 **手でコピーする作業は自動にできます。** [D5: GASへの反映を自動にする](docs/D5_AUTO_DEPLOY.md) の
+    > 準備（1度だけ）を済ませると、`main` にマージした時点で品質ゲート → 控え → 反映 → デプロイ更新まで走ります。
+    > 手元から `npm run deploy` の一発でも反映できます。既存のURLは変わりません。
 
     > ⚠️ **更新するときは、増えたファイル・消えたファイルにも合わせてください。**
     > 既存ファイルだけ貼り替えると、新しく増えたファイル（例: `18_SheetsApi.gs`）が無いまま動き、
@@ -443,6 +451,15 @@ npm ci          # 依存の取得（CI は --ignore-scripts 付き）
 npm run check   # 静的検査（quality.config.json の設定で実行）
 npm test        # 回帰テスト（node --test / tests/）
 npm run quality # 上の2つをまとめて実行
+```
+
+GASへの反映も `npm` スクリプトにまとめてあります（手順は [D5](docs/D5_AUTO_DEPLOY.md)）。
+
+```bash
+npm run gas:install # clasp を入れる（リポジトリの依存には含めていません）
+npm run gas:login   # 1度だけ。GASプロジェクトの持ち主のアカウントで許可する
+npm run gas:status  # 送られるファイルを一覧する（送りません）
+npm run deploy      # 品質ゲート → 控え → 反映 → 既存デプロイの更新（URLは変わりません）
 ```
 
 `npm run check` は、必須ファイルの存在、`App.html` から参照される `include()` の解決、禁止OAuthスコープ（`auth/drive` 全体・`https://mail.google.com/`）の混入、`postMessage` のワイルドカード送信先などを検査します。例外として許可する箇所は `quality.config.json` の `securityExceptions` に明示されています。

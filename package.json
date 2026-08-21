@@ -9,6 +9,12 @@
   },
   "scripts": {
     "check": "node scripts/check-project.mjs",
+    "gas:install": "npm install --no-save --no-package-lock --no-audit --no-fund @google/clasp@3.3.0",
+    "gas:login": "node scripts/gas-deploy.mjs login",
+    "gas:status": "node scripts/gas-deploy.mjs status",
+    "gas:backup": "node scripts/gas-deploy.mjs backup",
+    "gas:push": "node scripts/gas-deploy.mjs push",
+    "deploy": "npm run quality && node scripts/gas-deploy.mjs deploy",
     "check:json": "node scripts/check-project.mjs --json",
     "test": "node --test",
     "quality": "npm run check && npm test",
