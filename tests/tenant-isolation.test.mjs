@@ -33,12 +33,17 @@ function load({ userProps = {}, scriptProps = {} } = {}) {
       })
     },
     logInfo: (m) => logs.push(m),
-    logError: () => {}
+    logError: () => {},
+    // 起動時の getTenantStatus() を動かすのに要るものだけ、当たり障りのない形で用意する
+    CacheService: { getUserCache: () => ({ get: () => null, put: () => {}, remove: () => {}, removeAll: () => {} }) },
+    Session: { getActiveUser: () => ({ getEmail: () => 'teacher@example.com' }) },
+    checkDeploymentIntegrity_: () => ({ ok: true }),
+    sheetsOpenById_: (id) => ({ getName: () => 'DB(' + id + ')' })
   };
   const names = Object.keys(globals);
   const factory = new Function(...names, `
     ${SOURCE}
-    return { tGetProp_, tSetProp_, isSharedDeployment_,
+    return { tGetProp_, tSetProp_, isSharedDeployment_, getTenantStatus,
              resolveSpreadsheetId_, getLegacySpreadsheetId_, getUserSpreadsheetId_ };
   `);
   return { api: factory(...names.map(n => globals[n])), logs, userProps, scriptProps };
@@ -112,12 +117,33 @@ test('切り替えは true のときだけ効く', () => {
 
 // ---------------------------------------------------------------- 気づけるようにする
 
-test('旧バインドの設定を使ったときは記録が残る', () => {
+test('旧バインドの設定を使ったときは、起動時に記録が残る', () => {
   const { api, logs } = load({ scriptProps: { SPREADSHEET_ID: 'legacy-db' } });
-  api.resolveSpreadsheetId_();
+  api.getTenantStatus();
 
   assert.ok(logs.some(m => /旧バインド/.test(m)),
     '「別のDBを開いていた」ときの手がかりが残りません');
+});
+
+test('旧バインドの記録は、データベースを開くたびには書かない', () => {
+  // ログの追記は1行が Sheets API の往復1回。resolveSpreadsheetId_ は getSs_() の
+  // たびに通り、週案の保存1回で8回来る。ここで書くと保存がそのぶん遅くなり、
+  // しかも writeToLog_ が getSs_() を呼ぶため再帰していた。
+  // 手がかりは起動時の1行で足りる（上のテスト）。
+  const { api, logs } = load({ scriptProps: { SPREADSHEET_ID: 'legacy-db' } });
+  api.resolveSpreadsheetId_();
+  api.resolveSpreadsheetId_();
+
+  assert.deepEqual(logs, [],
+    `データベースを解決するたびにログを書いている（${logs.length} 行）`);
+});
+
+test('実行内で覚えるキャッシュは、利用者ごとのものを使う', () => {
+  // 1つのURLを多数の先生へ配る運用では、スクリプト全体のキャッシュに入れると
+  // 他人のシート構成や単元進捗が見えてしまう。
+  assert.match(SOURCE, /function tCacheGet_[\s\S]{0,400}CacheService\.getUserCache\(\)/);
+  assert.match(SOURCE, /function tCachePut_[\s\S]{0,400}CacheService\.getUserCache\(\)/);
+  assert.doesNotMatch(SOURCE, /CacheService\.getScriptCache\(\)/);
 });
 
 test('配布者向けの設定は切り替えの影響を受けない', () => {

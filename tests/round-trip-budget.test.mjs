@@ -205,7 +205,11 @@ function createRuntime(world) {
     getProperties: () => { world.rpc.propGetAll++; return { ...store }; }
   });
   const cache = () => ({
-    get: key => { world.rpc.cacheGet++; return world.cache[key] === undefined ? null : world.cache[key]; },
+    get: key => {
+      world.rpc.cacheGet++;
+      world.cacheKeys.push(key);
+      return world.cache[key] === undefined ? null : world.cache[key];
+    },
     put: (key, value) => { world.rpc.cachePut++; world.cache[key] = value; },
     remove: key => { world.rpc.cachePut++; delete world.cache[key]; },
     removeAll: keys => { world.rpc.cachePut++; keys.forEach(key => delete world.cache[key]); }
@@ -254,9 +258,13 @@ function createRuntime(world) {
   context.globalThis = context;
   vm.createContext(context);
   for (const source of SOURCES) vm.runInContext(source.code, context, { filename: source.name });
-  // ログシートへの追記はこのテストの対象外（別の往復になるので黙らせる）
-  context.logInfo = () => {};
-  context.logError = () => {};
+  // ログシートへの追記も往復1回ぶんある。黙らせずに数える。
+  // 黙らせていたころ、旧バインドの通知が getSs_() のたびに出ており、
+  // 保存1回で8行（＝8往復）書いていたのを、このテストは見逃していた。
+  const logInfo = context.logInfo;
+  const logError = context.logError;
+  context.logInfo = message => { world.logs.push('INFO'); return logInfo(message); };
+  context.logError = (message, error) => { world.logs.push('ERROR'); return logError(message, error); };
   return context;
 }
 
@@ -266,6 +274,8 @@ function createWorld() {
     sheets: createWorkbook(),
     log: [],
     cache: {},
+    logs: [],
+    cacheKeys: [],
     rpc: { propGet: 0, propGetAll: 0, propSet: 0, cacheGet: 0, cachePut: 0 },
     uuid: 0,
     userProps: {},
@@ -281,8 +291,16 @@ function createWorld() {
 function measure(world, run) {
   world.log.length = 0;
   world.rpc = { propGet: 0, propGetAll: 0, propSet: 0, cacheGet: 0, cachePut: 0 };
+  world.logs = [];
+  world.cacheKeys = [];
   const result = run(createRuntime(world));
-  return { result, calls: world.log.slice(), rpc: Object.assign({}, world.rpc) };
+  return {
+    result,
+    calls: world.log.slice(),
+    rpc: Object.assign({}, world.rpc),
+    logs: world.logs.slice(),
+    cacheKeys: world.cacheKeys.slice()
+  };
 }
 
 /** 週案の1コマを書き換えて保存する（読み込み→編集→保存で1回の操作）。 */
@@ -474,4 +492,59 @@ test('プロパティの読み取りを、1回の実行で何度も繰り返さ�
     `1件ずつのプロパティ読み取りが ${rpc.propGet} 回ある（まとめて読むこと）`);
   assert.ok(rpc.propGetAll <= 2,
     `プロパティのまとめ読みが ${rpc.propGetAll} 回ある（利用者ぶんとスクリプトぶんの2回まで）`);
+});
+
+test('キャッシュの読み取りを、1回の実行で何度も繰り返さない', () => {
+  // CacheService も PropertiesService と同じく、1回ごとに Google への
+  // リモート呼び出しになる。保存1回で8回読んでいたが、見ている鍵は4種類しかなく、
+  // 同じ鍵を何度も取りに行っていた（`p2Calendar` は4回、`p3SheetsVerified` は2回）。
+  const world = createWorld();
+  warmUp(world);
+  const { cacheKeys } = saveOneCell(world, '編集した学習内容');
+
+  const seen = new Set();
+  const repeated = cacheKeys.filter(key => (seen.has(key) ? true : (seen.add(key), false)));
+  assert.deepEqual(repeated, [],
+    `同じ鍵を2回以上取りに行っている: ${[...new Set(repeated)].join(', ')}`);
+  assert.ok(cacheKeys.length <= 4,
+    `キャッシュの読み取りが ${cacheKeys.length} 回ある（4回まで）: ${cacheKeys.join(', ')}`);
+});
+
+test('保存のとき、ログシートへ書き込まない', () => {
+  // ログの追記は1行が Sheets API の往復1回。保存のたびに書けば、そのぶん遅くなる。
+  //
+  // この疑似環境は「旧バインド」（ScriptProperties の SPREADSHEET_ID を使い、
+  // 利用者ごとの設定を持たない）で、実際に多い形でもある。
+  // かつては getLegacySpreadsheetId_ が getSs_() のたびに通知を書いていたため、
+  // 保存1回で8行になり、しかも writeToLog_ → getSs_ → logInfo と再帰していた。
+  const world = createWorld();
+  warmUp(world);
+  const { logs } = saveOneCell(world, '編集した学習内容');
+
+  assert.deepEqual(logs, [],
+    `保存の途中でログを ${logs.length} 行書いている（往復がそのぶん増える）`);
+});
+
+test('ログを書くこと自体が、またログを呼んでも入れ子にならない', () => {
+  // writeToLog_ は書き込み先を得るために getSs_() を通る。その先から logInfo が
+  // 呼ばれると、ここへ戻ってきて再帰する。実際に旧バインドの通知がその位置にあり、
+  // ログ追記は1回が Sheets API の往復1回なので、再帰はそのまま保存時間になる。
+  const world = createWorld();
+  const app = createRuntime(world);
+  const original = app.getSs_;
+  let depth = 0;
+  let deepest = 0;
+  app.getSs_ = function () {
+    depth += 1;
+    deepest = Math.max(deepest, depth);
+    try {
+      app.logInfo('ログの書き込み中に出たログ');
+      return original();
+    } finally {
+      depth -= 1;
+    }
+  };
+
+  app.logInfo('外側のログ');
+  assert.equal(deepest, 1, `ログの書き込みが入れ子になっている（深さ ${deepest}）`);
 });

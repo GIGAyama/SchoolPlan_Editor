@@ -91,7 +91,7 @@ function p2RememberCalendar_(sheet, scanned) {
   });
   if (!contiguous) return;
   try {
-    CacheService.getUserCache().put(
+    tCachePut_(
       p2CalendarCacheKey_(sheet),
       JSON.stringify({ firstDate: first.dateStr, firstRow: first.rowNumber, count: scanned.length }),
       P2_CALENDAR_CACHE_SECONDS_);
@@ -102,7 +102,7 @@ function p2RememberCalendar_(sheet, scanned) {
 function p2GuessRowNumbers_(sheet, dateStrs) {
   let remembered = null;
   try {
-    const raw = CacheService.getUserCache().get(p2CalendarCacheKey_(sheet));
+    const raw = tCacheGet_(p2CalendarCacheKey_(sheet));
     remembered = raw ? JSON.parse(raw) : null;
   } catch (e) {
     return null;
@@ -122,7 +122,7 @@ function p2GuessRowNumbers_(sheet, dateStrs) {
 /** 覚えている並びを捨てます（カレンダーを作り直したときなど）。 */
 function p2ForgetCalendar_(sheet) {
   try {
-    CacheService.getUserCache().remove(p2CalendarCacheKey_(sheet));
+    tCacheRemove_(p2CalendarCacheKey_(sheet));
   } catch (e) { /* 消せなくても、次の読み取りで食い違いに気づいて捨て直す */ }
 }
 

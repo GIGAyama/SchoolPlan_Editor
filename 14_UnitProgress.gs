@@ -56,7 +56,7 @@ function invalidateUnitProgressCache_() {
         if (c && c.sheetName && names.indexOf(c.sheetName) === -1) names.push(c.sheetName);
       });
     } catch (e) { /* 複数学級が未設定でも既定シート分は消す */ }
-    CacheService.getUserCache().removeAll(names.map(function (n) { return upCacheKey_(id, n); }));
+    tCacheRemoveAll_(names.map(function (n) { return upCacheKey_(id, n); }));
   } catch (e) {
     // キャッシュ破棄の失敗は致命的ではない（TTLで最大5分後に自然回復する）
   }
@@ -195,11 +195,10 @@ function getUnitProgressIndexFromWeb(forceRefresh) {
     const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
     const cacheKey = upCacheKey_(ss.getId(), dbSheet.getName());
-    const cache = CacheService.getUserCache();
 
     if (!forceRefresh) {
       try {
-        const hit = cache.get(cacheKey);
+        const hit = tCacheGet_(cacheKey);
         if (hit) {
           const parsed = JSON.parse(hit);
           parsed.cached = true;
@@ -232,7 +231,7 @@ function getUnitProgressIndexFromWeb(forceRefresh) {
     try {
       const json = JSON.stringify(payload);
       // CacheService の1エントリ上限は100KB。巨大なマスタでは諦めて毎回再計算する。
-      if (json.length < UP_CACHE_MAX_BYTES_) cache.put(cacheKey, json, UP_CACHE_TTL_SEC_);
+      if (json.length < UP_CACHE_MAX_BYTES_) tCachePut_(cacheKey, json, UP_CACHE_TTL_SEC_);
     } catch (e) { /* キャッシュ書き込み失敗は無視 */ }
 
     return payload;

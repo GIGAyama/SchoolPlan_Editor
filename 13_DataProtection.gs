@@ -155,24 +155,12 @@ const P3_SHEETS_VERIFY_INTERVAL_SECONDS_ = 21600; // 6時間
  */
 function p3SheetsVerification_(spreadsheetId) {
   const key = 'p3SheetsVerified::' + spreadsheetId + '::v' + P3_SCHEMA_VERSION_;
-  let cache = null;
-  try {
-    cache = CacheService.getUserCache();
-  } catch (e) {
-    cache = null;
-  }
-  let trusted = false;
-  try {
-    trusted = !!(cache && cache.get(key));
-  } catch (e) {
-    trusted = false;
-  }
+  // 保存の中でここは2回通る。tCacheGet_ は1回の実行で一度しか取りに行かない。
+  const trusted = !!tCacheGet_(key);
   return {
     trusted: trusted,
     remember: function () {
-      try {
-        if (cache) cache.put(key, '1', P3_SHEETS_VERIFY_INTERVAL_SECONDS_);
-      } catch (e) { /* キャッシュが使えなくても、次回また確認するだけ */ }
+      tCachePut_(key, '1', P3_SHEETS_VERIFY_INTERVAL_SECONDS_);
     }
   };
 }
@@ -446,12 +434,11 @@ function ensureDataProtectionReady_() {
   // 期限切れ掃除は全行走査+deleteRowループを伴うため、毎回ではなく
   // ユーザー・スプレッドシート単位で6時間に1回に間引く(掃除失敗は本処理を妨げない)。
   try {
-    const cache = CacheService.getUserCache();
     const cacheKey = 'p3CleanupDone::' + ss.getId();
-    if (!cache.get(cacheKey)) {
+    if (!tCacheGet_(cacheKey)) {
       p3CleanupExpiredTrash_(ss);
       p3CleanupSnapshots_(ss);
-      cache.put(cacheKey, '1', 21600);
+      tCachePut_(cacheKey, '1', 21600);
     }
   } catch (e) {
     logError('ensureDataProtectionReady_:cleanup', e);

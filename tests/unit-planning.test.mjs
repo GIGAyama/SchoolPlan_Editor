@@ -340,8 +340,10 @@ test('進捗キャッシュのキーはスプレッドシートIDとDBシート�
   const source = read('14_UnitProgress.gs');
   assert.match(source, /function upCacheKey_\(spreadsheetId, dbSheetName\)/);
   assert.match(source, /UP_CACHE_PREFIX_ \+ spreadsheetId \+ '::' \+ dbSheetName/);
-  // マルチテナントで他人のデータを参照しないよう UserCache を使う
-  assert.match(source, /CacheService\.getUserCache\(\)/);
+  // マルチテナントで他人のデータを参照しないよう UserCache を使う。
+  // 読み書きは 11_Tenant.gs の tCacheGet_ / tCachePut_ / tCacheRemoveAll_ を通す
+  // （UserCache の薄い包みで、1回の実行の中で同じ鍵を何度も取りに行かない）。
+  assert.match(source, /tCache(Get|Put|RemoveAll)_\(/);
   assert.doesNotMatch(source, /CacheService\.getScriptCache\(\)/);
 });
 
