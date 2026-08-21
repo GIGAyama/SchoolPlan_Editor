@@ -150,6 +150,29 @@ function createFakeSheets(options = {}) {
       return respond(200, {});
     }
 
+    // 末尾への追記（values.append）。本物と同じく、書く先はサーバ側が決めて応答で返す。
+    if (rest.startsWith(`${state.id}/values/`) && rest.endsWith(':append')) {
+      const rangeText = decodeURIComponent(rest.replace(`${state.id}/values/`, '').replace(/:append$/, ''));
+      const title = rangeText.split('!')[0].replace(/^'|'$/g, '').replace(/''/g, "'");
+      const grid = state.values[title];
+      const startRow = trim(grid || []).length + 1;
+      payload.values.forEach((row, r) => {
+        const rowIndex = startRow - 1 + r;
+        while (grid.length <= rowIndex) grid.push([]);
+        grid[rowIndex] = row.map((value, c) => state.normalize(value, c + 1));
+      });
+      const endRow = startRow + payload.values.length - 1;
+      const width = Math.max(1, ...payload.values.map(row => row.length));
+      const letter = (n) => {
+        let out = '';
+        while (n > 0) { const rem = (n - 1) % 26; out = String.fromCharCode(65 + rem) + out; n = Math.floor((n - 1) / 26); }
+        return out;
+      };
+      return respond(200, {
+        updates: { updatedRange: `${rangeText.split('!')[0]}!A${startRow}:${letter(width)}${endRow}` }
+      });
+    }
+
     // 値の書き込み
     if (rest.startsWith(`${state.id}/values/`) && options && options.method === 'put') {
       const rangeText = decodeURIComponent(rest.replace(`${state.id}/values/`, ''));
@@ -171,7 +194,14 @@ function createFakeSheets(options = {}) {
     if (rest.startsWith(`${state.id}/values/`)) {
       const rangeText = decodeURIComponent(rest.replace(`${state.id}/values/`, ''));
       const target = parseA1(rangeText);
-      const grid = trim(state.values[target.title] || []);
+      const whole = state.values[target.title] || [];
+      // 範囲を指定されたらその矩形だけを返す（本物と同じく、末尾の空セルは詰める）
+      const picked = (target.numRows === null && target.numColumns === null)
+        ? whole
+        : whole
+          .slice(target.row - 1, target.row - 1 + target.numRows)
+          .map(row => row.slice(target.column - 1, target.column - 1 + target.numColumns));
+      const grid = trim(picked.map(row => (row || []).slice()));
       if (params.get('valueRenderOption') === 'FORMATTED_VALUE') {
         return respond(200, { values: grid.map(row => row.map(v => String(v))) });
       }
@@ -370,6 +400,27 @@ test('追記はシート全体を読み直さない（ログ出力が重くな�
   assert.equal(sheet.getLastRow(), 4);
 });
 
+test('追記は values.append を使い、シートを一度も読まない', () => {
+  // 監査ログのように増え続けるシートでは、追記のたびに全体を読むと重くなり、
+  // やがて UrlFetch の応答上限（50MB）に達して追記そのものが失敗する。
+  const fake = createFakeSheets({ values: [['見出し'], ['既存1'], ['既存2']] });
+  const api = loadFacade(fake);
+  const sheet = api.sheetsOpenById_('ss-1').getSheetByName('データベース');
+
+  fake.state.requests.length = 0;
+  sheet.appendRow(['追記した行']);
+
+  const reads = fake.state.requests.filter(r => r.method === 'get' && r.url.indexOf('/values/') >= 0);
+  assert.equal(reads.length, 0, '追記のためにシートを読んでいる');
+
+  const appended = fake.state.requests.filter(r => r.url.indexOf(':append') >= 0);
+  assert.equal(appended.length, 1, 'values.append が使われていない');
+
+  // 既存行の下に入っていること
+  assert.deepEqual(sheet.getRange(4, 1).getValues(), [['追記した行']]);
+  assert.equal(sheet.getLastRow(), 4);
+});
+
 test('Date を書くとシリアル値として送られる', () => {
   const fake = createFakeSheets({ values: [['']], dateColumns: [1] });
   const api = loadFacade(fake);
@@ -460,13 +511,30 @@ test('日付を書いた列には日付の表示形式が付く', () => {
   assert.ok(sheet.getRange(2, 1).getValue() instanceof Date);
 });
 
-test('すでに日付列なら表示形式を当て直さない', () => {
+test('日付列だと分かっていれば、表示形式を当て直さない', () => {
+  // 「分かっている」＝そのシートの書式を既に読んである状態。書き込みのためだけに
+  // 調べには行かない（シートの書式を200行ぶん取る往復が、書き込みのたびに増えるため）。
   const fake = createFakeSheets({ values: [['', '']], dateColumns: [1] });
   const api = loadFacade(fake);
   const sheet = api.sheetsOpenById_('ss-1').getSheetByName('データベース');
 
+  sheet.getRange(1, 1).getValues(); // ここで日付列が分かる
+  fake.state.formats.length = 0;
+
   sheet.getRange(1, 1).setValue(new Date('2026-08-18T15:00:00.000Z'));
   assert.equal(fake.state.formats.length, 0, '不要な書式設定を送っている');
+});
+
+test('日付列か分からないときは、調べに行かずに表示形式を付ける', () => {
+  const fake = createFakeSheets({ values: [['', '']] });
+  const api = loadFacade(fake);
+  const sheet = api.sheetsOpenById_('ss-1').getSheetByName('データベース');
+
+  sheet.getRange(1, 1).setValue(new Date('2026-08-18T15:00:00.000Z'));
+
+  const probes = fake.state.requests.filter(r => r.url.indexOf('includeGridData') >= 0);
+  assert.equal(probes.length, 0, '書き込みのために書式を調べに行っている');
+  assert.equal(fake.state.formats.length, 1, '日付の表示形式が付いていない');
 });
 
 // ---------------------------------------------------------------- PDF 書き出し

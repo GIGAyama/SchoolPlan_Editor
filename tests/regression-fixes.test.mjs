@@ -120,7 +120,8 @@ test('save response revision is computed from the sheet after the write', () => 
   const perf = read('12_Performance.gs');
   const fn = perf.slice(perf.indexOf('function saveWeeklyPlanDataV2'), perf.indexOf('function getDbSchemaDiagnosticsFromWeb'));
   const writeAt = fn.indexOf('p2WriteChangedWeekRows_(dbSheet');
-  const rereadAt = fn.indexOf('p2ReadRowsForDates_(dbSheet', writeAt);
+  // 読み直すのは書き込んだ行だけでよい（日付と行の対応は書き込み前に分かっている）。
+  const rereadAt = fn.indexOf('p2RereadRows_(dbSheet', writeAt);
   const revisionAt = fn.indexOf('const newRevision =');
   // かつては SpreadsheetApp.flush() で確定させてから読み直していた。REST では
   // 書き込みは即時に確定し、読み直しはファサードが「書いたら次の読みで取り直す」

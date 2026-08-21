@@ -205,8 +205,12 @@ function getDbColumns() {
  * @returns {Object} 1始まりの列インデックスのマップ
  */
 function scanDbHeaderForSheet_(dbSheet) {
-  const lastColumn = Math.max(1, dbSheet.getLastColumn());
-  const headers = dbSheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
+  // 幅は getMaxColumns()（シート構成に入っている＝通信なし）から取る。
+  // getLastColumn() は「データのある最終列」なのでシート全体の読み込みを伴い、
+  // 見出し1行を読むためだけに年間データを丸ごと運ぶことになる。
+  // 見出しの無い列は buildDbColumnMapFromHeaders_ が読み飛ばす。
+  const width = Math.max(1, dbSheet.getMaxColumns());
+  const headers = dbSheet.getRange(1, 1, 1, width).getDisplayValues()[0];
   return buildDbColumnMapFromHeaders_(headers, dbSheet.getName());
 }
 

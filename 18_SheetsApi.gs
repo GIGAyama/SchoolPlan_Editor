@@ -36,6 +36,21 @@
  * 素朴に「1 呼び出し = 1 リクエスト」にすると往復が跳ね上がるため、
  * **シート単位の値をこの実行中だけキャッシュ**します。書き込みはキャッシュにも
  * 反映するので、読み直しのための再取得は起きません。
+ *
+ * ただし**シート全体しか読めない**と、それはそれで高くつきます。週案は年間1枚の
+ * シートに全部入っているため、1週（正味 約1.6KB）を出すのに全体（数百KB）を運ぶ
+ * ことになっていました。そこで `getRange(...).getValues()` は、**全体を読み込み済み
+ * ならそこから切り出し、まだならその範囲だけを取りに行き**ます。
+ *
+ * 増え続けるシート（監査ログ・復元ポイント）では、これに加えて次の2つが効きます。
+ *
+ * - **`getLastRow()` / `getLastColumn()` を呼ばない。** 「データのある最終行・列」を
+ *   知るにはシート全体が要るため、呼んだ時点で全体読みが走ります。大きさは
+ *   `getMaxRows()` / `getMaxColumns()`（シート構成に入っている＝通信なし）で足ります。
+ * - **追記は `appendRow` / `appendRows`（`values.append`）を使う。** 末尾はサーバ側が
+ *   探すので、読み取りが要りません。
+ *
+ * 何往復するかは `tests/round-trip-budget.test.mjs` が見張っています。
  */
 
 /** Sheets REST API のベース URL */
@@ -240,6 +255,67 @@ function sheetsParseA1_(a1) {
     numRows: end.row ? (end.row - row + 1) : null,
     numColumns: end.column ? (end.column - column + 1) : null
   };
+}
+
+/**
+ * `values.append` の応答が返す `updatedRange`（例: `'ログ'!A123:C123`）から、
+ * 実際に書かれた行番号を取り出します。読めなければ 0 を返します。
+ * @param {string} updatedRange
+ * @returns {number} 1始まりの行番号。不明なら 0
+ */
+function sheetsAppendedRowNumber_(updatedRange) {
+  if (!updatedRange) return 0;
+  try {
+    return sheetsParseA1_(updatedRange).row || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+/**
+ * 追記した行の日付セルに表示形式を付けます。
+ *
+ * REST は数値を書くだけなので、付けないと日時が「46253.5」のような数値で表示されます。
+ * どの列が日付かを調べる `dateColumns()` はシートの書式を取りに行くため、
+ * **既に読み込んである時だけ**参照します。追記のために読み取りを増やしては本末転倒なので、
+ * 分からないときは付ける側に倒します（同じ書式を上書きするだけで害はありません）。
+ *
+ * @param {Object} sheet Sheet 相当のオブジェクト
+ * @param {Object} api シート内部API（`sheetsMakeSheet_` が返す第2の顔）
+ * @param {number} rowNumber 1始まりの行番号
+ * @param {number} numRows 追記した行数
+ * @param {Object<number, string>} offsets 0始まりの列オフセット → 表示形式
+ */
+function sheetsApplyAppendedDateFormats_(sheet, api, rowNumber, numRows, offsets) {
+  const targets = Object.keys(offsets || {});
+  if (targets.length === 0) return;
+
+  const known = (api.peekDateColumns && api.peekDateColumns()) || null;
+  const requests = targets
+    .filter(offset => !(known && known[Number(offset) + 1]))
+    .map(offset => ({
+      repeatCell: {
+        range: {
+          sheetId: sheet.getSheetId(),
+          startRowIndex: rowNumber - 1, endRowIndex: rowNumber - 1 + Math.max(1, numRows),
+          startColumnIndex: Number(offset), endColumnIndex: Number(offset) + 1
+        },
+        cell: {
+          userEnteredFormat: {
+            numberFormat: {
+              type: offsets[offset].indexOf('H') >= 0 ? 'DATE_TIME' : 'DATE',
+              pattern: offsets[offset]
+            }
+          }
+        },
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    }));
+  if (requests.length === 0) return;
+
+  sheetsBatchUpdate_(api.spreadsheetId, requests);
+  // どの列を Date に戻すかが変わったので、判定をやり直させる
+  api.invalidateDateColumns();
 }
 
 // ============================================================
@@ -568,6 +644,58 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
     return g.values;
   }
 
+  /**
+   * 範囲だけを読みます。
+   *
+   * シート全体を読み込み済みならそこから切り出し、まだならその範囲だけを取りに行きます。
+   * 週案は年間1枚のシートに全部入っているため、1週を出すのに全体を取ると、
+   * 実データの100倍以上を運ぶことになります（1週の正味は約1.6KB）。
+   *
+   * 返す配列は**シート全体と同じ座標**に値を置きます。こうしておくと、
+   * 切り出し側（`sheetsMakeRange_` の `slice`）が全体キャッシュのときと同じコードで済みます。
+   *
+   * @param {number} row 1始まり
+   * @param {number} column 1始まり
+   * @param {number} numRows
+   * @param {number} numColumns
+   * @param {boolean} formatted 画面に見えている文字列で欲しいか
+   * @returns {Array[]} シート全体と同じ座標の疎な二次元配列
+   */
+  function window_(row, column, numRows, numColumns, formatted) {
+    const g = grid();
+    // 全体を持っているならそれが最も安い（書き込み後は読み直しが要るので dirty は除く）
+    const whole = formatted ? g.display : (g.dirty ? null : g.values);
+    if (whole) return whole;
+
+    if (!g.windows) g.windows = {};
+    const key = `${formatted ? 'd' : 'v'}:${row}:${column}:${numRows}:${numColumns}`;
+    if (g.windows[key]) return g.windows[key];
+
+    const lastColumnLetter = sheetsColumnLetter_(column + numColumns - 1);
+    const a1 = `${sheetsQuoteTitle_(props.title)}!` +
+      `${sheetsColumnLetter_(column)}${row}:${lastColumnLetter}${row + numRows - 1}`;
+    const query = formatted
+      ? '?valueRenderOption=FORMATTED_VALUE'
+      : '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER';
+    const result = sheetsFetch_(
+      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(a1)}${query}`);
+
+    // 取れた値を、シート全体での座標へ置き直す
+    const placed = [];
+    (result.values || []).forEach((line, offset) => {
+      const target = [];
+      line.forEach((value, index) => { target[column - 1 + index] = value; });
+      placed[row - 1 + offset] = target;
+    });
+    g.windows[key] = placed;
+    return placed;
+  }
+
+  /** 書き込んだので、範囲だけ読んで持っていた分は捨てる。 */
+  function dropWindows() {
+    delete grid().windows;
+  }
+
   /** 表示文字列のキャッシュ。`getDisplayValues()` でしか使わないので遅延取得。 */
   function displayValues() {
     const g = grid();
@@ -623,11 +751,13 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
   /** 値を書き換えたので、読み直しに備えて表示文字列だけ捨てる。 */
   function invalidateDisplay() {
     delete grid().display;
+    dropWindows();
   }
   /** 数式を書いた等、キャッシュでは追随できないときに全部捨てる。 */
   function invalidateValues() {
     delete grid().values;
     delete grid().display;
+    dropWindows();
   }
 
   /** 表示形式を変えたので、日付列の判定をやり直させる。 */
@@ -694,10 +824,66 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
 
     /**
      * 最終行の次に1行足します。
+     *
+     * `getLastRow()` を使うと、書き足すだけなのにシート全体を読むことになります。
+     * 監査ログのように増え続けるシートでは、これが追記のたびに重くなり、
+     * やがて UrlFetch の応答上限（50MB）に達して追記そのものが失敗します。
+     * Sheets の `values.append` は末尾をサーバ側で探すため、読み取りが要りません。
+     *
      * @param {Array} row
      */
-    appendRow: function (row) {
-      sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]);
+    appendRow: function (row) { return sheet.appendRows([row]); },
+
+    /**
+     * 最終行の次に複数行をまとめて足します（1回の通信で書きます）。
+     * @param {Array[]} rows
+     */
+    appendRows: function (rows) {
+      const lines = (rows || []).filter(Boolean);
+      if (lines.length === 0) return sheet;
+      const timeZone = spreadsheet.getSpreadsheetTimeZone();
+      // Date を書いた列を覚えておく。表示形式は書いたあとに付ける（setValues と同じ理由）。
+      const dateColumnOffsets = {};
+      const payload = lines.map(line => line.map((v, c) => {
+        if (v instanceof Date) {
+          dateColumnOffsets[c] = (v.getHours() || v.getMinutes() || v.getSeconds())
+            ? 'yyyy/MM/dd HH:mm:ss' : 'yyyy/MM/dd';
+          return sheetsDateToSerial_(v, timeZone);
+        }
+        return v === undefined || v === null ? '' : v;
+      }));
+
+      const result = sheetsFetch_(
+        `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/` +
+        `${encodeURIComponent(sheetsQuoteTitle_(props.title))}:append` +
+        '?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+          method: 'post',
+          contentType: 'application/json',
+          payload: JSON.stringify({ values: payload })
+        });
+
+      // 実際に書かれた行は応答が教えてくれる（'ログ'!A123:C123 の形）。
+      const updatedRange = (result && result.updates && result.updates.updatedRange) || '';
+      const appendedRow = sheetsAppendedRowNumber_(updatedRange);
+
+      // 追記した行ぶんだけキャッシュを伸ばす。ここで valuesCached() を呼ぶと
+      // 全体読みが走ってしまうので、既に読み込んである時だけ手を入れる。
+      const g = grid();
+      if (g.values && appendedRow) {
+        payload.forEach((line, offset) => {
+          const index = appendedRow - 1 + offset;
+          while (g.values.length <= index) g.values.push([]);
+          g.values[index] = line.slice();
+        });
+        g.dirty = true;
+      }
+      delete g.display;
+      dropWindows();
+
+      if (appendedRow) {
+        sheetsApplyAppendedDateFormats_(sheet, api, appendedRow, payload.length, dateColumnOffsets);
+      }
+      return sheet;
     },
 
     /**
@@ -900,6 +1086,12 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
     displayValues: displayValues, dateColumns: dateColumns,
     invalidateDisplay: invalidateDisplay, invalidateValues: invalidateValues,
     invalidateDateColumns: invalidateDateColumns,
+    // 日付列の判定を「取りに行かずに、分かっていれば返す」。
+    // 追記のためだけに書式を取りに行くのを避けるために使う。
+    peekDateColumns: function () { return grid().dateColumns || null; },
+    // 全体の値も「取りに行かずに、あれば返す」。書き込み後のキャッシュ更新で使う。
+    peekValues: function () { return grid().values || null; },
+    window: window_, dropWindows: dropWindows,
     markDirty: function () { grid().dirty = true; },
     spreadsheetId: spreadsheetId, spreadsheet: spreadsheet,
     title: function () { return props.title; } };
@@ -951,13 +1143,23 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
   }
 
   /**
-   * キャッシュしたシート全体から、この範囲を矩形で切り出します。
+   * この範囲を矩形で切り出します。
    * `SpreadsheetApp` は必ず矩形を返すので、足りないところは '' で埋めます。
-   * @param {Array[]} source
+   * @param {Array[]} source シート全体と同じ座標の二次元配列
    * @param {boolean} convertDates シリアル値を Date に戻すか
+   * @param {number[]} [knownDateColumns] 日付として読む列（1始まり）。
+   *   渡されたときはシートの表示形式を調べません（その調査は往復1回ぶん高いため）。
    */
-  function slice(source, convertDates) {
-    const dateCols = convertDates ? api.dateColumns() : null;
+  function slice(source, convertDates, knownDateColumns) {
+    let dateCols = null;
+    if (convertDates) {
+      if (knownDateColumns) {
+        dateCols = {};
+        knownDateColumns.forEach(c => { dateCols[c] = true; });
+      } else {
+        dateCols = api.dateColumns();
+      }
+    }
     const timeZone = api.spreadsheet.getSpreadsheetTimeZone();
     const out = [];
     for (let r = 0; r < numRows; r++) {
@@ -990,14 +1192,23 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
     /** @returns {Object} */
     getSheet: function () { return sheet; },
 
-    /** @returns {Array[]} 日付セルは Date に戻した二次元配列 */
-    getValues: function () { return slice(api.values(), true); },
+    /**
+     * @param {Object} [options] `options.dateColumns` に日付として読む列（1始まり）を
+     *   渡すと、シートの表示形式を調べずに済みます（その調査は往復1回ぶん高い）。
+     * @returns {Array[]} 日付セルは Date に戻した二次元配列
+     */
+    getValues: function (options) {
+      const known = options && options.dateColumns;
+      return slice(api.window(row, column, numRows, numColumns, false), true, known);
+    },
 
     /** @returns {*} 左上のセルの値 */
     getValue: function () { return range.getValues()[0][0]; },
 
     /** @returns {string[][]} 画面に見えているとおりの文字列 */
-    getDisplayValues: function () { return slice(api.displayValues(), false); },
+    getDisplayValues: function () {
+      return slice(api.window(row, column, numRows, numColumns, true), false);
+    },
 
     /**
      * 値を書き込みます。`SpreadsheetApp` と同じく `=` 始まりは数式になります。
@@ -1137,7 +1348,10 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
     const targets = Object.keys(offsets);
     if (targets.length === 0) return;
 
-    const known = api.dateColumns();
+    // 日付列かどうかは、既に分かっているときだけ参照します。
+    // 調べに行くと、シートの書式を200行ぶん取る往復（数十KB）が書き込みのたびに増えます。
+    // 分からないときは付ける側に倒します（同じ書式を上書きするだけで害はありません）。
+    const known = api.peekDateColumns() || {};
     const requests = targets
       .filter(offset => !known[column + Number(offset)])
       .map(offset => ({
@@ -1175,7 +1389,12 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
    * @param {Array[]} values
    */
   function patchCache(values) {
-    const grid = api.valuesCached();
+    // 書いたので、範囲だけ読んで持っていた分は当てにならない。
+    api.dropWindows();
+    // まだシート全体を読んでいないなら、ここで読みに行かない。
+    // 書き込みのたびに全体を取ることになり、範囲読みにした意味が無くなる。
+    const grid = api.peekValues();
+    if (!grid) return;
     for (let r = 0; r < values.length; r++) {
       const targetRow = row - 1 + r;
       while (grid.length <= targetRow) grid.push([]);
