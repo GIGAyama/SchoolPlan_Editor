@@ -76,6 +76,24 @@ GAS_SCRIPT_ID=<スクリプトID> GAS_DEPLOYMENT_ID=<デプロイID> npm run dep
 
 控えは「送る直前のGASの中身」そのものです。消えて困るものがあれば、ここから拾えます。
 
+### マニフェストが「ウェブアプリであること」を持っている
+
+Apps Script は、そのデプロイがウェブアプリなのかライブラリなのかを **`appsscript.json` で** 決めます。
+
+```json
+"webapp": {
+  "executeAs": "USER_ACCESSING",
+  "access": "ANYONE"
+}
+```
+
+エディタから手でデプロイしていたころは、エディタがこれを書いてくれていました。`clasp push` は**GAS側のマニフェストを丸ごと上書き**するため、リポジトリ側に `webapp` が無いと、**新しいバージョンからウェブアプリの入り口が消えます**（デプロイの設定にライブラリのURLしか出なくなります）。自動反映を入れた最初の1回で、実際にそうなりました。
+
+- `executeAs` は必ず `USER_ACCESSING`。`USER_DEPLOYING`（自分＝オーナーとして実行）にすると、全員がオーナーの権限で動き、`UserProperties` もオーナーのものになります。**全員が同じ1つのデータベースを共有**し、他学級の児童に関する記述が相互に見えます（`docs/LEGAL_RISK_AUDIT_JP.md` の C-2）。
+- `access` は `ANYONE`（Googleアカウントを持つ全員）か `DOMAIN`（同一ドメイン）。`ANYONE_ANONYMOUS` はログイン不要になるため使えません。このアプリは `Session.getActiveUser()` で利用者を見分け、その人のDriveのデータを扱います。
+
+`tests/gas-deploy.test.mjs` が、この3点をそれぞれ見張っています。
+
 ### URLは変わりません
 
 自動反映は**既存のデプロイを差し替える**方式（`clasp deploy --deploymentId`）です。新しいデプロイを作ると別のURLになり、先生方のブックマークとPWAは古いURLを指したままになります。それを避けるために、デプロイIDを必ず指定しています。
@@ -96,6 +114,8 @@ GAS_SCRIPT_ID=<スクリプトID> GAS_DEPLOYMENT_ID=<デプロイID> npm run dep
 | `invalid_grant` | 認証が切れた | 手順2をやり直し、`CLASPRC_JSON` を登録し直す |
 | 自動反映が走らない | Secret がまだ無い | Actions のログに「まだ設定されていません」と出ます。手順3をする |
 | 反映されたのに画面が古い | ブラウザ／PWAのキャッシュ | 完全に再読み込みする |
+| デプロイの設定にライブラリのURLしか出ない | `appsscript.json` に `webapp` が無い | 上の「マニフェストが『ウェブアプリであること』を持っている」を参照 |
+| 反映しても、先生の見る画面が変わらない | `GAS_DEPLOYMENT_ID` が別のデプロイを指している | 「デプロイを管理」で、`/exec` のURLが実際に配っているものと同じデプロイのIDか確かめる |
 
 ## この仕組みを見張っているもの
 
@@ -107,3 +127,4 @@ GAS_SCRIPT_ID=<スクリプトID> GAS_DEPLOYMENT_ID=<デプロイID> npm run dep
 - 控えにスクリプトIDを混ぜない
 - 送るのはリポジトリ直下の `.gs` / `.html` / `appsscript.json` だけ
 - 反映は直列にする（同時に走らせて古いコードで上書きしない）
+- マニフェストがウェブアプリとしての入り口を宣言している（`executeAs` はアクセスしているユーザー、ログイン必須）

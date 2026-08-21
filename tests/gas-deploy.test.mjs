@@ -7,6 +7,7 @@
 //   (1) 壊れたものをそのまま反映してしまう（品質ゲートを通す前に触らない）
 //   (2) 新しいデプロイを作ってしまい **URLが変わる**（先生のブックマークとPWAが古いまま残る）
 //   (3) GASエディタで直接直した箇所を、控えも取らずに上書きしてしまう
+//   (4) マニフェストを上書きして、**ウェブアプリでなくなる**
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -150,4 +151,26 @@ test('スクリプトIDはリポジトリに置かない', () => {
   assert.ok(ignored.includes('.clasp.json'), '.clasp.json が追跡対象になっている');
   assert.ok(ignored.includes('.clasprc.json'), '.clasprc.json が追跡対象になっている');
   assert.equal(fs.existsSync('.clasp.json') && !ignored.includes('.clasp.json'), false);
+});
+
+test('マニフェストが、ウェブアプリとしての入り口を宣言している', () => {
+  // Apps Script は「このデプロイがウェブアプリか、ライブラリか」を appsscript.json で決める。
+  // clasp push はGAS側のマニフェストを丸ごと上書きするので、ここに webapp が無いと
+  // **デプロイからウェブアプリの入り口が消える**。実際に一度そうなった。
+  // エディタから手でデプロイしていたころは、エディタがこれを書いてくれていた。
+  const manifest = JSON.parse(fs.readFileSync('appsscript.json', 'utf8'));
+
+  assert.ok(manifest.webapp,
+    'appsscript.json に webapp がない（反映するとウェブアプリでなくなる）');
+
+  // 「自分（オーナー）として実行」にすると、全員がオーナーの権限で動き、
+  // UserProperties もオーナーのものになる。結果、**全員が同じ1つのデータベースを共有**し、
+  // 他学級の児童に関する記述が相互に見える（docs/LEGAL_RISK_AUDIT_JP.md の C-2）。
+  assert.equal(manifest.webapp.executeAs, 'USER_ACCESSING',
+    'アクセスしているユーザーとして実行する設定になっていない');
+
+  // ANYONE_ANONYMOUS はログイン不要になる。このアプリは Session.getActiveUser() で
+  // 利用者を見分け、その人のDriveのデータを扱うため、ログインが要る。
+  assert.ok(['ANYONE', 'DOMAIN'].includes(manifest.webapp.access),
+    `アクセス範囲が想定外: ${manifest.webapp.access}（ANYONE か DOMAIN のこと）`);
 });
