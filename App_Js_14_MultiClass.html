@@ -451,6 +451,8 @@
                     return;
                 }
 
+                p2LogTiming('起動', res);
+                p2LogTiming('起動（週案の読み込み）', res.weeklyPlan);
                 if (res.masterData && res.masterData.success) STATE.masterData = res.masterData;
                 if (res.multiClass && res.multiClass.success) applyMultiClassState(res.multiClass);
                 STATE.mondayStr = res.mondayStr;

@@ -68,3 +68,35 @@ test('client bootstrap uses one critical request and V2 week APIs', async () => 
   assert.match(source, /\.saveWeeklyPlanDataV2\(/);
   assert.match(source, /weekRequestSeq/);
 });
+
+test('サーバを呼ぶ週案の経路は、すべて所要時間を記録する', async () => {
+  // 一度やらかした落とし穴: App_Js_15_DataProtection_Overrides.html は
+  // window.saveWeeklyPlan / window.persistViewMutation を丸ごと差し替える。
+  // 元の関数だけに計測を入れても、実際に動くのは差し替え後なので何も出ない。
+  // 「サーバを呼んでいるのに計測していない経路」を、ここで名指しで止める。
+  const files = [
+    'App_Js_14_MultiClass.html',
+    'App_Js_15_DataProtection_Overrides.html'
+  ];
+  const WEEK_APIS = /\.(saveWeeklyPlanDataProtected|saveWeeklyPlanDataV2|getWeeklyPlanDataV2|getAppBootstrapV2)\(/g;
+
+  for (const file of files) {
+    const source = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
+    const calls = (source.match(WEEK_APIS) || []).length;
+    if (calls === 0) continue;
+    const logs = (source.match(/p2LogTiming\(/g) || []).length;
+    assert.ok(logs >= calls,
+      `${file}: サーバ呼び出し ${calls} 件に対して計測が ${logs} 件しかない`);
+  }
+});
+
+test('計測は往復回数と待ち時間まで返す', async () => {
+  // 「往復が重いのか、GAS 側の固定費が重いのか」を切り分けるために要る。
+  const facade = await readFile(new URL('../18_SheetsApi.gs', import.meta.url), 'utf8');
+  assert.match(facade, /function sheetsFetchStats_/);
+  assert.match(facade, /SHEETS_FETCH_COUNT_\+\+/);
+
+  const performance = await readFile(new URL('../12_Performance.gs', import.meta.url), 'utf8');
+  // 読み込み・保存・起動のいずれもが内訳を返すこと
+  assert.equal((performance.match(/sheetsFetchStats_\(\)/g) || []).length, 3);
+});
