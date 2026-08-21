@@ -24,6 +24,11 @@ function makeSheet(name, grid) {
     getName: () => name,
     getLastRow: () => grid.length,
     getLastColumn: () => grid.reduce((max, row) => Math.max(max, row.length), 0),
+    // シートの大きさ（データのある範囲ではなく、シートそのものの行数・列数）。
+    // 実際のシートはデータより広いのが普通なので、少し余らせて返す。
+    // 読み過ぎたぶんが空で返っても壊れないことを、これで確かめられる。
+    getMaxRows: () => grid.length + 5,
+    getMaxColumns: () => grid.reduce((max, row) => Math.max(max, row.length), 0) + 2,
     // 旧実装（シート全体を読んで丸ごと書き戻す）でも動くようにしておく。
     // そうしないと回帰テストが「例外で落ちた」だけになり、何を守っているのか分からなくなる。
     getDataRange() { return sheet.getRange(1, 1, grid.length, sheet.getLastColumn()); },

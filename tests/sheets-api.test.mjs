@@ -194,7 +194,14 @@ function createFakeSheets(options = {}) {
     if (rest.startsWith(`${state.id}/values/`)) {
       const rangeText = decodeURIComponent(rest.replace(`${state.id}/values/`, ''));
       const target = parseA1(rangeText);
-      const grid = trim(state.values[target.title] || []);
+      const whole = state.values[target.title] || [];
+      // 範囲を指定されたらその矩形だけを返す（本物と同じく、末尾の空セルは詰める）
+      const picked = (target.numRows === null && target.numColumns === null)
+        ? whole
+        : whole
+          .slice(target.row - 1, target.row - 1 + target.numRows)
+          .map(row => row.slice(target.column - 1, target.column - 1 + target.numColumns));
+      const grid = trim(picked.map(row => (row || []).slice()));
       if (params.get('valueRenderOption') === 'FORMATTED_VALUE') {
         return respond(200, { values: grid.map(row => row.map(v => String(v))) });
       }
@@ -504,13 +511,30 @@ test('日付を書いた列には日付の表示形式が付く', () => {
   assert.ok(sheet.getRange(2, 1).getValue() instanceof Date);
 });
 
-test('すでに日付列なら表示形式を当て直さない', () => {
+test('日付列だと分かっていれば、表示形式を当て直さない', () => {
+  // 「分かっている」＝そのシートの書式を既に読んである状態。書き込みのためだけに
+  // 調べには行かない（シートの書式を200行ぶん取る往復が、書き込みのたびに増えるため）。
   const fake = createFakeSheets({ values: [['', '']], dateColumns: [1] });
   const api = loadFacade(fake);
   const sheet = api.sheetsOpenById_('ss-1').getSheetByName('データベース');
 
+  sheet.getRange(1, 1).getValues(); // ここで日付列が分かる
+  fake.state.formats.length = 0;
+
   sheet.getRange(1, 1).setValue(new Date('2026-08-18T15:00:00.000Z'));
   assert.equal(fake.state.formats.length, 0, '不要な書式設定を送っている');
+});
+
+test('日付列か分からないときは、調べに行かずに表示形式を付ける', () => {
+  const fake = createFakeSheets({ values: [['', '']] });
+  const api = loadFacade(fake);
+  const sheet = api.sheetsOpenById_('ss-1').getSheetByName('データベース');
+
+  sheet.getRange(1, 1).setValue(new Date('2026-08-18T15:00:00.000Z'));
+
+  const probes = fake.state.requests.filter(r => r.url.indexOf('includeGridData') >= 0);
+  assert.equal(probes.length, 0, '書き込みのために書式を調べに行っている');
+  assert.equal(fake.state.formats.length, 1, '日付の表示形式が付いていない');
 });
 
 // ---------------------------------------------------------------- PDF 書き出し

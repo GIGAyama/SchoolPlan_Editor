@@ -34,6 +34,10 @@ const P3_SNAPSHOT_HEADERS_ = [
   'SnapshotID', 'CreatedAt', 'Actor', 'Type', 'Scope', 'Label', 'ExpiresAt',
   'ChunkIndex', 'ChunkCount', 'Payload'
 ];
+// Payload を除いた見出しの数。一覧・期限切れ判定・件数制限はこの範囲しか見ない。
+// Payload まで読むと、保持上限（90日/300件）に達したシートでは1回の保存で
+// 数MBを運ぶことになる。中身が要るのは p3ReadSnapshot_ だけ。
+const P3_SNAPSHOT_META_WIDTH_ = P3_SNAPSHOT_HEADERS_.length - 1;
 const P3_TRASH_HEADERS_ = [
   'TrashID', 'DeletedAt', 'ExpiresAt', 'Actor', 'EntityType', 'EntityId',
   'Label', 'Payload'

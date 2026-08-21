@@ -8,8 +8,11 @@ function p3SplitChunks_(text) {
 
 function p3ListSnapshotFirstRows_(ss) {
   const sheet = p3EnsureInternalSheets_(ss).snapshots;
-  if (sheet.getLastRow() < 2) return [];
-  return sheet.getRange(2, 1, sheet.getLastRow() - 1, P3_SNAPSHOT_HEADERS_.length).getValues()
+  // 行数はシート構成（通信なし）から取る。getLastRow() を呼ぶと
+  // Payload 込みでシート全体を読むことになり、絞り込んだ意味が無くなる。
+  const maxRow = sheet.getMaxRows();
+  if (maxRow < 2) return [];
+  return sheet.getRange(2, 1, maxRow - 1, P3_SNAPSHOT_META_WIDTH_).getValues()
     .map((row, index) => ({ row, sheetRow: index + 2 }))
     .filter(item => Number(item.row[7]) === 1);
 }
@@ -102,7 +105,9 @@ function p3CreateSnapshot_(type, scope, label, payload) {
     chunks.length,
     chunk
   ]);
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, P3_SNAPSHOT_HEADERS_.length).setValues(rows);
+  // 末尾に足すだけなので getLastRow() は使わない。呼ぶと Payload 込みで
+  // シート全体を読むことになり、復元ポイントがたまるほど作成が重くなる。
+  sheet.appendRows(rows);
   p3CleanupSnapshots_(ss);
   if (type === 'week' && String(label || '').indexOf('自動: 週案保存前') === 0) {
     p3CleanupAutoSnapshotsForScope_(ss, scope);
@@ -112,8 +117,9 @@ function p3CreateSnapshot_(type, scope, label, payload) {
 
 function p3CleanupSnapshots_(ss) {
   const sheet = p3EnsureInternalSheets_(ss).snapshots;
-  if (sheet.getLastRow() < 2) return 0;
-  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, P3_SNAPSHOT_HEADERS_.length).getValues();
+  const maxRow = sheet.getMaxRows();
+  if (maxRow < 2) return 0;
+  const values = sheet.getRange(2, 1, maxRow - 1, P3_SNAPSHOT_META_WIDTH_).getValues();
   const now = Date.now();
   const firstRows = values
     .map((row, index) => ({ row, sheetRow: index + 2 }))
@@ -179,9 +185,10 @@ function listRestorePointsFromWeb(limit) {
     ensureDataProtectionReady_();
     const ss = getSs_();
     const sheet = p3EnsureInternalSheets_(ss).snapshots;
-    if (sheet.getLastRow() < 2) return { success: true, items: [] };
+    const maxRow = sheet.getMaxRows();
+    if (maxRow < 2) return { success: true, items: [] };
     const max = Math.max(1, Math.min(parseInt(limit, 10) || 50, 200));
-    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, P3_SNAPSHOT_HEADERS_.length).getValues();
+    const values = sheet.getRange(2, 1, maxRow - 1, P3_SNAPSHOT_META_WIDTH_).getValues();
     const items = values
       .filter(row => Number(row[7]) === 1)
       .map(row => ({

@@ -58,6 +58,26 @@ function createWorkbook() {
 function createTransport(sheets, log) {
   const display = g => g.map(r => r.map(v => (v === null || v === undefined ? '' : String(v))));
   const sheetNameIn = url => decodeURIComponent(url).match(/\/values\/'?([^'!?:]+)/)[1];
+  const columnNumber = letters => letters.split('')
+    .reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0);
+
+  /** 要求された範囲だけを切り出す（本物と同じく、末尾の空セルは詰める）。 */
+  function pick(grid, text) {
+    const body = (decodeURIComponent(text).split('/values/')[1] || '').split('?')[0];
+    const cells = /!([A-Z]+)(\d+):([A-Z]+)(\d+)/.exec(body);
+    const picked = cells
+      ? grid
+        .slice(parseInt(cells[2], 10) - 1, parseInt(cells[4], 10))
+        .map(row => (row || []).slice(columnNumber(cells[1]) - 1, columnNumber(cells[3])))
+      : grid.map(row => (row || []).slice());
+    const rows = picked.map(row => {
+      const copy = row.slice();
+      while (copy.length && (copy[copy.length - 1] === '' || copy[copy.length - 1] === undefined)) copy.pop();
+      return copy;
+    });
+    while (rows.length && rows[rows.length - 1].length === 0) rows.pop();
+    return rows;
+  }
 
   return function fetch(url, options) {
     const opt = options || {};
@@ -67,8 +87,8 @@ function createTransport(sheets, log) {
     let kind;
 
     if (text.includes(':append')) {
-      kind = 'append';
       const name = sheetNameIn(url);
+      kind = 'append:' + name;
       const grid = sheets[name] || (sheets[name] = []);
       const values = JSON.parse(opt.payload || '{}').values || [];
       const start = grid.length + 1;
@@ -84,7 +104,7 @@ function createTransport(sheets, log) {
       const name = sheetNameIn(url);
       const grid = sheets[name] || [];
       if (method === 'put' || method === 'post') {
-        kind = 'write';
+        kind = 'write:' + name;
         // 書いた内容はシートに残す。残さないと、保全用シートの見出しや
         // スキーマ版がいつまでも空のままになり、実際には起きない処理まで走ってしまう。
         const cell = text.match(/!([A-Z]+)(\d+)/);
@@ -107,7 +127,8 @@ function createTransport(sheets, log) {
       } else {
         kind = 'read:' + name;
         const formatted = text.includes('FORMATTED_VALUE') && !text.includes('UNFORMATTED_VALUE');
-        body = { values: formatted ? display(grid) : grid };
+        const picked = pick(grid, url);
+        body = { values: formatted ? display(picked) : picked };
       }
     } else if (text.includes(':batchUpdate')) {
       kind = 'batchUpdate';
@@ -264,22 +285,47 @@ function fillAuditLog(world, rows) {
   }
 }
 
+/** 復元ポイントに、実際に近い大きさの行をためる。 */
+function fillSnapshots(world, rows) {
+  const sheet = world.sheets['_週案_復元ポイント'];
+  assert.ok(sheet, '復元ポイントのシートがまだ無い');
+  const payload = 'あ'.repeat(3500); // JSON約10KB相当
+  while (sheet.length - 1 < rows) {
+    const index = sheet.length;
+    sheet.push(['snap_' + index, new Date(2026, 4, 1), 'teacher@example.com', 'week',
+      'データベース::2026/05/' + ((index % 28) + 1), '自動: 週案保存前',
+      new Date(2026, 10, 1), 1, 1, payload]);
+  }
+}
+
 /** 保全用シートを作らせる（作成は最初の1回だけの費用なので、計測から外す）。 */
 function warmUp(world) {
   saveOneCell(world, 'ウォームアップ');
 }
 
-test('週案の読み込みは、往復を使いすぎない', () => {
+/** 1回の操作で運んだ受信バイト数。 */
+function receivedBytes(calls) {
+  return calls.reduce((sum, c) => sum + c.bytes, 0);
+}
+
+test('週案の読み込みは、往復も通信量も使いすぎない', () => {
+  // 年間1枚のシートから1週を出す。正味は約1.6KB なので、
+  // 数十KBも運んでいたら「シート全体を読んでいる」ということ。
   const world = createWorld();
   const { calls } = measure(world, app => app.getWeeklyPlanDataV2(MONDAY));
-  assert.ok(calls.length <= 6, `読み込みで ${calls.length} 往復している`);
+  assert.ok(calls.length <= 4, `読み込みで ${calls.length} 往復している`);
+  assert.ok(receivedBytes(calls) <= 32 * 1024,
+    `読み込みで ${Math.round(receivedBytes(calls) / 1024)}KB 受信している`);
 });
 
-test('週案の保存は、往復を使いすぎない', () => {
+test('週案の保存は、往復も通信量も使いすぎない', () => {
   const world = createWorld();
   warmUp(world);
   const { calls } = saveOneCell(world, '編集した学習内容');
-  assert.ok(calls.length <= 14, `保存で ${calls.length} 往復している`);
+  // 上限は実測値そのもの。増やすときは「なぜ1往復増やすのか」を書いてから増やすこと。
+  assert.ok(calls.length <= 11, `保存で ${calls.length} 往復している`);
+  assert.ok(receivedBytes(calls) <= 64 * 1024,
+    `保存で ${Math.round(receivedBytes(calls) / 1024)}KB 受信している`);
 });
 
 test('保存のとき、監査ログのシートを読まない', () => {
@@ -291,7 +337,7 @@ test('保存のとき、監査ログのシートを読まない', () => {
   const auditReads = calls.filter(c => c.kind === 'read:_週案_監査ログ');
   assert.equal(auditReads.length, 0, '監査ログを読んでいる（values.append を使うこと）');
 
-  const appends = calls.filter(c => c.kind === 'append');
+  const appends = calls.filter(c => c.kind === 'append:_週案_監査ログ');
   assert.equal(appends.length, 1, '監査ログへの追記が values.append になっていない');
 });
 
@@ -310,8 +356,10 @@ test('監査ログがたまっても、保存の重さが変わらない', () =>
     '監査ログの量で往復回数が変わっている');
 
   const bytesOf = run => run.calls.reduce((sum, c) => sum + c.bytes, 0);
-  assert.ok(bytesOf(heavy) <= bytesOf(light) * 1.1,
-    `監査ログの量で受信量が増えている（${Math.round(bytesOf(light) / 1024)}KB → ${Math.round(bytesOf(heavy) / 1024)}KB）`);
+  // 行番号の桁が増えるぶん（応答に載る A403:J403 のような文字列）は数十バイト動く。
+  // 「行数に比例して増えていないこと」が見たいので、その幅だけ許す。
+  assert.ok(Math.abs(bytesOf(heavy) - bytesOf(light)) < 256,
+    `監査ログの量で通信量が変わっている（${bytesOf(light)}B → ${bytesOf(heavy)}B）`);
 });
 
 test('監査ログの1行は、週データを丸ごと抱え込まない', () => {
@@ -329,4 +377,29 @@ test('監査ログの1行は、週データを丸ごと抱え込まない', () =
   assert.ok(after.length <= 600, `After が大きすぎる（${after.length}文字）`);
   assert.match(before, /snapshotId/, '復元ポイントIDが残っていない');
   assert.doesNotMatch(before, /学習内容のテキスト/, '週データの中身が監査ログに入っている');
+});
+
+test('復元ポイントがたまっても、保存の重さが変わらない', () => {
+  // 復元ポイントは1件が週データ相当（Payload 列）を持つ。保持上限は90日/300件なので、
+  // 一覧や期限切れ判定が Payload まで読むと、上限に達したシートでは
+  // 1回の保存で数MBを運ぶことになる。読むのは中身が要る復元のときだけでよい。
+  const world = createWorld();
+  warmUp(world);
+
+  const light = saveOneCell(world, '復元ポイントが少ないときの編集');
+
+  fillSnapshots(world, 300); // 保持上限いっぱい。1件あたり約10KBの Payload
+  const heavy = saveOneCell(world, '復元ポイントがたまったあとの編集');
+
+  assert.equal(heavy.calls.length, light.calls.length,
+    '復元ポイントの量で往復回数が変わっている');
+
+  const payloadReads = heavy.calls.filter(c => c.kind === 'read:_週案_復元ポイント');
+  const biggest = payloadReads.reduce((max, c) => Math.max(max, c.bytes), 0);
+  assert.ok(biggest < 64 * 1024,
+    `復元ポイントの Payload まで読んでいる（1回で ${Math.round(biggest / 1024)}KB）`);
+
+  const bytesOf = run => run.calls.reduce((sum, c) => sum + c.bytes, 0);
+  assert.ok(Math.abs(bytesOf(heavy) - bytesOf(light)) < 4096,
+    `復元ポイントの量で通信量が変わっている（${bytesOf(light)}B → ${bytesOf(heavy)}B）`);
 });

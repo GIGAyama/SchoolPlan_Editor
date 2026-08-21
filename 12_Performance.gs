@@ -47,26 +47,41 @@ function p2GroupConsecutiveNumbers_(numbers) {
 }
 
 /**
+ * 列マップが指す最も右の列（1始まり）を返します。
+ * 週案が読み書きするのはこの範囲までなので、行を読む幅にも使います。
+ * @param {Object} cols 列マップ
+ * @returns {number}
+ */
+function p2MappedWidth_(cols) {
+  return Object.keys(cols || {})
+    .reduce((max, key) => Math.max(max, Number(cols[key]) || 0), 1);
+}
+
+/**
  * 日付列だけを先に読み、対象日の行だけを取得します。
  * 年間DB全体を全列読み込む従来方式を避けます。
  */
 function p2ReadRowsForDates_(sheet, cols, dateStrs) {
-  const lastRow = sheet.getLastRow();
-  const lastColumn = Math.max(1, sheet.getLastColumn());
+  // 大きさは、通信の要らないシート構成（getMaxRows / 列マップ）から決める。
+  // getLastRow() / getLastColumn() は「データのある最終行・列」なので、
+  // 呼ぶとシート全体の読み込みが走る。年間1枚のシートで1週を出すのに
+  // 全部を運ぶことになるため、ここでは使わない。
+  const maxRow = Math.max(2, sheet.getMaxRows());
+  const lastColumn = p2MappedWidth_(cols);
   const wanted = new Set(dateStrs);
   const rowNumberByDate = new Map();
 
-  if (lastRow >= 2) {
-    const dateValues = sheet.getRange(2, cols.DATE, lastRow - 1, 1).getValues();
-    dateValues.forEach((row, index) => {
-      const value = row[0];
-      if (!(value instanceof Date)) return;
-      const dateStr = formatDate(value);
-      if (wanted.has(dateStr) && !rowNumberByDate.has(dateStr)) {
-        rowNumberByDate.set(dateStr, index + 2);
-      }
-    });
-  }
+  // 日付列であることは見出しから分かっているので、表示形式を調べに行かせない。
+  const dateValues = sheet.getRange(2, cols.DATE, maxRow - 1, 1)
+    .getValues({ dateColumns: [cols.DATE] });
+  dateValues.forEach((row, index) => {
+    const value = row[0];
+    if (!(value instanceof Date)) return;
+    const dateStr = formatDate(value);
+    if (wanted.has(dateStr) && !rowNumberByDate.has(dateStr)) {
+      rowNumberByDate.set(dateStr, index + 2);
+    }
+  });
 
   const rowNumbers = [...rowNumberByDate.values()].sort((a, b) => a - b);
   const rowByNumber = new Map();
@@ -74,7 +89,8 @@ function p2ReadRowsForDates_(sheet, cols, dateStrs) {
 
   for (const group of p2GroupConsecutiveNumbers_(rowNumbers)) {
     const startRow = group[0];
-    const values = sheet.getRange(startRow, 1, group.length, lastColumn).getValues();
+    const values = sheet.getRange(startRow, 1, group.length, lastColumn)
+      .getValues({ dateColumns: [cols.DATE] });
     values.forEach((row, offset) => rowByNumber.set(startRow + offset, row));
   }
 
@@ -84,6 +100,41 @@ function p2ReadRowsForDates_(sheet, cols, dateStrs) {
   });
 
   return { lastColumn, rowNumbers, rowNumberByDate, rowByNumber, rowByDate };
+}
+
+/**
+ * 書き込んだあと、対象の行だけを読み直します。
+ *
+ * スプレッドシートは書き込んだ値を解釈し直す（"1/3" は日付に、"007" は 7 になる）ため、
+ * 保存後のリビジョンは「送った値」ではなく「シートに実際に入った値」から求める必要が
+ * あります。日付と行番号の対応はもう分かっているので、日付列は読み直しません。
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet 対象シート
+ * @param {Object} cols 列マップ
+ * @param {Object} rowState p2ReadRowsForDates_ の戻り値
+ * @returns {Object} 読み直した rowState（同じ形）
+ */
+function p2RereadRows_(sheet, cols, rowState) {
+  const lastColumn = p2MappedWidth_(cols);
+  const rowByNumber = new Map();
+  for (const group of p2GroupConsecutiveNumbers_(rowState.rowNumbers)) {
+    const startRow = group[0];
+    const values = sheet.getRange(startRow, 1, group.length, lastColumn)
+      .getValues({ dateColumns: [cols.DATE] });
+    values.forEach((row, offset) => rowByNumber.set(startRow + offset, row));
+  }
+  const rowByDate = new Map();
+  rowState.rowNumberByDate.forEach((rowNumber, dateStr) => {
+    const row = rowByNumber.get(rowNumber);
+    if (row) rowByDate.set(dateStr, row);
+  });
+  return {
+    lastColumn,
+    rowNumbers: rowState.rowNumbers,
+    rowNumberByDate: rowState.rowNumberByDate,
+    rowByNumber,
+    rowByDate
+  };
 }
 
 /**
@@ -560,7 +611,7 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
     // 「保存の競合」になっていた(単独利用でも頻発する原因)。
     let afterState = rowState;
     if (uniqueChangedRows.length > 0) {
-      afterState = p2ReadRowsForDates_(dbSheet, dbCols, weekDateStrs);
+      afterState = p2RereadRows_(dbSheet, dbCols, rowState);
       // 単元セルが変わると単元の進捗も変わるため、進捗インデックスのキャッシュを捨てる。
       invalidateUnitProgressCache_();
     }

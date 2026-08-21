@@ -226,7 +226,7 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 ├── 15_UnitMasterOps.gs   # 単元単位の書き込みと単元マスタの整合性チェック・修復
 ├── 16_UnitRecompose.gs   # 単元の時数再構成（AI）と年間時数の再配分
 ├── 17_DriveApi.gs        # Drive REST API v3 ラッパー（drive.file で動かすため DriveApp は使わない）
-├── 18_SheetsApi.gs       # Sheets REST API v4 ファサード（spreadsheets スコープを避けるため SpreadsheetApp は使わない）
+├── 18_SheetsApi.gs       # Sheets REST API v4 ファサード（spreadsheets スコープを避けるため SpreadsheetApp は使わない／範囲読み・追記で通信量を抑える）
 ├── 99_Utils.gs           # 日付計算等の共通ユーティリティ関数
 ├── appsscript.json       # GASマニフェスト（OAuthスコープ・Classroom拡張サービス）
 ├── App.html              # フロントエンドSPAのメインHTML
@@ -244,7 +244,7 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 ├── scripts/check-project.mjs # 静的検査の入口（npm run check）
 ├── scripts/lib/          # 静的検査の本体（project-quality / giga-v5-checks）
 ├── tests/                # 静的検査・回帰テスト（node --test / npm test）
-│   └── round-trip-budget.test.mjs # 週案の読み書きが Sheets API を何往復するかの上限
+│   └── round-trip-budget.test.mjs # 週案の読み書きが Sheets API を何往復・何KB使うかの上限
 ├── quality.config.json   # 静的検査の設定（必須ファイル・禁止スコープ・例外リスト）
 ├── package.json          # 品質ゲートとVendor生成用のnpmスクリプト・開発依存
 ├── .github/workflows/quality.yml # CI: Node 20 / 22 で npm run check と npm test を実行
