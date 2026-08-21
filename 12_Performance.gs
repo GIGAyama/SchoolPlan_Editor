@@ -74,28 +74,63 @@ function p2CalendarCacheKey_(sheet) {
  * 先頭の日付と行番号さえ分かれば、任意の日付の行番号は引き算で出せます。
  * 覚えておけば、週を開くたびに日付列（370行）を読む必要がなくなります。
  *
- * 連続していないシート（手で行を足した等）では覚えません。その場合は
- * 従来どおり日付列を走査します。
+ * ただし、シート全体が1本の並びになっているとは限りません。`generateAnnualCalendar` は
+ * 既存の行数が370行を超えていると**超えた分をそのまま残す**ため、前年度の日付が下に
+ * 居座ることがあります。手で行を足した場合も同じです。
+ *
+ * そこで「いちばん長く続いている範囲」だけを覚えます。シート全体がひと続きで
+ * なければ諦める、という作りだと、たった1行の乱れで週の読み込みが常に
+ * 日付列の全走査に戻ってしまいます。
+ *
+ * 覚えた範囲を使うときは、読んだ行の日付を必ず突き合わせます
+ * （`p2ReadRowsByRememberedCalendar_`）。覚え違いがあっても、走査し直すだけです。
  *
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
  * @param {Array<{dateStr: string, rowNumber: number}>} scanned 走査で分かった対応（行番号昇順）
  */
 function p2RememberCalendar_(sheet, scanned) {
-  if (!scanned || scanned.length < 2) return;
-  const first = scanned[0];
-  const contiguous = scanned.every((item, index) => {
-    if (item.rowNumber !== first.rowNumber + index) return false;
-    const expected = new Date(parseDate_(first.dateStr).getTime());
-    expected.setDate(expected.getDate() + index);
-    return formatDate(expected) === item.dateStr;
-  });
-  if (!contiguous) return;
+  const run = p2LongestCalendarRun_(scanned);
+  if (!run) return;
   try {
     tCachePut_(
       p2CalendarCacheKey_(sheet),
-      JSON.stringify({ firstDate: first.dateStr, firstRow: first.rowNumber, count: scanned.length }),
+      JSON.stringify({ firstDate: run.firstDate, firstRow: run.firstRow, count: run.count }),
       P2_CALENDAR_CACHE_SECONDS_);
   } catch (e) { /* 覚えられなくても、走査すれば同じ結果になる */ }
+}
+
+/**
+ * 「行番号も日付も1ずつ進む」がいちばん長く続く範囲を返します。
+ * 2行に満たなければ null（引き算で行番号を出す意味がないため）。
+ * @param {Array<{dateStr: string, rowNumber: number}>} scanned 行番号昇順
+ * @returns {?{firstDate: string, firstRow: number, count: number}}
+ */
+function p2LongestCalendarRun_(scanned) {
+  const list = scanned || [];
+  if (list.length < 2) return null;
+
+  const followsPrevious = (previous, current) => {
+    if (!previous || current.rowNumber !== previous.rowNumber + 1) return false;
+    const expected = new Date(parseDate_(previous.dateStr).getTime());
+    expected.setDate(expected.getDate() + 1);
+    return formatDate(expected) === current.dateStr;
+  };
+
+  let best = null;
+  let startIndex = 0;
+  for (let index = 1; index <= list.length; index++) {
+    if (index < list.length && followsPrevious(list[index - 1], list[index])) continue;
+    const length = index - startIndex;
+    if (length >= 2 && (!best || length > best.count)) {
+      best = {
+        firstDate: list[startIndex].dateStr,
+        firstRow: list[startIndex].rowNumber,
+        count: length
+      };
+    }
+    startIndex = index;
+  }
+  return best;
 }
 
 /** 覚えている並びから、日付に対応する行番号を出します。分からなければ null。 */
@@ -113,7 +148,10 @@ function p2GuessRowNumbers_(sheet, dateStrs) {
   const guessed = new Map();
   for (const dateStr of dateStrs) {
     const offset = Math.round((parseDate_(dateStr).getTime() - firstTime) / 86400000);
-    if (offset < 0 || offset >= remembered.count) continue;
+    // **1日でも範囲の外に出たら、この週は覚えている並びで扱わない。**
+    // 一部だけ返すと、残りの日は「DBに無い日」として扱われ、入力できたはずの日が
+    // 保存されないまま「保存しました」になる。覚えている範囲の端の週で起きる。
+    if (offset < 0 || offset >= remembered.count) return null;
     guessed.set(dateStr, remembered.firstRow + offset);
   }
   return guessed.size > 0 ? guessed : null;
