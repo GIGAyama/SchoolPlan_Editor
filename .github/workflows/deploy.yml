@@ -1,0 +1,99 @@
+name: Deploy to Apps Script
+
+# main が更新されたら、リポジトリの内容を Apps Script プロジェクトへ反映し、
+# 既存のWebアプリのデプロイを新しいバージョンへ差し替えます。
+# これまで手でコピーしていた作業（53ファイル）を置き換えるものです。
+#
+# 事前に必要な設定は docs/D5_AUTO_DEPLOY.md にあります。
+# 秘密が1つも設定されていないうちは、何もせずに終わります（設定前の main 更新を
+# 赤くしないため）。一部だけ設定されている場合は、取り違えを疑って止めます。
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 反映は直列にする。2つ同時に走ると、あとから始まったほうが古いコードで
+# 上書きしうる。走っているものは止めない（途中で切ると中途半端に反映される）。
+concurrency:
+  group: deploy-apps-script
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Push and redeploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Check deployment secrets
+        id: secrets
+        shell: bash
+        env:
+          GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "${GAS_SCRIPT_ID}" ] || missing="${missing} GAS_SCRIPT_ID"
+          [ -n "${GAS_DEPLOYMENT_ID}" ] || missing="${missing} GAS_DEPLOYMENT_ID"
+          [ -n "${CLASPRC_JSON}" ] || missing="${missing} CLASPRC_JSON"
+
+          if [ "${missing}" = " GAS_SCRIPT_ID GAS_DEPLOYMENT_ID CLASPRC_JSON" ]; then
+            echo "::notice::自動反映はまだ設定されていません。docs/D5_AUTO_DEPLOY.md の手順で3つのシークレットを登録してください。"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "${missing}" ]; then
+            echo "::error::シークレットが足りません:${missing}（docs/D5_AUTO_DEPLOY.md を参照）"
+            exit 1
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install quality tooling
+        if: steps.secrets.outputs.ready == 'true'
+        run: npm ci --ignore-scripts
+
+      # 壊れたものを反映しない。品質ゲートを通ってから初めてGASを触る。
+      - name: Run quality gate
+        if: steps.secrets.outputs.ready == 'true'
+        run: npm run quality
+
+      - name: Install clasp
+        if: steps.secrets.outputs.ready == 'true'
+        run: npm run gas:install
+
+      # clasp push は GAS 側を丸ごと上書きする。GASエディタで直接直した箇所があれば
+      # それは消える。取り返しがつかないので、送る前の中身を必ず控えて残す。
+      - name: Deploy
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+          GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          GAS_DEPLOY_DESCRIPTION: ${{ github.sha }}
+        run: node scripts/gas-deploy.mjs deploy
+
+      - name: Upload pre-push snapshot
+        if: always() && steps.secrets.outputs.ready == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: gas-before-push-${{ github.sha }}
+          path: dist/gas-before-push
+          retention-days: 30
+          if-no-files-found: warn
