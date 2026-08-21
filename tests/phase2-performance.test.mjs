@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
@@ -70,24 +70,32 @@ test('client bootstrap uses one critical request and V2 week APIs', async () => 
 });
 
 test('サーバを呼ぶ週案の経路は、すべて所要時間を記録する', async () => {
-  // 一度やらかした落とし穴: App_Js_15_DataProtection_Overrides.html は
-  // window.saveWeeklyPlan / window.persistViewMutation を丸ごと差し替える。
-  // 元の関数だけに計測を入れても、実際に動くのは差し替え後なので何も出ない。
-  // 「サーバを呼んでいるのに計測していない経路」を、ここで名指しで止める。
-  const files = [
-    'App_Js_14_MultiClass.html',
-    'App_Js_15_DataProtection_Overrides.html'
-  ];
-  const WEEK_APIS = /\.(saveWeeklyPlanDataProtected|saveWeeklyPlanDataV2|getWeeklyPlanDataV2|getAppBootstrapV2)\(/g;
+  // 二度やらかした落とし穴。
+  //   1度目: App_Js_15_DataProtection_Overrides.html が window.saveWeeklyPlan などを
+  //          丸ごと差し替えるため、元の関数だけに計測を入れても何も出なかった。
+  //   2度目: 検査を2ファイルに絞っていたため、App_Js_02_Plan.html の保存経路を見落とした。
+  //          しかも「件数が合っていればよい」判定だったので、別の場所で数が合うと通ってしまった。
+  //
+  // そこで、フロントエンド全ファイルを対象に、**google.script.run の連鎖1本ずつ**を見る。
+  const files = (await readdir(new URL('../', import.meta.url)))
+    .filter(name => /^App_Js_.*\.html$/.test(name));
+  assert.ok(files.length > 0, 'フロントエンドのファイルが見つからない');
+
+  const WEEK_APIS = /\.(saveWeeklyPlanDataProtected|saveWeeklyPlanDataV2|getWeeklyPlanDataV2|getAppBootstrapV2)\(/;
+  const missing = [];
 
   for (const file of files) {
     const source = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
-    const calls = (source.match(WEEK_APIS) || []).length;
-    if (calls === 0) continue;
-    const logs = (source.match(/p2LogTiming\(/g) || []).length;
-    assert.ok(logs >= calls,
-      `${file}: サーバ呼び出し ${calls} 件に対して計測が ${logs} 件しかない`);
+    // google.script.run で分ける。分けたひと切れが「1回の呼び出しの連鎖」にあたる。
+    source.split('google.script.run').slice(1).forEach((chain, index) => {
+      if (!WEEK_APIS.test(chain)) return;
+      if (chain.indexOf('p2LogTiming(') >= 0) return;
+      missing.push(`${file} の ${index + 1} 本目`);
+    });
   }
+
+  assert.deepEqual(missing, [],
+    '所要時間を記録していないサーバ呼び出しがある: ' + missing.join(' / '));
 });
 
 test('計測は往復回数と待ち時間まで返す', async () => {

@@ -623,6 +623,7 @@
             .withSuccessHandler(function (result) {
                 _autoSaving = false;
                 endSaveRequest();
+                p2LogTiming('自動保存（週移動前）', result);
                 if (result.success) {
                     adoptSavedWeekDays(result, days);
                     STATE.weekData.revision = result.revision;
@@ -728,6 +729,7 @@
             google.script.run
                 .withSuccessHandler(function (result) {
                     endSaveRequest();
+                    p2LogTiming('自動保存（セル操作）', result);
                     if (result.success) {
                         weekData.revision = result.revision;
                         markViewWeekSaved(cacheKey, mutationSeq);

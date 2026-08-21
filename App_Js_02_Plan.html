@@ -1160,6 +1160,7 @@
                 google.script.run
                     .withSuccessHandler(function (result) {
                         endSaveRequest();
+                        if (typeof p2LogTiming === 'function') p2LogTiming('保存してから実行（' + source + '）', result);
                         if (result.success) {
                             adoptSavedWeekDays(result, days);
                             STATE.weekData.revision = result.revision;
