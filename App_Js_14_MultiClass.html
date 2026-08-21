@@ -260,6 +260,10 @@
                 + ' / 書き ' + p.writeMs + 'ms'
                 + ' / 監査 ' + p.auditMs + 'ms';
         }
+        // 通信1回ぶんずつの中身。回数だけでは「どこで増えたか」が分からない。
+        if (p.fetchLog && p.fetchLog.length) {
+            line += '\n  通信: ' + p.fetchLog.join('\n        ');
+        }
         console.log(line);
     }
 

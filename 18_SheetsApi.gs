@@ -77,6 +77,7 @@ function sheetsResetCache_() {
   SHEETS_CACHE_ = {};
   SHEETS_FETCH_COUNT_ = 0;
   SHEETS_FETCH_MS_ = 0;
+  SHEETS_FETCH_LOG_ = [];
 }
 
 // --- 通信の実測 -----------------------------------------------------------
@@ -89,12 +90,48 @@ function sheetsResetCache_() {
 let SHEETS_FETCH_COUNT_ = 0;
 let SHEETS_FETCH_MS_ = 0;
 
+// 回数だけでは「どこで増えたか」が分からない。手元の検査では3往復なのに実機では
+// 8往復、ということが起きる（データの形が違えば通る道も違う）。
+// 1回ぶんずつ「何を取りに行って何ミリ秒だったか」を残しておけば、実機の
+// コンソールだけで切り分けられる。
+const SHEETS_FETCH_LOG_MAX_ = 30;
+let SHEETS_FETCH_LOG_ = [];
+
+/**
+ * 通信の中身を、人が読める短い名前にします。
+ * スプレッドシートIDとアクセストークンは名前に入れません。
+ * @param {string} url
+ * @param {Object} options
+ * @returns {string}
+ */
+function sheetsFetchLabel_(url, options) {
+  const text = String(url);
+  const method = String((options && options.method) || 'get').toLowerCase();
+  if (text.indexOf(':batchUpdate') >= 0) return '書式・シート操作';
+  if (text.indexOf('/values:batchGet') >= 0) {
+    return 'まとめ読み(' + (text.match(/ranges=/g) || []).length + '範囲)';
+  }
+  const matched = /\/values\/([^?]+)/.exec(text);
+  if (matched) {
+    const range = decodeURIComponent(matched[1]).replace(/:append$/, '');
+    if (text.indexOf(':append') >= 0) return '追記 ' + range;
+    if (method === 'put') return '書き ' + range;
+    return '読み ' + range;
+  }
+  return 'シート構成';
+}
+
 /**
  * この実行で Sheets API を何回叩き、合計何ミリ秒待ったかを返します。
- * @returns {{fetches: number, fetchMs: number}}
+ * `fetchLog` は1回ぶんずつの内訳（先頭 SHEETS_FETCH_LOG_MAX_ 件まで）です。
+ * @returns {{fetches: number, fetchMs: number, fetchLog: Array<string>}}
  */
 function sheetsFetchStats_() {
-  return { fetches: SHEETS_FETCH_COUNT_, fetchMs: Math.round(SHEETS_FETCH_MS_) };
+  return {
+    fetches: SHEETS_FETCH_COUNT_,
+    fetchMs: Math.round(SHEETS_FETCH_MS_),
+    fetchLog: SHEETS_FETCH_LOG_.slice()
+  };
 }
 
 // --- シート構成の持ち越しキャッシュ ---------------------------------------
@@ -190,8 +227,12 @@ function sheetsFetch_(url, options) {
       }),
       muteHttpExceptions: true
     }));
+    const elapsedMs = Date.now() - startedAt;
     SHEETS_FETCH_COUNT_++;
-    SHEETS_FETCH_MS_ += Date.now() - startedAt;
+    SHEETS_FETCH_MS_ += elapsedMs;
+    if (SHEETS_FETCH_LOG_.length < SHEETS_FETCH_LOG_MAX_) {
+      SHEETS_FETCH_LOG_.push(sheetsFetchLabel_(url, opts) + ' ' + elapsedMs + 'ms');
+    }
     const code = response.getResponseCode();
 
     if (code >= 200 && code < 300) {

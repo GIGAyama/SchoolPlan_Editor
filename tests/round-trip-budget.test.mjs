@@ -548,3 +548,81 @@ test('ログを書くこと自体が、またログを呼んでも入れ子に�
   app.logInfo('外側のログ');
   assert.equal(deepest, 1, `ログの書き込みが入れ子になっている（深さ ${deepest}）`);
 });
+
+test('日付の並びが下のほうで乱れていても、続いている範囲は覚える', () => {
+  // generateAnnualCalendar は、既存の行数が370行を超えていると**超えた分をそのまま残す**。
+  // 前年度の日付が下に居座るシートは実際にありうる。シート全体がひと続きでなければ
+  // 諦める作りだと、たった1行の乱れで週の読み込みが常に日付列の全走査へ戻ってしまう。
+  const world = createWorld();
+  const stray = new Array(HEADERS.length).fill('');
+  stray[1] = (Date.UTC(2025, 3, 6) - SHEETS_EPOCH) / 86400000; // 1年前の日付が下に残っている
+  world.sheets['データベース'].push(stray);
+
+  warmUp(world);
+  const { result, calls } = measure(world, app => app.getWeeklyPlanDataV2(MONDAY));
+
+  assert.ok(result.success, '週案を読み込めていない: ' + result.error);
+  assert.equal(calls.length, 1,
+    `${calls.length}往復ある（続いている範囲を覚えていれば1往復で足りる）`);
+});
+
+test('覚えている範囲からはみ出す週は、覚えている行番号を使わない', () => {
+  // 覚えた範囲の端では、週7日のうち何日かが範囲の外に出る。そこで「入っている日だけ」
+  // を返すと、外に出た日は「DBに無い日」として扱われる。**行はあるのに無いことにされる**ため、
+  // 入力できたはずの日が保存されないまま「保存しました」になる。
+  // 1日でも外れたら、覚えている並びは使わずに走査し直す。
+  const world = createWorld();
+  const app = createRuntime(world);
+  const grid = world.sheets['データベース'];
+  const lastSerial = grid[grid.length - 1][1];
+  // 1行あけてから、続きの日付を置く。日付は続いているが行が飛んでいるので、
+  // 覚える範囲（いちばん長く続いている並び）には入らない。
+  grid.push(new Array(HEADERS.length).fill(''));
+  const detached = new Array(HEADERS.length).fill('');
+  detached[1] = lastSerial + 1;
+  detached[4] = '離れた行の行事';
+  grid.push(detached);
+
+  // 日付はアプリ自身に読ませる。テスト側で連番から日付を組み立てると、
+  // タイムゾーンの扱いで1日ずれた日付を指してしまう。
+  const detachedDate = app.formatDate(
+    app.sheetsOpenById_('ss-1').getSheetByName('データベース')
+      .getRange(grid.length, 2, 1, 1).getValues({ dateColumns: [2] })[0][0]);
+
+  warmUp(world);
+
+  const detachedAt = app.parseDate_(detachedDate);
+  const monday = app.formatDate(
+    new Date(detachedAt.getTime() - ((detachedAt.getDay() + 6) % 7) * 86400000));
+
+  const { result } = measure(world, a => a.getWeeklyPlanDataV2(monday));
+  assert.ok(result.success, '週案を読み込めていない: ' + result.error);
+
+  const day = result.days.find(d => d.date === detachedDate);
+  assert.ok(day, `${detachedDate} が ${monday} の週に入っていない（テストの組み立てが誤り）`);
+  assert.equal(day.found, true,
+    '覚えている範囲の外にある行を「DBに無い日」として落としている');
+  assert.equal(day.event, '離れた行の行事',
+    '覚えている範囲の外にある行の内容が読めていない');
+});
+
+test('通信の内訳を、1回ぶんずつ名前で返す', () => {
+  // 回数だけでは「どこで増えたか」が分からない。手元では3往復なのに実機では8往復、
+  // ということが起きる（データの形が違えば通る道も違う）。実機のコンソールだけで
+  // 切り分けられるよう、何を取りに行ったかを名前で返す。
+  const world = createWorld();
+  warmUp(world);
+  const { result, calls } = saveOneCell(world, '編集した学習内容');
+  // vm の中で作られた配列なので、host 側の Array へ写してから比べる
+  const log = Array.from(result.performance.fetchLog);
+
+  assert.equal(log.length, calls.length,
+    `通信は ${calls.length} 回なのに、内訳は ${log.length} 件しかない`);
+  assert.ok(log.every(line => /\d+ms$/.test(line)),
+    `所要時間の付いていない行がある: ${log.join(' / ')}`);
+  assert.ok(!log.some(line => line.indexOf('ss-1') >= 0),
+    `内訳にスプレッドシートIDが混じっている: ${log.join(' / ')}`);
+  assert.deepEqual(log.map(line => line.replace(/ \d+ms$/, '')), [
+    'まとめ読み(2範囲)', "書き 'データベース'!E60:AD60", "追記 '_週案_監査ログ'"
+  ], '保存が通る道が変わっている');
+});
