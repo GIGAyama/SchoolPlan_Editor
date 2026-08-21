@@ -242,6 +242,66 @@ function sheetsParseA1_(a1) {
   };
 }
 
+/**
+ * `values.append` の応答が返す `updatedRange`（例: `'ログ'!A123:C123`）から、
+ * 実際に書かれた行番号を取り出します。読めなければ 0 を返します。
+ * @param {string} updatedRange
+ * @returns {number} 1始まりの行番号。不明なら 0
+ */
+function sheetsAppendedRowNumber_(updatedRange) {
+  if (!updatedRange) return 0;
+  try {
+    return sheetsParseA1_(updatedRange).row || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+/**
+ * 追記した行の日付セルに表示形式を付けます。
+ *
+ * REST は数値を書くだけなので、付けないと日時が「46253.5」のような数値で表示されます。
+ * どの列が日付かを調べる `dateColumns()` はシートの書式を取りに行くため、
+ * **既に読み込んである時だけ**参照します。追記のために読み取りを増やしては本末転倒なので、
+ * 分からないときは付ける側に倒します（同じ書式を上書きするだけで害はありません）。
+ *
+ * @param {Object} sheet Sheet 相当のオブジェクト
+ * @param {Object} api シート内部API（`sheetsMakeSheet_` が返す第2の顔）
+ * @param {number} rowNumber 1始まりの行番号
+ * @param {Object<number, string>} offsets 0始まりの列オフセット → 表示形式
+ */
+function sheetsApplyAppendedDateFormats_(sheet, api, rowNumber, offsets) {
+  const targets = Object.keys(offsets || {});
+  if (targets.length === 0) return;
+
+  const known = (api.peekDateColumns && api.peekDateColumns()) || null;
+  const requests = targets
+    .filter(offset => !(known && known[Number(offset) + 1]))
+    .map(offset => ({
+      repeatCell: {
+        range: {
+          sheetId: sheet.getSheetId(),
+          startRowIndex: rowNumber - 1, endRowIndex: rowNumber,
+          startColumnIndex: Number(offset), endColumnIndex: Number(offset) + 1
+        },
+        cell: {
+          userEnteredFormat: {
+            numberFormat: {
+              type: offsets[offset].indexOf('H') >= 0 ? 'DATE_TIME' : 'DATE',
+              pattern: offsets[offset]
+            }
+          }
+        },
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    }));
+  if (requests.length === 0) return;
+
+  sheetsBatchUpdate_(api.spreadsheetId, requests);
+  // どの列を Date に戻すかが変わったので、判定をやり直させる
+  api.invalidateDateColumns();
+}
+
 // ============================================================
 // ===== 日付（シリアル値 ⇄ Date） =====
 // ============================================================
@@ -694,10 +754,52 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
 
     /**
      * 最終行の次に1行足します。
+     *
+     * `getLastRow()` を使うと、書き足すだけなのにシート全体を読むことになります。
+     * 監査ログのように増え続けるシートでは、これが追記のたびに重くなり、
+     * やがて UrlFetch の応答上限（50MB）に達して追記そのものが失敗します。
+     * Sheets の `values.append` は末尾をサーバ側で探すため、読み取りが要りません。
+     *
      * @param {Array} row
      */
     appendRow: function (row) {
-      sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]);
+      const timeZone = spreadsheet.getSpreadsheetTimeZone();
+      // Date を書いた列を覚えておく。表示形式は書いたあとに付ける（setValues と同じ理由）。
+      const dateColumnOffsets = {};
+      const payload = (row || []).map((v, c) => {
+        if (v instanceof Date) {
+          dateColumnOffsets[c] = (v.getHours() || v.getMinutes() || v.getSeconds())
+            ? 'yyyy/MM/dd HH:mm:ss' : 'yyyy/MM/dd';
+          return sheetsDateToSerial_(v, timeZone);
+        }
+        return v === undefined || v === null ? '' : v;
+      });
+
+      const result = sheetsFetch_(
+        `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/` +
+        `${encodeURIComponent(sheetsQuoteTitle_(props.title))}:append` +
+        '?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+          method: 'post',
+          contentType: 'application/json',
+          payload: JSON.stringify({ values: [payload] })
+        });
+
+      // 実際に書かれた行は応答が教えてくれる（'ログ'!A123:C123 の形）。
+      const updatedRange = (result && result.updates && result.updates.updatedRange) || '';
+      const appendedRow = sheetsAppendedRowNumber_(updatedRange);
+
+      // 追記した行ぶんだけキャッシュを伸ばす。ここで valuesCached() を呼ぶと
+      // 全体読みが走ってしまうので、既に読み込んである時だけ手を入れる。
+      const g = grid();
+      if (g.values && appendedRow) {
+        while (g.values.length < appendedRow) g.values.push([]);
+        g.values[appendedRow - 1] = payload.slice();
+        g.dirty = true;
+      }
+      delete g.display;
+
+      if (appendedRow) sheetsApplyAppendedDateFormats_(sheet, api, appendedRow, dateColumnOffsets);
+      return sheet;
     },
 
     /**
@@ -900,6 +1002,9 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
     displayValues: displayValues, dateColumns: dateColumns,
     invalidateDisplay: invalidateDisplay, invalidateValues: invalidateValues,
     invalidateDateColumns: invalidateDateColumns,
+    // 日付列の判定を「取りに行かずに、分かっていれば返す」。
+    // 追記のためだけに書式を取りに行くのを避けるために使う。
+    peekDateColumns: function () { return grid().dateColumns || null; },
     markDirty: function () { grid().dirty = true; },
     spreadsheetId: spreadsheetId, spreadsheet: spreadsheet,
     title: function () { return props.title; } };

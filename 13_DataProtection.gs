@@ -65,9 +65,26 @@ function p3HideInternalSheet_(sheet) {
   }
 }
 
-function p3EnsureSheet_(ss, name, headers) {
+/**
+ * 保全用の内部シートを用意します。
+ *
+ * @param {Object} ss スプレッドシート
+ * @param {string} name シート名
+ * @param {string[]} headers 見出し行
+ * @param {Object} [options] `options.trustExisting` を立てると、既にあるシートは
+ *   見出しの確認も装飾もせずそのまま返します。見出しを1行読むだけでもシート全体の
+ *   取得になるため（`18_SheetsApi.gs` は範囲読みを持たない）、監査ログのように
+ *   増え続けるシートでは、この確認が保存のたびに重くのしかかります。
+ *   確認そのものは `p3EnsureInternalSheets_` が定期的に行います。
+ * @returns {Object} Sheet 相当のオブジェクト
+ */
+function p3EnsureSheet_(ss, name, headers, options) {
   let sheet = ss.getSheetByName(name);
+  const created = !sheet;
   if (!sheet) sheet = ss.insertSheet(name, ss.getSheets().length);
+
+  // 作ったばかりのシートは、見出しも装飾もこれから付ける必要があるので素通ししない。
+  if (!created && options && options.trustExisting) return sheet;
 
   const requiredWidth = headers.length;
   if (sheet.getMaxColumns() < requiredWidth) {
@@ -99,14 +116,57 @@ function p3EnsureSheet_(ss, name, headers) {
 // 何度も呼ばれる保存・監査・ごみ箱操作の負荷を実行内メモ化で抑える。
 let p3SheetsMemo_ = null;
 
+/** 内部シートの構成を確認し直す間隔（秒）。 */
+const P3_SHEETS_VERIFY_INTERVAL_SECONDS_ = 21600; // 6時間
+
+/**
+ * 内部シートの構成を「今回は確認しなくてよい」かどうかを返します。
+ *
+ * 実行内メモ化（`p3SheetsMemo_`）は1回の実行の中でしか効きません。週案の保存は
+ * 1回ごとが別の実行なので、確認の一式（見出しの読取と装飾4回の書込）が保存のたびに
+ * まるごと走っていました。内部シートを書き換えるのはアプリ自身だけなので、
+ * 確認は起動時と6時間ごとで足ります。
+ *
+ * 見つからないシートは、確認を省いた回でも `p3EnsureSheet_` が作り直します。
+ * ここで省くのは「既にあるシートの見出しと見た目の点検」だけです。
+ * @param {string} spreadsheetId
+ * @returns {{trusted: boolean, remember: function()}}
+ */
+function p3SheetsVerification_(spreadsheetId) {
+  const key = 'p3SheetsVerified::' + spreadsheetId + '::v' + P3_SCHEMA_VERSION_;
+  let cache = null;
+  try {
+    cache = CacheService.getUserCache();
+  } catch (e) {
+    cache = null;
+  }
+  let trusted = false;
+  try {
+    trusted = !!(cache && cache.get(key));
+  } catch (e) {
+    trusted = false;
+  }
+  return {
+    trusted: trusted,
+    remember: function () {
+      try {
+        if (cache) cache.put(key, '1', P3_SHEETS_VERIFY_INTERVAL_SECONDS_);
+      } catch (e) { /* キャッシュが使えなくても、次回また確認するだけ */ }
+    }
+  };
+}
+
 function p3EnsureInternalSheets_(ss) {
   if (p3SheetsMemo_ && p3SheetsMemo_.id === ss.getId()) return p3SheetsMemo_.sheets;
+  const verification = p3SheetsVerification_(ss.getId());
+  const options = { trustExisting: verification.trusted };
   const sheets = {
-    meta: p3EnsureSheet_(ss, P3_META_SHEET_, P3_META_HEADERS_),
-    audit: p3EnsureSheet_(ss, P3_AUDIT_SHEET_, P3_AUDIT_HEADERS_),
-    snapshots: p3EnsureSheet_(ss, P3_SNAPSHOT_SHEET_, P3_SNAPSHOT_HEADERS_),
-    trash: p3EnsureSheet_(ss, P3_TRASH_SHEET_, P3_TRASH_HEADERS_)
+    meta: p3EnsureSheet_(ss, P3_META_SHEET_, P3_META_HEADERS_, options),
+    audit: p3EnsureSheet_(ss, P3_AUDIT_SHEET_, P3_AUDIT_HEADERS_, options),
+    snapshots: p3EnsureSheet_(ss, P3_SNAPSHOT_SHEET_, P3_SNAPSHOT_HEADERS_, options),
+    trash: p3EnsureSheet_(ss, P3_TRASH_SHEET_, P3_TRASH_HEADERS_, options)
   };
+  if (!verification.trusted) verification.remember();
   p3SheetsMemo_ = { id: ss.getId(), sheets };
   return sheets;
 }
@@ -174,6 +234,61 @@ function p3Json_(value, maxLength) {
   return text.length > limit ? text.substring(0, limit) + '…' : text;
 }
 
+/** 監査ログの Before/After 1件あたりの上限（文字）。これを超える値は要約に畳む。 */
+const P3_AUDIT_VALUE_MAX_ = 512;
+
+/**
+ * 監査ログに残す値を、中身ではなく「かたち」に畳みます。
+ *
+ * 配列は件数だけ、入れ子のオブジェクトは `{…}` にします。
+ * revision・snapshotId・trashId のような手がかりはスカラーなのでそのまま残ります。
+ * @param {*} value
+ * @param {number} [depth]
+ * @returns {*}
+ */
+function p3AuditOutline_(value, depth) {
+  depth = depth || 0;
+  if (value === null || value === undefined) return value;
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return '[' + value.length + '件]';
+  if (typeof value === 'object') {
+    if (depth >= 1) return '{…}';
+    const out = {};
+    Object.keys(value).slice(0, 30).forEach(key => {
+      out[key] = p3AuditOutline_(value[key], depth + 1);
+    });
+    return out;
+  }
+  const text = String(value);
+  return text.length > 120 ? text.substring(0, 120) + '…' : text;
+}
+
+/**
+ * 監査ログの Before/After に書く値を決めます。
+ *
+ * 監査ログは「いつ・誰が・何をしたか」の記録であって、中身を戻すためのものでは
+ * ありません。戻すのは復元ポイント・ごみ箱・完全バックアップの役目です
+ * （docs/PHASE3_DATA_PROTECTION.md）。
+ *
+ * 以前は週案1回の保存で、保存前後の週データを丸ごと2つ書いていました。1行あたり
+ * 約10KBになるうえ、このシートには保持期限がありません。読み出しているのは
+ * `listAuditLogFromWeb` だけで、そこは Before/After を返していないため、
+ * **書かれるだけで誰も読まない中身**がシートを太らせ続けていました。
+ *
+ * そこで、小さい値はそのまま残し、大きい値は手がかり（revision・snapshotId など）と
+ * 件数だけに畳みます。復元ポイントIDが残るので、中身が要るときはそちらを辿れます。
+ * @param {*} value
+ * @returns {*}
+ */
+function p3AuditValue_(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== 'object') return value;
+  // 上限より十分大きい所で切って長さを見る（全体を組み立て直さないため）
+  const json = p3Json_(value, P3_AUDIT_VALUE_MAX_ * 4);
+  if (json.length <= P3_AUDIT_VALUE_MAX_) return value;
+  return p3AuditOutline_(value);
+}
+
 function p3RecordAudit_(action, entityType, entityId, summary, beforeValue, afterValue, correlationId) {
   try {
     const ss = getSs_();
@@ -186,8 +301,8 @@ function p3RecordAudit_(action, entityType, entityId, summary, beforeValue, afte
       String(entityType || '').substring(0, 80),
       String(entityId || '').substring(0, 500),
       String(summary || '').substring(0, 5000),
-      p3Json_(beforeValue, 20000),
-      p3Json_(afterValue, 20000),
+      p3Json_(p3AuditValue_(beforeValue), P3_AUDIT_VALUE_MAX_),
+      p3Json_(p3AuditValue_(afterValue), P3_AUDIT_VALUE_MAX_),
       correlationId || ''
     ]);
   } catch (e) {

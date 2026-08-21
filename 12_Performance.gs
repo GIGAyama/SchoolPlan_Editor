@@ -568,13 +568,18 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
     const newRevision = computeWeekRevision_([...afterState.rowByDate.values()], dbCols, weekDateStrs);
 
     if (uniqueChangedRows.length > 0 && protect) {
+      // 監査ログには「どの日を変えたか」までを残す。保存前の中身そのものは
+      // 復元ポイント（snapshotId）に入っているので、ここへ二重に持たせない。
+      const changedRowSet = new Set(uniqueChangedRows);
+      const changedDates = weekDateStrs
+        .filter(dateStr => changedRowSet.has(rowState.rowNumberByDate.get(dateStr)));
       p3RecordAudit_(
         'WEEK_SAVE',
         'week',
         mondayDateStr,
         ((options && options.source) || 'web') + 'から週案を保存 (' + uniqueChangedRows.length + '日)',
-        { revision: currentRevision, snapshotId: restorePointId, days: p3ComparableDays_(beforeDays) },
-        { revision: newRevision, days: p3ComparableDays_(savedDays) },
+        { revision: currentRevision, snapshotId: restorePointId, changedDates: changedDates.join(' ') },
+        { revision: newRevision },
         'save_' + Utilities.getUuid()
       );
     }

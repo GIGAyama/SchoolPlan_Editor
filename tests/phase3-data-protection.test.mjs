@@ -241,3 +241,75 @@ test('settings UI exposes backup, restore, trash, audit, migrations, and integri
     'runDataIntegrityCheckFromWeb'
   ]) assert.match(frontend, new RegExp(api));
 });
+
+// ---------------------------------------------------------------- 監査ログに残す値
+
+/** 13_DataProtection.gs の純粋な関数だけを取り出して動かす。 */
+function loadAuditHelpers() {
+  const source = fs.readFileSync('13_DataProtection.gs', 'utf8');
+  const factory = new Function(`
+    ${source}
+    return { p3AuditValue_, p3AuditOutline_, p3Json_, P3_AUDIT_VALUE_MAX_ };
+  `);
+  return factory();
+}
+
+/** 週案1週ぶんに近い大きさのデータを作る。 */
+function sampleWeekDays() {
+  return Array.from({ length: 7 }, (_, d) => ({
+    date: `2026/06/0${d + 1}`,
+    event: '行事の説明が入ります',
+    periods: Array.from({ length: 6 }, (_, p) => ({
+      subject: '国語', unit: '単元' + p, content: '学習内容の説明文がここに入ります'.repeat(3)
+    }))
+  }));
+}
+
+test('監査ログの Before/After は、小さい値ならそのまま残す', () => {
+  const { p3AuditValue_ } = loadAuditHelpers();
+  assert.deepEqual(p3AuditValue_({ trashId: 'trash_1' }), { trashId: 'trash_1' });
+  assert.deepEqual(p3AuditValue_({ version: 4, applied: ['保持期間設定'] }),
+    { version: 4, applied: ['保持期間設定'] });
+  assert.equal(p3AuditValue_('文字列はそのまま'), '文字列はそのまま');
+  assert.equal(p3AuditValue_(null), null);
+});
+
+test('監査ログの Before/After は、大きい値を手がかりだけに畳む', () => {
+  // 監査ログは「いつ・誰が・何をしたか」の記録で、中身を戻すためのものではない。
+  // 戻すのは復元ポイント側の役目なので、snapshotId が残っていればよい。
+  const { p3AuditValue_, p3Json_, P3_AUDIT_VALUE_MAX_ } = loadAuditHelpers();
+  const before = {
+    revision: 'abc123',
+    snapshotId: 'snap_1',
+    changedDates: '2026/06/01 2026/06/02',
+    days: sampleWeekDays()
+  };
+
+  const outlined = p3AuditValue_(before);
+  assert.equal(outlined.revision, 'abc123');
+  assert.equal(outlined.snapshotId, 'snap_1', '復元ポイントIDまで畳んでしまっている');
+  assert.equal(outlined.changedDates, '2026/06/01 2026/06/02');
+  assert.equal(outlined.days, '[7件]', '週データの中身が残っている');
+
+  // 畳んだうえで、記録する文字数も上限を超えない
+  assert.ok(p3Json_(outlined, P3_AUDIT_VALUE_MAX_).length <= P3_AUDIT_VALUE_MAX_ + 1);
+
+  // 畳む前は上限をはるかに超えていたこと（＝この畳みが効いていること）を示す
+  assert.ok(p3Json_(before, 1000000).length > P3_AUDIT_VALUE_MAX_ * 4);
+});
+
+test('監査ログの要約でも、機密の伏せ字は効いたまま', () => {
+  const { p3AuditValue_, p3Json_, P3_AUDIT_VALUE_MAX_ } = loadAuditHelpers();
+  const value = { apiKey: 'AIza-本物のキー', days: sampleWeekDays() };
+  const json = p3Json_(p3AuditValue_(value), P3_AUDIT_VALUE_MAX_);
+  assert.match(json, /REDACTED/);
+  assert.doesNotMatch(json, /AIza-本物のキー/);
+});
+
+test('週案保存の監査ログは、週データではなく変更した日付を残す', () => {
+  const performance = fs.readFileSync('12_Performance.gs', 'utf8');
+  const audit = between(performance, "p3RecordAudit_(\n        'WEEK_SAVE'", "'save_' + Utilities.getUuid()");
+  assert.match(audit, /snapshotId: restorePointId/, '復元ポイントIDを残していない');
+  assert.match(audit, /changedDates/);
+  assert.doesNotMatch(audit, /days:/, '週データを監査ログへ渡している');
+});

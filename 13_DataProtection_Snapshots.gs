@@ -238,25 +238,6 @@ function createWeekRestorePointFromWeb(mondayDateStr, label) {
   }
 }
 
-function p3ComparableDays_(days) {
-  return (days || []).map(day => ({
-    date: day.date || '',
-    event: day.event || '',
-    preclass: day.preclass || '',
-    morning: day.morning || '',
-    periods: (day.periods || []).map(period => ({
-      subject: period && period.subject || '',
-      unit: period && period.unit || '',
-      content: period && period.content || ''
-    })),
-    recess1: day.recess1 || '',
-    recess2: day.recess2 || '',
-    afterschool: day.afterschool || '',
-    homework: day.homework || '',
-    items: day.items || ''
-  }));
-}
-
 function saveWeeklyPlanDataProtected(mondayDateStr, days, baseRevision, source, expectedSheetName) {
   // 保存前スナップショットと監査ログは保存本体で常時実施される。
   // ここは監査ログの操作元と、保存先学級の照合を渡すための入口。

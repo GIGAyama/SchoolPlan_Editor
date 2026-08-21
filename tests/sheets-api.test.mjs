@@ -150,6 +150,29 @@ function createFakeSheets(options = {}) {
       return respond(200, {});
     }
 
+    // 末尾への追記（values.append）。本物と同じく、書く先はサーバ側が決めて応答で返す。
+    if (rest.startsWith(`${state.id}/values/`) && rest.endsWith(':append')) {
+      const rangeText = decodeURIComponent(rest.replace(`${state.id}/values/`, '').replace(/:append$/, ''));
+      const title = rangeText.split('!')[0].replace(/^'|'$/g, '').replace(/''/g, "'");
+      const grid = state.values[title];
+      const startRow = trim(grid || []).length + 1;
+      payload.values.forEach((row, r) => {
+        const rowIndex = startRow - 1 + r;
+        while (grid.length <= rowIndex) grid.push([]);
+        grid[rowIndex] = row.map((value, c) => state.normalize(value, c + 1));
+      });
+      const endRow = startRow + payload.values.length - 1;
+      const width = Math.max(1, ...payload.values.map(row => row.length));
+      const letter = (n) => {
+        let out = '';
+        while (n > 0) { const rem = (n - 1) % 26; out = String.fromCharCode(65 + rem) + out; n = Math.floor((n - 1) / 26); }
+        return out;
+      };
+      return respond(200, {
+        updates: { updatedRange: `${rangeText.split('!')[0]}!A${startRow}:${letter(width)}${endRow}` }
+      });
+    }
+
     // 値の書き込み
     if (rest.startsWith(`${state.id}/values/`) && options && options.method === 'put') {
       const rangeText = decodeURIComponent(rest.replace(`${state.id}/values/`, ''));
@@ -367,6 +390,27 @@ test('追記はシート全体を読み直さない（ログ出力が重くな�
   sheet.appendRow(['3行目']);
 
   assert.equal(countReads(), afterFirst, '追記のたびにシートを読み直している');
+  assert.equal(sheet.getLastRow(), 4);
+});
+
+test('追記は values.append を使い、シートを一度も読まない', () => {
+  // 監査ログのように増え続けるシートでは、追記のたびに全体を読むと重くなり、
+  // やがて UrlFetch の応答上限（50MB）に達して追記そのものが失敗する。
+  const fake = createFakeSheets({ values: [['見出し'], ['既存1'], ['既存2']] });
+  const api = loadFacade(fake);
+  const sheet = api.sheetsOpenById_('ss-1').getSheetByName('データベース');
+
+  fake.state.requests.length = 0;
+  sheet.appendRow(['追記した行']);
+
+  const reads = fake.state.requests.filter(r => r.method === 'get' && r.url.indexOf('/values/') >= 0);
+  assert.equal(reads.length, 0, '追記のためにシートを読んでいる');
+
+  const appended = fake.state.requests.filter(r => r.url.indexOf(':append') >= 0);
+  assert.equal(appended.length, 1, 'values.append が使われていない');
+
+  // 既存行の下に入っていること
+  assert.deepEqual(sheet.getRange(4, 1).getValues(), [['追記した行']]);
   assert.equal(sheet.getLastRow(), 4);
 });
 

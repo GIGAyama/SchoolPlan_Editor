@@ -132,7 +132,6 @@ function loadBackend(sheetRows, options = {}) {
     function p3ShouldCreateAutoSnapshot_() { return false; }
     function p3WeekScope_(m) { return m; }
     function p3RecordAudit_() {}
-    function p3ComparableDays_(d) { return d; }
     function invalidateUnitProgressCache_() {}
     function tGetProp_() { return ''; }
     var __today = new Date();
