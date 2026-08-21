@@ -59,7 +59,7 @@ Apps Script 組み込みの `DriveApp` は、**対象がアプリ作成ファイ
 | C1 | `03_PdfProcessing.gs:113,149,336,773` | キュー内 `fileId` を `getFileById` で読取 | ファイルID読取 | △ | **Picker由来のIDなら可**／フォルダ列挙由来なら不可 |
 | D1 | `07_WebApp.gs:844-863` 週案PDF出力 | export→rootに`createFile`→`setSharing`→`downloadUrl` | app作成ファイル | ✅ | 改修不要 |
 | D2 | `07_WebApp.gs:909-922` Classroom用PDF | export→`createFile`→`setSharing`、`getFileById`(自作) | app作成ファイル | ✅ | 改修不要 |
-| D3 | `05_Classroom.gs:420-426` 学級通信シート投稿 | export→rootに`createFile`、旧ファイル`setTrashed` | app作成ファイル | ✅ | 改修不要 |
+| D3 | ~~学級通信シート投稿~~ | — | — | — | **削除済み**（「学級通信」シートはアプリが作らないため到達不能だった。投稿は学級通信タブの `postNewsletterToClassroomFromWeb` が担う） |
 | D4 | `07_WebApp.gs:1082` PDF削除 | 自作ファイル `setTrashed` | app作成ファイル | ✅ | 改修不要 |
 | E1 | `07_WebApp.gs:946-973` `getOrCreateNwFolder_` | 学級通信データフォルダ作成/検索、JSON保存 | app管理フォルダ | ✅※ | 原則不要（※移行注記あり） |
 | E2 | `07_WebApp.gs:1054` 学級通信データ読取 | 自作JSONを`getFileById` | app作成ファイル | ✅ | 改修不要 |

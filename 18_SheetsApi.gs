@@ -428,64 +428,6 @@ function sheetsParseColor_(color) {
 // ===== PDF 書き出し =====
 // ============================================================
 
-/**
- * シートを PDF にして Blob で返します。
- *
- * 用紙サイズや余白を指定できるのは `docs.google.com/.../export` の方だけなので、まずそちらを試します。
- * ただしこのエンドポイントの認可は Drive 側の権限で決まり、`drive.file` だけのトークンで
- * 通るかは環境に依存します。断られたときは Drive API v3 の export に切り替えます
- * （こちらは `drive.file` で確実に通りますが、レイアウトの指定はできません）。
- *
- * @param {string} spreadsheetId
- * @param {number} sheetId 出力するシートの gid
- * @param {string} fileName 付けたいファイル名
- * @returns {GoogleAppsScript.Base.Blob}
- */
-function sheetsExportSheetAsPdf_(spreadsheetId, sheetId, fileName) {
-  const token = ScriptApp.getOAuthToken();
-  const layoutUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/export?`
-    + 'exportFormat=pdf&format=pdf&size=A4&portrait=true&fitToPage=true'
-    + `&gridlines=false&printtitle=false&sheetnames=false&gid=${sheetId}`;
-
-  const response = UrlFetchApp.fetch(layoutUrl, {
-    headers: { Authorization: 'Bearer ' + token },
-    muteHttpExceptions: true
-  });
-  const code = response.getResponseCode();
-  if (code >= 200 && code < 300) {
-    return response.getBlob().setName(fileName);
-  }
-
-  if (code !== 401 && code !== 403) {
-    throw new Error(`PDF の書き出しに失敗しました (${code}): ${response.getContentText()}`);
-  }
-
-  // 権限で断られた場合のみ、Drive API v3 の export に切り替える。
-  // シート単位の指定はできないため、スプレッドシート全体が1つの PDF になる。
-  logInfo('レイアウト指定つきの PDF 書き出しが権限で断られたため、Drive API の書き出しに切り替えます。');
-  // 17_DriveApi.gs の DRIVE_API_BASE と同じ URL。ファイル間の初期化順に左右されないよう直接書く。
-  const fallbackUrl = 'https://www.googleapis.com/drive/v3/files/'
-    + encodeURIComponent(spreadsheetId) + '/export?mimeType=application%2Fpdf';
-  const fallback = UrlFetchApp.fetch(fallbackUrl, {
-    headers: { Authorization: 'Bearer ' + token },
-    muteHttpExceptions: true
-  });
-  const fallbackCode = fallback.getResponseCode();
-  if (fallbackCode < 200 || fallbackCode >= 300) {
-    throw new Error(`PDF の書き出しに失敗しました (${fallbackCode}): ${fallback.getContentText()}`);
-  }
-  return fallback.getBlob().setName(fileName);
-}
-
-// ============================================================
-// ===== Spreadsheet =====
-// ============================================================
-
-/**
- * スプレッドシートを開きます（`SpreadsheetApp.openById()` の置き換え）。
- * @param {string} spreadsheetId
- * @returns {Object} Spreadsheet 相当のオブジェクト
- */
 function sheetsOpenById_(spreadsheetId) {
   const id = String(spreadsheetId);
   // metaFromCache … シート構成を持ち越しキャッシュから読んだか（古い可能性があるか）
