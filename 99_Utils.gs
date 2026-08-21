@@ -442,10 +442,22 @@ function logError(message, error) {
   writeToLog_("ERROR", `${message}\nエラー詳細: ${detail}`);
 }
 
+/**
+ * ログを書いている最中かどうか。
+ *
+ * ログの書き込みは getSs_() を通り、その先（旧バインドの通知など）から
+ * また logInfo が呼ばれる。放っておくとここへ戻ってきて再帰する。
+ * ログ追記は1回が Sheets API の往復1回なので、回数はそのまま保存時間になる。
+ * 書いている最中に出た内側のログは捨てる。
+ */
+let LOG_WRITING_ = false;
+
 /** 
  * ログシート書き込みの共通処理 
  */
 function writeToLog_(level, message) {
+  if (LOG_WRITING_) return;
+  LOG_WRITING_ = true;
   try {
     const ss = getSs_();
     let logSheet = ss.getSheetByName(SHEET_NAME_LOG);
@@ -462,6 +474,8 @@ function writeToLog_(level, message) {
     // 何が起きたかを追うには「どのログが書けなかったか」の種別で足りるため、本文は出さない
     // （docs/LEGAL_RISK_AUDIT_JP.md の B-1）。
     console.error(`ログシートへの書き込みに失敗しました（レベル: ${level}）: ${e.message}`);
+  } finally {
+    LOG_WRITING_ = false;
   }
 }
 

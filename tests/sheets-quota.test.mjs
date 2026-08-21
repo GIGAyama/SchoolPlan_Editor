@@ -19,6 +19,9 @@ import fs from 'node:fs';
 
 const SOURCE = fs.readFileSync('18_SheetsApi.gs', 'utf8');
 const UTILS = fs.readFileSync('99_Utils.gs', 'utf8');
+// 持ち越しキャッシュの読み書きは 11_Tenant.gs の tCacheGet_ / tCachePut_ / tCacheRemove_ を通る
+// （1回の実行の中で同じ鍵を何度も取りに行かないため）。本物と同じ組み合わせで動かす。
+const TENANT = fs.readFileSync('11_Tenant.gs', 'utf8');
 
 /** 利用者ごとのキャッシュを模す。実行をまたいでも中身が残ることを再現する。 */
 function makeCacheService() {
@@ -82,6 +85,7 @@ function loadFacade({ cacheService, sheets } = {}) {
   const names = Object.keys(globals);
   const factory = new Function(...names, `
     ${UTILS.match(/function describeApiDisabledError_[\s\S]*?\n}/)[0]}
+    ${TENANT.slice(TENANT.indexOf('let T_USER_CACHE_MEMO_'), TENANT.indexOf('/**\n * ユーザー別プロパティを取得します'))}
     ${SOURCE}
     return { sheetsOpenById_, sheetsResetCache_, sheetsRetryWaitMs_,
              sheetsReadCachedMeta_, sheetsWriteCachedMeta_, sheetsDropCachedMeta_,

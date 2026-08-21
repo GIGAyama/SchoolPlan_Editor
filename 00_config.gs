@@ -229,7 +229,7 @@ function clearDbColumnsCache() {
   });
   keys.push('dbColumnsMap_v4');
   try { CacheService.getScriptCache().removeAll(keys); } catch (e) {}
-  try { CacheService.getUserCache().removeAll(keys); } catch (e) {}
+  tCacheRemoveAll_(keys);
   logInfo('データベースの列構成キャッシュをクリアしました。');
 }
 

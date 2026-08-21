@@ -72,17 +72,15 @@ function p3AutoSnapshotCacheKey_(scope) {
  * @param {string} scope
  */
 function p3RememberAutoSnapshot_(scope) {
-  try {
-    CacheService.getUserCache().put(
-      p3AutoSnapshotCacheKey_(scope), String(Date.now()),
-      P3_AUTO_SNAPSHOT_INTERVAL_MINUTES_ * 60);
-  } catch (e) { /* 覚えられなくても、次回シートを読んで判定するだけ */ }
+  tCachePut_(
+    p3AutoSnapshotCacheKey_(scope), String(Date.now()),
+    P3_AUTO_SNAPSHOT_INTERVAL_MINUTES_ * 60);
 }
 
 function p3ShouldCreateAutoSnapshot_(scope) {
   // さっき作ったばかりなら、一覧を読まずに「作らない」と答える。
   try {
-    const rememberedAt = Number(CacheService.getUserCache().get(p3AutoSnapshotCacheKey_(scope)));
+    const rememberedAt = Number(tCacheGet_(p3AutoSnapshotCacheKey_(scope)));
     if (rememberedAt && Date.now() - rememberedAt < P3_AUTO_SNAPSHOT_INTERVAL_MINUTES_ * 60000) {
       return false;
     }

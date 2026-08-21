@@ -67,6 +67,78 @@ function tScriptProps_() {
 function tResetPropsCache_() {
   T_USER_PROPS_ = null;
   T_SCRIPT_PROPS_ = null;
+  tResetCacheMemo_();
+}
+
+// --- キャッシュの読み取りも、1回の実行の中でまとめる -----------------------
+//
+// CacheService も PropertiesService と同じく、1回ごとに Google へのリモート呼び出しに
+// なる。週案の保存1回で8回読んでいたが、見ている鍵は4種類しかなく、同じ鍵を何度も
+// 取りに行っていた（`p2Calendar` は4回、`p3SheetsVerified` は2回）。
+//
+// 1回の実行の中では、自分が書き換えないかぎり内容は変わらない。他の実行が書き換えても、
+// 次の実行で読み直せば追いつく。だから最初の1回だけ取りに行き、あとは覚えているものを返す。
+// 書き込みと削除は、本体と覚えている内容の両方へ反映する。
+let T_USER_CACHE_MEMO_ = {};
+
+/** 覚えているキャッシュの内容を捨てます。 */
+function tResetCacheMemo_() {
+  T_USER_CACHE_MEMO_ = {};
+}
+
+/**
+ * 利用者キャッシュを1件読みます（未設定なら null）。
+ * @param {string} key
+ * @returns {?string}
+ */
+function tCacheGet_(key) {
+  if (Object.prototype.hasOwnProperty.call(T_USER_CACHE_MEMO_, key)) {
+    return T_USER_CACHE_MEMO_[key];
+  }
+  let value = null;
+  try {
+    value = CacheService.getUserCache().get(key);
+  } catch (e) {
+    value = null;
+  }
+  T_USER_CACHE_MEMO_[key] = (value === undefined ? null : value);
+  return T_USER_CACHE_MEMO_[key];
+}
+
+/**
+ * 利用者キャッシュへ1件書きます（キャッシュが使えなくても処理は続けます）。
+ * @param {string} key
+ * @param {string} value
+ * @param {number} seconds 保持秒数
+ */
+function tCachePut_(key, value, seconds) {
+  try {
+    CacheService.getUserCache().put(key, value, seconds);
+  } catch (e) { /* キャッシュは無くても動く */ }
+  T_USER_CACHE_MEMO_[key] = value;
+}
+
+/**
+ * 利用者キャッシュから1件消します。
+ * @param {string} key
+ */
+function tCacheRemove_(key) {
+  try {
+    CacheService.getUserCache().remove(key);
+  } catch (e) { /* もともと無ければそれでよい */ }
+  T_USER_CACHE_MEMO_[key] = null;
+}
+
+/**
+ * 利用者キャッシュからまとめて消します。
+ * @param {Array<string>} keys
+ */
+function tCacheRemoveAll_(keys) {
+  const list = keys || [];
+  try {
+    CacheService.getUserCache().removeAll(list);
+  } catch (e) { /* もともと無ければそれでよい */ }
+  list.forEach(function (key) { T_USER_CACHE_MEMO_[key] = null; });
 }
 
 /**
@@ -198,13 +270,11 @@ function getLegacySpreadsheetId_() {
   // 共有デプロイでは使わない。全員が配布元の1つのDBへ合流してしまうため。
   if (isSharedDeployment_()) return '';
   try {
-    const id = tGetScriptProp_(SP_KEY_LEGACY_SPREADSHEET_ID) || '';
-    if (id) {
-      // めったに通らない経路なので、通ったことが分かるようにしておく。
-      // 「自分のDBを作ったつもりが、別のDBを開いていた」ときの手がかりになる。
-      logInfo('スクリプト全体の設定（旧バインド）に記録されたデータベースを使用しています。');
-    }
-    return id;
+    // 「旧バインドで開いている」ことはログに残す価値があるが、ここでは書かない。
+    // ここは getSs_() のたびに通り、週案の保存1回で8回来る。ログの追記は1行が
+    // Sheets API の往復1回なので、そのまま保存時間になっていた。
+    // 起動時に1度だけ呼ばれる getTenantStatus() へ移してある。
+    return tGetScriptProp_(SP_KEY_LEGACY_SPREADSHEET_ID) || '';
   } catch (e) {
     return '';
   }
@@ -257,6 +327,11 @@ function getTenantStatus() {
     }
 
     const id = resolveSpreadsheetId_();
+    // 旧バインド（スクリプト全体の設定）で開いていることを、起動時に1行だけ残す。
+    // 「自分のDBを作ったつもりが、別のDBを開いていた」ときの手がかりになる。
+    if (id && !getUserSpreadsheetId_()) {
+      logInfo('スクリプト全体の設定（旧バインド）に記録されたデータベースを使用しています。');
+    }
     let linked = false;
     let name = '';
     // 「一度も紐付けていない」のか「紐付け先が開けなくなった」のかを区別する。

@@ -120,7 +120,7 @@ function sheetsMetaCacheKey_(id) {
 /** 持ち越したシート構成を読みます。無ければ null。 */
 function sheetsReadCachedMeta_(id) {
   try {
-    const raw = CacheService.getUserCache().get(sheetsMetaCacheKey_(id));
+    const raw = tCacheGet_(sheetsMetaCacheKey_(id));
     return raw ? JSON.parse(raw) : null;
   } catch (e) {
     return null; // キャッシュが使えなくても、取りに行けば動く
@@ -132,14 +132,14 @@ function sheetsWriteCachedMeta_(id, meta) {
   try {
     const text = JSON.stringify(meta);
     if (text.length > SHEETS_META_CACHE_MAX_BYTES) return;
-    CacheService.getUserCache().put(sheetsMetaCacheKey_(id), text, SHEETS_META_CACHE_TTL_SEC);
+    tCachePut_(sheetsMetaCacheKey_(id), text, SHEETS_META_CACHE_TTL_SEC);
   } catch (e) { /* 入らなくても動作に影響しない */ }
 }
 
 /** 持ち越したシート構成を捨てます（構成を変えた後始末）。 */
 function sheetsDropCachedMeta_(id) {
   try {
-    CacheService.getUserCache().remove(sheetsMetaCacheKey_(id));
+    tCacheRemove_(sheetsMetaCacheKey_(id));
   } catch (e) { /* 消せなくても、TTL で消える */ }
 }
 
