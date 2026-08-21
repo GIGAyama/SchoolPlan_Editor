@@ -312,7 +312,11 @@ function getAppBootstrapV2() {
       weeklyPlan,
       masterData,
       multiClass,
-      elapsedMs: Date.now() - startedAt
+      elapsedMs: Date.now() - startedAt,
+      // 内訳（Sheets API を何回叩き、合計何ミリ秒待ったか）。
+      // elapsedMs との差が GAS 側の処理時間になる。
+      performance: Object.assign({ api: 'bootstrap', elapsedMs: Date.now() - startedAt },
+        sheetsFetchStats_())
     };
   } catch (e) {
     logError('getAppBootstrapV2', e);
