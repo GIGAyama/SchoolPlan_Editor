@@ -8,11 +8,9 @@ function p3SplitChunks_(text) {
 
 function p3ListSnapshotFirstRows_(ss) {
   const sheet = p3EnsureInternalSheets_(ss).snapshots;
-  // 行数はシート構成（通信なし）から取る。getLastRow() を呼ぶと
+  // 末尾を開けて、Payload を除いた列だけ読む。getLastRow() を呼ぶと
   // Payload 込みでシート全体を読むことになり、絞り込んだ意味が無くなる。
-  const maxRow = sheet.getMaxRows();
-  if (maxRow < 2) return [];
-  return sheet.getRange(2, 1, maxRow - 1, P3_SNAPSHOT_META_WIDTH_).getValues()
+  return sheet.getValuesToEnd(2, 1, P3_SNAPSHOT_META_WIDTH_)
     .map((row, index) => ({ row, sheetRow: index + 2 }))
     .filter(item => Number(item.row[7]) === 1);
 }
@@ -58,7 +56,38 @@ function p3SnapshotSheetMismatch_(snapshot) {
   return 'この復元ポイントは学級シート「' + stored + '」のものです。学級を切り替えてから復元してください。';
 }
 
+/** 直近に自動の復元ポイントを作った時刻を覚えておくキー。 */
+function p3AutoSnapshotCacheKey_(scope) {
+  return 'p3AutoSnap::' + String(scope);
+}
+
+/**
+ * 「この週の自動の復元ポイントを、さっき作ったばかりか」を覚えておきます。
+ *
+ * 間隔の判定のためだけに復元ポイント一覧を読むと、保存のたびに件数ぶんの
+ * 通信が発生します（保持上限の300件で約45KB）。作った時刻を覚えておけば、
+ * 間隔の内側にいる間はシートを読まずに済みます。
+ *
+ * 覚えている時刻が消えても、シートを読んで判定し直すだけで結果は変わりません。
+ * @param {string} scope
+ */
+function p3RememberAutoSnapshot_(scope) {
+  try {
+    CacheService.getUserCache().put(
+      p3AutoSnapshotCacheKey_(scope), String(Date.now()),
+      P3_AUTO_SNAPSHOT_INTERVAL_MINUTES_ * 60);
+  } catch (e) { /* 覚えられなくても、次回シートを読んで判定するだけ */ }
+}
+
 function p3ShouldCreateAutoSnapshot_(scope) {
+  // さっき作ったばかりなら、一覧を読まずに「作らない」と答える。
+  try {
+    const rememberedAt = Number(CacheService.getUserCache().get(p3AutoSnapshotCacheKey_(scope)));
+    if (rememberedAt && Date.now() - rememberedAt < P3_AUTO_SNAPSHOT_INTERVAL_MINUTES_ * 60000) {
+      return false;
+    }
+  } catch (e) { /* キャッシュが使えなければ、下でシートを読む */ }
+
   const ss = getSs_();
   const rows = p3ListSnapshotFirstRows_(ss)
     .filter(item => String(item.row[3]) === 'week'
@@ -107,9 +136,10 @@ function p3CreateSnapshot_(type, scope, label, payload) {
   ]);
   // 末尾に足すだけなので getLastRow() は使わない。呼ぶと Payload 込みで
   // シート全体を読むことになり、復元ポイントがたまるほど作成が重くなる。
-  sheet.appendRows(rows);
+  sheet.appendRows(rows, { knownDateColumns: P3_SNAPSHOT_DATE_COLUMNS_ });
   p3CleanupSnapshots_(ss);
   if (type === 'week' && String(label || '').indexOf('自動: 週案保存前') === 0) {
+    p3RememberAutoSnapshot_(scope);
     p3CleanupAutoSnapshotsForScope_(ss, scope);
   }
   return snapshotId;
@@ -117,9 +147,8 @@ function p3CreateSnapshot_(type, scope, label, payload) {
 
 function p3CleanupSnapshots_(ss) {
   const sheet = p3EnsureInternalSheets_(ss).snapshots;
-  const maxRow = sheet.getMaxRows();
-  if (maxRow < 2) return 0;
-  const values = sheet.getRange(2, 1, maxRow - 1, P3_SNAPSHOT_META_WIDTH_).getValues();
+  const values = sheet.getValuesToEnd(2, 1, P3_SNAPSHOT_META_WIDTH_);
+  if (values.length === 0) return 0;
   const now = Date.now();
   const firstRows = values
     .map((row, index) => ({ row, sheetRow: index + 2 }))
@@ -185,10 +214,9 @@ function listRestorePointsFromWeb(limit) {
     ensureDataProtectionReady_();
     const ss = getSs_();
     const sheet = p3EnsureInternalSheets_(ss).snapshots;
-    const maxRow = sheet.getMaxRows();
-    if (maxRow < 2) return { success: true, items: [] };
     const max = Math.max(1, Math.min(parseInt(limit, 10) || 50, 200));
-    const values = sheet.getRange(2, 1, maxRow - 1, P3_SNAPSHOT_META_WIDTH_).getValues();
+    const values = sheet.getValuesToEnd(2, 1, P3_SNAPSHOT_META_WIDTH_);
+    if (values.length === 0) return { success: true, items: [] };
     const items = values
       .filter(row => Number(row[7]) === 1)
       .map(row => ({

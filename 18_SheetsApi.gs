@@ -66,6 +66,26 @@ let SHEETS_CACHE_ = {};
 /** キャッシュを捨てます（テスト・障害時の保険）。 */
 function sheetsResetCache_() {
   SHEETS_CACHE_ = {};
+  SHEETS_FETCH_COUNT_ = 0;
+  SHEETS_FETCH_MS_ = 0;
+}
+
+// --- 通信の実測 -----------------------------------------------------------
+//
+// GAS の待ち時間は、ほぼ「Sheets API を何回叩いたか」で決まる。ところが
+// 実際に何秒かかっているかは、GAS 実環境でしか分からない。
+// 何回・何ミリ秒だったかを応答に載せておけば、「往復が重いのか、
+// それとも GAS 側の固定費（スクリプトの読み込みなど）が重いのか」を切り分けられる。
+// トップレベル変数なので、実行が変われば 0 から数え直しになる。
+let SHEETS_FETCH_COUNT_ = 0;
+let SHEETS_FETCH_MS_ = 0;
+
+/**
+ * この実行で Sheets API を何回叩き、合計何ミリ秒待ったかを返します。
+ * @returns {{fetches: number, fetchMs: number}}
+ */
+function sheetsFetchStats_() {
+  return { fetches: SHEETS_FETCH_COUNT_, fetchMs: Math.round(SHEETS_FETCH_MS_) };
 }
 
 // --- シート構成の持ち越しキャッシュ ---------------------------------------
@@ -154,12 +174,15 @@ function sheetsFetch_(url, options) {
   const MAX_ATTEMPTS = 4;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const startedAt = Date.now();
     const response = UrlFetchApp.fetch(url, Object.assign({}, opts, {
       headers: Object.assign({}, opts.headers || {}, {
         Authorization: 'Bearer ' + ScriptApp.getOAuthToken()
       }),
       muteHttpExceptions: true
     }));
+    SHEETS_FETCH_COUNT_++;
+    SHEETS_FETCH_MS_ += Date.now() - startedAt;
     const code = response.getResponseCode();
 
     if (code >= 200 && code < 300) {
@@ -285,14 +308,16 @@ function sheetsAppendedRowNumber_(updatedRange) {
  * @param {number} rowNumber 1始まりの行番号
  * @param {number} numRows 追記した行数
  * @param {Object<number, string>} offsets 0始まりの列オフセット → 表示形式
+ * @param {number[]} [declaredDateColumns] 既に日付の表示形式が付いている列（1始まり）
  */
-function sheetsApplyAppendedDateFormats_(sheet, api, rowNumber, numRows, offsets) {
+function sheetsApplyAppendedDateFormats_(sheet, api, rowNumber, numRows, offsets, declaredDateColumns) {
   const targets = Object.keys(offsets || {});
   if (targets.length === 0) return;
 
-  const known = (api.peekDateColumns && api.peekDateColumns()) || null;
+  const known = (api.peekDateColumns && api.peekDateColumns()) || {};
+  (declaredDateColumns || []).forEach(column => { known[Number(column)] = true; });
   const requests = targets
-    .filter(offset => !(known && known[Number(offset) + 1]))
+    .filter(offset => !known[Number(offset) + 1])
     .map(offset => ({
       repeatCell: {
         range: {
@@ -696,6 +721,48 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
     delete grid().windows;
   }
 
+  /**
+   * 末尾を開けた範囲（`A2:C`）を読み、範囲キャッシュへ入れます。
+   *
+   * `getMaxRows()` は**シートの宣言上の行数**で、追記で伸びた分がすぐには
+   * 反映されません。「データのある行を全部」読みたいときにこれを当てにすると、
+   * 直前に足した行を取りこぼします（実際、スキーマ版が読めなくなりました）。
+   * 末尾を開けて要求すれば、Sheets 側がデータのある行だけを返してくれます。
+   *
+   * @param {number} startRow 1始まり
+   * @param {number} column 1始まり
+   * @param {number} numColumns
+   * @param {boolean} formatted 画面に見えている文字列で欲しいか
+   * @returns {number} 返ってきた行数（0 ならデータなし）
+   */
+  function windowToEnd_(startRow, column, numColumns, formatted) {
+    const g = grid();
+    const whole = formatted ? g.display : (g.dirty ? null : g.values);
+    if (whole) return Math.max(0, whole.length - startRow + 1);
+
+    const a1 = `${sheetsQuoteTitle_(props.title)}!` +
+      `${sheetsColumnLetter_(column)}${startRow}:${sheetsColumnLetter_(column + numColumns - 1)}`;
+    const query = formatted
+      ? '?valueRenderOption=FORMATTED_VALUE'
+      : '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER';
+    const result = sheetsFetch_(
+      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(a1)}${query}`);
+
+    const lines = result.values || [];
+    if (lines.length === 0) return 0;
+
+    const placed = [];
+    lines.forEach((line, offset) => {
+      const target = [];
+      line.forEach((value, index) => { target[column - 1 + index] = value; });
+      placed[startRow - 1 + offset] = target;
+    });
+    if (!g.windows) g.windows = {};
+    // 続く getRange(...).getValues() がこのキャッシュに当たるようにする
+    g.windows[`${formatted ? 'd' : 'v'}:${startRow}:${column}:${lines.length}:${numColumns}`] = placed;
+    return lines.length;
+  }
+
   /** 表示文字列のキャッシュ。`getDisplayValues()` でしか使わないので遅延取得。 */
   function displayValues() {
     const g = grid();
@@ -832,13 +899,35 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
      *
      * @param {Array} row
      */
-    appendRow: function (row) { return sheet.appendRows([row]); },
+    /**
+     * 末尾を開けて読みます（`A2:C`）。データのある行だけが返るので、
+     * シートの行数を知る必要がありません。追記で伸びた分も取りこぼしません。
+     * @param {number} startRow 1始まり
+     * @param {number} column 1始まり
+     * @param {number} numColumns
+     * @param {Object} [options] `options.formatted` で表示文字列、
+     *   `options.dateColumns` で日付として読む列（1始まり）
+     * @returns {Array[]} 矩形の二次元配列（データが無ければ空配列）
+     */
+    getValuesToEnd: function (startRow, column, numColumns, options) {
+      const formatted = !!(options && options.formatted);
+      const rows = windowToEnd_(startRow, column, numColumns, formatted);
+      if (rows <= 0) return [];
+      const range = sheet.getRange(startRow, column, rows, numColumns);
+      return formatted ? range.getDisplayValues() : range.getValues(options);
+    },
+
+    appendRow: function (row, options) { return sheet.appendRows([row], options); },
 
     /**
      * 最終行の次に複数行をまとめて足します（1回の通信で書きます）。
      * @param {Array[]} rows
+     * @param {Object} [options] `options.knownDateColumns` に「既に日付の表示形式が
+     *   付いている列」（1始まり）を渡すと、その列には表示形式を当て直しません。
+     *   当て直しは1回ぶんの通信になるため、列構成が決まっているシート
+     *   （保全用の内部シートなど）では作成時に付けておき、ここで渡します。
      */
-    appendRows: function (rows) {
+    appendRows: function (rows, options) {
       const lines = (rows || []).filter(Boolean);
       if (lines.length === 0) return sheet;
       const timeZone = spreadsheet.getSpreadsheetTimeZone();
@@ -880,8 +969,18 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
       delete g.display;
       dropWindows();
 
+      // 追記でシートが伸びていることがある。覚えている行数を実態に合わせる。
       if (appendedRow) {
-        sheetsApplyAppendedDateFormats_(sheet, api, appendedRow, payload.length, dateColumnOffsets);
+        const reached = appendedRow + payload.length - 1;
+        if (reached > sheet.getMaxRows()) {
+          growGrid_('rowCount', reached - sheet.getMaxRows());
+        }
+      }
+
+      if (appendedRow) {
+        const declared = (options && options.knownDateColumns) || null;
+        sheetsApplyAppendedDateFormats_(
+          sheet, api, appendedRow, payload.length, dateColumnOffsets, declared);
       }
       return sheet;
     },

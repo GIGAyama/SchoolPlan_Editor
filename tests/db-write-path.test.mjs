@@ -24,6 +24,13 @@ function makeSheet(name, grid) {
     getName: () => name,
     getLastRow: () => grid.length,
     getLastColumn: () => grid.reduce((max, row) => Math.max(max, row.length), 0),
+    // 末尾を開けた読み取り。本物と同じく、データのある行だけを返す。
+    getValuesToEnd(startRow, column, numColumns, options) {
+      const rows = Math.max(0, grid.length - startRow + 1);
+      if (rows <= 0) return [];
+      const range = sheet.getRange(startRow, column, rows, numColumns);
+      return (options && options.formatted) ? range.getDisplayValues() : range.getValues();
+    },
     // シートの大きさ（データのある範囲ではなく、シートそのものの行数・列数）。
     // 実際のシートはデータより広いのが普通なので、少し余らせて返す。
     // 読み過ぎたぶんが空で返っても壊れないことを、これで確かめられる。
@@ -139,6 +146,8 @@ function loadBackend(sheetRows, options = {}) {
     function p3RecordAudit_() {}
     function invalidateUnitProgressCache_() {}
     function tGetProp_() { return ''; }
+    // 通信の実測（18_SheetsApi.gs）は、このテストでは読み込んでいない
+    function sheetsFetchStats_() { return { fetches: 0, fetchMs: 0 }; }
     var __today = new Date();
     // 「過去の日付は転記しない」判定を固定するため、現在日時だけ差し替える
     Date = (function (RealDate) {

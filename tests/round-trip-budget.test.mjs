@@ -64,10 +64,11 @@ function createTransport(sheets, log) {
   /** 要求された範囲だけを切り出す（本物と同じく、末尾の空セルは詰める）。 */
   function pick(grid, text) {
     const body = (decodeURIComponent(text).split('/values/')[1] || '').split('?')[0];
-    const cells = /!([A-Z]+)(\d+):([A-Z]+)(\d+)/.exec(body);
+    // A2:C10（行を指定）と A2:C（末尾を開ける）の両方に対応する
+    const cells = /!([A-Z]+)(\d+):([A-Z]+)(\d*)/.exec(body);
     const picked = cells
       ? grid
-        .slice(parseInt(cells[2], 10) - 1, parseInt(cells[4], 10))
+        .slice(parseInt(cells[2], 10) - 1, cells[4] ? parseInt(cells[4], 10) : undefined)
         .map(row => (row || []).slice(columnNumber(cells[1]) - 1, columnNumber(cells[3])))
       : grid.map(row => (row || []).slice());
     const rows = picked.map(row => {
@@ -323,8 +324,8 @@ test('週案の保存は、往復も通信量も使いすぎない', () => {
   warmUp(world);
   const { calls } = saveOneCell(world, '編集した学習内容');
   // 上限は実測値そのもの。増やすときは「なぜ1往復増やすのか」を書いてから増やすこと。
-  assert.ok(calls.length <= 11, `保存で ${calls.length} 往復している`);
-  assert.ok(receivedBytes(calls) <= 64 * 1024,
+  assert.ok(calls.length <= 8, `保存で ${calls.length} 往復している`);
+  assert.ok(receivedBytes(calls) <= 32 * 1024,
     `保存で ${Math.round(receivedBytes(calls) / 1024)}KB 受信している`);
 });
 

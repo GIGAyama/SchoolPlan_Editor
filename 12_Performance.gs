@@ -62,18 +62,16 @@ function p2MappedWidth_(cols) {
  * 年間DB全体を全列読み込む従来方式を避けます。
  */
 function p2ReadRowsForDates_(sheet, cols, dateStrs) {
-  // 大きさは、通信の要らないシート構成（getMaxRows / 列マップ）から決める。
   // getLastRow() / getLastColumn() は「データのある最終行・列」なので、
   // 呼ぶとシート全体の読み込みが走る。年間1枚のシートで1週を出すのに
   // 全部を運ぶことになるため、ここでは使わない。
-  const maxRow = Math.max(2, sheet.getMaxRows());
   const lastColumn = p2MappedWidth_(cols);
   const wanted = new Set(dateStrs);
   const rowNumberByDate = new Map();
 
-  // 日付列であることは見出しから分かっているので、表示形式を調べに行かせない。
-  const dateValues = sheet.getRange(2, cols.DATE, maxRow - 1, 1)
-    .getValues({ dateColumns: [cols.DATE] });
+  // 日付列を末尾まで読む。日付列であることは見出しから分かっているので、
+  // 表示形式を調べに行かせない。
+  const dateValues = sheet.getValuesToEnd(2, cols.DATE, 1, { dateColumns: [cols.DATE] });
   dateValues.forEach((row, index) => {
     const value = row[0];
     if (!(value instanceof Date)) return;
@@ -387,11 +385,11 @@ function getWeeklyPlanDataV2(mondayDateStr) {
       weekNum,
       revision,
       weekSummary,
-      performance: {
+      performance: Object.assign({
         api: 'v2',
         rowsRead: rows.rowNumbers.length,
         elapsedMs: Date.now() - startedAt
-      }
+      }, sheetsFetchStats_())
     };
   } catch (e) {
     logError('getWeeklyPlanDataV2', e);
@@ -650,12 +648,14 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
       // シート側で正規化された値(例: "007"→7)を持ち続けないようにする。
       days: savedDays,
       restorePointId,
-      performance: {
+      // fetches / fetchMs は「Sheets API を何回叩き、合計何ミリ秒待ったか」。
+      // elapsedMs との差が、GAS 側でかかっている時間になる。
+      performance: Object.assign({
         api: 'v2',
         rowsRead: rowState.rowNumbers.length,
         rowsWritten: uniqueChangedRows.length,
         elapsedMs: Date.now() - startedAt
-      }
+      }, sheetsFetchStats_())
     };
   } catch (e) {
     logError('saveWeeklyPlanWeek_', e);

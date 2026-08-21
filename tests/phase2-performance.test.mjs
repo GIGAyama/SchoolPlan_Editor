@@ -55,7 +55,8 @@ test('weekly V2 transport reads targeted rows instead of the full database range
   assert.match(source, /function saveWeeklyPlanDataV2/);
   assert.match(source, /p2ReadRowsForDates_/);
   assert.doesNotMatch(source, /getDataRange\(\)/);
-  assert.match(source, /getRange\(2, cols\.DATE/);
+  // 日付列は「2行目から末尾まで」を狙って読む（シート全体ではなく）
+  assert.match(source, /getValuesToEnd\(2, cols\.DATE/);
 });
 
 test('client bootstrap uses one critical request and V2 week APIs', async () => {
