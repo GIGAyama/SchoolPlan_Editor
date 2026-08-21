@@ -245,13 +245,14 @@ function computeWeekRevision_(dbData, dbCols, weekDateStrs) {
  */
 function callGeminiApiRaw_(prompt, apiKey, blobs = []) {
   const modelName = getGeminiModelNameSafe_();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  // API キーは URL クエリに入れない（アクセスログやプロキシに残る）。ヘッダで渡す。
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
   const parts = [{ "text": prompt }];
   blobs.forEach(blob => {
     parts.push({ "inline_data": { "mime_type": blob.getContentType(), "data": Utilities.base64Encode(blob.getBytes()) } });
   });
   const payload = { "contents": [{ "parts": parts }], "generationConfig": { "response_mime_type": "application/json", "maxOutputTokens": 65536 } };
-  const options = { 'method': 'post', 'contentType': 'application/json', 'payload': JSON.stringify(payload), 'muteHttpExceptions': true };
+  const options = { 'method': 'post', 'contentType': 'application/json', 'headers': { 'x-goog-api-key': apiKey }, 'payload': JSON.stringify(payload), 'muteHttpExceptions': true };
 
   // 429（レート制限）・5xx（サーバ一時障害）に対し指数バックオフで再試行する。
   // PDF解析はトリガー実行のため、失敗が無音で進行を止めやすく再試行の効果が大きい。
