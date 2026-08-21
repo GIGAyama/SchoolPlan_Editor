@@ -24,11 +24,13 @@ function callGeminiEndpoint_(payload, logLabel) {
   const options = {
     method: 'post',
     contentType: 'application/json',
+    // API キーは URL クエリに入れない（アクセスログやプロキシに残る）。ヘッダで渡す。
+    headers: { 'x-goog-api-key': apiKey },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   };
 
-  const url = `${getGeminiApiUrl_()}?key=${apiKey}`;
+  const url = getGeminiApiUrl_();
   const MAX_ATTEMPTS = 4;      // 初回 + 最大3回の再試行
   const BASE_DELAY_MS = 1000;  // 指数バックオフの基準（1秒→2秒→4秒）
 

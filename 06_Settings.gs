@@ -194,11 +194,12 @@ function getAvailableGeminiModels() {
     const allModels = [];
     let pageToken = '';
     do {
-      let url = 'https://generativelanguage.googleapis.com/v1beta/models?key=' + apiKey + '&pageSize=100';
+      // API キーは URL クエリに入れない（アクセスログやプロキシに残る）。ヘッダで渡す。
+      let url = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=100';
       if (pageToken) {
         url += '&pageToken=' + pageToken;
       }
-      const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      const response = UrlFetchApp.fetch(url, { headers: { 'x-goog-api-key': apiKey }, muteHttpExceptions: true });
       const code = response.getResponseCode();
       if (code !== 200) {
         const errBody = JSON.parse(response.getContentText());
