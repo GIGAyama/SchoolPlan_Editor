@@ -199,9 +199,11 @@ function loadCreateMyDatabase({ linkedId = '' } = {}) {
   const globals = {
     LockService: { getUserLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
     PropertiesService: {
-      getScriptProperties: () => ({ getProperty: () => null }),
+      getScriptProperties: () => ({ getProperty: () => null, getProperties: () => ({}) }),
       getUserProperties: () => ({
         getProperty: (k) => (userProps.has(k) ? userProps.get(k) : null),
+        // 本物にもある。1回で全部返るので、実装はこちらを使って呼び出し回数を抑える。
+        getProperties: () => Object.fromEntries(userProps),
         setProperty: (k, v) => { userProps.set(k, v); },
         deleteProperty: (k) => { userProps.delete(k); }
       })
@@ -222,6 +224,13 @@ function loadCreateMyDatabase({ linkedId = '' } = {}) {
   };
   const names = Object.keys(globals);
   const body = [
+    // プロパティの読みは、実行の最初に一度だけ取って覚える仕組みを通る
+    'let T_USER_PROPS_ = null;',
+    'let T_SCRIPT_PROPS_ = null;',
+    TENANT.match(/function tUserProps_[\s\S]*?\n}/)[0],
+    TENANT.match(/function tScriptProps_[\s\S]*?\n}/)[0],
+    TENANT.match(/function tGetUserProp_[\s\S]*?\n}/)[0],
+    TENANT.match(/function tGetScriptProp_[\s\S]*?\n}/)[0],
     TENANT.match(/function getUserSpreadsheetId_[\s\S]*?\n}/)[0],
     TENANT.match(/function setUserSpreadsheetId_[\s\S]*?\n}/)[0],
     TENANT.match(/function createMyDatabase\(name, options\)[\s\S]*?\n}/)[0]

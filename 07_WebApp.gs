@@ -1193,8 +1193,9 @@ function fetchAndStoreHolidays(force) {
     const props = PropertiesService.getScriptProperties();
     // 更新間隔内なら（かつデータが存在すれば）ネットワーク取得をスキップして負荷を抑える
     if (!force) {
-      const has = props.getProperty(SP_KEY_HOLIDAYS);
-      const updatedAt = props.getProperty(SP_KEY_HOLIDAYS_UPDATED);
+      // 読みは覚えてある内容から（PropertiesService の1件読みは毎回リモート呼び出し）
+      const has = tGetScriptProp_(SP_KEY_HOLIDAYS);
+      const updatedAt = tGetScriptProp_(SP_KEY_HOLIDAYS_UPDATED);
       if (has && updatedAt) {
         const ageMs = Date.now() - new Date(updatedAt).getTime();
         if (ageMs >= 0 && ageMs < HOLIDAY_REFRESH_INTERVAL_DAYS * 24 * 60 * 60 * 1000) {
@@ -1221,8 +1222,13 @@ function fetchAndStoreHolidays(force) {
         holidays.push({ date: normalizeDateStr_(parts[0]), name: parts[1].trim() });
       }
     }
-    props.setProperty(SP_KEY_HOLIDAYS, JSON.stringify(holidays));
-    props.setProperty(SP_KEY_HOLIDAYS_UPDATED, new Date().toISOString());
+    const holidaysJson = JSON.stringify(holidays);
+    const updatedAtIso = new Date().toISOString();
+    props.setProperty(SP_KEY_HOLIDAYS, holidaysJson);
+    props.setProperty(SP_KEY_HOLIDAYS_UPDATED, updatedAtIso);
+    // 覚えてある内容も合わせる
+    tScriptProps_()[SP_KEY_HOLIDAYS] = holidaysJson;
+    tScriptProps_()[SP_KEY_HOLIDAYS_UPDATED] = updatedAtIso;
     logInfo('祝日データを更新しました (' + holidays.length + '件)');
     return true;
   } catch (e) {
@@ -1238,11 +1244,10 @@ function fetchAndStoreHolidays(force) {
  */
 function getHolidayMap_() {
   try {
-    const props = PropertiesService.getScriptProperties();
-    let json = props.getProperty(SP_KEY_HOLIDAYS);
+    let json = tGetScriptProp_(SP_KEY_HOLIDAYS);
     if (!json) {
       fetchAndStoreHolidays(true);
-      json = props.getProperty(SP_KEY_HOLIDAYS);
+      json = tGetScriptProp_(SP_KEY_HOLIDAYS);
     }
     const list = json ? JSON.parse(json) : [];
     const map = {};
@@ -1261,11 +1266,11 @@ function getHolidayMap_() {
  */
 function getHolidays() {
   try {
-    const json = PropertiesService.getScriptProperties().getProperty(SP_KEY_HOLIDAYS);
+    const json = tGetScriptProp_(SP_KEY_HOLIDAYS);
     if (json) return { success: true, data: JSON.parse(json) };
     // まだ取得していなければ取得して返す
     fetchAndStoreHolidays(true);
-    const json2 = PropertiesService.getScriptProperties().getProperty(SP_KEY_HOLIDAYS);
+    const json2 = tGetScriptProp_(SP_KEY_HOLIDAYS);
     return { success: true, data: json2 ? JSON.parse(json2) : [] };
   } catch (e) {
     logError('getHolidays', e);
@@ -1597,6 +1602,8 @@ function generateAnnualCalendar(year, startMondayStr) {
 
     // まとめて一括書き込み
     dbSheet.getRange(startRow, 1, newData.length, lastCol).setValues(newData);
+    // 日付の並びが変わったので、覚えている「日付→行番号」を捨てる
+    p2ForgetCalendar_(dbSheet);
 
     return { success: true, message: `${year}年度のカレンダー（${totalDays}日分）を生成しました。` };
   } catch (e) {

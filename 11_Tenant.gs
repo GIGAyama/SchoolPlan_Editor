@@ -28,6 +28,67 @@ const SP_KEY_SHARED_DEPLOYMENT = 'sp_sharedDeployment';
 // これにより従来のバインド型（設定が ScriptProperties にある）から移行しても
 // 設定が失われず、ユーザーが保存し直すと自然に UserProperties へ移る。
 
+// --- プロパティの読み取りを、1回の実行の中でまとめる -----------------------
+//
+// PropertiesService の getProperty は、GAS では**1回ごとに Google への
+// リモート呼び出し**になる。実測では、週案の保存1回で 44 回呼んでいた。
+// 1回あたり数十msなので、これだけで数秒になる（保存時間の半分が Sheets API の
+// 外にあった、その正体）。
+//
+// getProperties() なら1回で全部返るので、実行の最初に一度だけ取って覚えておく。
+// 実行が終われば消えるため、他の実行や他の利用者に漏れることはない。
+// 書き込みは本体と覚えている内容の両方へ反映する。
+let T_USER_PROPS_ = null;
+let T_SCRIPT_PROPS_ = null;
+
+/** この実行での UserProperties の内容（初回だけ取りに行く）。 */
+function tUserProps_() {
+  if (T_USER_PROPS_) return T_USER_PROPS_;
+  try {
+    T_USER_PROPS_ = PropertiesService.getUserProperties().getProperties() || {};
+  } catch (e) {
+    T_USER_PROPS_ = {};
+  }
+  return T_USER_PROPS_;
+}
+
+/** この実行での ScriptProperties の内容（初回だけ取りに行く）。 */
+function tScriptProps_() {
+  if (T_SCRIPT_PROPS_) return T_SCRIPT_PROPS_;
+  try {
+    T_SCRIPT_PROPS_ = PropertiesService.getScriptProperties().getProperties() || {};
+  } catch (e) {
+    T_SCRIPT_PROPS_ = {};
+  }
+  return T_SCRIPT_PROPS_;
+}
+
+/** 覚えている内容を捨てます（テスト・障害時の保険）。 */
+function tResetPropsCache_() {
+  T_USER_PROPS_ = null;
+  T_SCRIPT_PROPS_ = null;
+}
+
+/**
+ * 利用者ごとのプロパティを1件読みます（未設定なら null）。
+ * @param {string} key
+ * @returns {?string}
+ */
+function tGetUserProp_(key) {
+  const value = tUserProps_()[key];
+  return value === undefined ? null : value;
+}
+
+/**
+ * スクリプト全体のプロパティを1件読みます（未設定なら null）。
+ * @param {string} key
+ * @returns {?string}
+ */
+function tGetScriptProp_(key) {
+  const value = tScriptProps_()[key];
+  return value === undefined ? null : value;
+}
+
 /**
  * ユーザー別プロパティを取得します（UserProperties→ScriptProperties の順、無ければ null）。
  * PropertiesService.getProperty と同じく、未設定時は null を返します。
@@ -35,17 +96,11 @@ const SP_KEY_SHARED_DEPLOYMENT = 'sp_sharedDeployment';
  * @returns {?string}
  */
 function tGetProp_(key) {
-  try {
-    const v = PropertiesService.getUserProperties().getProperty(key);
-    if (v !== null && v !== undefined) return v;
-  } catch (e) { /* UserProperties 不可時はフォールバックへ */ }
+  const own = tGetUserProp_(key);
+  if (own !== null) return own;
   // 共有デプロイでは、スクリプト全体の設定へ落ちない（下の isSharedDeployment_ 参照）
   if (isSharedDeployment_()) return null;
-  try {
-    return PropertiesService.getScriptProperties().getProperty(key);
-  } catch (e) {
-    return null;
-  }
+  return tGetScriptProp_(key);
 }
 
 /**
@@ -67,8 +122,7 @@ function tGetProp_(key) {
  */
 function isSharedDeployment_() {
   try {
-    return String(PropertiesService.getScriptProperties()
-      .getProperty(SP_KEY_SHARED_DEPLOYMENT) || '').toLowerCase() === 'true';
+    return String(tGetScriptProp_(SP_KEY_SHARED_DEPLOYMENT) || '').toLowerCase() === 'true';
   } catch (e) {
     return false;
   }
@@ -81,6 +135,7 @@ function isSharedDeployment_() {
  */
 function tSetProp_(key, value) {
   PropertiesService.getUserProperties().setProperty(key, value);
+  tUserProps_()[key] = String(value);
 }
 
 /**
@@ -89,6 +144,8 @@ function tSetProp_(key, value) {
  */
 function tSetProps_(obj) {
   PropertiesService.getUserProperties().setProperties(obj, false);
+  const memo = tUserProps_();
+  Object.keys(obj || {}).forEach(key => { memo[key] = String(obj[key]); });
 }
 
 /**
@@ -98,6 +155,7 @@ function tSetProps_(obj) {
 function tDeleteProp_(key) {
   try {
     PropertiesService.getUserProperties().deleteProperty(key);
+    delete tUserProps_()[key];
   } catch (e) { /* 未設定時は無視 */ }
 }
 
@@ -107,7 +165,7 @@ function tDeleteProp_(key) {
  */
 function getUserSpreadsheetId_() {
   try {
-    return PropertiesService.getUserProperties().getProperty(UP_KEY_SPREADSHEET_ID) || '';
+    return tGetUserProp_(UP_KEY_SPREADSHEET_ID) || '';
   } catch (e) {
     return '';
   }
@@ -119,6 +177,7 @@ function getUserSpreadsheetId_() {
  */
 function setUserSpreadsheetId_(id) {
   PropertiesService.getUserProperties().setProperty(UP_KEY_SPREADSHEET_ID, String(id));
+  tUserProps_()[UP_KEY_SPREADSHEET_ID] = String(id);
 }
 
 /**
@@ -127,6 +186,7 @@ function setUserSpreadsheetId_(id) {
 function clearUserSpreadsheetId_() {
   try {
     PropertiesService.getUserProperties().deleteProperty(UP_KEY_SPREADSHEET_ID);
+    delete tUserProps_()[UP_KEY_SPREADSHEET_ID];
   } catch (e) { /* 未設定時は無視 */ }
 }
 
@@ -138,7 +198,7 @@ function getLegacySpreadsheetId_() {
   // 共有デプロイでは使わない。全員が配布元の1つのDBへ合流してしまうため。
   if (isSharedDeployment_()) return '';
   try {
-    const id = PropertiesService.getScriptProperties().getProperty(SP_KEY_LEGACY_SPREADSHEET_ID) || '';
+    const id = tGetScriptProp_(SP_KEY_LEGACY_SPREADSHEET_ID) || '';
     if (id) {
       // めったに通らない経路なので、通ったことが分かるようにしておく。
       // 「自分のDBを作ったつもりが、別のDBを開いていた」ときの手がかりになる。
@@ -221,7 +281,7 @@ function getTenantStatus() {
     let email = '';
     try { email = Session.getActiveUser().getEmail() || ''; } catch (e) { /* 権限未付与時は空 */ }
 
-    const templateConfigured = !!PropertiesService.getScriptProperties().getProperty(SP_KEY_DB_TEMPLATE_ID);
+    const templateConfigured = !!tGetScriptProp_(SP_KEY_DB_TEMPLATE_ID);
 
     return {
       success: true,
@@ -427,7 +487,7 @@ function createMyDatabase(name, options) {
       }
     }
 
-    const templateId = PropertiesService.getScriptProperties().getProperty(SP_KEY_DB_TEMPLATE_ID);
+    const templateId = tGetScriptProp_(SP_KEY_DB_TEMPLATE_ID);
     const title = String(name || '').trim()
       || ('週案データベース（' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy/MM/dd') + '）');
 

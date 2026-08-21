@@ -189,7 +189,16 @@ function createFakeSheets(options = {}) {
           grid[rowIndex][columnIndex] = state.normalize(value, columnIndex + 1);
         });
       });
-      return respond(200, { updatedCells: payload.values.length });
+      const response = { updatedCells: payload.values.length };
+      // 書き込みと同時に「シートに実際に入った値」を返す（本物と同じ）
+      if (params.get('includeValuesInResponse') === 'true') {
+        response.updatedData = {
+          values: trim(grid
+            .slice(target.row - 1, target.row - 1 + target.numRows)
+            .map(row => (row || []).slice(target.column - 1, target.column - 1 + target.numColumns)))
+        };
+      }
+      return respond(200, response);
     }
 
     // 値の読み取り
