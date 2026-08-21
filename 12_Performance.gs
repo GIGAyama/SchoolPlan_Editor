@@ -58,6 +58,150 @@ function p2MappedWidth_(cols) {
 }
 
 /**
+ * 「日付 → 行番号」の対応を覚えておくためのキー（利用者ごと・シートごと）。
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @returns {string}
+ */
+function p2CalendarCacheKey_(sheet) {
+  return 'p2Calendar::' + sheet.getParent().getId() + '::' + sheet.getName();
+}
+
+/**
+ * 年間カレンダーの並びを覚えておきます。
+ *
+ * データベースの日付列は「2行目から1日ずつ連続」で作られます
+ * （`initializeNewDatabase_` / `generateAnnualCalendar`）。であれば、
+ * 先頭の日付と行番号さえ分かれば、任意の日付の行番号は引き算で出せます。
+ * 覚えておけば、週を開くたびに日付列（370行）を読む必要がなくなります。
+ *
+ * 連続していないシート（手で行を足した等）では覚えません。その場合は
+ * 従来どおり日付列を走査します。
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Array<{dateStr: string, rowNumber: number}>} scanned 走査で分かった対応（行番号昇順）
+ */
+function p2RememberCalendar_(sheet, scanned) {
+  if (!scanned || scanned.length < 2) return;
+  const first = scanned[0];
+  const contiguous = scanned.every((item, index) => {
+    if (item.rowNumber !== first.rowNumber + index) return false;
+    const expected = new Date(parseDate_(first.dateStr).getTime());
+    expected.setDate(expected.getDate() + index);
+    return formatDate(expected) === item.dateStr;
+  });
+  if (!contiguous) return;
+  try {
+    CacheService.getUserCache().put(
+      p2CalendarCacheKey_(sheet),
+      JSON.stringify({ firstDate: first.dateStr, firstRow: first.rowNumber, count: scanned.length }),
+      P2_CALENDAR_CACHE_SECONDS_);
+  } catch (e) { /* 覚えられなくても、走査すれば同じ結果になる */ }
+}
+
+/** 覚えている並びから、日付に対応する行番号を出します。分からなければ null。 */
+function p2GuessRowNumbers_(sheet, dateStrs) {
+  let remembered = null;
+  try {
+    const raw = CacheService.getUserCache().get(p2CalendarCacheKey_(sheet));
+    remembered = raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+  if (!remembered || !remembered.firstDate || !remembered.firstRow) return null;
+
+  const firstTime = parseDate_(remembered.firstDate).getTime();
+  const guessed = new Map();
+  for (const dateStr of dateStrs) {
+    const offset = Math.round((parseDate_(dateStr).getTime() - firstTime) / 86400000);
+    if (offset < 0 || offset >= remembered.count) continue;
+    guessed.set(dateStr, remembered.firstRow + offset);
+  }
+  return guessed.size > 0 ? guessed : null;
+}
+
+/** 覚えている並びを捨てます（カレンダーを作り直したときなど）。 */
+function p2ForgetCalendar_(sheet) {
+  try {
+    CacheService.getUserCache().remove(p2CalendarCacheKey_(sheet));
+  } catch (e) { /* 消せなくても、次の読み取りで食い違いに気づいて捨て直す */ }
+}
+
+/**
+ * 覚えている並びで対象週の行を読み、日付が合っているか確かめます。
+ *
+ * **合っていなければ何も返しません。** 行が動いていた場合に、別の日の行を
+ * その週の内容として読み書きしてしまうと取り返しがつかないためです。
+ * 呼び出し側は従来どおり日付列を走査し直します。
+ *
+ * @returns {?Object} 確かめられた rowState。合わなければ null
+ */
+function p2ReadRowsByRememberedCalendar_(sheet, cols, dateStrs) {
+  const guessed = p2GuessRowNumbers_(sheet, dateStrs);
+  if (!guessed) return null;
+
+  const lastColumn = p2MappedWidth_(cols);
+  const rowNumbers = [...guessed.values()].sort((a, b) => a - b);
+  const rowByNumber = new Map();
+  for (const group of p2GroupConsecutiveNumbers_(rowNumbers)) {
+    const values = sheet.getRange(group[0], 1, group.length, lastColumn)
+      .getValues({ dateColumns: [cols.DATE] });
+    values.forEach((row, offset) => rowByNumber.set(group[0] + offset, row));
+  }
+
+  const rowByDate = new Map();
+  for (const [dateStr, rowNumber] of guessed) {
+    const row = rowByNumber.get(rowNumber);
+    const actual = row ? row[cols.DATE - 1] : null;
+    // 覚えていた行に、期待した日付が入っているか
+    if (!(actual instanceof Date) || formatDate(actual) !== dateStr) return null;
+    rowByDate.set(dateStr, row);
+  }
+
+  return { lastColumn, rowNumbers, rowNumberByDate: guessed, rowByNumber, rowByDate };
+}
+
+/**
+ * 対象週を読むのに要る範囲を、1回の通信でまとめて取っておきます。
+ *
+ * 見出し行と、対象週の行。行番号は覚えている並びから引けるので、
+ * 読む前から分かります。GAS の待ち時間はほぼ往復の回数で決まるため、
+ * 分かっているものは先にまとめて取ってしまうのが効きます。
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {string[]} dateStrs 対象週の日付
+ */
+function p2PrefetchWeek_(sheet, dateStrs) {
+  const width = Math.max(1, sheet.getMaxColumns());
+  const specs = [{ row: 1, column: 1, numRows: 1, numColumns: width }];
+  const guessed = p2GuessRowNumbers_(sheet, dateStrs);
+  if (guessed) {
+    for (const group of p2GroupConsecutiveNumbers_([...guessed.values()])) {
+      specs.push({ row: group[0], column: 1, numRows: group.length, numColumns: width });
+    }
+  }
+  sheet.prefetchRanges(specs);
+}
+
+/**
+ * 対象週の行を読みます。
+ *
+ * 覚えている並びが使えれば日付列（370行）を読まずに済みます。読んだ行の日付が
+ * 食い違ったら、覚えていたものを捨てて従来どおり日付列を走査し直します。
+ * **食い違ったまま進むことはありません**（別の日の行を読み書きしてしまうため）。
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Object} cols 列マップ
+ * @param {string[]} dateStrs 対象週の日付
+ * @returns {Object} rowState
+ */
+function p2LoadWeekRows_(sheet, cols, dateStrs) {
+  const remembered = p2ReadRowsByRememberedCalendar_(sheet, cols, dateStrs);
+  if (remembered) return remembered;
+  p2ForgetCalendar_(sheet);
+  return p2ReadRowsForDates_(sheet, cols, dateStrs);
+}
+
+/**
  * 日付列だけを先に読み、対象日の行だけを取得します。
  * 年間DB全体を全列読み込む従来方式を避けます。
  */
@@ -72,10 +216,12 @@ function p2ReadRowsForDates_(sheet, cols, dateStrs) {
   // 日付列を末尾まで読む。日付列であることは見出しから分かっているので、
   // 表示形式を調べに行かせない。
   const dateValues = sheet.getValuesToEnd(2, cols.DATE, 1, { dateColumns: [cols.DATE] });
+  const allScanned = [];
   dateValues.forEach((row, index) => {
     const value = row[0];
     if (!(value instanceof Date)) return;
     const dateStr = formatDate(value);
+    allScanned.push({ dateStr, rowNumber: index + 2 });
     if (wanted.has(dateStr) && !rowNumberByDate.has(dateStr)) {
       rowNumberByDate.set(dateStr, index + 2);
     }
@@ -96,6 +242,9 @@ function p2ReadRowsForDates_(sheet, cols, dateStrs) {
     const row = rowByNumber.get(rowNumber);
     if (row) rowByDate.set(dateStr, row);
   });
+
+  // 次からは日付列を読まずに済むよう、並びを覚えておく
+  p2RememberCalendar_(sheet, allScanned);
 
   return { lastColumn, rowNumbers, rowNumberByDate, rowByNumber, rowByDate };
 }
@@ -192,6 +341,11 @@ function p2WriteColumnValues_(sheet, column, valueByRowNumber) {
 // 校時列は「校時・単元・学習内容」の3列おきに並ぶため、2列までまたげば
 // 1〜6校時を1回の読み込みにまとめられる。
 const P2_READ_SPAN_MAX_GAP_ = 2;
+
+// 「日付 → 行番号」の対応を覚えておく時間（秒）。
+// カレンダーはめったに変わらないが、覚えたまま行が動くと危ないので長すぎないようにする。
+// 食い違いは読み取り時に必ず検出されるため、これは安全弁ではなく効き目の調整値。
+const P2_CALENDAR_CACHE_SECONDS_ = 21600; // 6時間
 
 /**
  * 連続した番号を、間に許容ギャップを挟んでまとめた範囲に分けます。
@@ -361,6 +515,9 @@ function getWeeklyPlanDataV2(mondayDateStr) {
     const dbSheet = getDbSheet_(ss);
     if (!dbSheet) throw new Error('データベースシートが見つかりません');
 
+    // 見出しと対象週の行を1回でまとめて取る（以降の読み取りは通信なしで済む）
+    p2PrefetchWeek_(dbSheet, p2WeekDateStrings_(mondayDateStr));
+
     let dbCols;
     try {
       dbCols = ensureReflectionColumns_();
@@ -370,7 +527,7 @@ function getWeeklyPlanDataV2(mondayDateStr) {
     }
 
     const weekDateStrs = p2WeekDateStrings_(mondayDateStr);
-    const rows = p2ReadRowsForDates_(dbSheet, dbCols, weekDateStrs);
+    const rows = p2LoadWeekRows_(dbSheet, dbCols, weekDateStrs);
     const holidayMap = getHolidayMap_();
     const days = p2BuildWeekDays_(rows, dbCols, weekDateStrs, holidayMap);
 
@@ -438,13 +595,17 @@ function p2ApplyDayToRow_(row, cols, day) {
  * @param {string[]} [writeKeys] 書き戻す論理列キー。省略時は週案の入力列すべて。
  */
 function p2WriteChangedWeekRows_(sheet, cols, rowState, changedRowNumbers, writeKeys) {
-  if (changedRowNumbers.length === 0) return;
+  if (changedRowNumbers.length === 0) return true;
 
   const writeColumns = (writeKeys || P2_WEEK_READ_KEYS_)
     .map(key => cols[key])
     .filter(Boolean);
   const columnGroups = p2GroupConsecutiveNumbers_(writeColumns);
   const rowGroups = p2GroupConsecutiveNumbers_(changedRowNumbers);
+
+  // 書き込みの応答が「シートに実際に入った値」を返してくれたか。
+  // 1か所でも返らなければ、呼び出し側が読み直す（p2RereadRows_）。
+  let readBackComplete = true;
 
   for (const rowGroup of rowGroups) {
     for (const columnGroup of columnGroups) {
@@ -455,9 +616,23 @@ function p2WriteChangedWeekRows_(sheet, cols, rowState, changedRowNumbers, write
         const row = rowState.rowByNumber.get(rowNumber);
         return row.slice(startCol - 1, startCol - 1 + width);
       });
-      sheet.getRange(startRow, startCol, rowGroup.length, width).setValues(values);
+      const written = sheet.getRange(startRow, startCol, rowGroup.length, width)
+        .setValuesReadingBack(values);
+      if (!written) {
+        readBackComplete = false;
+        continue;
+      }
+      // 解釈し直された値を手元の行へ戻す（"007" → 7 のような読み替えに追随する）
+      rowGroup.forEach((rowNumber, offset) => {
+        const row = rowState.rowByNumber.get(rowNumber);
+        if (!row) return;
+        (written[offset] || []).forEach((value, index) => {
+          row[startCol - 1 + index] = value;
+        });
+      });
     }
   }
+  return readBackComplete;
 }
 
 /**
@@ -523,11 +698,14 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
           + '元の学級へ戻してから、もう一度保存してください。'
       };
     }
+    const weekDateStrs = p2WeekDateStrings_(mondayDateStr);
+    // 見出しと対象週の行を1回でまとめて取る（以降の読み取りは通信なしで済む）
+    p2PrefetchWeek_(dbSheet, weekDateStrs);
+
     const dbCols = getDbColumns();
     p2AssertWritableSchema_(dbCols, dbSheet.getName());
 
-    const weekDateStrs = p2WeekDateStrings_(mondayDateStr);
-    const rowState = p2ReadRowsForDates_(dbSheet, dbCols, weekDateStrs);
+    const rowState = p2LoadWeekRows_(dbSheet, dbCols, weekDateStrs);
     const currentRows = [...rowState.rowByDate.values()];
     const currentRevision = computeWeekRevision_(currentRows, dbCols, weekDateStrs);
     const holidayMap = getHolidayMap_();
@@ -604,7 +782,7 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
       }
     }
 
-    p2WriteChangedWeekRows_(dbSheet, dbCols, rowState, uniqueChangedRows);
+    const readBackComplete = p2WriteChangedWeekRows_(dbSheet, dbCols, rowState, uniqueChangedRows);
 
     // 新しいリビジョンは「書き込んだ値」ではなく「シートに実際に入った値」から算出する。
     // スプレッドシートは setValues の際に文字列を解釈し直す("1/3"→日付、"007"→7、
@@ -613,7 +791,9 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
     // 「保存の競合」になっていた(単独利用でも頻発する原因)。
     let afterState = rowState;
     if (uniqueChangedRows.length > 0) {
-      afterState = p2RereadRows_(dbSheet, dbCols, rowState);
+      // 書き込みの応答が解釈後の値を返していれば、rowState はもう最新。
+      // 返らなかったときだけ、対象行を読み直す。
+      if (!readBackComplete) afterState = p2RereadRows_(dbSheet, dbCols, rowState);
       // 単元セルが変わると単元の進捗も変わるため、進捗インデックスのキャッシュを捨てる。
       invalidateUnitProgressCache_();
     }

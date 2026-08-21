@@ -62,8 +62,7 @@ function createTransport(sheets, log) {
     .reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0);
 
   /** 要求された範囲だけを切り出す（本物と同じく、末尾の空セルは詰める）。 */
-  function pick(grid, text) {
-    const body = (decodeURIComponent(text).split('/values/')[1] || '').split('?')[0];
+  function pickRange(grid, body) {
     // A2:C10（行を指定）と A2:C（末尾を開ける）の両方に対応する
     const cells = /!([A-Z]+)(\d+):([A-Z]+)(\d*)/.exec(body);
     const picked = cells
@@ -78,6 +77,11 @@ function createTransport(sheets, log) {
     });
     while (rows.length && rows[rows.length - 1].length === 0) rows.pop();
     return rows;
+  }
+
+  /** URL の /values/ 部分から範囲を取り出して切り出す。 */
+  function pick(grid, text) {
+    return pickRange(grid, (decodeURIComponent(text).split('/values/')[1] || '').split('?')[0]);
   }
 
   return function fetch(url, options) {
@@ -125,12 +129,28 @@ function createTransport(sheets, log) {
           });
         }
         body = { updatedCells: 1 };
+        // 書き込みと同時に「シートに実際に入った値」を返す（本物と同じ）
+        if (text.includes('includeValuesInResponse=true')) {
+          body.updatedData = { values: pick(sheets[name] || [], url) };
+        }
       } else {
         kind = 'read:' + name;
         const formatted = text.includes('FORMATTED_VALUE') && !text.includes('UNFORMATTED_VALUE');
         const picked = pick(grid, url);
         body = { values: formatted ? display(picked) : picked };
       }
+    } else if (text.includes(':batchGet')) {
+      kind = 'batchGet';
+      // ranges=... が範囲の数だけ並ぶ。1回の通信で全部返す。
+      const wanted = [...decodeURIComponent(text).matchAll(/ranges=([^&]+)/g)].map(m => m[1]);
+      const formatted = text.includes('FORMATTED_VALUE') && !text.includes('UNFORMATTED_VALUE');
+      body = {
+        valueRanges: wanted.map(range => {
+          const name = range.split('!')[0].replace(/^'|'$/g, '').replace(/''/g, "'");
+          const picked = pickRange(sheets[name] || [], range);
+          return { range, values: formatted ? display(picked) : picked };
+        })
+      };
     } else if (text.includes(':batchUpdate')) {
       kind = 'batchUpdate';
       const requests = JSON.parse(opt.payload || '{}').requests || [];
@@ -314,9 +334,41 @@ test('週案の読み込みは、往復も通信量も使いすぎない', () =>
   // 数十KBも運んでいたら「シート全体を読んでいる」ということ。
   const world = createWorld();
   const { calls } = measure(world, app => app.getWeeklyPlanDataV2(MONDAY));
-  assert.ok(calls.length <= 4, `読み込みで ${calls.length} 往復している`);
+  assert.ok(calls.length <= 4, `初回の読み込みで ${calls.length} 往復している`);
   assert.ok(receivedBytes(calls) <= 32 * 1024,
-    `読み込みで ${Math.round(receivedBytes(calls) / 1024)}KB 受信している`);
+    `初回の読み込みで ${Math.round(receivedBytes(calls) / 1024)}KB 受信している`);
+
+  // 2回目からは「日付→行番号」を覚えているので、日付列を読まずに済む。
+  // 見出しと対象行は1回の batchGet にまとめる。
+  const again = measure(world, app => app.getWeeklyPlanDataV2(MONDAY));
+  assert.ok(again.calls.length <= 1,
+    `2回目の読み込みで ${again.calls.length} 往復している`);
+});
+
+test('行がずれていたら、覚えている行番号を使わずに読み直す', () => {
+  // ここが「日付→行番号を覚える」ことの唯一の危険。覚えたあとに行が動くと、
+  // 別の日の行をその週の内容として読み書きしかねない。読んだ行の日付を
+  // 必ず突き合わせ、食い違ったら覚えていたものを捨てて走査し直すこと。
+  const world = createWorld();
+
+  // 月曜の行に目印を置く。どの行かはアプリに決めさせる（テスト側で行番号を
+  // 計算すると、タイムゾーンの扱いの違いで1日ずれた行を指してしまう）。
+  const before = measure(world, app => app.getWeeklyPlanDataV2(MONDAY));
+  assert.ok(before.result.success, '下ごしらえの読み込みに失敗');
+  const marked = JSON.parse(JSON.stringify(before.result.days));
+  marked[0].event = '目印となる行事';
+  const saved = measure(world, app =>
+    app.saveWeeklyPlanWeek_(MONDAY, marked, before.result.revision, { protect: false }));
+  assert.ok(saved.result.success, '下ごしらえの保存に失敗: ' + saved.result.error);
+
+  // ここまでで並びを覚えている。シートの先頭に1行差し込んで全体を1つ下へずらす。
+  world.sheets['データベース'].splice(1, 0, new Array(HEADERS.length).fill(''));
+
+  const after = measure(world, app => app.getWeeklyPlanDataV2(MONDAY));
+  assert.ok(after.result.success, '読み込めていない');
+  assert.equal(after.result.days[0].date, MONDAY);
+  assert.equal(after.result.days[0].event, '目印となる行事',
+    '行がずれているのに、覚えていた行番号のまま読んでいる');
 });
 
 test('週案の保存は、往復も通信量も使いすぎない', () => {
@@ -324,8 +376,8 @@ test('週案の保存は、往復も通信量も使いすぎない', () => {
   warmUp(world);
   const { calls } = saveOneCell(world, '編集した学習内容');
   // 上限は実測値そのもの。増やすときは「なぜ1往復増やすのか」を書いてから増やすこと。
-  assert.ok(calls.length <= 8, `保存で ${calls.length} 往復している`);
-  assert.ok(receivedBytes(calls) <= 32 * 1024,
+  assert.ok(calls.length <= 3, `保存で ${calls.length} 往復している`);
+  assert.ok(receivedBytes(calls) <= 16 * 1024,
     `保存で ${Math.round(receivedBytes(calls) / 1024)}KB 受信している`);
 });
 

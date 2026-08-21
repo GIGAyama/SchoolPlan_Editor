@@ -1597,6 +1597,8 @@ function generateAnnualCalendar(year, startMondayStr) {
 
     // まとめて一括書き込み
     dbSheet.getRange(startRow, 1, newData.length, lastCol).setValues(newData);
+    // 日付の並びが変わったので、覚えている「日付→行番号」を捨てる
+    p2ForgetCalendar_(dbSheet);
 
     return { success: true, message: `${year}年度のカレンダー（${totalDays}日分）を生成しました。` };
   } catch (e) {

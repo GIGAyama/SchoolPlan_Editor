@@ -427,6 +427,21 @@ function p3RunMigrations_(ss) {
 
 function ensureDataProtectionReady_() {
   const ss = getSs_();
+  const verification = p3SheetsVerification_(ss.getId());
+
+  // スキーマ版の確認は、内部シートの点検と同じ枠（6時間）で行う。
+  //
+  // 確認そのものはメタシートを1回読むだけだが、週案の自動保存は450msの間隔で
+  // 走るため、そのたびに1往復を足すと保存時間のうち無視できない割合になる。
+  // 内部シートを書き換えるのはアプリ自身だけなので、点検と同じ頻度で足りる。
+  //
+  // 「アプリより新しいスキーマなら止める」という守りは、確認する回に働く。
+  // 点検を省いた回にすり抜けうるのは、点検そのものと同じ最大6時間の窓であり、
+  // 新しく増える危険ではない。
+  if (verification.trusted) {
+    return { success: true, version: P3_SCHEMA_VERSION_, applied: [] };
+  }
+
   const result = p3RunMigrations_(ss);
   // 期限切れ掃除は全行走査+deleteRowループを伴うため、毎回ではなく
   // ユーザー・スプレッドシート単位で6時間に1回に間引く(掃除失敗は本処理を妨げない)。

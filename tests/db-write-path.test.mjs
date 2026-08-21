@@ -24,6 +24,9 @@ function makeSheet(name, grid) {
     getName: () => name,
     getLastRow: () => grid.length,
     getLastColumn: () => grid.reduce((max, row) => Math.max(max, row.length), 0),
+    getParent: () => ({ getId: () => 'ss' }),
+    // まとめ読み。このスタブは grid から直接読むので、何もしなくてよい。
+    prefetchRanges() { return sheet; },
     // 末尾を開けた読み取り。本物と同じく、データのある行だけを返す。
     getValuesToEnd(startRow, column, numColumns, options) {
       const rows = Math.max(0, grid.length - startRow + 1);
@@ -77,6 +80,12 @@ function makeSheet(name, grid) {
             while (grid[row - 1 + r].length < col - 1 + c) grid[row - 1 + r].push('');
             grid[row - 1 + r][col - 1 + c] = value;
           }));
+        },
+        // 書き込みと同時に「シートに実際に入った値」を返す経路。
+        // 本物は Sheets の解釈し直しを反映するが、ここでは書いたとおりが入る。
+        setValuesReadingBack(values) {
+          this.setValues(values);
+          return values.map(line => line.slice());
         }
       };
     }
@@ -120,7 +129,18 @@ function loadBackend(sheetRows, options = {}) {
     SpreadsheetApp: { flush: () => {}, getActiveSpreadsheet: () => ({ getSheetByName: () => sheet, getId: () => 'ss' }) },
     LockService: {
       getScriptLock: () => ({ waitLock: () => {}, tryLock: () => true, releaseLock: () => {} })
-    }
+    },
+    // 「日付→行番号」を覚える経路を実際に通すため、動くキャッシュを渡す
+    CacheService: (() => {
+      const store = {};
+      const cache = {
+        get: (key) => (store[key] === undefined ? null : store[key]),
+        put: (key, value) => { store[key] = String(value); },
+        remove: (key) => { delete store[key]; },
+        removeAll: (keys) => keys.forEach((key) => delete store[key])
+      };
+      return { getUserCache: () => cache, getScriptCache: () => cache };
+    })()
   });
   context.globalThis = context;
 

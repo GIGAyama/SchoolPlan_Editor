@@ -50,6 +50,15 @@
  * - **追記は `appendRow` / `appendRows`（`values.append`）を使う。** 末尾はサーバ側が
  *   探すので、読み取りが要りません。
  *
+ * さらに往復を減らすために、次の2つを持っています。
+ *
+ * - **`prefetchRanges`**（`values:batchGet`）。分かっている範囲をまとめて1回で取ります。
+ *   範囲キャッシュは「広く読んだものから狭い範囲を切り出す」ので、先に大きめに
+ *   取っておけば、続く `getRange(...).getValues()` は通信なしで済みます。
+ * - **`setValuesReadingBack`**（`includeValuesInResponse`）。書き込みの応答が
+ *   「シートに実際に入った値」を返すため、書いたあとの読み直しが要りません。
+ *   応答に入っていなければ null を返すので、呼び出し側は従来どおり読み直せます。
+ *
  * 何往復するかは `tests/round-trip-budget.test.mjs` が見張っています。
  */
 
@@ -628,33 +637,118 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
    * @param {boolean} formatted 画面に見えている文字列で欲しいか
    * @returns {Array[]} シート全体と同じ座標の疎な二次元配列
    */
+  /**
+   * 範囲だけを読んだものを覚えておく入れ物。
+   * **広く読んだものから狭い範囲を切り出せる**ようにしてあります。
+   * 先にまとめて読んでおけば（`prefetchRanges`）、続く読み取りは通信なしで済みます。
+   * @returns {Array<{formatted: boolean, row: number, column: number,
+   *   numRows: number, numColumns: number, data: Array[]}>}
+   */
+  function windows_() {
+    const g = grid();
+    if (!g.windows) g.windows = [];
+    return g.windows;
+  }
+
+  /** 要求された矩形を丸ごと含んでいる読み取り済みの範囲を探します。 */
+  function findWindow_(row, column, numRows, numColumns, formatted) {
+    return windows_().filter(w => w.formatted === formatted
+      && w.row <= row && w.row + w.numRows >= row + numRows
+      && w.column <= column && w.column + w.numColumns >= column + numColumns)[0] || null;
+  }
+
+  /** 取れた値を、シート全体での座標に置き直します。 */
+  function placeValues_(values, row, column) {
+    const placed = [];
+    (values || []).forEach((line, offset) => {
+      const target = [];
+      line.forEach((value, index) => { target[column - 1 + index] = value; });
+      placed[row - 1 + offset] = target;
+    });
+    return placed;
+  }
+
+  /** A1 記法（シート名つき）を組み立てます。`numRows` が null なら末尾を開けます。 */
+  function rangeA1_(row, column, numRows, numColumns) {
+    const from = `${sheetsColumnLetter_(column)}${row}`;
+    const to = sheetsColumnLetter_(column + numColumns - 1) + (numRows === null ? '' : (row + numRows - 1));
+    return `${sheetsQuoteTitle_(props.title)}!${from}:${to}`;
+  }
+
+  /** 読み取りのクエリ文字列。 */
+  function readQuery_(formatted) {
+    return formatted
+      ? 'valueRenderOption=FORMATTED_VALUE'
+      : 'valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER';
+  }
+
+  /**
+   * 複数の範囲を**1回の通信**でまとめて読み、範囲キャッシュへ入れます。
+   *
+   * GAS の待ち時間はほぼ往復の回数で決まるので、先に分かっている範囲は
+   * まとめて取ってしまうのが効きます。読み終えたぶんは、続く
+   * `getRange(...).getValues()` が通信なしで切り出せます。
+   *
+   * @param {Array<{row: number, column: number, numRows: number, numColumns: number}>} specs
+   * @param {boolean} [formatted] 画面に見えている文字列で欲しいか
+   */
+  function prefetchRanges_(specs, formatted) {
+    const wanted = (specs || []).filter(spec => spec && spec.numRows > 0 && spec.numColumns > 0
+      && !findWindow_(spec.row, spec.column, spec.numRows, spec.numColumns, !!formatted));
+    if (wanted.length === 0) return;
+    if (wanted.length === 1) {
+      window_(wanted[0].row, wanted[0].column, wanted[0].numRows, wanted[0].numColumns, !!formatted);
+      return;
+    }
+    const ranges = wanted
+      .map(spec => 'ranges=' + encodeURIComponent(rangeA1_(spec.row, spec.column, spec.numRows, spec.numColumns)))
+      .join('&');
+    const result = sheetsFetch_(
+      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values:batchGet` +
+      `?${ranges}&${readQuery_(!!formatted)}`);
+    (result.valueRanges || []).forEach((valueRange, index) => {
+      const spec = wanted[index];
+      if (!spec) return;
+      windows_().push({
+        formatted: !!formatted,
+        row: spec.row, column: spec.column,
+        numRows: spec.numRows, numColumns: spec.numColumns,
+        data: placeValues_(valueRange.values, spec.row, spec.column)
+      });
+    });
+  }
+
+  /**
+   * 範囲だけを読みます。
+   *
+   * シート全体を読み込み済みならそこから切り出し、まだならその範囲だけを取りに行きます。
+   * 週案は年間1枚のシートに全部入っているため、1週を出すのに全体を取ると、
+   * 実データの100倍以上を運ぶことになります（1週の正味は約1.6KB）。
+   *
+   * 返す配列は**シート全体と同じ座標**に値を置きます。こうしておくと、
+   * 切り出し側（`sheetsMakeRange_` の `slice`）が全体キャッシュのときと同じコードで済みます。
+   *
+   * @param {number} row 1始まり
+   * @param {number} column 1始まり
+   * @param {number} numRows
+   * @param {number} numColumns
+   * @param {boolean} formatted 画面に見えている文字列で欲しいか
+   * @returns {Array[]} シート全体と同じ座標の疎な二次元配列
+   */
   function window_(row, column, numRows, numColumns, formatted) {
     const g = grid();
     // 全体を持っているならそれが最も安い（書き込み後は読み直しが要るので dirty は除く）
     const whole = formatted ? g.display : (g.dirty ? null : g.values);
     if (whole) return whole;
 
-    if (!g.windows) g.windows = {};
-    const key = `${formatted ? 'd' : 'v'}:${row}:${column}:${numRows}:${numColumns}`;
-    if (g.windows[key]) return g.windows[key];
+    const found = findWindow_(row, column, numRows, numColumns, formatted);
+    if (found) return found.data;
 
-    const lastColumnLetter = sheetsColumnLetter_(column + numColumns - 1);
-    const a1 = `${sheetsQuoteTitle_(props.title)}!` +
-      `${sheetsColumnLetter_(column)}${row}:${lastColumnLetter}${row + numRows - 1}`;
-    const query = formatted
-      ? '?valueRenderOption=FORMATTED_VALUE'
-      : '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER';
     const result = sheetsFetch_(
-      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(a1)}${query}`);
-
-    // 取れた値を、シート全体での座標へ置き直す
-    const placed = [];
-    (result.values || []).forEach((line, offset) => {
-      const target = [];
-      line.forEach((value, index) => { target[column - 1 + index] = value; });
-      placed[row - 1 + offset] = target;
-    });
-    g.windows[key] = placed;
+      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/` +
+      `${encodeURIComponent(rangeA1_(row, column, numRows, numColumns))}?${readQuery_(formatted)}`);
+    const placed = placeValues_(result.values, row, column);
+    windows_().push({ formatted, row, column, numRows, numColumns, data: placed });
     return placed;
   }
 
@@ -682,26 +776,20 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
     const whole = formatted ? g.display : (g.dirty ? null : g.values);
     if (whole) return Math.max(0, whole.length - startRow + 1);
 
-    const a1 = `${sheetsQuoteTitle_(props.title)}!` +
-      `${sheetsColumnLetter_(column)}${startRow}:${sheetsColumnLetter_(column + numColumns - 1)}`;
-    const query = formatted
-      ? '?valueRenderOption=FORMATTED_VALUE'
-      : '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER';
     const result = sheetsFetch_(
-      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(a1)}${query}`);
+      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/` +
+      `${encodeURIComponent(rangeA1_(startRow, column, null, numColumns))}?${readQuery_(formatted)}`);
 
     const lines = result.values || [];
     if (lines.length === 0) return 0;
 
-    const placed = [];
-    lines.forEach((line, offset) => {
-      const target = [];
-      line.forEach((value, index) => { target[column - 1 + index] = value; });
-      placed[startRow - 1 + offset] = target;
-    });
-    if (!g.windows) g.windows = {};
     // 続く getRange(...).getValues() がこのキャッシュに当たるようにする
-    g.windows[`${formatted ? 'd' : 'v'}:${startRow}:${column}:${lines.length}:${numColumns}`] = placed;
+    windows_().push({
+      formatted: formatted,
+      row: startRow, column: column,
+      numRows: lines.length, numColumns: numColumns,
+      data: placeValues_(lines, startRow, column)
+    });
     return lines.length;
   }
 
@@ -851,6 +939,17 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
      *   `options.dateColumns` で日付として読む列（1始まり）
      * @returns {Array[]} 矩形の二次元配列（データが無ければ空配列）
      */
+    /**
+     * 複数の範囲を1回の通信でまとめて読みます。
+     * 続く `getRange(...).getValues()` は、この読み取りから切り出されます。
+     * @param {Array<{row: number, column: number, numRows: number, numColumns: number}>} specs
+     * @param {Object} [options] `options.formatted` で表示文字列
+     */
+    prefetchRanges: function (specs, options) {
+      prefetchRanges_(specs, !!(options && options.formatted));
+      return sheet;
+    },
+
     getValuesToEnd: function (startRow, column, numColumns, options) {
       const formatted = !!(options && options.formatted);
       const rows = windowToEnd_(startRow, column, numColumns, formatted);
@@ -1256,6 +1355,23 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
      * @param {Array[]} values
      */
     setValues: function (values) {
+      range.setValuesReadingBack(values);
+      return range;
+    },
+
+    /**
+     * 値を書き込み、**スプレッドシートが解釈し直した結果**を返します。
+     *
+     * スプレッドシートは書いた値を解釈し直します（"1/3" は日付に、"007" は 7 に）。
+     * 送った値をそのまま手元に残すと実データと食い違い、以降の保存が毎回
+     * 「保存の競合」になります（tests/regression-fixes.test.mjs）。
+     * 書いたあとに読み直せば解決しますが、それは往復1回ぶんの費用になります。
+     * `includeValuesInResponse` を付ければ、書き込みの応答がそのまま結果を返します。
+     *
+     * @param {Array[]} values
+     * @returns {?Array[]} 解釈後の値。応答に入っていなければ null（呼び出し側は読み直すこと）
+     */
+    setValuesReadingBack: function (values) {
       const timeZone = api.spreadsheet.getSpreadsheetTimeZone();
       let hasFormula = false;
       // Date を書いた列を覚えておく。書式が日付でない列は、書いたあとに付ける（下記）。
@@ -1272,9 +1388,10 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
         return v === undefined || v === null ? '' : v;
       }));
 
-      sheetsFetch_(
+      const result = sheetsFetch_(
         `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(a1(true))}` +
-        '?valueInputOption=USER_ENTERED', {
+        '?valueInputOption=USER_ENTERED&includeValuesInResponse=true' +
+        '&responseValueRenderOption=UNFORMATTED_VALUE&responseDateTimeRenderOption=SERIAL_NUMBER', {
           method: 'put',
           contentType: 'application/json',
           payload: JSON.stringify({ values: payload })
@@ -1285,11 +1402,24 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
       if (hasFormula) {
         // 数式の計算結果はキャッシュでは分からないので、まるごと読み直させる
         api.invalidateValues();
-      } else {
-        patchCache(values);
-        api.invalidateDisplay();
+        return null;
       }
-      return range;
+      patchCache(values);
+      api.invalidateDisplay();
+
+      const written = result && result.updatedData && result.updatedData.values;
+      if (!written) return null;
+      // 要求した矩形にそろえる（末尾の空セルは詰められて返る）
+      const rectangle = [];
+      for (let r = 0; r < numRows; r++) {
+        const line = [];
+        for (let c = 0; c < numColumns; c++) {
+          const value = (written[r] || [])[c];
+          line.push(value === undefined || value === null ? '' : value);
+        }
+        rectangle.push(line);
+      }
+      return rectangle;
     },
 
     /**

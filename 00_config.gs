@@ -209,7 +209,10 @@ function scanDbHeaderForSheet_(dbSheet) {
   // 見出し1行を読むためだけに年間データを丸ごと運ぶことになる。
   // 見出しの無い列は buildDbColumnMapFromHeaders_ が読み飛ばす。
   const width = Math.max(1, dbSheet.getMaxColumns());
-  const headers = dbSheet.getRange(1, 1, 1, width).getDisplayValues()[0];
+  // 対象行の読み取りと同じ形式（UNFORMATTED）で取る。形式がそろっていれば
+  // 見出しと対象行を1回の batchGet にまとめられる（18_SheetsApi.gs の prefetchRanges）。
+  // 見出しは文字列なので、表示文字列との違いは出ない。日付列の調査もさせない。
+  const headers = dbSheet.getRange(1, 1, 1, width).getValues({ dateColumns: [] })[0];
   return buildDbColumnMapFromHeaders_(headers, dbSheet.getName());
 }
 
