@@ -1,0 +1,7 @@
+{
+  "//": "配信物は docs/ にコミットしている。先読み一覧の定数名は SHELL_ASSETS。",
+  "swPath": "docs/sw.js",
+  "baseDir": "docs",
+  "versionConst": "APP_VERSION",
+  "shellConst": "SHELL_ASSETS"
+}
