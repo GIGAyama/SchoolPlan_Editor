@@ -68,9 +68,12 @@ export function shellFilesOf(swSource, baseDir, shellConst) {
   }
   const entries = [...body.matchAll(/['"]([^'"]+)['"]/g)].map((hit) => hit[1]);
   return entries.map((entry) => {
-    // './' はディレクトリそのものを指す。実体は index.html。
-    const relPath = entry === './' ? './index.html' : entry;
-    return { entry, file: path.join(baseDir, relPath.replace(/^\.\//, '')) };
+    // 末尾が '/' の項目は、指しているのがディレクトリそのもの。実体は index.html。
+    // './' と '/'（独自ドメイン直下に置くリポジトリの書き方。ポータルの sw.js が
+    // その形）だけでなく、'./manabi-portal/' のような下の階層もある。
+    // 取りこぼすと readFileSync がディレクトリを読もうとして EISDIR で落ちる。
+    const relPath = entry.endsWith('/') ? entry + 'index.html' : entry;
+    return { entry, file: path.join(baseDir, relPath.replace(/^\.?\//, '')) };
   });
 }
 
