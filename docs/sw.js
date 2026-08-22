@@ -30,8 +30,12 @@
  * 2アプリ間に縮めただけの、同じ不具合になる。
  * ここは 'schoolplan-editor-shell-' として重ならないようにしてある。 */
 const CACHE_PREFIX = 'schoolplan-editor-shell-';
-// リリースごとに必ず上げる。上げ忘れると、直した内容が先生の端末に届かない。
-const CACHE_NAME = CACHE_PREFIX + 'v6';
+// ⚠️ この行は手で直さない。tools/build-sw.mjs が SHELL_ASSETS の中身から書き換える。
+//    手書きだったころは「リリースごとに必ず上げる」が人の仕事で、
+//    2026-08-21 に12リポジトリで同時に上げ忘れる事故が起きた。上げ忘れると
+//    古いシェルのキャッシュが掃除されず、直した内容が先生の端末に届かない。
+const APP_VERSION = 'v9d22d84d'; /* __APP_VERSION__ */
+const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
   './index.html',

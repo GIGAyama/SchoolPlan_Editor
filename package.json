@@ -17,14 +17,15 @@
     "deploy": "npm run quality && node scripts/gas-deploy.mjs deploy",
     "check:json": "node scripts/check-project.mjs --json",
     "test": "node --test",
-    "quality": "npm run check && npm test",
+    "quality": "node tools/build-sw.mjs --check && npm run check && npm test",
     "build:vendor": "node tools/build-vendor.mjs",
     "build:vendor:qrcode": "node tools/build-vendor.mjs qrcode",
     "verify:icons": "node tools/verify-icons.mjs",
     "verify:vendor-css": "node tools/compare-vendor-css.mjs",
     "demo:verify": "node tools/demo-video/verify-scenes.mjs",
     "demo:dry": "node tools/demo-video/record-demo.mjs --dry-run",
-    "demo:record": "node tools/demo-video/record-demo.mjs"
+    "demo:record": "node tools/demo-video/record-demo.mjs",
+    "build:sw": "node tools/build-sw.mjs"
   },
   "devDependencies": {
     "@material-symbols/font-400": "^0.45.10",

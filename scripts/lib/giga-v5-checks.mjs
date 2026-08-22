@@ -218,6 +218,23 @@ export function runGigaV5Checks(rootDir, files, options = {}) {
       issues.push(issue('error', 'GIGA_SW_SKIP_WAITING',
         'install の中で skipWaiting しています。入力中に画面が入れ替わります（§3-3）。', file));
     }
+    // 版が自動生成のままか。
+    // 手書きの版は「上げるのは人の仕事」で、上げ忘れても検査は何も言えない。
+    // 2026-08-21 に12リポジトリで同時に上げ忘れる事故が起きたのがその形。
+    // 上げ忘れると古いシェルのキャッシュが掃除されず、直した内容が
+    // 先生の端末に届かないまま「直したはずなのに直らない」が続く。
+    // ⚠️ body ではなく source を見る。目印はコメントなので stripComments に消される
+    if (!/const APP_VERSION = '[^']*'; \/\* __APP_VERSION__ \*\//.test(source)) {
+      issues.push(issue('error', 'GIGA_SW_VERSION_GENERATED',
+        "SW の版が手書きに戻っています。const APP_VERSION = 'v0'; /* __APP_VERSION__ */ の形にして、"
+        + '版は tools/build-sw.mjs に作らせてください（§3-3）。', file));
+    } else if (!fileSet.has('tools/build-sw.mjs')) {
+      // ⚠️ fs を直に見ない。この検査器は渡されたファイル一覧で判断する作りで、
+      //    実ファイルを見ると合成の木でテストできなくなる
+      issues.push(issue('error', 'GIGA_SW_VERSION_GENERATED',
+        'tools/build-sw.mjs がありません。版の自動生成が外れています（§3-3）。', file));
+    }
+
     if (!/message[\s\S]{0,200}SKIP_WAITING/.test(body)) {
       issues.push(issue('warning', 'GIGA_SW_NO_UPDATE_CHANNEL',
         '更新を利用者の操作で切り替える口（SKIP_WAITING メッセージ）がありません（§3-3）。', file));

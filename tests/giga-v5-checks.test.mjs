@@ -61,13 +61,16 @@ if (document.readyState === 'complete') navigator.serviceWorker.register('sw.js'
 else window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js'); });
 </script></body>`,
   'docs/sw.js': `const CACHE_PREFIX = 'demo-';
+const APP_VERSION = 'v0'; /* __APP_VERSION__ */
 // localStorage は一切操作しない
 self.addEventListener('install', (event) => { event.waitUntil(caches.open('demo-v1')); });
 self.addEventListener('activate', (event) => {
   event.waitUntil(caches.keys().then((keys) => Promise.all(
     keys.filter((k) => k.startsWith(CACHE_PREFIX)).map((k) => caches.delete(k)))));
 });
-self.addEventListener('message', (e) => { if (e.data.type === 'SKIP_WAITING') self.skipWaiting(); });`
+self.addEventListener('message', (e) => { if (e.data.type === 'SKIP_WAITING') self.skipWaiting(); });`,
+  // 版の生成器。これが無いと GIGA_SW_VERSION_GENERATED が「自動生成が外れている」と言う
+  'tools/build-sw.mjs': '// 正本 standards/sw/build-sw-static.mjs のコピー'
 };
 
 test('正しく書けている木では何も報告しない（誤検知していない）', () => {
@@ -161,6 +164,29 @@ test('prefers-reduced-motion で 0 にしているのを拾う', () => {
       '<style>@media (prefers-reduced-motion: reduce) { * { animation-duration: 0s !important; } }</style>'
   };
   assert.ok(codes(check(tree)).includes('GIGA_REDUCED_MOTION_ZERO'));
+});
+
+test('SW の版が手書きに戻っていたら拾う', () => {
+  // 手書きの版は「上げるのは人の仕事」で、上げ忘れても検査は何も言えない。
+  // 2026-08-21 に12リポジトリで同時に上げ忘れる事故が起きたのがその形。
+  const tree = {
+    ...OK_TREE,
+    'docs/sw.js': OK_TREE['docs/sw.js'].replace(
+      "const APP_VERSION = 'v0'; /* __APP_VERSION__ */", "const APP_VERSION = 'v6';"),
+  };
+  assert.ok(codes(check(tree)).includes('GIGA_SW_VERSION_GENERATED'));
+});
+
+test('版の生成器が無ければ拾う', () => {
+  const tree = { ...OK_TREE };
+  delete tree['tools/build-sw.mjs'];
+  assert.ok(codes(check(tree)).includes('GIGA_SW_VERSION_GENERATED'));
+});
+
+test('目印はコメントなので、コメント除去のあとで探してはいけない', () => {
+  // 実際にここを間違えて、正しく書けている sw.js を「手書きに戻っている」と
+  // 報告した。stripComments が /* __APP_VERSION__ */ を消すため
+  assert.ok(!codes(check(OK_TREE)).includes('GIGA_SW_VERSION_GENERATED'));
 });
 
 test('sw.js の全キャッシュ削除を拾う（アロー関数で消していても）', () => {
