@@ -109,12 +109,23 @@ test('スクリプトIDが無ければ、何もせずに止まる', () => {
 });
 
 test('品質ゲートを通してから、はじめてGASを触る', () => {
-  const qualityAt = WORKFLOW.indexOf('npm run quality');
+  // 正本の deploy.yml は、回すゲートの名前を package.json から選ぶ
+  // （リポジトリによって quality / ci / check とばらばらなため）。
+  // なので「npm run quality」という字面ではなく、
+  //   ・ゲートを回す段があること
+  //   ・それが GAS を触る段より前にあること
+  // を見る。
+  const gateAt = WORKFLOW.indexOf('Run quality gate');
   const deployAt = WORKFLOW.indexOf('gas-deploy.mjs deploy');
-  assert.ok(qualityAt >= 0, 'デプロイの手順に品質ゲートが無い');
-  assert.ok(deployAt > qualityAt, '品質ゲートより先にGASを触っている');
+  assert.ok(gateAt >= 0, 'デプロイの手順に品質ゲートの段が無い');
+  assert.ok(deployAt > gateAt, '品質ゲートより先にGASを触っている');
 
+  // このリポジトリには quality があるので、それが選ばれる
   const scripts = JSON.parse(fs.readFileSync('package.json', 'utf8')).scripts;
+  assert.ok(scripts.quality, 'package.json に quality が無い（ゲートが選ばれない）');
+  assert.match(WORKFLOW, /npm run "\$\{gate\}"/,
+    'ゲートを実際に回していない');
+
   assert.match(scripts.deploy, /npm run quality &&/,
     'npm run deploy が品質ゲートを通っていない');
 });
