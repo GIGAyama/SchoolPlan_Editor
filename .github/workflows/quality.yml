@@ -83,3 +83,16 @@ jobs:
       - name: Enforce static analysis
         if: steps.static-analysis.outputs.exit_code != '0'
         run: exit 1
+
+  # 正本コピー（standards-map.json に載るファイル）が
+  # GIGAyama.github.io/standards/ とずれていないか
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: GIGAyama/GIGAyama.github.io
+          path: .standards-src
+      - name: 正本とのずれ検知
+        run: node .standards-src/standards/check-drift.mjs --standards .standards-src/standards

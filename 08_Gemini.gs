@@ -19,61 +19,29 @@ function getGeminiApiUrl_() {
  * @returns {Object} パース済みのレスポンスJSON
  */
 function callGeminiEndpoint_(payload, logLabel) {
-  const apiKey = getApiKeySafe_();
-
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    // API キーは URL クエリに入れない（アクセスログやプロキシに残る）。ヘッダで渡す。
-    headers: { 'x-goog-api-key': apiKey },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-
-  const url = getGeminiApiUrl_();
-  const MAX_ATTEMPTS = 4;      // 初回 + 最大3回の再試行
-  const BASE_DELAY_MS = 1000;  // 指数バックオフの基準（1秒→2秒→4秒）
-
-  let lastCode = 0;
-  let lastDetail = '';
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const response = UrlFetchApp.fetch(url, options);
-    const responseCode = response.getResponseCode();
-    const responseText = response.getContentText();
-
-    if (responseCode === 200) {
-      return JSON.parse(responseText);
+  // 通信の作法（ヘッダでキーを渡す・429/5xx の再試行・Retry-After の尊重）は
+  // 正本 Gemini.gs（GigaGemini）に集約した。ここはこのアプリ固有の値を渡すだけ。
+  try {
+    return GigaGemini.callRaw({
+      apiKey: getApiKeySafe_(),
+      payload: payload,
+      url: getGeminiApiUrl_(),
+      maxAttempts: 4,
+      log: logInfo,
+      logLabel: logLabel,
+    });
+  } catch (e) {
+    // 文言はこれまでどおり（設定画面の案内と対応しているため変えない）
+    const msg = String(e && e.message || e);
+    logError(`${logLabel}`, e);
+    if (msg.indexOf('AI_BUSY') === 0) {
+      throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
     }
-
-    lastCode = responseCode;
-    lastDetail = (() => {
-      try { return JSON.parse(responseText).error?.message || responseText; } catch(e) { return responseText; }
-    })();
-
-    // 429（レート制限）と 5xx（サーバ側一時障害）のみ再試行対象。
-    // 401/403/400 等のクライアント起因エラーは再試行しても無駄なので即終了する。
-    const isRetryable = (responseCode === 429 || responseCode >= 500);
-    if (!isRetryable || attempt === MAX_ATTEMPTS - 1) {
-      break;
+    if (msg.indexOf('APIキー') !== -1) {
+      throw new Error('AI APIキーが無効です。設定画面でAPIキーを確認してください。');
     }
-
-    // 指数バックオフ。Retry-After ヘッダがあればそれを尊重する（上限16秒）。
-    const headers = response.getHeaders() || {};
-    const retryAfter = parseInt(headers['Retry-After'] || headers['retry-after'], 10);
-    const waitMs = (!isNaN(retryAfter) && retryAfter > 0)
-      ? Math.min(retryAfter * 1000, 16000)
-      : BASE_DELAY_MS * Math.pow(2, attempt);
-    logInfo(`${logLabel}: HTTP ${responseCode} のため ${waitMs}ms 後に再試行します（${attempt + 1}/${MAX_ATTEMPTS - 1}）`);
-    Utilities.sleep(waitMs);
+    throw new Error('AI APIとの通信に失敗しました。');
   }
-
-  logError(`${logLabel} (HTTP ${lastCode})`, new Error(lastDetail));
-  if (lastCode === 429) {
-    throw new Error('AI APIのリクエスト制限に達しました。しばらく待ってから再度お試しください。');
-  } else if (lastCode === 401 || lastCode === 403) {
-    throw new Error('AI APIキーが無効です。設定画面でAPIキーを確認してください。');
-  }
-  throw new Error(`AI APIとの通信に失敗しました。（HTTP ${lastCode}）`);
 }
 
 /**

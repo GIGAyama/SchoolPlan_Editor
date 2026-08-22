@@ -252,29 +252,20 @@ function callGeminiApiRaw_(prompt, apiKey, blobs = []) {
     parts.push({ "inline_data": { "mime_type": blob.getContentType(), "data": Utilities.base64Encode(blob.getBytes()) } });
   });
   const payload = { "contents": [{ "parts": parts }], "generationConfig": { "response_mime_type": "application/json", "maxOutputTokens": 65536 } };
-  const options = { 'method': 'post', 'contentType': 'application/json', 'headers': { 'x-goog-api-key': apiKey }, 'payload': JSON.stringify(payload), 'muteHttpExceptions': true };
-
-  // 429（レート制限）・5xx（サーバ一時障害）に対し指数バックオフで再試行する。
-  // PDF解析はトリガー実行のため、失敗が無音で進行を止めやすく再試行の効果が大きい。
-  const MAX_ATTEMPTS = 4;      // 初回 + 最大3回
-  const BASE_DELAY_MS = 1000;  // 1秒→2秒→4秒
-  let response, responseCode, responseBody;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    response = UrlFetchApp.fetch(url, options);
-    responseCode = response.getResponseCode();
-    responseBody = response.getContentText();
-    if (responseCode === 200) break;
-
-    const isRetryable = (responseCode === 429 || responseCode >= 500);
-    if (!isRetryable || attempt === MAX_ATTEMPTS - 1) break;
-
-    const headers = response.getHeaders() || {};
-    const retryAfter = parseInt(headers['Retry-After'] || headers['retry-after'], 10);
-    const waitMs = (!isNaN(retryAfter) && retryAfter > 0)
-      ? Math.min(retryAfter * 1000, 16000)
-      : BASE_DELAY_MS * Math.pow(2, attempt);
-    logInfo(`Gemini API(PDF): HTTP ${responseCode} のため ${waitMs}ms 後に再試行します（${attempt + 1}/${MAX_ATTEMPTS - 1}）`);
-    Utilities.sleep(waitMs);
+  // 通信の作法（再試行・Retry-After の尊重）は正本 Gemini.gs に集約した。
+  // 後段の「途切れた JSON の修復」はこのアプリ固有なのでここに残す。
+  let responseCode = 0;
+  let responseBody = '';
+  try {
+    const jsonResponse0 = GigaGemini.callRaw({
+      apiKey: apiKey, payload: payload, url: url,
+      maxAttempts: 4, log: logInfo, logLabel: 'Gemini API(PDF)',
+    });
+    responseCode = 200;
+    responseBody = JSON.stringify(jsonResponse0);
+  } catch (e) {
+    logError('Gemini API(PDF) の呼び出しに失敗しました。', e);
+    return { data: null, isTruncated: false };
   }
 
   if (responseCode === 200) {
@@ -568,6 +559,9 @@ function checkDeploymentIntegrity_() {
   if (typeof driveCreateFile_ !== 'function') outdated.push('17_DriveApi.gs');
   if (typeof sheetsOpenById_ !== 'function') outdated.push('18_SheetsApi.gs');
   if (typeof describeApiDisabledError_ !== 'function') outdated.push('99_Utils.gs');
+  // 正本コピー（GIGAyama.github.io/standards/gas/Gemini.gs）。
+  // 貼り忘れると AI 機能が丸ごと動かないので、ここでも見る。
+  if (typeof GigaGemini === 'undefined') outdated.push('Gemini.gs');
 
   // 削除済みのファイルが残っていないか（それぞれのファイルにしか無かった関数で見る）
   const stale = [];
