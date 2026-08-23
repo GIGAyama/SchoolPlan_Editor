@@ -180,7 +180,34 @@ const listFiles = (root, dir, exts, skip = SKIP_DIRS) => {
  *    pagehide を取りこぼして発覚）。
  */
 const JS_EXTS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'];
-const jsFiles = (root, cfg) => cfg.jsDirs.flatMap((d) => listFiles(root, d, JS_EXTS));
+/**
+ * CNAME の置き場。
+ *
+ * ⚠️ リポジトリによって違う。配信の起点に置くのが本当だが、直下にあることもある。
+ *    片方に決め打ちすると、もう片方のリポジトリでは「独自ドメインをつかって
+ *    いません」と言って**黙って通る**。落ちるのではなく通るので、いちばん
+ *    気づけない。E_CNAME でこれをやって SchoolPlan_Editor を素通りさせ（#59）、
+ *    同じ決め打ちが E_STALE_REPO_PATH にも残っていた（2026-08-23）。
+ *    3か所目を作らないために、ここ1つにまとめる。
+ */
+const cnamePath = (root, cfg) => [sitePath(root, cfg, 'CNAME'), path.join(root, 'CNAME')]
+  .find((c) => fs.existsSync(c)) || null;
+
+/**
+ * 画面をつくっている JavaScript の一覧。
+ *
+ * ⚠️ Service Worker は外す。あれは画面のコードではないし、専用の検査
+ *    （E_SW_*）がべつに見ている。混ぜると、SW 側に書いてあるだけの語が
+ *    画面側の検査を満たしてしまう。
+ *    jsDirs が配信ディレクトリそのもの（xxx_automatic の ["docs"]）だと
+ *    sw.js が混ざり、画面から SKIP_WAITING を丸ごと消しても
+ *    E_SW_UPDATE_PROMPT が通った。sw.js 側の SKIP_WAITING が身代わりに
+ *    なっていた（2026-08-23 実測）。C_PAGEHIDE も同じ形で身代わりが効く。
+ */
+const jsFiles = (root, cfg) => {
+  const sw = path.normalize(swSourceOf(cfg));
+  return cfg.jsDirs.flatMap((d) => listFiles(root, d, JS_EXTS)).filter((r) => path.normalize(r) !== sw);
+};
 const cssFiles = (root, cfg) => cfg.cssDirs.flatMap((d) => listFiles(root, d, '.css'));
 // CSS の中身の一覧。単一 HTML 型のアプリはスタイルを <style> に書くので、
 // .css ファイルに加えて htmlFiles の <style> ブロックも数える。
@@ -621,8 +648,7 @@ export const CHECKS = [
       //    「独自ドメインをつかっていません」と言って**黙って通る**。
       //    SchoolPlan_Editor は docs/CNAME を持っているのに、
       //    BOM を入れても1行でなくしても素通りしていた（2026-08-23）。
-      const candidates = [sitePath(root, cfg, 'CNAME'), path.join(root, 'CNAME')];
-      const p = candidates.find((c) => fs.existsSync(c));
+      const p = cnamePath(root, cfg);
       if (!p) return { ok: true, detail: [], skip: '独自ドメインをつかっていません' };
       const raw = fs.readFileSync(p, 'utf8');
       // ⚠️ BOM を必ず見ること。メモ帳や PowerShell の `>` で書くと先頭に U+FEFF が入る。
@@ -651,7 +677,7 @@ export const CHECKS = [
       // どちらも失敗を握りつぶす作りなので、画面にもコンソールにも何も出ないまま
       // 「オフラインで開けない・インストールできない」だけが静かに残る。
       // 実際にこの形で残っていたので、機械で見張る。
-      if (!fs.existsSync(path.join(root, 'CNAME'))) return { ok: true, detail: [], skip: '独自ドメインをつかっていません' };
+      if (!cnamePath(root, cfg)) return { ok: true, detail: [], skip: '独自ドメインをつかっていません' };
       if (!cfg.repoName) return { ok: false, detail: ['quality.config.json に repoName がありません（この検査に必要です）'] };
       const stale = `/${cfg.repoName}/`;
       const bad = [];
