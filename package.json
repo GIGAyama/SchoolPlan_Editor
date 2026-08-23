@@ -16,6 +16,7 @@
     "gas:push": "node scripts/gas-deploy.mjs push",
     "deploy": "npm run quality && node scripts/gas-deploy.mjs deploy",
     "check:json": "node scripts/check-project.mjs --json",
+    "check:self": "node scripts/check-project.mjs --self-test",
     "test": "node --test",
     "quality": "node tools/build-sw.mjs --check && npm run check && npm test",
     "build:vendor": "node tools/build-vendor.mjs",

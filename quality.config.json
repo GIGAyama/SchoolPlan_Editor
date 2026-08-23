@@ -22,7 +22,7 @@
     "wildcardPostMessage": [
       "App.html",
       "App_Js_01_Core.html",
-      "docs/index.html"
+      "docs/app-url.js"
     ],
     "xFrameAllowAll": [
       "07_WebApp.gs"
@@ -37,6 +37,44 @@
     "docsDir": "docs",
     "allowedRemoteScripts": [
       "^https://apis\\.google\\.com/js/api\\.js$"
+    ]
+  },
+  "standard": {
+    "//": "正本 GIGAyama.github.io/standards/lib/giga-v5-checks.mjs に渡す設定。",
+    "repoName": "SchoolPlan_Editor",
+    "sw": "static",
+    "swSource": "docs/sw.js",
+    "swVersionConst": "APP_VERSION",
+    "manifest": "docs/manifest.webmanifest",
+    "//entryHtml": "GitHub Pages を docs/ から配るので、入口は docs/index.html。既定（直下の index.html）のままだと CSP も viewport も見られない",
+    "entryHtml": "docs/index.html",
+    "siteRoot": "docs",
+    "jsDirs": [
+      "docs"
+    ],
+    "cssDirs": [
+      "docs"
+    ],
+    "htmlFiles": [
+      "docs/index.html",
+      "docs/offline.html"
+    ],
+    "//imageDirs": "アイコンだけを見る。docs/note/images は note の記事に載せる画像で、アプリが配るものではない（12MB ある）",
+    "imageDirs": [
+      "docs/icons"
+    ],
+    "allowedRemoteScripts": [
+      "^https://apis\\.google\\.com/js/api\\.js$"
+    ],
+    "skips": [
+      {
+        "id": "C_PAGEHIDE",
+        "reason": "docs/ は入口のシェルで、記録を持たない。持つのは接続先の URL などの設定だけで、押されたその場で保存している。締めて確定する作業中の記録が無いので pagehide の出番が無い（週案そのものは iframe の中の GAS 本体が保存する）（2026-08-23）"
+      },
+      {
+        "id": "C_NO_POSTMESSAGE_STAR",
+        "reason": "アプリ本体（GAS）からの ready に返す1往復だけ '*' を使っている。GAS のページは *.googleusercontent.com の予測できない副ドメインで開くため、返し先の origin を決め打ちできない。送っている中身は { type: 'schoolPlanNote:shellAck' } だけで、鍵も個人情報も乗せていない。e.origin を使う形に締められるかは、GAS のサンドボックスで origin が \"null\" になるかどうかで決まり、ここでは実機確認ができていない。確かめられるまでは現状のまま置く（2026-08-23）"
+      }
     ]
   }
 }
