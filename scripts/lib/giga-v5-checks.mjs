@@ -97,6 +97,12 @@ const DEFAULTS = {
   // ここを決め打ちにしていたせいで、そういうリポジトリでは CSP も viewport も
   // インストールの合図も「index.html がありません」で落ちていた（2026-08-23）。
   entryHtml: 'index.html',
+  // 版を刻む道具の場所。ほとんどのリポジトリは tools/build-sw.mjs だが、
+  // 道具を scripts/ にまとめているリポジトリ（xxx_automatic）は
+  // 'scripts/build-sw.mjs' になる。ここを決め打ちにしていたせいで、
+  // 版を正しく自動生成しているのに「自動生成が外れています」と落ちていた
+  // （entryHtml #58・E_CNAME #59 と同じ形の決め打ち。3件目）（2026-08-23）。
+  swBuilder: 'tools/build-sw.mjs',
   jsDirs: ['js'],
   cssDirs: ['css'],
   htmlFiles: ['index.html', 'offline.html'],
@@ -174,7 +180,34 @@ const listFiles = (root, dir, exts, skip = SKIP_DIRS) => {
  *    pagehide を取りこぼして発覚）。
  */
 const JS_EXTS = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx'];
-const jsFiles = (root, cfg) => cfg.jsDirs.flatMap((d) => listFiles(root, d, JS_EXTS));
+/**
+ * CNAME の置き場。
+ *
+ * ⚠️ リポジトリによって違う。配信の起点に置くのが本当だが、直下にあることもある。
+ *    片方に決め打ちすると、もう片方のリポジトリでは「独自ドメインをつかって
+ *    いません」と言って**黙って通る**。落ちるのではなく通るので、いちばん
+ *    気づけない。E_CNAME でこれをやって SchoolPlan_Editor を素通りさせ（#59）、
+ *    同じ決め打ちが E_STALE_REPO_PATH にも残っていた（2026-08-23）。
+ *    3か所目を作らないために、ここ1つにまとめる。
+ */
+const cnamePath = (root, cfg) => [sitePath(root, cfg, 'CNAME'), path.join(root, 'CNAME')]
+  .find((c) => fs.existsSync(c)) || null;
+
+/**
+ * 画面をつくっている JavaScript の一覧。
+ *
+ * ⚠️ Service Worker は外す。あれは画面のコードではないし、専用の検査
+ *    （E_SW_*）がべつに見ている。混ぜると、SW 側に書いてあるだけの語が
+ *    画面側の検査を満たしてしまう。
+ *    jsDirs が配信ディレクトリそのもの（xxx_automatic の ["docs"]）だと
+ *    sw.js が混ざり、画面から SKIP_WAITING を丸ごと消しても
+ *    E_SW_UPDATE_PROMPT が通った。sw.js 側の SKIP_WAITING が身代わりに
+ *    なっていた（2026-08-23 実測）。C_PAGEHIDE も同じ形で身代わりが効く。
+ */
+const jsFiles = (root, cfg) => {
+  const sw = path.normalize(swSourceOf(cfg));
+  return cfg.jsDirs.flatMap((d) => listFiles(root, d, JS_EXTS)).filter((r) => path.normalize(r) !== sw);
+};
 const cssFiles = (root, cfg) => cfg.cssDirs.flatMap((d) => listFiles(root, d, '.css'));
 // CSS の中身の一覧。単一 HTML 型のアプリはスタイルを <style> に書くので、
 // .css ファイルに加えて htmlFiles の <style> ブロックも数える。
@@ -615,8 +648,7 @@ export const CHECKS = [
       //    「独自ドメインをつかっていません」と言って**黙って通る**。
       //    SchoolPlan_Editor は docs/CNAME を持っているのに、
       //    BOM を入れても1行でなくしても素通りしていた（2026-08-23）。
-      const candidates = [sitePath(root, cfg, 'CNAME'), path.join(root, 'CNAME')];
-      const p = candidates.find((c) => fs.existsSync(c));
+      const p = cnamePath(root, cfg);
       if (!p) return { ok: true, detail: [], skip: '独自ドメインをつかっていません' };
       const raw = fs.readFileSync(p, 'utf8');
       // ⚠️ BOM を必ず見ること。メモ帳や PowerShell の `>` で書くと先頭に U+FEFF が入る。
@@ -645,7 +677,7 @@ export const CHECKS = [
       // どちらも失敗を握りつぶす作りなので、画面にもコンソールにも何も出ないまま
       // 「オフラインで開けない・インストールできない」だけが静かに残る。
       // 実際にこの形で残っていたので、機械で見張る。
-      if (!fs.existsSync(path.join(root, 'CNAME'))) return { ok: true, detail: [], skip: '独自ドメインをつかっていません' };
+      if (!cnamePath(root, cfg)) return { ok: true, detail: [], skip: '独自ドメインをつかっていません' };
       if (!cfg.repoName) return { ok: false, detail: ['quality.config.json に repoName がありません（この検査に必要です）'] };
       const stale = `/${cfg.repoName}/`;
       const bad = [];
@@ -676,6 +708,17 @@ export const CHECKS = [
       if (!has('512x512', 'any')) bad.push('512 の any アイコンがありません');
       if (!has('192x192', 'maskable')) bad.push('192 の maskable がありません');
       if (!has('512x512', 'maskable')) bad.push('512 の maskable がありません');
+
+      // ⚠️ 並んでいることと、在ることは別である。
+      //    maskable の実体は E_MASKABLE_SAFE_ZONE が読むので消えれば落ちるが、
+      //    any のほうは誰も読んでいなかった。icons/icon-192.png を消しても
+      //    38 件すべて通る状態だった（2026-08-23 に xxx_automatic で実測）。
+      //    192 のアイコンが取れないと Chrome はインストールの合図を出さない。
+      //    画面は普通に出るので、誰も気づかないまま「入れられないアプリ」になる。
+      for (const ic of j.icons || []) {
+        if (!ic.src) { bad.push('src の無いアイコンが並んでいます'); continue; }
+        if (!fs.existsSync(sitePath(root, cfg, ic.src))) bad.push(`${ic.src} がありません`);
+      }
 
       const html = read(root, cfg.entryHtml) || '';
       const m = html.replace(/<!--[\s\S]*?-->/g, '').match(/rel=["']apple-touch-icon["'][^>]*href=["']([^"']+)["']/i);
@@ -849,8 +892,8 @@ export const CHECKS = [
       const rel = swSourceOf(cfg);
       const src = read(root, rel);
       if (!src) return { ok: false, detail: [`${rel} がありません`] };
-      if (!fs.existsSync(path.join(root, 'tools/build-sw.mjs'))) {
-        return { ok: false, detail: ['tools/build-sw.mjs がありません。版の自動生成が外れています'] };
+      if (!fs.existsSync(path.join(root, cfg.swBuilder))) {
+        return { ok: false, detail: [`${cfg.swBuilder} がありません。版の自動生成が外れています`] };
       }
       // ⚠️ 目印はコメントなので、コメント除去前の原文で見る。
       const name = cfg.swVersionConst ? cfg.swVersionConst.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '(?:APP_VERSION|VERSION)';
@@ -866,7 +909,7 @@ export const CHECKS = [
         return { ok: false, detail: [`${rel} の版の行が自動生成の形（__APP_VERSION__ の目印つき）になっていません`] };
       }
       if (stamped && cfg.sw === 'static' && (stamped[1] === 'v0' || stamped[1] === 'dev')) {
-        return { ok: false, detail: [`${rel} の版が仮の値（${stamped[1]}）のままです。node tools/build-sw.mjs で埋めてください`] };
+        return { ok: false, detail: [`${rel} の版が仮の値（${stamped[1]}）のままです。node ${cfg.swBuilder} で埋めてください`] };
       }
       return { ok: true, detail: [] };
     },
