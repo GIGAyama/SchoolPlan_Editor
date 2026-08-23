@@ -34,13 +34,16 @@ const CACHE_PREFIX = 'schoolplan-editor-shell-';
 //    手書きだったころは「リリースごとに必ず上げる」が人の仕事で、
 //    2026-08-21 に12リポジトリで同時に上げ忘れる事故が起きた。上げ忘れると
 //    古いシェルのキャッシュが掃除されず、直した内容が先生の端末に届かない。
-const APP_VERSION = 'v9d22d84d'; /* __APP_VERSION__ */
+const APP_VERSION = 'v30796710'; /* __APP_VERSION__ */
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
   './index.html',
   './offline.html',
   './config.js',
+  // 立ち上げ処理。index.html から外に出したので、ここに入れないと
+  // 圏外では画面が出ない（HTML は控えから出るのに、中身が動かない）。
+  './app-url.js',
   // インストールの合図を受ける入口。圏外で取りこぼすと、
   // 次にオンラインで開いたときに「アプリを入れる」が出なくなる。
   './install-hook.js',

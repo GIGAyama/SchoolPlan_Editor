@@ -15,12 +15,10 @@
     {
       "canonical": "sw/build-sw-static.mjs",
       "local": "tools/build-sw.mjs"
-    }
-  ],
-  "unmanaged": [
+    },
     {
-      "local": "scripts/lib/giga-v5-checks.mjs",
-      "reason": "373行のフォーク。issue(severity, code, …) を積む形で、正本の CHECKS 配列とは組み立てからして違うため、コピーし直しでは移行できない。いちばん効く「版ずれの検出」は tools/build-sw.mjs の配備と GIGA_SW_VERSION_GENERATED の新設で先に解消した（standards/docs/gate-forks.md の段取り①）。段取り②は未実施（2026-08-22）"
+      "canonical": "lib/giga-v5-checks.mjs",
+      "local": "scripts/lib/giga-v5-checks.mjs"
     }
   ]
 }

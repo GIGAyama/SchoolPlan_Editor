@@ -64,8 +64,15 @@ export function walkProjectFiles(rootDir, ignoredDirectories = []) {
 export function extractScriptBlocks(html) {
   const scripts = [];
   const scriptPattern = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+  // ⚠️ 先に HTML コメントを落とす。
+  //    注意書きの中に <script> と書いてあると（CSP の説明でよくある）、
+  //    そこから本物の </script> までが「インラインの JavaScript」として
+  //    読まれ、構文エラーになる。逆に、本物のインライン script を
+  //    コメントの中の </script> で打ち切って見のがすこともある。
+  //    実際 docs/index.html の CSP の注意書きで前者が起きた（2026-08-23）。
+  const source = html.replace(/<!--[\s\S]*?-->/g, ' ');
   let match;
-  while ((match = scriptPattern.exec(html)) !== null) {
+  while ((match = scriptPattern.exec(source)) !== null) {
     const attributes = match[1] || '';
     if (/\bsrc\s*=/.test(attributes)) continue;
     scripts.push(match[2]);
