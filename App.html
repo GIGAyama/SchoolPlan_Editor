@@ -1543,7 +1543,12 @@
         <!-- GIGA Standard v2: 固定フッター -->
         <footer class="text-center text-muted py-3 border-top giga-footer">
             <small>© 2026 週案エディタ <a href="https://giga-school.com" target="_blank"
-                    class="text-decoration-none text-muted">GIGA山</a></small>
+                    class="text-decoration-none text-muted">GIGA山</a>
+                <!-- ⚠️ target="_blank" は要る。このアプリは入口ページ（GitHub Pages）の
+                     iframe の中で動いているので、同じタブで開くと枠の中に紹介記事が
+                     出てしまい、アプリへ戻れなくなる。 -->
+                <a href="https://giga-school.com/apps/schoolplan-editor/" target="_blank"
+                    rel="noopener noreferrer" class="ms-2 text-muted">使い方を読む</a></small>
         </footer>
 
     </div><!-- /app -->
