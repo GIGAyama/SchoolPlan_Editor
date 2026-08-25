@@ -392,6 +392,23 @@
         return SUBJECT_NAME_ALIASES[s] || s;
     }
 
+    // ===== 単元名の正規化（サーバー側 normalizeUnitName_ と同一ルール） =====
+    // 週案の単元セルは自由入力なので、単元マスタと同じ単元でも空白や記号のゆれで
+    // 別物として数えられてしまう。突き合わせのときだけこれを通す。
+    // 画面やセルへ書く名前は、単元マスタの表記をそのまま使うこと。
+    // 99_Utils.gs の normalizeUnitName_ と対で直すこと。
+    function normalizeUnitName(name) {
+        var s = (name === null || name === undefined) ? '' : String(name);
+        if (typeof s.normalize === 'function') s = s.normalize('NFKC');
+        s = s.toLowerCase();
+        s = s.replace(/[\s\u3000]/g, '');
+        s = s.replace(/[\u301c]/g, '~');
+        s = s.replace(/[-\u2010\u2013\u2014\u2015\u2212]/g, 'ー');
+        s = s.replace(/[「」『』"']/g, '');
+        s = s.replace(/[・]/g, '');
+        return s;
+    }
+
     /** masterMap から、表記ゆれを同一視して該当教科の単元リストを取得します。 */
     function findMasterMapUnits(masterMap, subject) {
         if (!masterMap) return null;
