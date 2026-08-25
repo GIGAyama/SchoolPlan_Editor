@@ -196,3 +196,28 @@ test('進捗の重ね合わせを openUnitPicker が通っている', async () =
   // 追加のサーバ往復を入れない（forceRefresh 付きの取得を増やさない）
   assert.doesNotMatch(src, /loadUnitProgress\([^)]*,\s*true\s*\)/);
 });
+
+test('週案側の表記がゆれていても、同じ単元として進捗に重なる', () => {
+  // 全角スペース・かぎ括弧・長音とハイフンのゆれ（99_Utils.gs の normalizeUnitName_ と対）
+  const after = sync({ 0: { 0: { subject: '国語', unit: '「ごんぎつね」　1/3' } } });
+  const unit = unitOf(after, 'ごんぎつね');
+
+  assert.equal(unit.plannedHour, 1, '表記のゆれで別の単元として数えられています');
+  assert.equal(unit.nextHour, 2);
+  assert.deepEqual(after.subjects.国語.orphans, [],
+    'ゆれただけの単元がマスタに無い単元として扱われています');
+});
+
+test('マスタの総時数を正とする（週案の分母に押し戻されない）', () => {
+  // 「ここまでで終了」で総時数を 1 にした単元。週案には 1/3 が残っている
+  const progress = makeProgress();
+  const unit = progress.subjects.国語.units[0];
+  unit.declaredTotal = 1;
+  unit.masterRowHours = 3;
+  unit.effectiveTotal = 1;
+
+  const after = sync({ 0: { 0: { subject: '国語', unit: 'ごんぎつね 1/3' } } }, progress);
+  const closed = unitOf(after, 'ごんぎつね');
+  assert.equal(closed.status, 'done');
+  assert.equal(after.subjects.国語.nextUnitName, '大造じいさん');
+});

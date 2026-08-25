@@ -108,10 +108,10 @@ function buildUnitProgressPayload_(masterData, dbData, dbCols, tomorrowMidnight,
     sm.units.forEach(function (u) {
       const effectiveTotal = tracker.effectiveTotal(subjectKey, u.name);
       const plannedHour = tracker.maxProgress(subjectKey, u.name);
-      const th = taughtHistory[subjectKey] && taughtHistory[subjectKey].units[u.name];
+      const th = taughtHistory[subjectKey] && taughtHistory[subjectKey].units[normalizeUnitName_(u.name)];
       const taughtHour = th ? th.maxHour : 0;
       const done = tracker.isFinished(subjectKey, u.name);
-      const masterTotal = Math.max(u.declaredTotal || 0, u.maxHourRow || 0);
+      const masterTotal = (u.declaredTotal || 0) || (u.maxHourRow || 0);
 
       const unit = {
         unitName: u.name,
@@ -128,7 +128,10 @@ function buildUnitProgressPayload_(masterData, dbData, dbCols, tomorrowMidnight,
         status: done ? 'done' : (plannedHour > 0 ? 'inProgress' : 'untaught'),
         isNext: false,
         overTaught: !!(masterTotal && plannedHour > masterTotal),
-        totalMismatch: !!(u.declaredTotal && u.maxHourRow && u.declaredTotal !== u.maxHourRow)
+        // 総時数より行が多いのは「余った時間の指導案を残したまま短く閉じた」正当な状態。
+        // 不一致として拾うのは「総時数のぶんだけ行が足りない」ときだけにする
+        // （15_UnitMasterOps.gs の TOTAL_MISMATCH と同じ判定）。
+        totalMismatch: !!(u.declaredTotal && u.declaredTotal > (u.maxHourRow || 0))
       };
       units.push(unit);
 
@@ -146,9 +149,11 @@ function buildUnitProgressPayload_(masterData, dbData, dbCols, tomorrowMidnight,
     const orphans = [];
     const ph = plannedHistory[subjectKey];
     if (ph) {
-      Object.keys(ph.units).forEach(function (name) {
-        if (!sm.byName[name]) {
-          orphans.push({ unitName: name, plannedHour: ph.units[name].maxHour });
+      // キーは正規化済みなので、画面に出すのは週案に書かれていた表記のほう
+      Object.keys(ph.units).forEach(function (nameKey) {
+        if (!sm.byName[nameKey]) {
+          const pu = ph.units[nameKey];
+          orphans.push({ unitName: pu.displayName || nameKey, plannedHour: pu.maxHour });
         }
       });
     }
@@ -164,8 +169,9 @@ function buildUnitProgressPayload_(masterData, dbData, dbCols, tomorrowMidnight,
   // 単元マスタに教科ごと存在しないが週案に登場する教科も拾う（全て孤立扱い）
   Object.keys(plannedHistory).forEach(function (subjectKey) {
     if (subjects[subjectKey]) return;
-    const orphans = Object.keys(plannedHistory[subjectKey].units).map(function (name) {
-      return { unitName: name, plannedHour: plannedHistory[subjectKey].units[name].maxHour };
+    const orphans = Object.keys(plannedHistory[subjectKey].units).map(function (nameKey) {
+      const pu = plannedHistory[subjectKey].units[nameKey];
+      return { unitName: pu.displayName || nameKey, plannedHour: pu.maxHour };
     });
     subjects[subjectKey] = {
       subjectLabel: subjectLabels[subjectKey] || subjectKey,

@@ -101,6 +101,42 @@ function isSameSubject_(a, b) {
   return normalizeSubjectName_(a) === normalizeSubjectName_(b);
 }
 
+/**
+ * 単元名を突き合わせるためのキーを作ります。**表示にはそのまま使わないこと。**
+ *
+ * 週案の単元セルは自由入力なので、単元マスタと同じ単元でも「全角スペースが入った」
+ * 「ー が － になった」程度のゆれで別の単元として数えられ、マスタ側の単元が
+ * いつまでも未指導のまま残っていた。突き合わせのときだけここを通す。
+ *
+ * 画面やセルへ書く名前は、単元マスタに書かれている表記をそのまま持ち回ること
+ * （教科名の normalizeSubjectName_ / subjectLabels と同じ考え方）。
+ *
+ * @param {*} name 単元名
+ * @returns {string} 突き合わせ用のキー
+ */
+function normalizeUnitName_(name) {
+  let s = (name === null || name === undefined) ? '' : String(name);
+  // 全角英数・全角記号・半角カナを揃える（（）や ～ もここで半角側へ寄る）
+  if (typeof s.normalize === 'function') s = s.normalize('NFKC');
+  s = s.toLowerCase();
+  s = s.replace(/[\s\u3000]/g, '');              // 空白は位置を問わず落とす
+  s = s.replace(/[\u301c]/g, '~');                // 波ダッシュ（NFKC では変わらない）
+  s = s.replace(/[-\u2010\u2013\u2014\u2015\u2212]/g, 'ー'); // ハイフン類は長音記号へ寄せる
+  s = s.replace(/[「」『』"']/g, '');               // かぎ括弧・引用符の有無は区別しない
+  s = s.replace(/[・]/g, '');                      // 中黒の有無も区別しない
+  return s;
+}
+
+/**
+ * 2つの単元名が（表記ゆれを含めて）同じ単元を指すかを判定します。
+ * @param {*} a 単元名
+ * @param {*} b 単元名
+ * @returns {boolean}
+ */
+function isSameUnitName_(a, b) {
+  return normalizeUnitName_(a) === normalizeUnitName_(b);
+}
+
 // ============================================================
 // ===== 日付処理ヘルパー関数 =====
 // ============================================================

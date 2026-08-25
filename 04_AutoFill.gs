@@ -31,11 +31,13 @@ function parseUnitProgress_(unitText) {
 function findActivityFromMaster_(masterData, subject, unitName, hourNum) {
   for (let i = 1; i < masterData.length; i++) {
     const row = masterData[i];
-    if (isSameSubject_(row[MASTER_COL_SUBJECT - 1], subject) && row[MASTER_COL_UNIT_NAME - 1] === unitName && row[MASTER_COL_HOUR_NUM - 1] == hourNum) {
+    if (isSameSubject_(row[MASTER_COL_SUBJECT - 1], subject)
+      && isSameUnitName_(row[MASTER_COL_UNIT_NAME - 1], unitName)
+      && row[MASTER_COL_HOUR_NUM - 1] == hourNum) {
       return row[MASTER_COL_ACTIVITY - 1];
     }
   }
-  if (unitName.includes("のまとめ")) return "めあて：単元の学習を振り返ろう\n・学習内容の要点を確認する\n・まとめテストやふり返りカードに取り組む";
+  if (String(unitName).includes("のまとめ")) return "めあて：単元の学習を振り返ろう\n・学習内容の要点を確認する\n・まとめテストやふり返りカードに取り組む";
   return "（単元マスタに該当する活動が見つかりませんでした）";
 }
 
@@ -116,10 +118,14 @@ function buildMasterIndex_(masterData) {
     if (!subjects[key]) subjects[key] = { units: [], byName: {} };
     const s = subjects[key];
 
-    let unit = s.byName[unitName];
+    // 突き合わせは正規化したキーで行い、name にはマスタの表記をそのまま残す
+    // （セルへ書くのも画面に出すのも、先生が単元マスタに書いた表記のほう）。
+    const displayName = String(unitName).trim();
+    const nameKey = normalizeUnitName_(displayName);
+    let unit = s.byName[nameKey];
     if (!unit) {
-      unit = { name: unitName, declaredTotal: 0, maxHourRow: 0, activities: {}, order: s.units.length };
-      s.byName[unitName] = unit;
+      unit = { name: displayName, declaredTotal: 0, maxHourRow: 0, activities: {}, order: s.units.length };
+      s.byName[nameKey] = unit;
       s.units.push(unit);
     }
 
@@ -142,7 +148,7 @@ function buildMasterIndex_(masterData) {
  */
 function getMasterUnit_(masterIndex, subject, unitName) {
   const s = masterIndex[normalizeSubjectName_(subject)];
-  return (s && s.byName[unitName]) || null;
+  return (s && s.byName[normalizeUnitName_(unitName)]) || null;
 }
 
 /**
@@ -175,8 +181,11 @@ function buildTaughtHistory_(dbData, dbCols, beforeDate) {
       if (!history[key]) history[key] = { units: {}, lastUnitName: null, lastTime: 0 };
       const h = history[key];
 
-      let u = h.units[parsed.unitName];
-      if (!u) u = h.units[parsed.unitName] = { maxHour: 0, cellTotalMax: 0, taught: {} };
+      const nameKey = normalizeUnitName_(parsed.unitName);
+      let u = h.units[nameKey];
+      // displayName は「週案にそう書かれていた表記」。マスタに無い単元を
+      // 画面に出すときに、正規化後のキーではなくこちらを見せる。
+      if (!u) u = h.units[nameKey] = { displayName: parsed.unitName, maxHour: 0, cellTotalMax: 0, taught: {} };
       u.taught[parsed.currentHour] = true;
       if (parsed.currentHour > u.maxHour) u.maxHour = parsed.currentHour;
       if (parsed.totalHours > u.cellTotalMax) u.cellTotalMax = parsed.totalHours;
@@ -201,26 +210,36 @@ function createProgressTracker_(masterIndex, history) {
 
   function historyUnit_(subjectKey, unitName) {
     const h = history[subjectKey];
-    return (h && h.units[unitName]) || null;
+    return (h && h.units[normalizeUnitName_(unitName)]) || null;
   }
   function plannedUnit_(subjectKey, unitName) {
     const p = planned[subjectKey];
-    return (p && p[unitName]) || null;
+    return (p && p[normalizeUnitName_(unitName)]) || null;
   }
 
   /**
-   * 実効総時数: マスタ設定時数・マスタの時数行の最大・週案上で観測した総時数・
-   * 実際に指導済みの最大時数のうち、最も大きいものを採用します。
-   * これにより「設定時間数と実際の指導時数が合わない」場合も破綻せず継続できます。
+   * 実効総時数: **単元マスタの「総時間数」を正**とします。
+   *
+   * ここを「マスタ総時数・行数・週案の分母・実績の最大値」で決めていたころは、
+   * 5時間の単元を3時間で切り上げても、行数と週案の分母（n/5）に押し戻されて
+   * いつまでも未消化のまま残り、自動入力がその単元へ戻り続けていた。
+   * 総時数を減らせば終わりにできるよう、行数と週案の分母は
+   * 「総時数が未設定のときの穴埋め」に降格させている。
+   *
+   * 実績（指導済みの最大時数）が総時数を超えているときだけは、今までどおり
+   * 実績まで引き上げる（超過して指導した単元でも破綻させないため）。
    */
   function effectiveTotal(subjectKey, unitName, fallbackTotal) {
     const sm = masterIndex[subjectKey];
-    const mu = sm ? sm.byName[unitName] : null;
+    const mu = sm ? sm.byName[normalizeUnitName_(unitName)] : null;
     const hu = historyUnit_(subjectKey, unitName);
-    let total = 0;
-    if (mu) total = Math.max(mu.declaredTotal || 0, mu.maxHourRow || 0);
-    if (hu) total = Math.max(total, hu.cellTotalMax || 0, hu.maxHour || 0);
-    if (!total && fallbackTotal) total = fallbackTotal;
+    let total = mu ? (mu.declaredTotal || 0) : 0;
+    if (!total) {
+      if (mu) total = mu.maxHourRow || 0;
+      if (!total && hu) total = hu.cellTotalMax || 0;
+      if (!total && fallbackTotal) total = fallbackTotal;
+    }
+    if (hu && (hu.maxHour || 0) > total) total = hu.maxHour;
     return total;
   }
 
@@ -241,8 +260,9 @@ function createProgressTracker_(masterIndex, history) {
 
   function markPlanned(subjectKey, unitName, hour) {
     if (!planned[subjectKey]) planned[subjectKey] = {};
-    let pu = planned[subjectKey][unitName];
-    if (!pu) pu = planned[subjectKey][unitName] = { maxHour: 0, hours: {} };
+    const nameKey = normalizeUnitName_(unitName);
+    let pu = planned[subjectKey][nameKey];
+    if (!pu) pu = planned[subjectKey][nameKey] = { maxHour: 0, hours: {} };
     pu.hours[hour] = true;
     if (hour > pu.maxHour) pu.maxHour = hour;
     lastPlannedUnit[subjectKey] = unitName;
@@ -273,16 +293,18 @@ function collectMismatchWarnings_(masterIndex, history, warnings) {
     const h = history[subjectKey];
     const sm = masterIndex[subjectKey];
     if (!sm) return;
-    Object.keys(h.units).forEach(function (unitName) {
-      const hu = h.units[unitName];
-      const mu = sm.byName[unitName];
+    Object.keys(h.units).forEach(function (nameKey) {
+      const hu = h.units[nameKey];
+      const mu = sm.byName[nameKey];
       if (!mu) return;
-      const masterTotal = Math.max(mu.declaredTotal || 0, mu.maxHourRow || 0);
+      // 総時数を正とするので、警告の基準もマスタの総時数（未設定なら行数）に合わせる
+      const masterTotal = (mu.declaredTotal || 0) || (mu.maxHourRow || 0);
       if (!masterTotal) return;
+      const label = subjectKey + '「' + mu.name + '」: ';
       if (hu.maxHour > masterTotal) {
-        addWarning_(warnings, subjectKey + '「' + unitName + '」: 単元マスタの設定は全' + masterTotal + '時間ですが、' + hu.maxHour + '時間目まで指導済みです。指導済みの単元として扱い、次の単元へ進みます。');
-      } else if (hu.cellTotalMax && hu.cellTotalMax !== masterTotal && hu.maxHour < Math.max(hu.cellTotalMax, masterTotal)) {
-        addWarning_(warnings, subjectKey + '「' + unitName + '」: 週案上の総時数（' + hu.cellTotalMax + '時間）と単元マスタの設定（' + masterTotal + '時間）が一致しません。大きい方の' + Math.max(hu.cellTotalMax, masterTotal) + '時間として継続します。');
+        addWarning_(warnings, label + '単元マスタの設定は全' + masterTotal + '時間ですが、' + hu.maxHour + '時間目まで指導済みです。指導済みの単元として扱い、次の単元へ進みます。');
+      } else if (hu.cellTotalMax && hu.cellTotalMax !== masterTotal) {
+        addWarning_(warnings, label + '週案に書かれている総時数（' + hu.cellTotalMax + '時間）と単元マスタの設定（' + masterTotal + '時間）が一致しません。単元マスタの' + masterTotal + '時間として扱います。');
       }
     });
   });
@@ -304,13 +326,21 @@ function collectMismatchWarnings_(masterIndex, history, warnings) {
 function determineNextLessonSmart_(subject, baseUnitName, masterIndex, tracker, warnings) {
   const subjectKey = normalizeSubjectName_(subject);
   const subjectMaster = masterIndex[subjectKey];
+  // 基準単元がマスタのどれに当たるか（表記のゆれは normalizeUnitName_ が吸収する）
+  const baseUnit = (baseUnitName && subjectMaster)
+    ? subjectMaster.byName[normalizeUnitName_(baseUnitName)] : null;
 
   // Step 1: 基準単元が未消化ならそのまま継続
   if (baseUnitName && !tracker.isFinished(subjectKey, baseUnitName)) {
     const total = tracker.effectiveTotal(subjectKey, baseUnitName);
     if (total > 0) {
       const hour = tracker.nextHour(subjectKey, baseUnitName);
-      return { unitName: baseUnitName, currentHour: hour, totalHours: Math.max(total, hour) };
+      // 週案側で表記がゆれていても、書き戻すのはマスタの表記にする
+      return {
+        unitName: baseUnit ? baseUnit.name : baseUnitName,
+        currentHour: hour,
+        totalHours: Math.max(total, hour)
+      };
     }
   }
 
@@ -321,8 +351,8 @@ function determineNextLessonSmart_(subject, baseUnitName, masterIndex, tracker, 
 
   // Step 2: 基準単元の次の位置から未消化の単元を探す（末尾に達したら先頭に戻って探索）
   let startOrder = 0;
-  if (baseUnitName && subjectMaster.byName[baseUnitName]) {
-    startOrder = subjectMaster.byName[baseUnitName].order + 1;
+  if (baseUnit) {
+    startOrder = baseUnit.order + 1;
   }
   const unitCount = subjectMaster.units.length;
   for (let i = 0; i < unitCount; i++) {
@@ -553,7 +583,7 @@ function applyAiOptimization_(days, slotPlans, presetMarks, masterIndex, history
       const unitName = String(sug.unitName).trim();
       const hour = parseInt(sug.hour, 10);
       const sm = masterIndex[key];
-      if (!sm || !sm.byName[unitName] || isNaN(hour)) { valid = false; break; }
+      if (!sm || !sm.byName[normalizeUnitName_(unitName)] || isNaN(hour)) { valid = false; break; }
       if (sim.isFinished(key, unitName) || hour !== sim.nextHour(key, unitName)) { valid = false; break; }
 
       const total = Math.max(sim.effectiveTotal(key, unitName), hour);

@@ -107,6 +107,38 @@
         color: var(--warning, #e65100);
     }
 
+    /* 「◯時間で終了」。行そのものをクリックすると単元を入力してしまうので、
+       押し間違えないよう控えめな見た目にし、行の右端へ寄せる。
+       ダイアログの地色は SweetAlert2 が持っていて表示テーマに追従しない。
+       面の色を --surface で塗ると手動ダークで白地に黒のボタンになるため、
+       ここは地を透かして文字色も継承する。 */
+    .up-close-btn {
+        margin-left: auto;
+        font-size: 0.68rem;
+        padding: 1px 8px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: inherit;
+        opacity: 0.75;
+        /* 指の入る大きさを確保する（タブレットで隣の行を押さないため） */
+        min-height: 26px;
+    }
+
+    .up-close-btn:hover {
+        opacity: 1;
+        background: rgba(128, 128, 128, 0.12);
+    }
+
+    .up-close-note {
+        margin-top: 8px;
+        font-size: 0.8rem;
+        color: inherit;
+        opacity: 0.8;
+        text-align: left;
+        line-height: 1.6;
+    }
+
     .up-toggle-done {
         margin-top: 6px;
         background: none;
@@ -127,7 +159,13 @@
     }
 
     .up-orphan-note {
-        color: var(--warning, #e65100);
+        /* 面の色（--warning: #fbbc04）は白地で 2:1 しかなく、2行の説明文が読めなかった。
+           ここでトークン（--warning-text）を使わないのは、SweetAlert2 のダイアログが
+           `.swal2-popup{background:#fff}` で**表示テーマに関わらず常に白**だから。
+           ダークのトークン（#fdd663）を持ってくると白地で読めなくなる。 */
+        color: #a34700;
+        text-align: left;
+        line-height: 1.7;
     }
 
     /* ===== 単元マスタ整合性チェック ===== */

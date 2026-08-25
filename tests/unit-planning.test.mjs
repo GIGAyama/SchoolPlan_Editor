@@ -155,6 +155,35 @@ test('総時間数と行数のズレ・時数の重複・行の非連続を検�
   assert.ok(byName['離れ'].issues.includes('NON_CONTIGUOUS'));
 });
 
+test('総時数より行が多いのは不整合にしない（短く閉じた単元を戻さないため）', () => {
+  const context = loadContext();
+  // 5時間ぶんの指導案を残したまま、総時数だけ 3 にした状態
+  const result = analyze(context, [
+    ['教科', '単元名', '総時間数', '何時間目', '活動'],
+    ['国語', '短く閉じた', 3, 1, 'a'],
+    ['国語', '短く閉じた', 3, 2, 'b'],
+    ['国語', '短く閉じた', 3, 3, 'c'],
+    ['国語', '短く閉じた', 3, 4, 'd'],
+    ['国語', '短く閉じた', 3, 5, 'e']
+  ]);
+  const u = result.units[0];
+  assert.equal(host(u.issues).includes('TOTAL_MISMATCH'), false,
+    '短く閉じた単元を不整合として扱うと、修復のたびに総時数が行数へ戻されます');
+  assert.equal(u.repairable, false);
+  // 教科ごとの時数合計も、行数ではなく総時数で数える
+  assert.equal(result.subjectTotals[0].unitHoursTotal, 3);
+});
+
+test('総時数のぶんだけ行が足りないのは、これまでどおり不整合として拾う', () => {
+  const context = loadContext();
+  const result = analyze(context, [
+    ['教科', '単元名', '総時間数', '何時間目', '活動'],
+    ['国語', '行が足りない', 5, 1, 'a'],
+    ['国語', '行が足りない', 5, 2, 'b']
+  ]);
+  assert.ok(host(result.units[0].issues).includes('TOTAL_MISMATCH'));
+});
+
 test('週案が総時数を超えて進んでいる単元を検出する', () => {
   const context = loadContext();
   const planned = { '国語': { units: { '超過': { maxHour: 5, cellTotalMax: 5, taught: {} } } } };
@@ -556,4 +585,193 @@ test('新しいUIは単元マスタ行を直接削除しない', () => {
   ]) {
     assert.doesNotMatch(read(file), /\.deleteUnitMasterRow\(/, `${file}`);
   }
+});
+
+// ===================================================
+// ===== 終わった単元を、終わったことにできるか =====
+// ===================================================
+//
+// 実際に困っていたこと:
+//  (A) 週案の単元名を少し変えて入力してしまうと、マスタ側の単元がいつまでも
+//      「未指導」のまま残り、自動入力が何度もそこへ戻ってきた
+//  (B) 5時間の単元を3時間で切り上げても終わりにできず、総時数を手で減らしても
+//      行数と週案の分母（n/5）に押し戻されて効かなかった
+
+/** 単元マスタ・週案をその場で組み立てて、進捗インデックスを作る。 */
+function payloadFor(context, master, dbRows) {
+  const mk = context.__mkDate;
+  const db = [['日付', '1校時', '単元1']].concat(dbRows.map(r => [mk(...r[0]), r[1], r[2]]));
+  return context.buildUnitProgressPayload_(master, db, DB_COLS, mk(2026, 3, 15), mk(9999, 0, 1));
+}
+
+const findUnit = (payload, subject, name) =>
+  host(payload.subjects[subject].units).find(u => u.unitName === name);
+
+test('単元名の表記ゆれ（空白・全角半角・記号）は同じ単元として数える', () => {
+  const context = loadContext();
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', 'ごんぎつね', 3, 1],
+    ['国語', 'ごんぎつね', 3, 2],
+    ['国語', 'ごんぎつね', 3, 3]
+  ];
+  const payload = payloadFor(context, master, [
+    [[2026, 3, 10], '国語', 'ごんぎつね　1/3'],      // 全角スペース
+    [[2026, 3, 11], '国語', '「ごんぎつね」 2/3']     // かぎ括弧つき
+  ]);
+
+  const unit = findUnit(payload, '国語', 'ごんぎつね');
+  assert.equal(unit.plannedHour, 2, '表記のゆれで別の単元として数えられています');
+  assert.equal(unit.nextHour, 3);
+  assert.equal(host(payload.subjects.国語.orphans).length, 0,
+    'ゆれただけの単元がマスタに無い単元として扱われています');
+});
+
+test('本当に別の名前で書いた分は、これまでどおり孤立として拾う', () => {
+  const context = loadContext();
+  const payload = progressFor(context);
+  const orphans = host(payload.subjects.国語.orphans);
+  assert.equal(orphans.length, 1);
+  // 正規化したキーではなく、週案に書かれていた表記を見せる
+  assert.equal(orphans[0].unitName, '幻の単元');
+  assert.equal(orphans[0].plannedHour, 1);
+});
+
+test('マスタの総時数を減らせば、行が余っていても終わりにできる', () => {
+  const context = loadContext();
+  // 5時間ぶんの行を残したまま、総時数だけ 3 にした状態（＝「ここまでで終了」の結果）
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', 'ごんぎつね', 3, 1],
+    ['国語', 'ごんぎつね', 3, 2],
+    ['国語', 'ごんぎつね', 3, 3],
+    ['国語', 'ごんぎつね', 3, 4],
+    ['国語', 'ごんぎつね', 3, 5],
+    ['国語', '大造じいさん', 2, 1],
+    ['国語', '大造じいさん', 2, 2]
+  ];
+  // 週案には 1/5, 2/5, 3/5 が残っている（分母は昔のまま）
+  const payload = payloadFor(context, master, [
+    [[2026, 3, 10], '国語', 'ごんぎつね 1/5'],
+    [[2026, 3, 11], '国語', 'ごんぎつね 2/5'],
+    [[2026, 3, 12], '国語', 'ごんぎつね 3/5']
+  ]);
+
+  const closed = findUnit(payload, '国語', 'ごんぎつね');
+  assert.equal(closed.effectiveTotal, 3,
+    '週案の分母やマスタの行数に押し戻されています（総時数を正にできていません）');
+  assert.equal(closed.status, 'done');
+  assert.equal(closed.isNext, false);
+
+  // 次の単元へ進む
+  assert.equal(payload.subjects.国語.nextUnitName, '大造じいさん');
+  assert.equal(findUnit(payload, '国語', '大造じいさん').nextHour, 1);
+});
+
+test('総時数を超えて指導した単元は、これまでどおり実績まで伸ばす', () => {
+  const context = loadContext();
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', 'ごんぎつね', 3, 1],
+    ['国語', 'ごんぎつね', 3, 2],
+    ['国語', 'ごんぎつね', 3, 3]
+  ];
+  const payload = payloadFor(context, master, [
+    [[2026, 3, 10], '国語', 'ごんぎつね 4/3'],
+    [[2026, 3, 11], '国語', 'ごんぎつね 5/3']
+  ]);
+  const unit = findUnit(payload, '国語', 'ごんぎつね');
+  assert.equal(unit.effectiveTotal, 5);
+  assert.equal(unit.status, 'done');
+  assert.equal(unit.overTaught, true);
+});
+
+test('総時数が未設定なら、行数・週案の分母で補う（従来どおり）', () => {
+  const context = loadContext();
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', 'てがみ', '', 1],
+    ['国語', 'てがみ', '', 2],
+    ['国語', 'てがみ', '', 3]
+  ];
+  const payload = payloadFor(context, master, [[[2026, 3, 10], '国語', 'てがみ 1/3']]);
+  const unit = findUnit(payload, '国語', 'てがみ');
+  assert.equal(unit.effectiveTotal, 3, '行数で補えていません');
+  assert.equal(unit.status, 'inProgress');
+  assert.equal(unit.nextHour, 2);
+});
+
+test('自動入力は、終了にした単元を飛ばして次の単元へ進む', () => {
+  const context = loadContext();
+  const mk = context.__mkDate;
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', 'ごんぎつね', 3, 1],
+    ['国語', 'ごんぎつね', 3, 2],
+    ['国語', 'ごんぎつね', 3, 3],
+    ['国語', 'ごんぎつね', 3, 4],
+    ['国語', 'ごんぎつね', 3, 5],
+    ['国語', '大造じいさん', 2, 1],
+    ['国語', '大造じいさん', 2, 2]
+  ];
+  const db = [
+    ['日付', '1校時', '単元1'],
+    [mk(2026, 3, 10), '国語', 'ごんぎつね 1/5'],
+    [mk(2026, 3, 11), '国語', 'ごんぎつね 2/5'],
+    [mk(2026, 3, 12), '国語', 'ごんぎつね 3/5']
+  ];
+  const masterIndex = context.buildMasterIndex_(master);
+  const history = context.buildTaughtHistory_(db, DB_COLS, mk(9999, 0, 1));
+  const tracker = context.createProgressTracker_(masterIndex, history);
+
+  const next = context.determineNextLessonSmart_('国語', 'ごんぎつね', masterIndex, tracker, []);
+  assert.equal(next.unitName, '大造じいさん');
+  assert.equal(next.currentHour, 1);
+  assert.equal(next.totalHours, 2);
+});
+
+test('基準単元の表記がゆれていても、書き戻すのは単元マスタの表記', () => {
+  const context = loadContext();
+  const mk = context.__mkDate;
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', 'ごんぎつね', 3, 1],
+    ['国語', 'ごんぎつね', 3, 2],
+    ['国語', 'ごんぎつね', 3, 3]
+  ];
+  const db = [
+    ['日付', '1校時', '単元1'],
+    [mk(2026, 3, 10), '国語', 'ごん　ぎつね 1/3']
+  ];
+  const masterIndex = context.buildMasterIndex_(master);
+  const tracker = context.createProgressTracker_(
+    masterIndex, context.buildTaughtHistory_(db, DB_COLS, mk(9999, 0, 1))
+  );
+
+  const next = context.determineNextLessonSmart_('国語', 'ごん　ぎつね', masterIndex, tracker, []);
+  assert.equal(next.unitName, 'ごんぎつね', '週案側のゆれた表記が書き戻されています');
+  assert.equal(next.currentHour, 2, 'ゆれのせいで1時間目からやり直しになっています');
+});
+
+test('短く閉じた単元に「行が足りない」の印を付けない', () => {
+  const context = loadContext();
+  // 総時数 3・行は5本（＝「ここまでで終了」を押したあとの形）
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', '短く閉じた', 3, 1],
+    ['国語', '短く閉じた', 3, 2],
+    ['国語', '短く閉じた', 3, 3],
+    ['国語', '短く閉じた', 3, 4],
+    ['国語', '短く閉じた', 3, 5]
+  ];
+  const closed = findUnit(payloadFor(context, master, []), '国語', '短く閉じた');
+  assert.equal(closed.totalMismatch, false);
+
+  // 逆に、総時数のぶんだけ行が無いときは印を付ける
+  const short = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', '行が足りない', 5, 1],
+    ['国語', '行が足りない', 5, 2]
+  ];
+  assert.equal(findUnit(payloadFor(context, short, []), '国語', '行が足りない').totalMismatch, true);
 });

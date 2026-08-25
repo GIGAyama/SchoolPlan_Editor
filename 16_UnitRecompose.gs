@@ -213,7 +213,7 @@ function p5LoadUnitContext_(subject, unitName) {
   const sheetRows = [];
   for (let i = 1; i < all.length; i++) {
     if (isSameSubject_(all[i][MASTER_COL_SUBJECT - 1], subject)
-      && String(all[i][MASTER_COL_UNIT_NAME - 1]).trim() === name) {
+      && isSameUnitName_(all[i][MASTER_COL_UNIT_NAME - 1], name)) {
       rows.push(all[i]);
       sheetRows.push(i + 1);
     }
@@ -237,7 +237,8 @@ function p5LoadUnitContext_(subject, unitName) {
 
   // 週案で既に指導済み・入力済みの時数はロックして書き換えない
   const planned = p4PlannedHistory_(ss);
-  const ph = planned[normalizeSubjectName_(subject)] && planned[normalizeSubjectName_(subject)].units[name];
+  const subjectPlanned = planned[normalizeSubjectName_(subject)];
+  const ph = subjectPlanned && subjectPlanned.units[normalizeUnitName_(name)];
   const lockedCount = Math.min(ph ? ph.maxHour : 0, ordered.length);
 
   return {
