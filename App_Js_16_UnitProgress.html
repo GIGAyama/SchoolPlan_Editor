@@ -56,6 +56,141 @@
         return null;
     }
 
+    // ===================================================
+    // ===== 保存前の入力を進捗へ重ねる（サーバ通信なし） =====
+    // サーバの進捗インデックスは編集モードに入った最初の1回しか取りに行かないため、
+    // 保存を挟まずに続けて入力すると2コマ目以降も同じ時間目が案内されてしまう。
+    // ピッカーを開く直前にグリッドの現在値を重ねて、その場で次の時間目へ進める。
+    // ===================================================
+
+    /**
+     * 表示中の週のグリッドから、単元セルの入力を拾います。
+     * 保存に使うのと同じ collectCurrentEditData() を通すため、ピッカー経由の入力も、
+     * 手入力も、ドラッグ＆ドロップや自動入力の結果も同じように拾えます
+     * （編集モードでなければ STATE.weekData.days の保存済みの値がそのまま返ります）。
+     *
+     * 単元セルの書式 "単元名 n/N" の解析は 04_AutoFill.gs の parseUnitProgress_ と同じです。
+     *
+     * @returns {Array<Object>} [{ subject, unitName, hour, cellTotal, isPast }]
+     */
+    function collectWeekUnitEntries() {
+        if (typeof collectCurrentEditData !== 'function') return [];
+        var days = collectCurrentEditData();
+        if (!days || !days.length) return [];
+
+        var todayStr = formatDateLocal(new Date());
+        var entries = [];
+        days.forEach(function (day) {
+            if (!day || !day.periods) return;
+            // 日付はサーバもクライアントも "yyyy/MM/dd" のゼロ埋めなので文字列のまま比較できる。
+            // 当日は「実施済み」に含める（サーバの upTomorrowMidnight_ と同じ締切）。
+            var isPast = !!day.date && String(day.date) <= todayStr;
+            day.periods.forEach(function (p) {
+                if (!p || !p.subject || !p.unit) return;
+                var m = String(p.unit).match(/(.+?)\s*(\d+)\/(\d+)/);
+                if (!m) return;
+                entries.push({
+                    subject: String(p.subject).trim(),
+                    unitName: m[1].trim(),
+                    hour: parseInt(m[2], 10),
+                    cellTotal: parseInt(m[3], 10),
+                    isPast: isPast
+                });
+            });
+        });
+        return entries;
+    }
+
+    /**
+     * 1教科分の派生値を、plannedHour / taughtHour / effectiveTotal から引き直します。
+     *
+     * ここでの決め方は 14_UnitProgress.gs の buildUnitProgressPayload_ と同じ規則です。
+     * 片方だけ直すと保存前と保存後で案内が変わってしまうため、必ず対で直してください。
+     */
+    function refreshProgressSubject(sp) {
+        if (!sp || !sp.units) return;
+
+        sp.units.forEach(function (u) {
+            var done = u.effectiveTotal > 0 && u.plannedHour >= u.effectiveTotal;
+            // 指導済みの単元には次の時間が存在しないため、総時数を超えないよう丸める
+            // （丸めないとピッカーがマスタに無い時数をセルへ書き込んでしまう）。
+            u.nextHour = done
+                ? Math.max(Math.min(u.plannedHour, u.effectiveTotal), 1)
+                : u.plannedHour + 1;
+            u.status = done ? 'done' : (u.plannedHour > 0 ? 'inProgress' : 'untaught');
+            var masterTotal = Math.max(u.declaredTotal || 0, u.masterRowHours || 0);
+            u.overTaught = !!(masterTotal && u.plannedHour > masterTotal);
+            u.isNext = false;
+        });
+
+        // 「次に指導する単元」= マスタ順で最初の未消化単元。着手済みがあればそちらを優先する。
+        var nextUnit = null;
+        for (var i = 0; i < sp.units.length; i++) {
+            if (sp.units[i].status !== 'done') { nextUnit = sp.units[i]; break; }
+        }
+        for (var j = 0; j < sp.units.length; j++) {
+            if (sp.units[j].status === 'inProgress') { nextUnit = sp.units[j]; break; }
+        }
+        sp.nextUnitName = nextUnit ? nextUnit.unitName : null;
+        sp.units.forEach(function (u) { u.isNext = (u.unitName === sp.nextUnitName); });
+    }
+
+    /**
+     * グリッドから拾った入力を進捗インデックスへ重ねます（破壊的更新）。
+     * 合成は max だけなので、同じ週の保存済みの行と二重に数えず、
+     * 何度通しても結果が変わりません。
+     *
+     * 未保存のまま入力を消した場合に進捗が下がらないのは承知のうえです。
+     * 保存すれば STATE.unitProgress が捨てられてサーバの計算で正しい値に戻るため、
+     * ずれるのは未保存の間だけで、そのために通信を増やすことはしません。
+     */
+    function applyWeekUnitEntries(progress, entries) {
+        if (!progress || !progress.subjects || !entries || !entries.length) return progress;
+
+        var touched = [];
+        entries.forEach(function (e) {
+            var sp = findProgressSubject(progress, e.subject);
+            if (!sp || !sp.units) return;
+
+            var unit = null;
+            for (var i = 0; i < sp.units.length; i++) {
+                if (sp.units[i].unitName === e.unitName) { unit = sp.units[i]; break; }
+            }
+
+            if (!unit) {
+                // 単元マスタに無い単元（改名・自由入力で発生する）は孤立として扱う。
+                if (!sp.orphans) sp.orphans = [];
+                var orphan = null;
+                for (var j = 0; j < sp.orphans.length; j++) {
+                    if (sp.orphans[j].unitName === e.unitName) { orphan = sp.orphans[j]; break; }
+                }
+                if (orphan) orphan.plannedHour = Math.max(orphan.plannedHour || 0, e.hour);
+                else sp.orphans.push({ unitName: e.unitName, plannedHour: e.hour });
+                return;
+            }
+
+            if (touched.indexOf(sp) === -1) touched.push(sp);
+            unit.plannedHour = Math.max(unit.plannedHour || 0, e.hour);
+            if (e.isPast) unit.taughtHour = Math.max(unit.taughtHour || 0, e.hour);
+            unit.effectiveTotal = Math.max(unit.effectiveTotal || 0, e.cellTotal || 0, unit.plannedHour);
+        });
+
+        touched.forEach(refreshProgressSubject);
+        return progress;
+    }
+
+    /**
+     * ピッカーを開く直前に、グリッドの現在値を進捗へ重ねます。サーバへは行きません。
+     * 重ね合わせに失敗しても、サーバ由来の進捗だけで従来どおり動かします。
+     */
+    function syncUnitProgressWithGrid(progress) {
+        try {
+            return applyWeekUnitEntries(progress, collectWeekUnitEntries());
+        } catch (e) {
+            return progress;
+        }
+    }
+
     /**
      * 単元マスタピッカー（進捗つき）。
      * 進捗が取れなかった場合は従来の openUnitPickerBasic にフォールバックする。
@@ -77,7 +212,8 @@
         }
 
         loadUnitProgress(function (progress) {
-            var sp = findProgressSubject(progress, subject);
+            // 保存前の入力もその場で進捗へ反映する（サーバ通信は増えない）
+            var sp = findProgressSubject(syncUnitProgressWithGrid(progress), subject);
             if (!sp || !sp.units || sp.units.length === 0) {
                 // 進捗が取れないときは機能を落として基本版で続行する
                 openUnitPickerBasic(dayIdx, pIdx);
