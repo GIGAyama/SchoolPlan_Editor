@@ -43,7 +43,9 @@ export function makeClock() {
       }
       if (ms !== undefined) now = until;
     },
-    get pending() { return timers.size; }
+    get pending() { return timers.size; },
+    /** いまの時刻（ms）。Date.now() を差し替えて、経過時間を見るコードを動かすのに使う。 */
+    get now() { return now; }
   };
 }
 

@@ -67,6 +67,8 @@
     <?!= include('App_Css_03_A11y'); ?>
     <!-- セル操作（コピー / ペースト / クリア）まわりのスタイル。App_Css.html のあとに読み込むこと。 -->
     <?!= include('App_Css_04_CellOps'); ?>
+    <!-- トースト。SweetAlert2 の z-index 上書き（App_Css.html）より後に読み込むこと。 -->
+    <?!= include('App_Css_05_Toast'); ?>
     <!-- Google Picker API（Googleドライブからファイルを選ぶ画面）。
          Google 自身の配信元で、GAS 本体（script.google.com）が通る環境なら通る。
          それでも届かないことはあるため、読み込みは非同期にし、
