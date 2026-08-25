@@ -71,24 +71,106 @@
         });
     }
 
-    var SwalToast = Swal.mixin({
-        toast: true,
-        position: 'top-end',
-        showConfirmButton: false,
-        timer: 3500,
-        timerProgressBar: true,
-        didOpen: function (toast) {
-            toast.addEventListener('mouseenter', Swal.stopTimer);
-            toast.addEventListener('mouseleave', Swal.resumeTimer);
-        }
-    });
+    // ===== トースト =====
+    // SweetAlert2 のトースト（Swal.mixin({toast:true})）は使わない。
+    // mixin は globalState を共有するため、トーストを1つ出すだけで
+    // 開いているダイアログが _destroy() され、その .then() へ isDismissed が返る。
+    // 単元を入れた直後のトーストが、次のコマで開いた単元ピッカーを黙って
+    // 閉じてしまい「入力がなかったことになる」不具合の原因だった。
+    // ここは自前で持ち、ダイアログとは一切干渉しない。
+
+    var TOAST_TIMEOUT_MS = 3500;
+    /** 同時に見せる上限。超えたら古いものから消す（上書きではなく積む）。 */
+    var TOAST_MAX = 3;
+    var TOAST_ANIM_MS = 180;
+    var _toastStack = null;
+    var _toasts = [];
+
+    function toastStack_() {
+        if (_toastStack && _toastStack.isConnected) return _toastStack;
+        if (!document.body) return null;
+        _toastStack = document.createElement('div');
+        _toastStack.id = 'toastStack';
+        // 読み上げは割り込ませない。入力中の操作を邪魔しないため polite にする。
+        _toastStack.setAttribute('aria-live', 'polite');
+        _toastStack.setAttribute('aria-atomic', 'false');
+        document.body.appendChild(_toastStack);
+        return _toastStack;
+    }
+
+    /** トーストを1つ消す。既に消えていれば何もしない。 */
+    function dismissToast_(entry) {
+        var idx = _toasts.indexOf(entry);
+        if (idx === -1) return;
+        _toasts.splice(idx, 1);
+        if (entry.timerId) clearTimeout(entry.timerId);
+        entry.timerId = null;
+        entry.el.classList.add('toast-leave');
+        setTimeout(function () {
+            if (entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
+        }, TOAST_ANIM_MS);
+    }
+
+    /** 残り時間から消えるまでのタイマーを張り直す（hover の一時停止に使う）。 */
+    function armToastTimer_(entry) {
+        if (entry.timerId) clearTimeout(entry.timerId);
+        entry.startedAt = Date.now();
+        entry.timerId = setTimeout(function () { dismissToast_(entry); }, entry.remaining);
+    }
 
     function showToast(type, message) {
-        var iconMap = { success: 'success', error: 'error', info: 'info', warning: 'warning' };
-        SwalToast.fire({
-            icon: iconMap[type] || 'info',
-            title: message
+        var stack = toastStack_();
+        if (!stack) return;
+        var text = (message === null || message === undefined) ? '' : String(message);
+        var kind = ({ success: 1, error: 1, info: 1, warning: 1 })[type] ? type : 'info';
+
+        // 同じ知らせが続けて出たときは積み増さず、表示時間だけ延ばす
+        var last = _toasts[_toasts.length - 1];
+        if (last && last.type === kind && last.message === text) {
+            last.remaining = TOAST_TIMEOUT_MS;
+            armToastTimer_(last);
+            return;
+        }
+
+        while (_toasts.length >= TOAST_MAX) dismissToast_(_toasts[0]);
+
+        var icons = { success: 'check_circle', error: 'error', warning: 'warning', info: 'info' };
+        var el = document.createElement('div');
+        el.className = 'toast-item toast-' + kind + ' toast-enter';
+        el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+
+        var icon = document.createElement('span');
+        icon.className = 'material-symbols-outlined toast-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = icons[kind];
+
+        var body = document.createElement('span');
+        body.className = 'toast-text';
+        // サーバのエラー文がそのまま来るため、HTML として解釈させない
+        body.textContent = text;
+
+        el.appendChild(icon);
+        el.appendChild(body);
+        stack.appendChild(el);
+
+        var entry = { el: el, type: kind, message: text, timerId: null, remaining: TOAST_TIMEOUT_MS, startedAt: 0 };
+        _toasts.push(entry);
+
+        el.addEventListener('click', function () { dismissToast_(entry); });
+        el.addEventListener('mouseenter', function () {
+            if (!entry.timerId) return;
+            clearTimeout(entry.timerId);
+            entry.timerId = null;
+            entry.remaining = Math.max(0, entry.remaining - (Date.now() - entry.startedAt));
         });
+        el.addEventListener('mouseleave', function () {
+            if (entry.timerId || _toasts.indexOf(entry) === -1) return;
+            armToastTimer_(entry);
+        });
+
+        // 追加した直後に外すことで、右からすべり込む動きになる
+        setTimeout(function () { el.classList.remove('toast-enter'); }, 16);
+        armToastTimer_(entry);
     }
 
     function _onCommError(e) {

@@ -532,16 +532,24 @@
             var unitEl = document.querySelector('[data-field="unit"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
             if (unitEl) unitEl.value = unitName + ' ' + hourNum + '/' + maxHour;
 
+            // 学習活動はサーバから取りにいく。その往復（1〜3秒）のあいだに先生が
+            // 同じ欄へ書き足していることがあるため、出したときの値を控えておく。
+            var contentBefore = null;
+            var contentAtRequest = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+            if (contentAtRequest) contentBefore = contentAtRequest.value;
+
             // サーバーから学習活動を取得してcontentに入力
             google.script.run
                 .withSuccessHandler(function (res) {
                     if (res.success) {
                         var contentEl = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
-                        if (contentEl) {
+                        // 往復のあいだに書き換わっていたら、その手入力を残す
+                        if (contentEl && contentEl.value === contentBefore) {
                             contentEl.value = res.activity || '';
                             autoResizeTextarea(contentEl);
                         }
-                        showToast('success', unitName + ' ' + hourNum + '/' + maxHour + ' を入力しました。');
+                        // 入力できたことはセルを見れば分かる。往復のあとに遅れて出る
+                        // 成功トーストは、次のコマの操作へ割り込むだけなので出さない。
                     }
                 })
                 .withFailureHandler(function (e) {
@@ -582,13 +590,11 @@
             var parts = splitFreeContent(contentEl.value);
             contentEl.value = [parts.subjectPart, parts.taskPart].filter(function (s) { return s.trim(); }).join('\n');
             if (btn) btn.classList.remove('free-slot-active');
-            showToast('info', '空き時間の設定を解除しました。');
         } else {
             // 空き時間に設定：末尾に区切りマーカーを追加
             var existing = contentEl.value.replace(/\s+$/, '');
             contentEl.value = (existing ? existing + '\n' : '') + FREE_TASK_DIVIDER + '\n';
             if (btn) btn.classList.add('free-slot-active');
-            showToast('success', 'この時間を空き時間に設定しました。教科の内容とタスクを分けて入力できます。');
         }
         autoResizeTextarea(contentEl);
     }
@@ -881,6 +887,21 @@
     }
 
     // ===== 編集中の入力データを回収 =====
+    /**
+     * 送信済みの週データと、いまのグリッドの中身が食い違っているかを返します。
+     *
+     * グリッドの入力欄には blur/change の書き戻しが無く、値は DOM にしかありません。
+     * 保存のサーバ往復（1〜3秒）のあいだに打たれた文字は送信済みのスナップショットに
+     * 入っていないため、そのまま編集モードを抜けて描き直すと消えてしまいます。
+     * 保存の成功時にこれで確かめて、食い違っていればもう一度だけ保存し直します。
+     */
+    function gridDiffersFromSaved(days) {
+        if (!days) return false;
+        var now = collectCurrentEditData();
+        if (!now) return false;
+        return JSON.stringify(now) !== JSON.stringify(days);
+    }
+
     function collectCurrentEditData() {
         if (!STATE.weekData) return null;
         return STATE.weekData.days.map(function (day, dayIdx) {
@@ -1595,7 +1616,6 @@
         STATE.weekData.days = STATE.undoStack.pop();
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        showToast('info', '↩ 元に戻しました');
         persistViewMutation();
     }
 
@@ -1607,7 +1627,6 @@
         STATE.weekData.days = STATE.redoStack.pop();
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        showToast('info', '↪ やり直しました');
         persistViewMutation();
     }
 
@@ -1667,7 +1686,6 @@
         }
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        showToast('success', asPeriod ? '📋 コマをペーストしました' : '📋 ペーストしました');
         persistViewMutation();
         return true;
     }
@@ -1688,7 +1706,6 @@
         }
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        showToast('info', '🗑 クリアしました');
         persistViewMutation();
     }
 
@@ -1745,7 +1762,6 @@
 
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        showToast('success', '🔄 コマを入れ替えました');
         persistViewMutation();
     }
 
@@ -1855,7 +1871,6 @@
                 }
                 markWeekDaysMutated();
                 rerenderGridPreservingFocus();
-                showToast('info', '🗑 ' + DAY_LABELS_JP[dayIdx] + '曜の全コマをクリアしました');
                 persistViewMutation();
                 break;
             case 'clearPeriod':
@@ -1866,7 +1881,6 @@
                 }
                 markWeekDaysMutated();
                 rerenderGridPreservingFocus();
-                showToast('info', '🗑 ' + (pIdx + 1) + '校時を全曜日クリアしました');
                 persistViewMutation();
                 break;
         }

@@ -604,13 +604,14 @@
     // 保存は beginSaveRequest/endSaveRequest で直列化する（App_Js_02_Plan で定義）。
     // 進行中の保存があるうちに別経路の保存を投げると、後着の要求が保存前のリビジョンを
     // 持ったまま届き、自分の保存が「競合」として弾かれてしまう。
-    function autoSaveAndThen(callback) {
+    // retrying: 保存の往復中に打たれた文字を拾うための、1回限りの再保存かどうか
+    function autoSaveAndThen(callback, retrying) {
         // 週移動・学級切替・画面切替の直前は、待たせてある閲覧モードの保存を先に送る。
         // サーバ側の保存先は「いまアクティブな学級シート」で決まるため、切替後に届いた
         // 保存は別の学級のシートへ書かれてしまう。
         flushPendingViewSave();
         if (isSaveInFlight()) {
-            whenSaveIdle(function () { autoSaveAndThen(callback); });
+            whenSaveIdle(function () { autoSaveAndThen(callback, retrying); });
             return;
         }
         if (!STATE.editMode || !hasUnsavedChanges()) {
@@ -629,9 +630,8 @@
             return;
         }
 
-        if (!beginSaveRequest()) { whenSaveIdle(function () { autoSaveAndThen(callback); }); return; }
+        if (!beginSaveRequest()) { whenSaveIdle(function () { autoSaveAndThen(callback, retrying); }); return; }
         _autoSaving = true;
-        showToast('info', '自動保存中...');
         google.script.run
             .withSuccessHandler(function (result) {
                 _autoSaving = false;
@@ -640,6 +640,12 @@
                 if (result.success) {
                     adoptSavedWeekDays(result, days);
                     STATE.weekData.revision = result.revision;
+                    // 往復のあいだに打たれた文字は days に入っていない。ここで編集モードを
+                    // 抜けて描き直すとその分が消えるので、もう一度だけ保存してから進む。
+                    if (!retrying && gridDiffersFromSaved(days)) {
+                        autoSaveAndThen(callback, true);
+                        return;
+                    }
                     STATE.editMode = false;
                     updateEditUI();
                     p2UpdateCurrentWeekCache();
@@ -676,7 +682,6 @@
         var btn = document.getElementById('saveBtn');
         btn.disabled = true;
         btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 保存中...';
-        showToast('info', '保存中...');
         // 保存中もグリッドは操作できる。応答を待つあいだの右クリックメニューのセル操作を
         // 保存済みの内容で消してしまわないよう、要求時点の書き換え回数を控えておく。
         var mutationSeq = weekDaysMutationSeq();

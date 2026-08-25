@@ -3,14 +3,15 @@
         // 保存はすべて beginSaveRequest/endSaveRequest で直列化する。
         // 進行中の保存があるうちに別経路の保存を投げると、後着の要求が古いリビジョンを
         // 持ったまま届き、自分の保存が競合として弾かれてしまうため。
-        window.autoSaveAndThen = function (callback) {
+        // retrying: 保存の往復中に打たれた文字を拾うための、1回限りの再保存かどうか
+        window.autoSaveAndThen = function (callback, retrying) {
             // 週移動・学級切替・画面切替の直前は、待たせてある閲覧モードの保存を先に送る。
             // 保存先はサーバ側の「アクティブな学級」で決まるため、切替後に届いた保存は
             // 別の学級のシートへ書かれてしまう。
             flushPendingViewSave();
             if (isSaveInFlight()) {
                 // 進行中の保存の完了後に再判定する（多くはその保存で解消し、そのまま callback へ）
-                whenSaveIdle(function () { window.autoSaveAndThen(callback); });
+                whenSaveIdle(function () { window.autoSaveAndThen(callback, retrying); });
                 return;
             }
             if (!STATE.editMode || !hasUnsavedChanges()) {
@@ -22,14 +23,19 @@
             if (!days) { callback(); return; }
             var errors = validateDaysSubjects(days);
             if (errors.length) { showToast('error', '教科名の入力に誤りがあるため自動保存できません: ' + errors[0]); return; }
-            if (!beginSaveRequest()) { whenSaveIdle(function () { window.autoSaveAndThen(callback); }); return; }
+            if (!beginSaveRequest()) { whenSaveIdle(function () { window.autoSaveAndThen(callback, retrying); }); return; }
             _autoSaving = true;
-            showToast('info', '自動保存中...');
             google.script.run.withSuccessHandler(function (result) {
                 _autoSaving = false; endSaveRequest();
                 if (typeof p2LogTiming === 'function') p2LogTiming('自動保存（週移動前）', result);
                 if (result.success) {
                     adoptSavedWeekDays(result, days); STATE.weekData.revision = result.revision;
+                    // 往復のあいだに打たれた文字は days に入っていない。ここで編集モードを
+                    // 抜けて描き直すとその分が消えるので、もう一度だけ保存してから進む。
+                    if (!retrying && gridDiffersFromSaved(days)) {
+                        window.autoSaveAndThen(callback, true);
+                        return;
+                    }
                     STATE.editMode = false; updateEditUI();
                     if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
                     showToast('success', '自動保存しました'); callback();
@@ -51,7 +57,6 @@
             if (!beginSaveRequest()) { showToast('info', '保存中です。完了までお待ちください。'); return; }
             var btn = document.getElementById('saveBtn');
             btn.disabled = true; btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 保存中...';
-            showToast('info', '保存中...');
             // 保存中もグリッドは操作できる。応答を待つあいだの右クリックメニューのセル操作を
             // 保存済みの内容で消してしまわないよう、要求時点の書き換え回数を控えておく。
             var mutationSeq = weekDaysMutationSeq();
