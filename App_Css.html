@@ -816,6 +816,8 @@
         color: #b3261e;
     }
 
+    /* 教科サジェスト。top は positionSuggestBox が教科欄の下端に合わせて書きこむ。
+       ここの 100% は JS が動く前の保険で、実際に見えているときは必ず上書きされている */
     .grid-cell .suggest-box {
         position: absolute;
         top: 100%;
@@ -828,6 +830,11 @@
         z-index: 200;
         max-height: 140px;
         overflow-y: auto;
+    }
+
+    /* 下に入りきらない行では教科欄の上に出るので、角の丸みも上下を入れ替える */
+    .grid-cell .suggest-box.suggest-box-above {
+        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     }
 
     .suggest-item {

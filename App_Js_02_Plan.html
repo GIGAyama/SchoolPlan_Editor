@@ -411,6 +411,31 @@
             return '<div class="suggest-item" onmousedown="selectSubject(this,\'' + escAttr(s) + '\',\'' + dayIdx + '\',\'' + pIdx + '\')">' + escHtml(s) + '</div>';
         }).join('');
         box.style.display = 'block';
+        positionSuggestBox(input, box);
+    }
+
+    /**
+     * 教科サジェストを、教科欄のすぐ下に出します。
+     * セルの外（次の行のセルの上）に出ると、打っている場所と候補が 60px 以上離れて選びにくいので、
+     * 同じセルの単元名・学習内容の上に重ねます。
+     * 下に入りきらない一番下の行だけ、教科欄の上に出します。
+     */
+    function positionSuggestBox(input, box) {
+        box.classList.remove('suggest-box-above');
+        // offsetParent は position:relative の .grid-cell。絶対配置の top と同じ基準なので、
+        // 教科欄の下端（offsetTop + offsetHeight）をそのまま top にできる
+        box.style.top = (input.offsetTop + input.offsetHeight) + 'px';
+        var wrapper = box.closest ? box.closest('.week-grid-wrapper') : null;
+        if (!wrapper) return;
+        var boxRect = box.getBoundingClientRect();
+        var inputRect = input.getBoundingClientRect();
+        var wrapRect = wrapper.getBoundingClientRect();
+        var noRoomBelow = boxRect.bottom > wrapRect.bottom;
+        var roomAbove = inputRect.top - wrapRect.top >= boxRect.height;
+        if (noRoomBelow && roomAbove) {
+            box.style.top = (input.offsetTop - boxRect.height) + 'px';
+            box.classList.add('suggest-box-above');
+        }
     }
 
     function showSuggest(input) { onSubjectInput(input); }
