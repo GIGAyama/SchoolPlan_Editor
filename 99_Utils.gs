@@ -706,3 +706,28 @@ function getTimetableData_() {
 
   return [['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','','']];
 }
+
+/**
+ * 固定時間割の「空きコマ（別教員担当）」指定を2次元配列（5行×6列）で返します。
+ * 戻り値: [[月1校時, ..., 月6校時], ...] (月〜金の5行)。
+ * 古い保存データ（freePeriods を持たない）は全 false になります。
+ *
+ * getTimetableData_() の戻り値（5行×8列）に足さずに別の関数にしているのは、
+ * あちらが DB_TIMETABLE_WRITE_KEYS_ の並びと1対1で対応する契約になっているため。
+ * 暗黙の9列目を紛れ込ませると、後から読む人が必ず踏む。
+ */
+function getTimetableFreeData_() {
+  const empty = () => [0,1,2,3,4].map(() => [false, false, false, false, false, false]);
+  const savedJson = tGetProp_('fixedTimetableData'); // 個人設定（UserProperties→ScriptProperties）
+  if (!savedJson) return empty();
+  try {
+    const parsed = JSON.parse(savedJson);
+    return [0,1,2,3,4].map(d => {
+      const free = (parsed[d] && parsed[d].freePeriods) || [];
+      return [0,1,2,3,4,5].map(p => free[p] === true);
+    });
+  } catch (e) {
+    logInfo('固定時間割(空きコマ)のプロパティ解析に失敗: ' + e.message);
+    return empty();
+  }
+}

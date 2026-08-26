@@ -2818,6 +2818,33 @@
         background: var(--primary-light);
     }
 
+    /* 校時セルの「空き（別教員担当）」チェック。
+       教科列は狭いので、入力欄の横ではなく下に積んで横幅を使わない。 */
+    .tt-editor-table .tt-free-toggle {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        margin-top: 2px;
+        font-size: 0.66rem;
+        color: var(--text-sub);
+        cursor: pointer;
+        user-select: none;
+    }
+
+    /* 上の .tt-editor-table input（width:100%）がチェックボックスまで巨大にするので打ち消す */
+    .tt-editor-table .tt-free-toggle input[type="checkbox"] {
+        width: auto;
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* 週案グリッドの空き時間（App_Css_04_CellOps.html）と同じ見せ方にそろえる */
+    .tt-editor-table td.tt-free-on input[type="text"] {
+        background: var(--primary-light);
+        box-shadow: inset 3px 0 0 var(--primary);
+    }
+
     /* ===== 長期休業期間カード ===== */
     .vacation-card {
         background: var(--surface-2);

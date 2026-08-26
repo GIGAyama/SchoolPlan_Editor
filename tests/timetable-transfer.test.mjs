@@ -70,6 +70,18 @@ test('転記は保存済みの内容を書くことをユーザーに示す', ()
   assert.match(fnBody(settings, 'runBulkTransfer'), /confirmTimetableBeforeTransfer\(/);
 });
 
+test('空きコマは「付けるだけ」だと、転記の前に伝える', () => {
+  // 固定時間割で空きを外しても、すでに転記した週の空きは解除されない。
+  // この非対称は「手で設定した空きを転記で消さない」ための仕様だが、
+  // 黙っていると「反映されない不具合」に見えるので必ず知らせる。
+  const preview = fnBody(settings, 'renderTimetablePreviewHtml');
+  assert.match(preview, /freePeriods/, 'プレビュー表に空きコマを出すこと');
+  assert.match(preview, /消しません/, '既存の学習内容を消さないと伝えること');
+  assert.match(preview, /解除されません/, '外しても消えないことを伝えること');
+  // 転記の両経路がこのプレビューを通るので、告知も両方に出る
+  assert.match(fnBody(settings, 'confirmTimetableBeforeTransfer'), /renderTimetablePreviewHtml\(timetable\)/);
+});
+
 test('固定時間割エディタの未保存を検出できる', () => {
   assert.match(core, /timetableSaved: null,/);
   const dirty = fnBody(settings, 'hasUnsavedTimetableChanges');

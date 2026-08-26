@@ -453,6 +453,10 @@ function calculateAutoFillForWebApp(mondayStr, days, options) {
       day.periods.forEach(function (p, pIdx) {
         const subject = p.subject;
         if (!subject || subject.includes("行事")) return;
+        // 空き時間（別教員担当）は自分が授業をしないコマなので、単元も学習内容も入れない。
+        // ここで除外しないと、上書きモードで空き時間の印ごと消えてしまう
+        // （画面の単元ピッカーも同じ理由で空き時間を除外している）。
+        if (isFreeContent_(p.content)) return;
         if (fillMode === 'empty' && (String(p.unit || '').trim() || String(p.content || '').trim())) return;
 
         const subjectKey = normalizeSubjectName_(subject);
@@ -717,6 +721,9 @@ function batchAutoFillFromWeek(baseMondayStr) {
       for (const pc of periodCols) {
         const subject = row[pc.subj - 1];
         if (!subject || typeof subject !== 'string' || subject.includes('行事')) continue;
+        // 空き時間（別教員担当）は対象外。固定時間割から空きコマが毎週入るようになると
+        // 週に何コマもあるのが普通になるため、ここを抜くと一括自動入力の1回で全部消える
+        if (isFreeContent_(row[pc.content - 1])) continue;
         const subjectKey = normalizeSubjectName_(subject);
 
         try {

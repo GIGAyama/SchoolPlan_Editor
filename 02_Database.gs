@@ -9,20 +9,32 @@ const DB_TIMETABLE_WRITE_KEYS_ = [
   'TIME', 'MORNING', 'PERIOD1', 'PERIOD2', 'PERIOD3', 'PERIOD4', 'PERIOD5', 'PERIOD6'
 ];
 
+// 空きコマの印を実際に付けた回だけ、学習内容の列も書き戻す。
+// 常に足すのではなく「印を付けた列だけ」を後から足すのは、空きコマを使っていない
+// 利用者の書き込み範囲を今までどおりに保つため。
+const DB_TIMETABLE_FREE_KEYS_ = [
+  'CONTENT1', 'CONTENT2', 'CONTENT3', 'CONTENT4', 'CONTENT5', 'CONTENT6'
+];
+
 /**
  * 指定した月曜日の週の「月〜金」について、転記する日付と値の組を作ります。
  * @param {Date} monday 週の月曜日
  * @param {Array[]} timetable getTimetableData_() の戻り値
- * @returns {{dateStr: string, date: Date, values: Array}[]}
+ * @param {boolean[][]} [freeFlags] getTimetableFreeData_() の戻り値（空きコマ指定）
+ * @returns {{dateStr: string, date: Date, values: Array, free: boolean[]|null}[]}
  */
-function dbTimetableEntriesForWeek_(monday, timetable) {
+function dbTimetableEntriesForWeek_(monday, timetable, freeFlags) {
   const entries = [];
   const dayCount = Math.min(5, timetable.length);
   for (let i = 0; i < dayCount; i++) {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
     d.setHours(0, 0, 0, 0);
-    entries.push({ dateStr: formatDate(d), date: d, values: timetable[i] });
+    entries.push({
+      dateStr: formatDate(d), date: d, values: timetable[i],
+      // 指定が無ければ学習内容には一切触れない
+      free: (freeFlags && freeFlags[i]) || null
+    });
   }
   return entries;
 }
@@ -33,10 +45,11 @@ function dbTimetableEntriesForWeek_(monday, timetable) {
  * 行は必ず日付で引き当てる。以前は「月曜の行から5行連続」という前提で書いていたため、
  * 行の抜け・並び替えがあると別の日付へ転記していた。
  * 書き込むのは時程・朝学習・各校時の列だけで、曜日・週番号などの数式列には触れない。
+ * 「空き」に指定した校時だけは、学習内容へ空き時間の印を追記する（既存の内容は消さない）。
  *
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet データベースシート
  * @param {Object} cols 論理列マップ
- * @param {{dateStr: string, values: Array}[]} entries 転記する日付と値
+ * @param {{dateStr: string, values: Array, free: boolean[]|null}[]} entries 転記する日付と値
  * @returns {{updatedRows: number, missingDates: string[]}}
  */
 function dbApplyTimetableEntries_(sheet, cols, entries) {
@@ -45,6 +58,7 @@ function dbApplyTimetableEntries_(sheet, cols, entries) {
   const rowState = p2ReadRowsForDates_(sheet, cols, entries.map(e => e.dateStr));
   const changedRowNumbers = [];
   const missingDates = [];
+  const touchedContentKeys = new Set();
 
   entries.forEach(entry => {
     const rowNumber = rowState.rowNumberByDate.get(entry.dateStr);
@@ -56,11 +70,30 @@ function dbApplyTimetableEntries_(sheet, cols, entries) {
       if (!cols[key]) return;
       if (p2SetRowValue_(row, cols, key, entry.values[index] || '')) changed = true;
     });
+
+    // 空きコマ: 指定のある校時だけ、学習内容の末尾に印を付ける（追記のみ）。
+    // 指定の無い校時の学習内容には一切触れない。固定時間割で空きを外しても、
+    // すでに転記した週の空きが解除されないのはこのため（手で設定した空きを守る）。
+    if (entry.free) {
+      DB_TIMETABLE_FREE_KEYS_.forEach((key, index) => {
+        if (!entry.free[index] || !cols[key]) return;
+        const merged = markFreeContent_(row[cols[key] - 1]);
+        if (p2SetRowValue_(row, cols, key, merged)) {
+          changed = true;
+          touchedContentKeys.add(key);
+        }
+      });
+    }
+
     if (changed) changedRowNumbers.push(rowNumber);
   });
 
   const uniqueChangedRows = [...new Set(changedRowNumbers)].sort((a, b) => a - b);
-  p2WriteChangedWeekRows_(sheet, cols, rowState, uniqueChangedRows, DB_TIMETABLE_WRITE_KEYS_);
+  // 印を付けた列だけを書き戻しに足す。触れていない学習内容の列は範囲にも入れない
+  const writeKeys = touchedContentKeys.size
+    ? DB_TIMETABLE_WRITE_KEYS_.concat(DB_TIMETABLE_FREE_KEYS_.filter(k => touchedContentKeys.has(k)))
+    : DB_TIMETABLE_WRITE_KEYS_;
+  p2WriteChangedWeekRows_(sheet, cols, rowState, uniqueChangedRows, writeKeys);
   return { updatedRows: uniqueChangedRows.length, missingDates };
 }
 
@@ -87,7 +120,8 @@ function transferWeeklyTimetable(targetDate) {
 
   try {
     const result = dbApplyTimetableEntries_(
-      shData, dbCols, dbTimetableEntriesForWeek_(firstDayOfWeek, getTimetableData_()));
+      shData, dbCols,
+      dbTimetableEntriesForWeek_(firstDayOfWeek, getTimetableData_(), getTimetableFreeData_()));
     if (result.missingDates.length > 0) {
       Logger.log(`転記週 ${formatDate(firstDayOfWeek)}: DBに無い日付 ${result.missingDates.join(', ')}`);
     }
@@ -157,10 +191,11 @@ function processBulkTransferWithExclusion(dates) {
     // 転記する日を先に洗い出す。長期休業にかかる日は1日単位で除外する
     // （行単位で書き込むようになったため、週の途中から始まる休業も正しく除外できる）。
     const timetable = getTimetableData_();
+    const freeFlags = getTimetableFreeData_(); // 年間分でも読むのは1回だけ
     const entries = [];
     let skippedDayCount = 0;
     for (let monday = new Date(firstMonday); monday <= lastDbDate; monday.setDate(monday.getDate() + 7)) {
-      dbTimetableEntriesForWeek_(monday, timetable).forEach(entry => {
+      dbTimetableEntriesForWeek_(monday, timetable, freeFlags).forEach(entry => {
         if (entry.date > lastDbDate) return;
         if (validExclusionPeriods.some(p => isDateInRange(entry.date, p.start, p.end))) {
           skippedDayCount++;
