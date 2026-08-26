@@ -479,6 +479,26 @@ test('復元ポイントがたまっても、保存の重さが変わらない',
     `復元ポイントの量で通信量が変わっている（${bytesOf(light)}B → ${bytesOf(heavy)}B）`);
 });
 
+test('復元ポイントを見に行く保存でも、表示形式の調査で往復を増やさない', () => {
+  // 「この週の自動の復元ポイントを、さっき作ったばかりか」は、覚えている時刻で
+  // 答えられる回はシートを読まない。覚えが消えた回（別インスタンス・キャッシュ切れ）
+  // だけ復元ポイントの一覧を読む。そのとき、読む側が日付列を渡していないと、
+  // 「どの列が日付か」を調べるためにシートの表示形式まで取りに行き、
+  // それだけで往復が1回・約31KB 増えていた。列構成はこちらで決めているので不要。
+  const world = createWorld();
+  warmUp(world);
+  fillSnapshots(world, 300);
+
+  // 覚えている時刻を消して、一覧を読む側の経路へ入れる
+  delete world.cache['p3AutoSnap::データベース::' + MONDAY];
+  const { calls } = saveOneCell(world, '覚えが消えたあとの編集');
+
+  const probes = calls.filter(c => c.kind === 'numberFormat');
+  assert.equal(probes.length, 0,
+    '表示形式を調べに行っている（読む側が日付列を渡すこと）');
+  assert.ok(calls.length <= 4, `保存で ${calls.length} 往復している`);
+});
+
 test('プロパティの読み取りを、1回の実行で何度も繰り返さない', () => {
   // PropertiesService の getProperty は、GAS では1回ごとに Google への
   // リモート呼び出しになる（数十ms）。実測では、保存1回で 44 回呼んでいて、

@@ -1123,7 +1123,11 @@
         _viewSaveTimer = setTimeout(function () {
             _viewSaveRunner = null;
             run();
+            refreshSaveStatus();
         }, VIEW_SAVE_DELAY_MS);
+        // 仕掛けた時点から「保存中」を出す。実際に送るまでの待ちも、
+        // 利用者から見れば保存が終わっていない時間であることに変わりはない。
+        refreshSaveStatus();
     }
 
     /**
@@ -1138,6 +1142,7 @@
         clearTimeout(_viewSaveTimer);
         _viewSaveRunner = null;
         run();
+        refreshSaveStatus();
     }
 
     /** 閲覧モードの変更が、まだサーバへ届いていない状態か（離脱警告に使う）。 */
@@ -1219,6 +1224,9 @@
      */
     function clearViewDirtyWeeks() {
         _viewDirtyWeeks = {};
+        // 手元を捨てて読み直す＝サーバ側の内容も別経路で変わっている可能性がある。
+        // 古い控えを残すと、送るべき保存を「同じ内容だ」と誤って省いてしまう。
+        forgetServerWeekContent();
     }
 
     // ===== 閲覧モードの自動保存の待ち行列 =====
@@ -1236,11 +1244,13 @@
     function queueViewSave(key, run) {
         var alreadyQueued = Object.prototype.hasOwnProperty.call(_viewSaveQueue, key);
         _viewSaveQueue[key] = run;
+        refreshSaveStatus();
         if (alreadyQueued) return;
         whenSaveIdle(function () {
             var fn = _viewSaveQueue[key];
             delete _viewSaveQueue[key];
             if (fn) fn();
+            refreshSaveStatus();
         });
     }
 
@@ -1256,6 +1266,7 @@
     function beginSaveRequest() {
         if (_saveInFlight) return false;
         _saveInFlight = true;
+        refreshSaveStatus();
         return true;
     }
 
@@ -1266,14 +1277,18 @@
      */
     function endSaveRequest() {
         _saveInFlight = false;
-        if (!_afterSaveQueue.length) return;
+        if (!_afterSaveQueue.length) { refreshSaveStatus(); return; }
         setTimeout(function () {
             var queued = _afterSaveQueue;
             _afterSaveQueue = [];
             queued.forEach(function (fn) {
                 try { fn(); } catch (e) { /* 後続処理の失敗で他の待機処理を止めない */ }
             });
+            refreshSaveStatus();
         }, 0);
+        // 待たせている処理が次の保存を始めることがあるため、ここでは
+        // 「まだ終わっていない」ままにしておく（saveStatusBusy が待ち行列も見る）。
+        refreshSaveStatus();
     }
 
     /** 保存が飛んでいなければ即時、飛んでいれば完了後に実行する。 */
@@ -1287,6 +1302,128 @@
         return _saveInFlight;
     }
 
+    // ===== 保存中の表示 =====
+    // 手動保存は「保存する」ボタンが「保存中...」に変わるので分かる。
+    // ところが自動保存（週移動前・閲覧モードのセル操作）はボタンを通らないため、
+    // 数秒かかる往復のあいだ、保存が動いていることが画面のどこにも出ていなかった。
+    // 保存の入口・出口はすべてこのファイルのゲートを通るので、表示もここから決める。
+    var _saveStatusOutcome = '';   // '' | 'saved' | 'error'
+    var _saveStatusMessage = '';
+    var _saveStatusHideTimer = null;
+    // 「保存しました」を出しておく時間。失敗の表示は消さない（気づかないまま離れないように）。
+    var SAVE_STATUS_DONE_MS = 2600;
+
+    /**
+     * まだ終わっていない保存があるか。
+     * 送信中だけでなく、ディレイ待ち・待ち行列に入っているものも「保存中」に含める。
+     * 利用者から見れば、どれも「操作したのにまだ保存されていない」時間である。
+     */
+    function saveStatusBusy() {
+        if (_saveInFlight) return true;
+        if (_viewSaveRunner) return true;
+        if (_afterSaveQueue.length) return true;
+        for (var key in _viewSaveQueue) {
+            if (Object.prototype.hasOwnProperty.call(_viewSaveQueue, key)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 保存の結果を控えます（表示の更新は refreshSaveStatus が行う）。
+     * @param {string} outcome 'saved' なら成功、'error' なら失敗
+     * @param {string} [message] 画面に出す短い文言。省略時は既定の文言
+     */
+    function markSaveOutcome(outcome, message) {
+        _saveStatusOutcome = outcome;
+        _saveStatusMessage = message || '';
+        refreshSaveStatus();
+    }
+
+    /** いまの保存の状態を編集ツールバーへ描き直します。 */
+    function refreshSaveStatus() {
+        var el = document.getElementById('saveStatus');
+        if (!el) return;
+        if (_saveStatusHideTimer) { clearTimeout(_saveStatusHideTimer); _saveStatusHideTimer = null; }
+
+        var state = '';
+        var icon = '';
+        var label = '';
+        if (saveStatusBusy()) {
+            state = 'is-saving'; icon = 'progress_activity'; label = '保存中...';
+        } else if (_saveStatusOutcome === 'error') {
+            state = 'is-error'; icon = 'error'; label = _saveStatusMessage || '保存できませんでした';
+        } else if (_saveStatusOutcome === 'saved') {
+            state = 'is-saved'; icon = 'check_circle'; label = _saveStatusMessage || '保存しました';
+        } else {
+            el.style.display = 'none';
+            return;
+        }
+
+        el.className = 'save-status ' + state;
+        el.style.display = 'inline-flex';
+        var iconEl = el.querySelector('.save-status-icon');
+        if (iconEl) iconEl.textContent = icon;
+        var textEl = document.getElementById('saveStatusText');
+        if (textEl) textEl.textContent = label;
+
+        if (state === 'is-saved') {
+            _saveStatusHideTimer = setTimeout(function () {
+                _saveStatusHideTimer = null;
+                if (_saveStatusOutcome === 'saved') { _saveStatusOutcome = ''; _saveStatusMessage = ''; }
+                refreshSaveStatus();
+            }, SAVE_STATUS_DONE_MS);
+        }
+    }
+
+    // ===== サーバが持っている週の内容 =====
+    // 閲覧モードのセル操作は、中身が変わらなくても自動保存を仕掛ける。
+    //   ・空のコマを「クリア」する
+    //   ・元に戻す → やり直す で元の内容に戻る
+    //   ・D&Dでコマを動かして、また元の場所へ戻す
+    //   ・同じ内容をペーストする
+    // どれも保存すべき差が無いのに、GASの往復（数秒）と保存ロックを1回ぶん使い、
+    // 後続の保存まで待たされる。そこで「サーバが確かに持っている内容」を控えておき、
+    // 送る中身がそれと同じなら往復ごと省く。
+    //
+    // 控えは必ずリビジョンとセットで持ち、リビジョンが一致するときだけ使う。
+    // 他の経路（復元・転記・別タブ）でサーバ側が変われば必ずリビジョンが変わるので、
+    // 古い控えを「同じ内容だ」と誤って信じてしまうことがない。
+    var _serverWeekContent = {};
+
+    /**
+     * サーバの応答から、その週の確定内容を控えます。
+     * 手元の状態からは絶対に作らないこと（届いていない変更を届いたことにしてしまう）。
+     * @param {string} key 週キャッシュキー（学級＋月曜日）
+     * @param {*} revision サーバが返したリビジョン
+     * @param {Array} days サーバが返した days
+     */
+    function rememberServerWeekContent(key, revision, days) {
+        if (!key || !revision || !days) return;
+        _serverWeekContent[key] = { revision: revision, json: JSON.stringify(days) };
+    }
+
+    /**
+     * 控えを捨てます。引数を省くと全部捨てます。
+     * 保存が失敗・競合したとき、サーバ側を直接書き換えたときに呼ぶこと。
+     */
+    function forgetServerWeekContent(key) {
+        if (key) delete _serverWeekContent[key];
+        else _serverWeekContent = {};
+    }
+
+    /**
+     * その週の手元の内容が、サーバの持っているものと同じか。
+     * 同じなら保存を送らなくてよい（送っても「変更はありませんでした」が返るだけ）。
+     * @param {string} key 週キャッシュキー
+     * @param {Object} weekData 表示中（または保存対象）の週データ
+     */
+    function matchesServerWeekContent(key, weekData) {
+        if (!key || !weekData || !weekData.days) return false;
+        var known = _serverWeekContent[key];
+        if (!known || !weekData.revision || known.revision !== weekData.revision) return false;
+        return known.json === JSON.stringify(weekData.days);
+    }
+
     // ===== 保存結果の取り込み =====
     // サーバは「シートに実際に入った値」を days で返す。スプレッドシートが
     // 入力を解釈し直した場合（"007"→7 など）に手元の値がずれ続けないよう、
@@ -1295,7 +1432,9 @@
     //   応答が返るまでに手元を書き換えていたら、サーバの返した「保存時点の内容」で
     //   上書きしない（応答待ちのあいだに行ったセル操作がまとめて巻き戻るのを防ぐ）。
     //   取り込まなかった分は、後続の保存が最新の内容を送り直すことで揃う。
-    function adoptSavedWeekDays(result, fallbackDays, weekData, mutationSeq) {
+    // @param {string} [cacheKey] 週キャッシュキー。渡すと、取り込んだ内容を
+    //   「サーバが持っている内容」として控える（同じ内容の保存を省くために使う）。
+    function adoptSavedWeekDays(result, fallbackDays, weekData, mutationSeq, cacheKey) {
         var target = weekData || STATE.weekData;
         if (!target) return false;
         // 保存が通った時点で「編集を始めた時の内容」は保存済みの内容に置き換わる。
@@ -1303,8 +1442,11 @@
         if (target === STATE.weekData) STATE.editBaseline = null;
         var stale = (mutationSeq !== undefined && mutationSeq !== null
             && mutationSeq !== weekDaysMutationSeq());
-        if (stale) return false;
         var saved = (result && result.days && result.days.length) ? result.days : fallbackDays;
+        // 控えはサーバの応答そのものから作る。取り込みを見送った回でも、サーバが
+        // その内容を持っていることは変わらないため、控えは残しておいてよい。
+        if (cacheKey) rememberServerWeekContent(cacheKey, result && result.revision, saved);
+        if (stale) return false;
         var normalized = JSON.stringify(saved) !== JSON.stringify(target.days);
         target.days = saved;
         return normalized;
@@ -1319,6 +1461,7 @@
         return new Promise(function (resolve) {
             var days = collectCurrentEditData();
             if (!days) { resolve(false); return; }
+            var cacheKey = p2WeekCacheKey(displayedWeekMondayStr());
             var run = function () {
                 if (!beginSaveRequest()) { whenSaveIdle(run); return; }
                 google.script.run
@@ -1326,22 +1469,29 @@
                         endSaveRequest();
                         if (typeof p2LogTiming === 'function') p2LogTiming('保存してから実行（' + source + '）', result);
                         if (result.success) {
-                            adoptSavedWeekDays(result, days);
+                            adoptSavedWeekDays(result, days, null, null, cacheKey);
                             STATE.weekData.revision = result.revision;
                             if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
                             cancelEdit();
+                            markSaveOutcome('saved');
                             showToast('success', result.message);
                             resolve(true);
                         } else if (result.conflict) {
+                            forgetServerWeekContent(cacheKey);
+                            markSaveOutcome('error', '保存の競合');
                             handleSaveConflict(result, days);
                             resolve(false);
                         } else {
+                            forgetServerWeekContent(cacheKey);
+                            markSaveOutcome('error');
                             showToast('error', '保存失敗: ' + result.error);
                             resolve(false);
                         }
                     })
                     .withFailureHandler(function (e) {
                         endSaveRequest();
+                        forgetServerWeekContent(cacheKey);
+                        markSaveOutcome('error', '保存できませんでした（通信エラー）');
                         showToast('error', '通信エラー: ' + e.message);
                         resolve(false);
                     })

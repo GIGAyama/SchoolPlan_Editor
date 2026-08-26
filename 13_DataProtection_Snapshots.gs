@@ -10,7 +10,12 @@ function p3ListSnapshotFirstRows_(ss) {
   const sheet = p3EnsureInternalSheets_(ss).snapshots;
   // 末尾を開けて、Payload を除いた列だけ読む。getLastRow() を呼ぶと
   // Payload 込みでシート全体を読むことになり、絞り込んだ意味が無くなる。
-  return sheet.getValuesToEnd(2, 1, P3_SNAPSHOT_META_WIDTH_)
+  //
+  // 日付列は渡して読む。渡さないと「どの列が日付か」を調べるために
+  // シートの表示形式を取りに行き、それだけで往復1回ぶん増える（実測で約31KB）。
+  // この列構成はシート作成時にこちらで決めているので、調べるまでもない。
+  return sheet.getValuesToEnd(2, 1, P3_SNAPSHOT_META_WIDTH_,
+    { dateColumns: P3_SNAPSHOT_DATE_COLUMNS_ })
     .map((row, index) => ({ row, sheetRow: index + 2 }))
     .filter(item => Number(item.row[7]) === 1);
 }
@@ -145,7 +150,9 @@ function p3CreateSnapshot_(type, scope, label, payload) {
 
 function p3CleanupSnapshots_(ss) {
   const sheet = p3EnsureInternalSheets_(ss).snapshots;
-  const values = sheet.getValuesToEnd(2, 1, P3_SNAPSHOT_META_WIDTH_);
+  // 日付列を渡す理由は p3ListSnapshotFirstRows_ と同じ（表示形式の調査を省く）
+  const values = sheet.getValuesToEnd(2, 1, P3_SNAPSHOT_META_WIDTH_,
+    { dateColumns: P3_SNAPSHOT_DATE_COLUMNS_ });
   if (values.length === 0) return 0;
   const now = Date.now();
   const firstRows = values
@@ -213,7 +220,8 @@ function listRestorePointsFromWeb(limit) {
     const ss = getSs_();
     const sheet = p3EnsureInternalSheets_(ss).snapshots;
     const max = Math.max(1, Math.min(parseInt(limit, 10) || 50, 200));
-    const values = sheet.getValuesToEnd(2, 1, P3_SNAPSHOT_META_WIDTH_);
+    const values = sheet.getValuesToEnd(2, 1, P3_SNAPSHOT_META_WIDTH_,
+      { dateColumns: P3_SNAPSHOT_DATE_COLUMNS_ });
     if (values.length === 0) return { success: true, items: [] };
     const items = values
       .filter(row => Number(row[7]) === 1)
