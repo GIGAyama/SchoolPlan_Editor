@@ -317,26 +317,51 @@
         }
 
         /* ===== フローティングメニュー ===== */
+        /* アプリ本体の丸い操作ボタンと同じ見た目にそろえる。
+           白地・青の細い輪郭・青のアイコンで、押すと青く塗りつぶす。
+           ふだんは薄く（opacity .55）して週案の邪魔をしないが、
+           指やマウスが近づいたらはっきり出す。
+
+           ⚠️ display は JavaScript が flex / none を切り替える。
+              ここで none にしておくのは、URL 未設定の初期表示で
+              一瞬だけ出てしまうのを防ぐため。 */
         #menuBtn {
             position: fixed;
             left: 12px;
             bottom: 12px;
             width: 40px;
             height: 40px;
+            padding: 0;
             border-radius: 50%;
-            border: 0;
-            background: rgba(32, 33, 36, .55);
-            color: #fff;
-            font-size: 18px;
+            border: 1.5px solid #1a73e8;
+            background: #fff;
+            color: #1461c8;
             cursor: pointer;
             z-index: 30;
-            opacity: .45;
-            transition: opacity .2s;
+            opacity: .55;
+            box-shadow: 0 1px 3px rgba(60, 64, 67, .15), 0 1px 2px rgba(60, 64, 67, .1);
+            transition: opacity .2s, background-color .2s, color .2s;
             display: none;
+            align-items: center;
+            justify-content: center;
         }
 
-        #menuBtn:hover {
+        #menuBtn svg {
+            width: 22px;
+            height: 22px;
+            display: block;
+        }
+
+        #menuBtn:hover,
+        #menuBtn:focus-visible {
             opacity: 1;
+            background: #1a73e8;
+            color: #fff;
+        }
+
+        #menuBtn:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(26, 115, 232, .35);
         }
 
         #menuPanel {
@@ -675,8 +700,20 @@
     <!-- アプリ本体 -->
     <iframe id="appFrame" title="週案エディタ" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
 
-    <!-- フローティングメニュー -->
-    <button id="menuBtn" title="メニュー" aria-label="メニュー">⚙</button>
+    <!-- フローティングメニュー
+
+         アイコンは絵文字（⚙）ではなく SVG で描く。絵文字は端末ごとに
+         形も色も違い（Windows は線画、iOS は立体的な色付き）、アプリ本体の
+         アイコンと揃わない。ここの図形はアプリ本体が使っている
+         Material Symbols Outlined の settings（設定タブと同じ字形）を
+         そのまま写したもので、字形を変えずに 24 の枠に収めてある。
+         フォントを読み込まないのは、CSP の font-src が 'self' で、
+         この入口ページに Web フォントを置いていないため。 -->
+    <button id="menuBtn" title="メニュー" aria-label="メニュー">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+            <path d="M9.7 22 9.2 18.85Q8.72 18.68 8.2 18.38Q7.68 18.07 7.28 17.75L4.33 19.1L2 15L4.7 13.02Q4.65 12.8 4.64 12.51Q4.62 12.22 4.62 12Q4.62 11.77 4.64 11.49Q4.65 11.2 4.7 10.97L2 9L4.33 4.9L7.28 6.25Q7.68 5.93 8.2 5.62Q8.72 5.32 9.2 5.18L9.7 2H14.3L14.8 5.15Q15.28 5.32 15.81 5.61Q16.35 5.9 16.73 6.25L19.68 4.9L22 9L19.3 10.92Q19.35 11.17 19.36 11.46Q19.38 11.75 19.38 12Q19.38 12.25 19.36 12.52Q19.35 12.8 19.3 13.05L22 15L19.68 19.1L16.73 17.75Q16.32 18.07 15.81 18.39Q15.3 18.7 14.8 18.85L14.3 22ZM10.9 20.5H13.1L13.45 17.7Q14.28 17.5 15.01 17.07Q15.75 16.65 16.35 16.05L19 17.2L20 15.4L17.65 13.67Q17.75 13.25 17.81 12.84Q17.88 12.42 17.88 12Q17.88 11.57 17.83 11.16Q17.78 10.75 17.65 10.32L20 8.6L19 6.8L16.35 7.95Q15.78 7.3 15.05 6.86Q14.33 6.43 13.45 6.3L13.1 3.5H10.9L10.55 6.3Q9.7 6.47 8.96 6.9Q8.22 7.32 7.65 7.95L5 6.8L4 8.6L6.35 10.32Q6.25 10.75 6.19 11.16Q6.12 11.57 6.12 12Q6.12 12.42 6.19 12.84Q6.25 13.25 6.35 13.67L4 15.4L5 17.2L7.65 16.05Q8.25 16.65 8.99 17.07Q9.73 17.5 10.55 17.7ZM12 15.25Q13.35 15.25 14.3 14.3Q15.25 13.35 15.25 12Q15.25 10.65 14.3 9.7Q13.35 8.75 12 8.75Q10.65 8.75 9.7 9.7Q8.75 10.65 8.75 12Q8.75 13.35 9.7 14.3Q10.65 15.25 12 15.25Z" />
+        </svg>
+    </button>
     <div id="menuPanel">
         <button id="reloadBtn">再読み込み</button>
         <a id="newTabLink" href="#" target="_blank" rel="noopener">新しいタブで開く（ログイン用）</a>

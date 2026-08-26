@@ -34,7 +34,7 @@ const CACHE_PREFIX = 'schoolplan-editor-shell-';
 //    手書きだったころは「リリースごとに必ず上げる」が人の仕事で、
 //    2026-08-21 に12リポジトリで同時に上げ忘れる事故が起きた。上げ忘れると
 //    古いシェルのキャッシュが掃除されず、直した内容が先生の端末に届かない。
-const APP_VERSION = 'v30796710'; /* __APP_VERSION__ */
+const APP_VERSION = 'v1e5ddb32'; /* __APP_VERSION__ */
 const CACHE_NAME = CACHE_PREFIX + APP_VERSION;
 const SHELL_ASSETS = [
   './',
