@@ -89,7 +89,10 @@
         recovery.style.display = 'none';
         welcome.style.display = 'none';
         frame.style.display = 'block';
-        menuBtn.style.display = 'block';
+        // ⚠️ flex にすること。ボタンの中身は SVG で、CSS 側は
+        //    flex の中央そろえで位置を決めている。block に戻すと
+        //    アイコンが左上に寄る。
+        menuBtn.style.display = 'flex';
     }
 
     // iframe内に表示できなかったときの案内を表示する。
