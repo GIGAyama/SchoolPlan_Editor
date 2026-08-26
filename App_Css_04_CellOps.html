@@ -68,9 +68,21 @@
         }
     }
 
-    /* 選択中の校時セルは、教科名がハンドルの下に潜り込まないよう右側を空ける */
-    .edit-mode .grid-cell.selected .period-subject-input {
+    /* ハンドルはセルの右上に出るので、その真下に来る「一番上の入力欄」だけ右を空ける。
+       選択中のセルだけ空けると、セルを選ぶたびに文字がずれて読みにくいので、
+       編集モードの間はずっと空けておく。
+       （このプロジェクトに box-sizing のグローバル指定は無いので個別に添える） */
+    .edit-mode .grid-cell .period-subject-input,
+    .edit-mode .grid-cell > textarea:not([data-period]) {
         padding-right: 22px;
+        box-sizing: border-box;
+    }
+
+    /* 校時セルの「空き時間」表示。セル内の「空」ボタンを廃したので、
+       教科名の帯そのものを塗って状態を示す（横幅を1pxも使わない）。 */
+    .edit-mode .grid-cell.free-slot .period-subject-input {
+        background: var(--primary-light);
+        box-shadow: inset 3px 0 0 var(--primary);
     }
 
     /* アイコンフォントの項目と文字（↩ / ↪）の項目でラベル位置をそろえる */

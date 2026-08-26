@@ -121,6 +121,8 @@
                     cell.addEventListener('drop', handleDrop);
                     cell.addEventListener('dragend', handleDragEnd);
                     if (isEdit) {
+                        // 「空」ボタンを廃したので、空き時間かどうかはセルの見た目で示す
+                        if (isFreeContent(p.content)) cell.classList.add('free-slot');
                         cell.innerHTML = renderPeriodEdit(pIdx, i, p);
                     } else {
                         cell.innerHTML = renderPeriodView(p);
@@ -137,28 +139,8 @@
                         ta.style.height = 'auto';
                         ta.addEventListener('input', function () { autoResizeTextarea(this); });
                         cell.appendChild(ta);
-                        // リンク挿入ボタン
-                        var linkBtn = document.createElement('button');
-                        linkBtn.type = 'button';
-                        linkBtn.className = 'link-insert-btn';
-                        linkBtn.title = 'リンクを挿入';
-                        linkBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">link</span>';
-                        (function(textarea) {
-                            linkBtn.addEventListener('click', function(e) { e.stopPropagation(); openLinkInsertDialog(textarea); });
-                        })(ta);
-                        cell.appendChild(linkBtn);
-                        // タスク選択ボタン（朝学習・中休み・昼休み・放課後などの空き時間向け）
-                        if (['preclass', 'morning', 'recess1', 'recess2', 'afterschool'].indexOf(rowDef.key) >= 0) {
-                            var taskBtn = document.createElement('button');
-                            taskBtn.type = 'button';
-                            taskBtn.className = 'field-task-btn';
-                            taskBtn.title = 'タスクから選択（複数選択可）';
-                            taskBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">checklist</span>';
-                            (function(dayIndex, fieldKey) {
-                                taskBtn.addEventListener('click', function(e) { e.stopPropagation(); openTaskPickerForField(dayIndex, fieldKey); });
-                            })(i, rowDef.key);
-                            cell.appendChild(taskBtn);
-                        }
+                        // リンク挿入・タスク選択はセル上に置かず「⋮」/ 右クリックのメニューへ集約する
+                        // （常時表示のボタンが入力中の文字を隠していたため）
                     } else {
                         var escaped = escHtml(val);
                         var linked = linkify(escaped.replace(/\n/g, '<br>'));
@@ -197,7 +179,7 @@
                     if (isEdit && hasTextSelection(e.target)) return;
                     e.preventDefault();
                     selectCell(i, rowIdx, rowDef.key, { keepFocus: isEdit });
-                    showContextMenu(e, i, ctxPeriod);
+                    showContextMenu(e, i, ctxPeriod, rowDef.key);
                 });
                 // タッチ端末には右クリックが無いため、閲覧モードでは長押しを代替にする。
                 // 編集モードの長押しは文字選択・標準の貼り付けに使うので奪わず、
@@ -261,23 +243,12 @@
         return '<input type="text" class="period-subject-input" placeholder="教科" value="' + escAttr(p.subject) + '" '
             + 'data-field="subject" data-day="' + dayIdx + '" data-period="' + pIdx + '" '
             + 'oninput="onSubjectInput(this)" onfocus="showSuggest(this)" onblur="hideSuggest(this)">'
-            + '<div style="display:flex;align-items:center;gap:2px;">'
             + '<input type="text" placeholder="単元名" value="' + escAttr(p.unit) + '" '
-            + 'data-field="unit" data-day="' + dayIdx + '" data-period="' + pIdx + '" style="flex:1;min-width:0;">'
-            + '<button type="button" class="unit-picker-btn" onclick="openUnitPicker(' + dayIdx + ',' + pIdx + ')" '
-            + 'title="単元マスタから選択（教科名が空の時間・空き時間はタスクから選択）" style="flex-shrink:0;padding:1px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;line-height:1;">'
-            + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">list_alt</span></button>'
-            + '<button type="button" class="free-slot-btn' + (isFreeContent(p.content) ? ' free-slot-active' : '') + '" onclick="toggleFreeSlot(' + dayIdx + ',' + pIdx + ',this)" '
-            + 'title="空き時間（別教員担当）に設定。教科の内容とタスクを分けて入力できます" style="flex-shrink:0;padding:1px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);cursor:pointer;line-height:1;font-size:0.62rem;">空</button></div>'
-            + '<div style="position:relative;">'
+            + 'data-field="unit" data-day="' + dayIdx + '" data-period="' + pIdx + '">'
             + '<textarea rows="2" placeholder="学習内容" style="font-size:0.72rem;min-height:36px;height:auto;" '
             + 'data-field="content" data-day="' + dayIdx + '" data-period="' + pIdx + '" '
             + 'id="content-' + dayIdx + '-' + pIdx + '" '
             + 'oninput="autoResizeTextarea(this)">' + escHtml(p.content) + '</textarea>'
-            + '<button type="button" class="link-insert-btn period-link-btn" title="リンクを挿入" '
-            + 'onclick="event.stopPropagation(); openLinkInsertDialog(document.getElementById(\'content-' + dayIdx + '-' + pIdx + '\'))">'
-            + '<span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle;">link</span></button>'
-            + '</div>'
             + '<div class="suggest-box" id="suggest-' + dayIdx + '-' + pIdx + '" style="display:none;"></div>';
     }
 
@@ -599,19 +570,21 @@
      * 校時セルの「空き時間」設定をトグルします。
      * ONにすると内容欄に区切りマーカーを挿入し、教科内容とタスクを分割入力できるようにします。
      */
-    function toggleFreeSlot(dayIdx, pIdx, btn) {
+    function toggleFreeSlot(dayIdx, pIdx) {
         var contentEl = document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
         if (!contentEl) return;
+        // 状態はセルの見た目（教科名の帯）で示す。セル内の「空」ボタンは廃止した。
+        var cell = contentEl.closest ? contentEl.closest('.grid-cell') : null;
         if (isFreeContent(contentEl.value)) {
             // 空き時間を解除：区切りマーカーを除去して授業内容とタスクを結合
             var parts = splitFreeContent(contentEl.value);
             contentEl.value = [parts.subjectPart, parts.taskPart].filter(function (s) { return s.trim(); }).join('\n');
-            if (btn) btn.classList.remove('free-slot-active');
+            if (cell) cell.classList.remove('free-slot');
         } else {
             // 空き時間に設定：末尾に区切りマーカーを追加
             var existing = contentEl.value.replace(/\s+$/, '');
             contentEl.value = (existing ? existing + '\n' : '') + FREE_TASK_DIVIDER + '\n';
-            if (btn) btn.classList.add('free-slot-active');
+            if (cell) cell.classList.add('free-slot');
         }
         autoResizeTextarea(contentEl);
     }
@@ -653,6 +626,10 @@
         }
         withTasksLoaded(function () { showTaskPickerModal(contentEl); });
     }
+
+    // タスクから直接転記できる日課レベルの行（登校前・朝学習・中休み・昼休み・放課後）。
+    // セル操作メニューに「タスクから選択」を出すかどうかの判定にも使う。
+    var TASK_FIELD_KEYS = ['preclass', 'morning', 'recess1', 'recess2', 'afterschool'];
 
     /**
      * 日課レベルのセル（朝学習・中休み・昼休み・放課後）の入力欄にタスクを転記します。
@@ -875,7 +852,7 @@
             label.textContent = '編集モード';
             if (hint) {
                 hint.style.display = '';
-                hint.textContent = '右クリック / ⋮ でコピー・ペースト';
+                hint.textContent = 'セルの ⋮ / 右クリックでリンク・単元・コピー';
             }
             editBtn.style.display = 'none';
             if (pdfBtn) pdfBtn.style.display = 'none';
@@ -1488,8 +1465,10 @@
 
     /**
      * 編集モードで選択中のセルに「セル操作」ハンドル（⋮）を1つだけ表示します。
+     * セル上に常時出していたボタン（リンク挿入・タスク選択・単元マスタ・空き時間）は
+     * 入力中の文字を隠してしまうため全廃し、その入口をこのハンドルへ一本化した。
      * 編集モードでは右クリック＝文字メニュー・長押し＝文字選択が本来の役割なので、
-     * タッチ端末からでもコピー / ペースト / クリアへ確実にたどり着ける入口を用意する。
+     * タッチ端末からでもここが唯一の入口になる。
      * 選択中の1セルにしか出ないため、編集画面が散らからない。
      */
     function updateCellActionHandle(cell) {
@@ -1501,15 +1480,9 @@
         btn.id = 'cellActionHandle';
         btn.className = 'cell-action-handle';
         btn.tabIndex = -1;
-        btn.title = 'このセルの操作（コピー / ペースト / クリア）';
-        btn.setAttribute('aria-label', 'このセルの操作');
+        btn.title = 'このセルのメニュー（リンク挿入 / 単元・タスク選択 / コピー / ペースト / クリア）';
+        btn.setAttribute('aria-label', 'このセルのメニュー');
         btn.textContent = '⋮';
-        // 日課・宿題などの行はセル右上に既存ボタン（リンク挿入・タスク選択）が並ぶ。
-        // その数だけ左へ寄せて重ならないようにする（ボタン1つあたり 14px のアイコン＋余白で約24px）。
-        var offset = 1;
-        if (cell.querySelector(':scope > .link-insert-btn')) offset += 24;
-        if (cell.querySelector(':scope > .field-task-btn')) offset += 24;
-        btn.style.right = offset + 'px';
         // 入力中のフォーカスとカーソル位置を奪わない
         btn.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
         btn.addEventListener('click', function (ev) {
@@ -1535,7 +1508,7 @@
         showContextMenu({
             pageX: r.left + window.pageXOffset,
             pageY: r.bottom + window.pageYOffset
-        }, s.day, pIdx);
+        }, s.day, pIdx, s.key);
     }
 
     // ===== Phase B: セル選択 =====
@@ -1799,25 +1772,56 @@
     }
 
     /**
+     * セルの入力欄のうち、リンク挿入の対象になるものを返します。
+     * 校時セルは学習内容欄、それ以外の行はその行の入力欄。
+     */
+    function cellLinkTarget(dayIdx, pIdx, rowKey) {
+        var isPeriod = (pIdx !== null && pIdx !== undefined && !isNaN(pIdx));
+        if (isPeriod) {
+            return document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]');
+        }
+        if (!rowKey) return null;
+        return document.querySelector('[data-field="' + rowKey + '"][data-day="' + dayIdx + '"]:not([data-period])');
+    }
+
+    /**
      * セルのコンテキストメニューを表示します。
      * 閲覧モード・編集モードのどちらからでも同じ操作を出す（編集モードでは
      * 右クリックのほか、選択中セルの「⋮」ハンドルからも開ける）。
+     * 編集モードでは、以前セル上に常時出していたボタン（リンク挿入・タスク選択・
+     * 単元マスタ・空き時間）もここに集約する。入力中の文字がボタンに隠れないようにするため。
      * @param {number|null} pIdx 校時セルなら校時番号、それ以外の行なら null
+     * @param {string} [rowKey] 行のキー（省略時は選択中セルから引く）
      */
-    function showContextMenu(e, dayIdx, pIdx) {
+    function showContextMenu(e, dayIdx, pIdx, rowKey) {
         hideContextMenu();
         // 別の週・学級から持ち越した履歴は、ここで捨ててから有効無効を決める
         ensureHistoryScope();
         var isPeriod = (pIdx !== null && pIdx !== undefined && !isNaN(pIdx));
+        if (!rowKey && STATE.selectedCell) rowKey = STATE.selectedCell.key;
         var menu = document.createElement('div');
         menu.className = 'context-menu';
         menu.id = 'uxContextMenu';
-        var items = [
+        var items = [];
+        // セル内ボタンの代わりの項目。よく使うので、コピー / ペーストより上に置く。
+        if (STATE.editMode) {
+            if (isPeriod) {
+                items.push(ctxItem('unit', 'list_alt', '単元マスタから選択', false));
+                var contentEl = cellLinkTarget(dayIdx, pIdx, rowKey);
+                var isFree = !!contentEl && isFreeContent(contentEl.value);
+                items.push(ctxItem('free', isFree ? '✓' : '', isFree ? '空き時間を解除' : '空き時間にする（別教員担当）', false));
+            } else if (TASK_FIELD_KEYS.indexOf(rowKey) >= 0) {
+                items.push(ctxItem('task', 'checklist', 'タスクから選択', false));
+            }
+            items.push(ctxItem('link', 'link', 'リンクを挿入', false));
+            items.push('<div class="ctx-sep"></div>');
+        }
+        items = items.concat([
             ctxItem('copy', 'content_copy', isPeriod ? 'コマをコピー' : 'コピー', false),
             ctxItem('paste', 'content_paste', isPeriod ? 'コマをペースト' : 'ペースト', !STATE.clipboard),
             '<div class="ctx-sep"></div>',
             ctxItem('clear', 'delete', isPeriod ? 'このコマをクリア' : 'このセルをクリア', false)
-        ];
+        ]);
         if (isPeriod) {
             items.push(ctxItem('clearDay', 'delete_sweep', 'この日の全コマをクリア', false));
             items.push(ctxItem('clearPeriod', 'playlist_remove', 'この校時を全曜日クリア', false));
@@ -1845,7 +1849,7 @@
             var item = ev.target.closest('.ctx-item');
             if (!item || item.classList.contains('disabled')) return;
             var action = item.dataset.action;
-            handleContextAction(action, dayIdx, pIdx);
+            handleContextAction(action, dayIdx, pIdx, rowKey);
             hideContextMenu();
         });
 
@@ -1860,10 +1864,30 @@
         if (m) m.remove();
     }
 
-    function handleContextAction(action, dayIdx, pIdx) {
+    function handleContextAction(action, dayIdx, pIdx, rowKey) {
         if (!STATE.weekData || !STATE.weekData.days) return;
         var isPeriod = (pIdx !== null && pIdx !== undefined && !isNaN(pIdx));
+        if (!rowKey && STATE.selectedCell) rowKey = STATE.selectedCell.key;
         switch (action) {
+            // ここから4つは、以前セル上に常時出していたボタンの移設先。
+            // 入力欄を直接書き換える／ダイアログを開くだけなので、再描画してはいけない
+            // （rerenderGridPreservingFocus() を呼ぶと入力途中の内容が作り直される）。
+            case 'link':
+                var linkEl = cellLinkTarget(dayIdx, pIdx, rowKey);
+                if (linkEl) openLinkInsertDialog(linkEl);
+                break;
+            case 'task':
+                if (isPeriod) break;
+                openTaskPickerForField(dayIdx, rowKey);
+                break;
+            case 'unit':
+                if (!isPeriod) break;
+                openUnitPicker(dayIdx, pIdx);
+                break;
+            case 'free':
+                if (!isPeriod) break;
+                toggleFreeSlot(dayIdx, pIdx);
+                break;
             case 'copy':
                 copyCellData();
                 break;
@@ -2069,7 +2093,7 @@
                 + '<tr><td style="padding:4px 6px">ダブルタップ<br>（ダブルクリック）</td><td>そのセルの編集を開始（閲覧モード）</td></tr>'
                 + '<tr><td style="padding:4px 6px">右クリック</td><td>セル操作メニュー（コピー / ペースト / クリア / 元に戻す）<br><span style="color:#999;font-size:0.78rem">閲覧モード・編集モードのどちらでも使えます。編集モードで文字を選択している時はブラウザ標準のメニューになります</span></td></tr>'
                 + '<tr><td style="padding:4px 6px">コマを長押し</td><td>セル操作メニュー（閲覧モード）</td></tr>'
-                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>⋮</kbd>（選択中セルの右上）</td><td>セル操作メニュー（編集モード）<br><span style="color:#999;font-size:0.78rem">タブレットなど右クリックできない端末はここから開きます</span></td></tr>'
+                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>⋮</kbd>（選択中セルの右上）</td><td>セル操作メニュー（編集モード）<br><span style="color:#999;font-size:0.78rem">リンク挿入・単元マスタから選択・タスクから選択・空き時間の切替も、すべてこのメニューにあります。セルの上にボタンを出すと入力中の文字が隠れてしまうため、⋮ ひとつにまとめました</span></td></tr>'
                 + '<tr><td colspan="2" style="padding:8px 6px;color:#999;font-size:0.78rem">💡 ドラッグ＆ドロップによるコマの入れ替えは、閲覧モード・編集モードのどちらでも使えます</td></tr>'
                 + '</table>',
             width: 520,
