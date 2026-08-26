@@ -314,6 +314,13 @@
                     <span class="mode-dot view-dot"></span>
                     <span id="modeLabel">閲覧モード</span>
                     <span id="modeHint" class="mode-hint" style="display:none;"></span>
+                    <!-- 保存の状態。閲覧モードのセル操作は保存ボタンを通らないため、
+                         自動保存が走っていることが分かる場所がここしか無い。
+                         文言とアイコンは refreshSaveStatus()（App_Js_02_Plan）が差し替える。 -->
+                    <span id="saveStatus" class="save-status" role="status" aria-live="polite"
+                        style="display:none;"><span class="material-symbols-outlined save-status-icon"
+                            aria-hidden="true">progress_activity</span><span
+                            id="saveStatusText" class="save-status-text">保存中...</span></span>
                 </div>
                 <div class="toolbar-actions">
                     <button class="btn btn-outline d-flex align-items-center gap-1" id="editToggleBtn"

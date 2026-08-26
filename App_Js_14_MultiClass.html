@@ -320,6 +320,12 @@
         if (!data || !data.success) return false;
         var force = !!(opts && opts.force);
 
+        // サーバが持っている内容として控えておく（同じ内容の自動保存を省くために使う）。
+        // リビジョンとセットで持つので、この応答が古くても誤った省略にはならない。
+        if (data.mondayDateStr && typeof rememberServerWeekContent === 'function') {
+            rememberServerWeekContent(p2WeekCacheKey(data.mondayDateStr), data.revision, data.days);
+        }
+
         // 閲覧モードのセル操作（コマの移動・クリア・ペースト・元に戻す）は、保存が
         // サーバへ届くまで手元の STATE.weekData.days にしか無い。表示中の週について
         // その変更が未確定のあいだは、読み込み結果を当ててはいけない。
@@ -558,6 +564,8 @@
      */
     function p2InvalidateWeekCache(reloadCurrentWeek) {
         if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
+        // サーバ側を直接書き換えたあとなので、控えている「サーバが持っている内容」も捨てる
+        if (typeof forgetServerWeekContent === 'function') forgetServerWeekContent();
         // 週の内容が変われば単元の進捗も変わる（p2UpdateCurrentWeekCache と同じ理由）
         STATE.unitProgress = null;
         STATE.unitProgressLoading = false;
@@ -632,13 +640,14 @@
 
         if (!beginSaveRequest()) { whenSaveIdle(function () { autoSaveAndThen(callback, retrying); }); return; }
         _autoSaving = true;
+        var cacheKey = p2WeekCacheKey(displayedWeekMondayStr());
         google.script.run
             .withSuccessHandler(function (result) {
                 _autoSaving = false;
                 endSaveRequest();
                 p2LogTiming('自動保存（週移動前）', result);
                 if (result.success) {
-                    adoptSavedWeekDays(result, days);
+                    adoptSavedWeekDays(result, days, null, null, cacheKey);
                     STATE.weekData.revision = result.revision;
                     // 往復のあいだに打たれた文字は days に入っていない。ここで編集モードを
                     // 抜けて描き直すとその分が消えるので、もう一度だけ保存してから進む。
@@ -649,20 +658,27 @@
                     STATE.editMode = false;
                     updateEditUI();
                     p2UpdateCurrentWeekCache();
+                    markSaveOutcome('saved', '自動保存しました');
                     showToast('success', '自動保存しました');
                     callback();
                 } else if (result.conflict) {
+                    forgetServerWeekContent(cacheKey);
+                    markSaveOutcome('error', '保存の競合');
                     handleSaveConflict(result, days, function (revision) {
                         STATE.weekData.revision = revision;
                         autoSaveAndThen(callback);
                     });
                 } else {
+                    forgetServerWeekContent(cacheKey);
+                    markSaveOutcome('error', '自動保存できませんでした');
                     showToast('error', '自動保存失敗: ' + result.error + ' 手動で保存してください。');
                 }
             })
             .withFailureHandler(function (e) {
                 _autoSaving = false;
                 endSaveRequest();
+                forgetServerWeekContent(cacheKey);
+                markSaveOutcome('error', '自動保存できませんでした');
                 showToast('error', '自動保存エラー: ' + e.message + ' 手動で保存してください。');
             })
             .saveWeeklyPlanDataV2(displayedWeekMondayStr(), days, STATE.weekData.revision);
@@ -685,6 +701,7 @@
         // 保存中もグリッドは操作できる。応答を待つあいだの右クリックメニューのセル操作を
         // 保存済みの内容で消してしまわないよう、要求時点の書き換え回数を控えておく。
         var mutationSeq = weekDaysMutationSeq();
+        var cacheKey = p2WeekCacheKey(displayedWeekMondayStr());
 
         google.script.run
             .withSuccessHandler(function (result) {
@@ -693,19 +710,24 @@
                 btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 p2LogTiming('週案の保存', result);
                 if (result.success) {
-                    adoptSavedWeekDays(result, days, null, mutationSeq);
+                    adoptSavedWeekDays(result, days, null, mutationSeq, cacheKey);
                     STATE.weekData.revision = result.revision;
                     p2UpdateCurrentWeekCache();
                     cancelEdit();
+                    markSaveOutcome('saved');
                     showToast('success', result.message);
                     // 保存に間に合わなかったセル操作は、閲覧モードへ戻ってから保存し直す
                     if (weekDaysMutationSeq() !== mutationSeq) persistViewMutation();
                 } else if (result.conflict) {
+                    forgetServerWeekContent(cacheKey);
+                    markSaveOutcome('error', '保存の競合');
                     handleSaveConflict(result, days, function (revision) {
                         STATE.weekData.revision = revision;
                         saveWeeklyPlan();
                     });
                 } else {
+                    forgetServerWeekContent(cacheKey);
+                    markSaveOutcome('error');
                     showToast('error', '保存失敗: ' + result.error);
                 }
             })
@@ -713,6 +735,8 @@
                 endSaveRequest();
                 btn.disabled = false;
                 btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
+                forgetServerWeekContent(cacheKey);
+                markSaveOutcome('error', '保存できませんでした（通信エラー）');
                 showToast('error', '通信エラー: ' + e.message);
             })
             .saveWeeklyPlanDataV2(displayedWeekMondayStr(), days, STATE.weekData.revision);
@@ -741,6 +765,14 @@
 
         function runViewSave() {
             if (!weekData.days) return;
+            // 送る中身がサーバの持っているものと同じなら、往復ごと省く。
+            // （空のコマのクリア・元に戻す→やり直す・コマを元の場所へ戻す、で起きる）
+            if (matchesServerWeekContent(cacheKey, weekData)) {
+                markViewWeekSaved(cacheKey, weekDaysMutationSeq());
+                p2CacheWeekByKey(cacheKey, mondayStr, weekData);
+                markSaveOutcome('saved');
+                return;
+            }
             if (!beginSaveRequest()) { queueViewSave(cacheKey, runViewSave); return; }
             var mutationSeq = weekDaysMutationSeq();
             var days = JSON.parse(JSON.stringify(weekData.days));
@@ -755,23 +787,35 @@
                         // 週を移動していたら、この応答はもう画面上の週のものではない。
                         var sameWeek = (STATE.weekData === weekData);
                         var normalized = (sameWeek && !STATE.editMode)
-                            ? adoptSavedWeekDays(result, days, weekData, mutationSeq)
+                            ? adoptSavedWeekDays(result, days, weekData, mutationSeq, cacheKey)
                             : false;
+                        // 取り込まない回でも、サーバが持っている内容は控えておく
+                        if (!(sameWeek && !STATE.editMode)) {
+                            rememberServerWeekContent(cacheKey, result.revision,
+                                (result.days && result.days.length) ? result.days : days);
+                        }
                         // 保存が通れば時数・単元進捗のキャッシュは作り直しが要る（編集中でも同じ）
                         if (sameWeek) p2UpdateCurrentWeekCache();
                         else p2CacheWeekByKey(cacheKey, mondayStr, weekData);
                         if (normalized) renderWeekGrid(weekData.days);
+                        markSaveOutcome('saved');
                     } else if (result.conflict) {
+                        forgetServerWeekContent(cacheKey);
+                        markSaveOutcome('error', '保存の競合');
                         handleSaveConflict(result, days, function (revision) {
                             weekData.revision = revision;
                             runViewSave();
                         });
                     } else {
+                        forgetServerWeekContent(cacheKey);
+                        markSaveOutcome('error', '変更を保存できませんでした');
                         showToast('error', '変更の保存に失敗: ' + result.error);
                     }
                 })
                 .withFailureHandler(function (e) {
                     endSaveRequest();
+                    forgetServerWeekContent(cacheKey);
+                    markSaveOutcome('error', '変更を保存できませんでした（通信エラー）');
                     showToast('error', '変更の保存に失敗（通信エラー）: ' + e.message);
                 })
                 .saveWeeklyPlanDataV2(mondayStr, days, weekData.revision, expectedSheet);

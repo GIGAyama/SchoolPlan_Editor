@@ -403,6 +403,61 @@
         animation: pulse-green 1.5s ease-in-out infinite;
     }
 
+    /* ===== 保存の状態表示 =====
+       手動保存はボタンが「保存中...」に変わるので分かるが、閲覧モードのセル操作
+       （D&D・クリア・ペースト・元に戻す）の自動保存はボタンを通らない。
+       保存はGASの往復で数秒かかるため、その間なにも起きていないように見えていた。
+       編集モードの表示の隣に置き、どちらの保存でもここに出す。 */
+    .save-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--bg-card);
+        font-size: 0.75rem;
+        line-height: 1.5;
+        white-space: nowrap;
+    }
+
+    .save-status-icon {
+        font-size: 0.95rem;
+        line-height: 1;
+    }
+
+    .save-status.is-saving {
+        color: var(--primary-text);
+        border-color: var(--primary);
+    }
+
+    .save-status.is-saving .save-status-icon {
+        animation: save-status-spin 1.1s linear infinite;
+    }
+
+    .save-status.is-saved {
+        color: var(--secondary-text);
+        border-color: var(--secondary);
+    }
+
+    .save-status.is-error {
+        color: var(--danger-text);
+        border-color: var(--danger);
+    }
+
+    @keyframes save-status-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    /* 動きを好まない環境では回さない（出ていること自体は色と文言で分かる） */
+    @media (prefers-reduced-motion: reduce) {
+        .save-status.is-saving .save-status-icon {
+            animation: none;
+        }
+    }
+
     .toolbar-actions {
         display: flex;
         gap: 8px;
