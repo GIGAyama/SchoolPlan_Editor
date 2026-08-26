@@ -16,19 +16,149 @@
                         + '<p>' + escHtml(res.error) + '</p>'
                         + (res.notConfigured ? '<button class="btn btn-outline btn-sm" onclick="switchView(\'settings\')">設定タブを開く</button>' : '')
                         + '</div>';
+                    renderPlanEventPdfPanel(res.error, res.notConfigured);
                     return;
                 }
                 STATE.eventLibraryLoaded = true;
                 STATE.eventLibraryGroups = res.groups || [];
                 renderEventPdfList();
+                renderPlanEventPdfPanel();
                 if (isManualReload) showToast('success', 'PDF一覧を更新しました。');
             })
             .withFailureHandler(function (e) {
                 STATE.eventLibraryLoading = false;
                 listEl.innerHTML = '<div class="events-list-message"><span class="material-symbols-outlined">error</span>'
                     + '<p>読み込みに失敗しました: ' + escHtml(e.message) + '</p></div>';
+                renderPlanEventPdfPanel('読み込みに失敗しました: ' + e.message);
             })
             .getEventPdfLibraryForWebApp();
+    }
+
+    // ===== 週案サイドパネルの行事予定PDF =====
+    // 行事予定タブと同じ一覧を使い、週案を書きながら横で開けるようにする。
+    // どのPDFを開いていたかは端末に覚えさせる（毎回選び直さなくて済むように）。
+
+    /** サイドパネルを行事予定に切り替えたとき、一覧がまだなら取りに行きます。 */
+    function ensurePlanEventPdfReady() {
+        if (STATE.eventLibraryLoaded) { renderPlanEventPdfPanel(); return; }
+        if (STATE.eventLibraryLoading) return;
+        loadEventPdfLibrary(false);
+    }
+
+    /** 全グループのPDFを、学校名つきの平らな配列にして返します。 */
+    function planEventPdfFiles_() {
+        var files = [];
+        (STATE.eventLibraryGroups || []).forEach(function (g) {
+            (g.files || []).forEach(function (f) {
+                files.push({ id: f.id, name: f.name, school: g.school || '' });
+            });
+        });
+        return files;
+    }
+
+    /**
+     * サイドパネルのPDF選択欄と本体を描き直します。
+     * @param {string} [errorMessage] 一覧が取れなかったときの理由
+     * @param {boolean} [notConfigured] 行事予定フォルダが未設定のとき true
+     */
+    function renderPlanEventPdfPanel(errorMessage, notConfigured) {
+        var sel = document.getElementById('planEventPdfSelect');
+        var body = document.getElementById('planEventPdfBody');
+        if (!sel || !body) return;
+
+        if (errorMessage) {
+            sel.innerHTML = '<option value="">選択できるPDFがありません</option>';
+            sel.disabled = true;
+            body.innerHTML = '<div class="plan-event-message">'
+                + '<span class="material-symbols-outlined">folder_off</span>'
+                + '<p>' + escHtml(errorMessage) + '</p>'
+                + (notConfigured
+                    ? '<button class="btn btn-outline btn-sm" onclick="switchView(\'settings\')">設定タブを開く</button>'
+                    : '')
+                + '</div>';
+            updatePlanEventPdfOpenLink_(null);
+            return;
+        }
+
+        var files = planEventPdfFiles_();
+        if (files.length === 0) {
+            sel.innerHTML = '<option value="">登録されたPDFがありません</option>';
+            sel.disabled = true;
+            body.innerHTML = '<div class="plan-event-message">'
+                + '<span class="material-symbols-outlined">picture_as_pdf</span>'
+                + '<p>行事予定PDFがまだありません。</p>'
+                + '<button class="btn btn-outline btn-sm" onclick="switchView(\'events\')">行事予定タブで追加する</button>'
+                + '</div>';
+            updatePlanEventPdfOpenLink_(null);
+            return;
+        }
+
+        // 前に開いていたPDFが今もあればそれを、無ければ先頭を開く
+        var stored = STATE.planEventPdfId;
+        if (stored === null || stored === undefined) {
+            try { stored = localStorage.getItem('planEventPdfId'); } catch (e) { stored = null; }
+        }
+        var current = files.filter(function (f) { return f.id === stored; })[0] || files[0];
+        STATE.planEventPdfId = current.id;
+
+        // 学校ごとにまとめて選びやすくする（学校未指定のグループは見出しを付けない）
+        var schools = [];
+        files.forEach(function (f) { if (schools.indexOf(f.school) < 0) schools.push(f.school); });
+        var optionHtml = function (f) {
+            return '<option value="' + escAttr(f.id) + '"'
+                + (f.id === current.id ? ' selected' : '') + '>' + escHtml(f.name) + '</option>';
+        };
+        var html = '';
+        if (schools.length === 1 && !schools[0]) {
+            html = files.map(optionHtml).join('');
+        } else {
+            schools.forEach(function (school) {
+                var group = files.filter(function (f) { return f.school === school; });
+                if (group.length === 0) return;
+                html += '<optgroup label="' + escAttr(school || '共通・学校未指定') + '">'
+                    + group.map(optionHtml).join('') + '</optgroup>';
+            });
+        }
+        sel.innerHTML = html;
+        sel.disabled = false;
+        showPlanEventPdf_(current.id, current.name);
+    }
+
+    /** サイドパネルのPDF選択欄が変わったとき。 */
+    function onPlanEventPdfSelect(fileId) {
+        if (!fileId) return;
+        var file = planEventPdfFiles_().filter(function (f) { return f.id === fileId; })[0];
+        if (!file) return;
+        STATE.planEventPdfId = fileId;
+        try { localStorage.setItem('planEventPdfId', fileId); } catch (e) {}
+        showPlanEventPdf_(file.id, file.name);
+    }
+
+    /** サイドパネルにDriveのプレビューを埋め込みます。 */
+    function showPlanEventPdf_(fileId, fileName) {
+        var body = document.getElementById('planEventPdfBody');
+        if (!body) return;
+        try { localStorage.setItem('planEventPdfId', fileId); } catch (e) {}
+        // 同じPDFを出し直すとプレビューが読み込み直しになり、開いていたページも戻ってしまう。
+        // タブを行き来しただけのときは、いま出ているものをそのままにする。
+        var shown = body.querySelector('iframe');
+        if (shown && shown.src.indexOf('/file/d/' + encodeURIComponent(fileId) + '/') >= 0) {
+            updatePlanEventPdfOpenLink_(fileId);
+            return;
+        }
+        body.innerHTML = '<iframe class="plan-event-frame" title="' + escAttr(fileName || '行事予定PDF') + '"'
+            + ' src="https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/preview"'
+            + ' allow="autoplay"></iframe>';
+        updatePlanEventPdfOpenLink_(fileId);
+    }
+
+    /** 「新しいタブで開く」の行き先を差し替えます（PDFが無いときは隠す）。 */
+    function updatePlanEventPdfOpenLink_(fileId) {
+        var link = document.getElementById('planEventPdfOpenLink');
+        if (!link) return;
+        if (!fileId) { link.style.display = 'none'; link.removeAttribute('href'); return; }
+        link.style.display = '';
+        link.href = 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/view';
     }
 
     function renderEventPdfList() {

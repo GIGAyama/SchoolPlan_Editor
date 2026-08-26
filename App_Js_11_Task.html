@@ -419,7 +419,9 @@
             var overdueLabel = isOverdue ? ' <span class="st-overdue-label">期限切れ</span>' : '';
 
             return `
-                <div class="sidebar-task-card${cardClass}${prioClass}">
+                <div class="sidebar-task-card${cardClass}${prioClass}" draggable="true"
+                    data-task-id="${escHtmlAttr(t.id)}"
+                    title="週案のセルへドラッグすると、そのセルに書き込めます">
                     <div class="st-checkbox-wrapper">
                         ${taskStatusBtnHtml(t, true)}
                     </div>
@@ -429,10 +431,51 @@
                             期日: ${dateDisplay}${overdueLabel}${statusLabel}
                         </div>
                     </div>
+                    <button type="button" class="st-insert-btn"
+                        onclick="insertTaskIntoSelectedCell('${escHtmlAttr(t.id)}')"
+                        title="選んでいる週案のセルへ書き込む" aria-label="選んでいる週案のセルへ書き込む">
+                        <span class="material-symbols-outlined">note_add</span>
+                    </button>
                 </div>
             `;
         }).join('');
+
+        // 使い方が分かるように、一覧の先頭に一言だけ添える。
+        // 一度でも週案へ書き込めた人には、もう要らないので出さない。
+        if (!taskInsertLearned()) {
+            container.innerHTML = '<div class="sidebar-task-hint">'
+                + 'カードを週案のセルへドラッグするか、セルを選んでカードの書き込みボタンを押すと記入できます。'
+                + '</div>' + container.innerHTML;
+        }
     }
+
+    /** この端末で、タスクを週案へ書き込んだことがあるか。 */
+    function taskInsertLearned() {
+        try { return localStorage.getItem('planTaskInsertLearned') === '1'; } catch (e) { return false; }
+    }
+
+    // タスクカードのドラッグ（週案のセルへ運ぶ）。カードは描き直されるので、
+    // 個々のカードではなく document 側で一度だけ受ける。
+    document.addEventListener('dragstart', function (e) {
+        var card = e.target.closest && e.target.closest('.sidebar-task-card[data-task-id]');
+        if (!card) return;
+        STATE.dragTaskId = card.getAttribute('data-task-id');
+        card.classList.add('st-dragging');
+        try {
+            e.dataTransfer.effectAllowed = 'copy';
+            // 文字として落とされた場合の中身（週案の外へ落としたときの保険）
+            var titleEl = card.querySelector('.st-title');
+            e.dataTransfer.setData('text/plain', titleEl ? titleEl.textContent : '');
+        } catch (err) { /* 一部ブラウザで setData が使えなくても、運ぶこと自体はできる */ }
+    });
+
+    document.addEventListener('dragend', function (e) {
+        var card = e.target.closest && e.target.closest('.sidebar-task-card');
+        if (card) card.classList.remove('st-dragging');
+        if (!STATE.dragTaskId) return;
+        STATE.dragTaskId = null;
+        if (typeof clearGridDropHighlights === 'function') clearGridDropHighlights();
+    });
 
     // ===== 個別タスクステータス操作 =====
 

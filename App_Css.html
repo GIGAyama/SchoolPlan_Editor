@@ -488,10 +488,116 @@
     }
 
     .weekly-task-sidebar.collapsed .weekly-task-sidebar-title,
+    .weekly-task-sidebar.collapsed .weekly-task-sidebar-tabs,
     .weekly-task-sidebar.collapsed .weekly-task-sidebar-spacer,
     .weekly-task-sidebar.collapsed .weekly-task-add-btn,
     .weekly-task-sidebar.collapsed .weekly-task-sidebar-content {
+        display: none !important;
+    }
+
+    /* 表示するものを切り替えるタブ（今週のタスク／行事予定PDF） */
+    .weekly-task-sidebar-tabs {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        gap: 2px;
+        background: var(--surface-3);
+        border-radius: var(--radius-sm);
+        padding: 2px;
+    }
+
+    .wts-tab {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 4px 6px;
+        border: none;
+        background: transparent;
+        border-radius: calc(var(--radius-sm) - 2px);
+        font: inherit;
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: var(--text-sub);
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .wts-tab:hover {
+        color: var(--text-main);
+    }
+
+    .wts-tab.active {
+        background: var(--surface);
+        color: var(--primary-text);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    }
+
+    /* 行事予定タブを開いているときは、PDFが読める幅まで広げる */
+    .weekly-task-sidebar.pane-event:not(.collapsed) {
+        width: 420px;
+    }
+
+    /* 行事予定タブでは「タスクを追加」ボタンは意味を持たないので隠す */
+    .weekly-task-sidebar.pane-event .weekly-task-add-btn {
         display: none;
+    }
+
+    /* ===== サイドパネルの行事予定PDF ===== */
+    .plan-event-pane {
+        padding: 8px;
+        gap: 8px;
+    }
+
+    .plan-event-picker {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .plan-event-picker .form-select {
+        flex: 1;
+        min-width: 0;
+        font-size: 0.78rem;
+    }
+
+    .plan-event-body {
+        flex: 1;
+        min-height: 240px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        background: var(--surface);
+        display: flex;
+    }
+
+    .plan-event-frame {
+        width: 100%;
+        height: 100%;
+        border: none;
+    }
+
+    .plan-event-message {
+        margin: auto;
+        text-align: center;
+        padding: 24px 12px;
+        color: var(--text-hint);
+        font-size: 0.8rem;
+    }
+
+    .plan-event-message .material-symbols-outlined {
+        font-size: 2rem;
+        display: block;
+        margin-bottom: 6px;
+    }
+
+    .plan-event-message p {
+        margin-bottom: 8px;
     }
 
     /* 収納時の縦書きラベル */
@@ -607,6 +713,53 @@
         padding: 30px 10px;
         color: var(--text-hint);
         font-size: 0.8rem;
+    }
+
+    /* ===== タスクカードから週案セルへの記入 ===== */
+    /* カードはつかんで週案セルへ運べる。運べることが分かるようにカーソルを変える */
+    .sidebar-task-card[draggable="true"] {
+        cursor: grab;
+    }
+
+    .sidebar-task-card.st-dragging {
+        opacity: 0.5;
+        cursor: grabbing;
+    }
+
+    /* タッチ端末にはドラッグが無いので、選択中のセルへ入れるボタンを添える */
+    .st-insert-btn {
+        flex-shrink: 0;
+        align-self: flex-start;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--primary-text);
+        border-radius: var(--radius-sm);
+        padding: 2px 4px;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    .st-insert-btn:hover {
+        background: var(--primary-light);
+    }
+
+    .st-insert-btn .material-symbols-outlined {
+        font-size: 1.05rem;
+        display: block;
+    }
+
+    /* 運んできたタスクを受け取れるセル */
+    .grid-cell.drag-over-task {
+        outline: 2px dashed var(--primary);
+        outline-offset: -2px;
+        background: var(--primary-light);
+    }
+
+    .sidebar-task-hint {
+        font-size: 0.7rem;
+        color: var(--text-hint);
+        line-height: 1.4;
+        padding: 0 2px 2px;
     }
 
     .week-grid {
@@ -3792,8 +3945,16 @@
             padding: 10px 16px;
         }
 
-        .weekly-task-sidebar.collapsed .weekly-task-sidebar-title {
-            display: flex;
+        .weekly-task-sidebar.collapsed .weekly-task-sidebar-title,
+        .weekly-task-sidebar.collapsed .weekly-task-sidebar-tabs {
+            display: flex !important;
+        }
+
+        /* 縦並びでは横幅を広げる余地が無いので全幅のまま。
+           ただし行事予定PDFは縦に潰れると読めないので、下パネルを高めに取る */
+        .weekly-task-sidebar.pane-event:not(.collapsed) {
+            width: 100% !important;
+            max-height: 55vh;
         }
 
         .weekly-task-sidebar.collapsed .weekly-task-collapsed-label {
