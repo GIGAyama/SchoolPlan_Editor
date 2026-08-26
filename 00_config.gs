@@ -123,6 +123,45 @@ function isDbSheetName_(sheetName) {
   return getClassList_().some(c => c.sheetName === sheetName);
 }
 
+// ===== 空き時間（別教員担当）の表現 =====
+// 空き時間の状態は専用の列ではなく、「学習内容」セルの中に区切りマーカーとして
+// 埋め込まれている。マーカーより前が授業内容、後ろがタスク。
+//
+// この文字列は、すでに利用者のスプレッドシートに保存されている。変更すると
+// 過去に設定したすべての空きコマが空きコマでなくなるため、絶対に変えないこと。
+// クライアント側の正本は App_Js_02_Plan.html の FREE_TASK_DIVIDER。
+// 両者が一致していることは tests/free-slot.test.mjs で固定している。
+const FREE_TASK_DIVIDER_ = '─── タスク ───';
+
+/** 学習内容が空き時間（区切りマーカーを含む）かどうかを判定します。 */
+function isFreeContent_(text) {
+  return !!text && String(text).indexOf(FREE_TASK_DIVIDER_) !== -1;
+}
+
+/** 空き時間の学習内容を「授業内容」と「タスク」に分割します。 */
+function splitFreeContent_(text) {
+  const t = String(text || '');
+  const idx = t.indexOf(FREE_TASK_DIVIDER_);
+  if (idx === -1) return { subjectPart: t, taskPart: '' };
+  return {
+    subjectPart: t.slice(0, idx).replace(/\n+$/, ''),
+    taskPart: t.slice(idx + FREE_TASK_DIVIDER_.length).replace(/^\n+/, '')
+  };
+}
+
+/**
+ * 学習内容の末尾に空き時間の印を付けます。既存の内容は消さず、授業内容として残します。
+ * すでに空き時間なら何もしないので、何度転記しても印は増えません。
+ * （組み立てた文字列どうしを比べる実装だと、シート側の末尾改行の扱い次第で
+ *   毎回「変更あり」となり印が増殖するため、マーカーの有無だけで判定する）
+ */
+function markFreeContent_(text) {
+  const t = (text === null || text === undefined) ? '' : String(text);
+  if (isFreeContent_(t)) return t;
+  const existing = t.replace(/\s+$/, '');
+  return (existing ? existing + '\n' : '') + FREE_TASK_DIVIDER_ + '\n';
+}
+
 // データベースの見出しは、旧版・学校ごとの既存シートで表記や列順が異なる。
 // NFKC正規化後の見出しを論理キーへ変換し、物理列順から完全に独立させる。
 const DB_HEADER_KEY_MAP_ = {

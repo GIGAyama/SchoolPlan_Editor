@@ -103,6 +103,15 @@
         html += '.subject { font-weight: bold; font-size: 1em; background-color: #dcedc8; padding: 2px; text-align: left; border-bottom: 1px solid #ccc; margin: -3px -3px 2px -3px; }';
         html += '.unit { font-size: 0.9em; color: #555; margin-bottom: 2px; }';
         html += '.content { font-size: 0.9em; line-height: 1.4; }';
+        // 空きコマ（別教員担当）: 教科名の帯だけ色を変えて「自分の授業ではない」ことを示す。
+        // 狭いセルで行が増えるため、紙では「空き」の文字バッジは足さない。
+        // 白黒印刷でも見分けられるよう、通常の帯 #dcedc8（グレー値228）から十分に離れた
+        // #b0bec5（同187）を選んである。土日・祝日・休み時間の有彩色とも意味が衝突しない。
+        html += '.subject.subject-free { background-color: #b0bec5; }';
+        // 空き時間のタスク欄（画面の .period-freetask と同じ見せ方）。
+        // フォントサイズはスライダー(body font-size)に追従するよう em 指定にする
+        html += '.freetask { font-size: 0.85em; line-height: 1.35; color: #444; margin-top: 2px; padding-top: 2px; border-top: 1px dashed #999; }';
+        html += '.freetask-label { font-weight: bold; font-size: 0.8em; color: #455a64; margin-right: 3px; }';
         html += '.row-header { width: 35px; text-align: center; vertical-align: middle; padding: 2px; }';
         html += '.recess-row td { height: 16px; background-color: #ffe0b2; }';
         html += '.recess-row td:first-child { text-align: center; font-weight: bold; padding: 0; vertical-align: middle;}';
@@ -313,11 +322,34 @@
             return html;
         };
 
+        // 空き時間（別教員担当）は、教科名の帯の色だけを変えて示す。
+        // 画面(renderPeriodView)と同じ整形にそろえ、区切りマーカーは紙に出さない。
         var renderPeriod = function (p) {
+            if (!p) return "";
+            var free = isFreeContent(p.content);
             var content = "";
-            if (p.subject) content += '<div class="subject">' + escHtml(p.subject) + '</div>';
+            // 教科名が無い空きコマでも帯は出す。色が唯一の手がかりになるため
+            // （空の div は行ボックスが作られず高さ0になるので &nbsp; を入れる）。
+            if (p.subject || free) {
+                content += '<div class="subject' + (free ? ' subject-free' : '') + '">'
+                    + (p.subject ? escHtml(p.subject) : '&nbsp;') + '</div>';
+            }
             if (p.unit) content += '<div class="unit">' + escHtml(p.unit) + '</div>';
-            if (p.content) content += '<div class="content">' + escHtml(p.content).replace(/\n/g, '<br>') + '</div>';
+            if (p.content) {
+                if (free) {
+                    var parts = splitFreeContent(p.content);
+                    if (parts.subjectPart.trim()) {
+                        content += '<div class="content">' + escHtml(parts.subjectPart.trim()).replace(/\n/g, '<br>') + '</div>';
+                    }
+                    // 画面はタスクの入力口なので空でも枠を出すが、紙では場所を取るだけなので出さない
+                    if (parts.taskPart.trim()) {
+                        content += '<div class="freetask"><span class="freetask-label">タスク</span>'
+                            + escHtml(parts.taskPart.trim()).replace(/\n/g, '<br>') + '</div>';
+                    }
+                } else {
+                    content += '<div class="content">' + escHtml(p.content).replace(/\n/g, '<br>') + '</div>';
+                }
+            }
             return content;
         };
 

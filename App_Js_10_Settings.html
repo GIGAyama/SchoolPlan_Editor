@@ -48,7 +48,11 @@
             tr.appendChild(makeEditorCell('tt_' + dayIndex + '_morning', dayData.morning || ''));
             // 1〜6校時
             for (var p = 0; p < 6; p++) {
-                tr.appendChild(makeEditorCell('tt_' + dayIndex + '_p' + p, (dayData.periods && dayData.periods[p]) || '', true));
+                var isFree = !!(dayData.freePeriods && dayData.freePeriods[p]);
+                var tdPeriod = makeEditorCell('tt_' + dayIndex + '_p' + p, (dayData.periods && dayData.periods[p]) || '', true);
+                tdPeriod.appendChild(makeFreeToggle('tt_' + dayIndex + '_f' + p, isFree, tdPeriod));
+                if (isFree) tdPeriod.classList.add('tt-free-on');
+                tr.appendChild(tdPeriod);
             }
             tbody.appendChild(tr);
         });
@@ -70,19 +74,43 @@
         return td;
     }
 
+    /**
+     * 校時セルの「空き（別教員担当）」チェックボックスを作ります。
+     *
+     * 教科列は実測60〜70pxしかないので、入力欄の横ではなく下に積む（横幅を使わない）。
+     * チェック中はセルの見た目を週案グリッドの空き時間（App_Css_04_CellOps.html）とそろえる。
+     */
+    function makeFreeToggle(id, checked, td) {
+        var label = document.createElement('label');
+        label.className = 'tt-free-toggle';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = id;
+        cb.checked = !!checked;
+        cb.addEventListener('change', function () { td.classList.toggle('tt-free-on', cb.checked); });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode('空き'));
+        return label;
+    }
+
     function gatherTimetableData() {
         var data = [];
         for (var d = 0; d < 5; d++) {
             var periods = [];
+            var freePeriods = [];
             for (var p = 0; p < 6; p++) {
                 var el = document.getElementById('tt_' + d + '_p' + p);
                 periods.push(el ? el.value : '');
+                var fe = document.getElementById('tt_' + d + '_f' + p);
+                freePeriods.push(!!(fe && fe.checked));
             }
             data.push({
                 day: d,
                 time: (document.getElementById('tt_' + d + '_time') || {}).value || '',
                 morning: (document.getElementById('tt_' + d + '_morning') || {}).value || '',
-                periods: periods
+                periods: periods,
+                // ここに含めることで、空きの切り替えも hasUnsavedTimetableChanges() が検知する
+                freePeriods: freePeriods
             });
         }
         return data;
@@ -197,17 +225,36 @@
             + '<tr>' + headers.map(function (h) {
                 return '<th style="' + headCss + '">' + escHtml(h) + '</th>';
             }).join('') + '</tr>';
+        var hasFree = false;
+        var freeCss = cellCss + 'background:var(--primary-light);box-shadow:inset 3px 0 0 var(--primary);';
         (timetable || []).forEach(function (d, i) {
             var periods = (d && d.periods) || [];
-            var cells = [(d && d.time) || '', (d && d.morning) || ''].concat(
-                [0, 1, 2, 3, 4, 5].map(function (p) { return periods[p] || ''; }));
+            var free = (d && d.freePeriods) || [];
+            // 時程・朝学習には空きの概念が無いので、先頭2列は必ず通常表示
+            var cells = [{ v: (d && d.time) || '' }, { v: (d && d.morning) || '' }].concat(
+                [0, 1, 2, 3, 4, 5].map(function (p) {
+                    if (free[p] === true) hasFree = true;
+                    return { v: periods[p] || '', free: free[p] === true };
+                }));
             html += '<tr><th style="' + headCss + '">' + escHtml(DAY_NAMES[i] || '') + '</th>'
-                + cells.map(function (v) { return '<td style="' + cellCss + '">' + escHtml(v) + '</td>'; }).join('')
+                + cells.map(function (c) {
+                    return '<td style="' + (c.free ? freeCss : cellCss) + '">' + escHtml(c.v)
+                        + (c.free ? '<span style="font-size:0.66rem;color:var(--primary);margin-left:3px;">空き</span>' : '')
+                        + '</td>';
+                }).join('')
                 + '</tr>';
         });
+        // 空きコマを使っていない人に、無関係な注意書きを常時見せない
+        var freeNote = hasFree
+            ? '<p style="margin:6px 0 0;font-size:0.74rem;color:var(--text-sub);">'
+                + '「空き」の校時は、学習内容の末尾に空き時間の印を付けるだけです。入力済みの学習内容は消しません。<br>'
+                + '<b>チェックを外した校時の学習内容には触れないため、すでに転記した週の空きは、この転記では解除されません。</b>'
+                + '解除は週案の画面で、コマの「⋮」→「空き時間を解除」から行ってください。</p>'
+            : '';
         return html + '</tbody></table>'
             + '<p style="margin:6px 0 0;font-size:0.74rem;color:var(--text-sub);">'
-            + '↑ これが実際に書き込まれる「保存済みの固定時間割」です。</p></div>';
+            + '↑ これが実際に書き込まれる「保存済みの固定時間割」です。</p>'
+            + freeNote + '</div>';
     }
 
     /**

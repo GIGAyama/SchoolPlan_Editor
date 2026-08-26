@@ -1008,6 +1008,32 @@ function deleteNewsletterData(rowIndex, fileId) {
 const SP_KEY_TIMETABLE = 'fixedTimetableData';
 
 /**
+ * 保存済みの固定時間割を現在のスキーマへそろえます。
+ *
+ * freePeriods（空きコマ指定）は後から足したキーなので、古い保存データには無い。
+ * 読み出しと保存の両方をここに通し、以降のコードが「必ず5日×6校時の真偽値がある」
+ * 前提で書けるようにする（読み手ごとに防御を書くと、いつか片方を忘れる）。
+ * @param {*} raw JSON.parse した保存内容、または null
+ * @returns {Array} 5要素の固定時間割データ
+ */
+function normalizeTimetableData_(raw) {
+  const src = Array.isArray(raw) ? raw : [];
+  return [0, 1, 2, 3, 4].map(d => {
+    const day = src[d] || {};
+    const periods = Array.isArray(day.periods) ? day.periods : [];
+    const free = Array.isArray(day.freePeriods) ? day.freePeriods : [];
+    return {
+      day: d,
+      time: day.time || '',
+      morning: day.morning || '',
+      periods: [0, 1, 2, 3, 4, 5].map(p => periods[p] || ''),
+      // 真偽値へ正規化する。壊れた値が来ても保存内容を汚さない
+      freePeriods: [0, 1, 2, 3, 4, 5].map(p => free[p] === true)
+    };
+  });
+}
+
+/**
  * [エディタ API] 固定時間割データを取得します。
  */
 function getTimetableForEditor() {
@@ -1015,14 +1041,11 @@ function getTimetableForEditor() {
     const savedJson = tGetProp_(SP_KEY_TIMETABLE);
 
     if (savedJson) {
-      return { success: true, data: JSON.parse(savedJson) };
+      return { success: true, data: normalizeTimetableData_(JSON.parse(savedJson)) };
     }
 
     // デフォルト空データ
-    const emptyData = [0, 1, 2, 3, 4].map(d => ({
-      day: d, time: '', morning: '', periods: ['', '', '', '', '', '']
-    }));
-    return { success: true, data: emptyData };
+    return { success: true, data: normalizeTimetableData_(null) };
   } catch (e) {
     logError('getTimetableForEditor', e);
     return { success: false, error: e.message };
@@ -1056,7 +1079,9 @@ function saveTimetableFromEditor(timetableData) {
       throw new Error('教科名の入力に誤りがあるため保存できません。\n' + errors.join('\n'));
     }
 
-    tSetProp_(SP_KEY_TIMETABLE, JSON.stringify(timetableData));
+    // 空きコマ指定は「あるかないか」だけなので、壊れた値は弾かずに正規化して受け入れる。
+    // 「空きなのに教科名が空」は正当（本当に自分の授業が無いコマ）なので検証しない。
+    tSetProp_(SP_KEY_TIMETABLE, JSON.stringify(normalizeTimetableData_(timetableData)));
 
     return { success: true, message: '固定時間割を保存しました。' };
   } catch (e) {

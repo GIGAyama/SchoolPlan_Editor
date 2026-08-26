@@ -151,13 +151,14 @@ function loadBackend(sheetRows, options = {}) {
 
   // 実データに触れる入口だけを、このテスト用に固定する
   vm.runInContext(`
-    var __sheet = null, __timetable = [], __holidays = {}, __logs = [];
+    var __sheet = null, __timetable = [], __free = [], __holidays = {}, __logs = [];
     function getSs_() { return { getSheetByName: function () { return __sheet; }, getId: function () { return 'ss'; } }; }
     function resolveDbSheet_() { return __sheet; }
     function getDbSheet_() { return __sheet; }
     function getClassList_() { return []; }
     function isMultiClassEnabled_() { return false; }
     function getTimetableData_() { return __timetable; }
+    function getTimetableFreeData_() { return __free; }
     function getHolidayMap_() { return __holidays; }
     function writeToLog_(level, message) { __logs.push(level + ': ' + message); }
     function ensureDataProtectionReady_() {}
@@ -182,6 +183,7 @@ function loadBackend(sheetRows, options = {}) {
   `, context);
   context.__sheet = sheet;
   if (options.timetable) context.__timetable = options.timetable;
+  context.__free = options.free || [0,1,2,3,4].map(() => [false, false, false, false, false, false]);
 
   return { context, sheet, logs, run: (code) => vm.runInContext(code, context) };
 }
@@ -201,10 +203,25 @@ function makeWeekRows(context, opts = {}) {
     row[COL['日付'] - 1] = dateCell(context, 2026, 8, day);
     row[COL['曜日'] - 1] = '=TEXT()';        // 数式列
     row[COL['行事'] - 1] = '既存行事' + i;
+    if (opts.withContent) {
+      for (let n = 1; n <= 6; n++) {
+        row[COL['単元' + n] - 1] = '既存単元' + n;
+        row[COL['学習内容' + n] - 1] = '既存内容' + n;
+      }
+    }
     rows.push(row);
   });
   return rows;
 }
+
+/** 指定した曜日・校時だけを「空きコマ」にした指定を作ります。 */
+function freeAt(pairs) {
+  const free = [0,1,2,3,4].map(() => [false, false, false, false, false, false]);
+  pairs.forEach(([d, p]) => { free[d][p] = true; });
+  return free;
+}
+
+const DIVIDER = '─── タスク ───';
 
 const TIMETABLE = [
   ['A時程', '朝読書', '国語', '算数', '理科', '社会', '体育', '音楽'],
@@ -263,6 +280,90 @@ test('固定時間割の転記は行の並びではなく日付で書き込む',
   });
   assert.deepEqual(byDate, { 17: 'A時程', 18: 'B時程', 20: 'D時程', 21: 'E時程' });
   assert.deepEqual([...result.missingDates], ['2026/08/19'], 'DBに無い日は報告すること');
+});
+
+// ===== 空きコマ（別教員担当）の転記 =====
+// 固定時間割で「空き」にした校時は、転記のときに学習内容へ印だけを付ける。
+// 印は学習内容セルの中のマーカーなので、書き方を誤ると入力済みの学習内容を
+// 丸ごと消してしまう。年間一括転記は数百行を一度に書くので復旧できない。
+
+/** 空きコマ指定つきで1週分を転記し、書き込み後のグリッドを返します。 */
+function transferWithFree(free, rowOpts = {}) {
+  const boot = loadBackend([], { timetable: TIMETABLE, free });
+  const rows = makeWeekRows(boot.context, rowOpts);
+  boot.sheet.grid.length = 0;
+  rows.forEach(r => boot.sheet.grid.push(r));
+  const result = boot.run(`transferWeeklyTimetable(new Date(2026, 7, 17))`);
+  return { boot, result };
+}
+
+test('空きコマの転記は、入力済みの学習内容を消さずに印だけを足す', () => {
+  // 月曜3校時だけを空きにする
+  const { boot } = transferWithFree(freeAt([[0, 2]]), { withContent: true });
+  const mon = boot.sheet.grid[1];
+
+  // 印は既存内容の後ろに付く（既存内容は授業内容として残る）
+  assert.equal(mon[COL['学習内容3'] - 1], '既存内容3\n' + DIVIDER + '\n');
+  // 指定していない校時の学習内容は1文字も変わらない
+  [1, 2, 4, 5, 6].forEach(n => {
+    assert.equal(mon[COL['学習内容' + n] - 1], '既存内容' + n,
+      `${n}校時: 空き指定の無い校時の学習内容に触れないこと`);
+  });
+  // 単元列は転記の対象外のまま
+  for (let n = 1; n <= 6; n++) {
+    assert.equal(mon[COL['単元' + n] - 1], '既存単元' + n, `単元${n} は転記で触れないこと`);
+  }
+  // 他の曜日にも波及しない
+  assert.equal(boot.sheet.grid[2][COL['学習内容3'] - 1], '既存内容3');
+});
+
+test('空きコマの転記は、単元・行事・数式列を書き込み範囲に含めない', () => {
+  const { boot } = transferWithFree(freeAt([[0, 2]]), { withContent: true });
+  // 学習内容の列を足しても、間に挟まる列は連続範囲に入らない
+  const protectedCols = [COL['第何週'], COL['曜日'], COL['行事']]
+    .concat([1, 2, 3, 4, 5, 6].map(n => COL['単元' + n]));
+  boot.sheet.writes.forEach(w => {
+    for (const col of protectedCols) {
+      assert.ok(col < w.col || col >= w.col + w.cols,
+        `列 ${col} は書き込み範囲(${w.col}〜${w.col + w.cols - 1})に含めないこと`);
+    }
+  });
+});
+
+test('空きコマを使っていなければ、学習内容の列は書き込み範囲にすら入らない', () => {
+  // 空き指定が無い利用者の書き込み範囲を、今までどおりに保つ
+  const { boot } = transferWithFree(freeAt([]), { withContent: true });
+  const contentCols = [1, 2, 3, 4, 5, 6].map(n => COL['学習内容' + n]);
+  boot.sheet.writes.forEach(w => {
+    for (const col of contentCols) {
+      assert.ok(col < w.col || col >= w.col + w.cols,
+        `学習内容の列 ${col} を書き込み範囲に入れないこと`);
+    }
+  });
+  assert.equal(boot.sheet.grid[1][COL['学習内容3'] - 1], '既存内容3');
+});
+
+test('同じ週に二度転記しても、空きコマの印は増えない', () => {
+  const boot = loadBackend([], { timetable: TIMETABLE, free: freeAt([[0, 2]]) });
+  const rows = makeWeekRows(boot.context, { withContent: true });
+  boot.sheet.grid.length = 0;
+  rows.forEach(r => boot.sheet.grid.push(r));
+
+  boot.run(`transferWeeklyTimetable(new Date(2026, 7, 17))`);
+  const afterFirst = boot.sheet.grid[1][COL['学習内容3'] - 1];
+  const second = boot.run(`transferWeeklyTimetable(new Date(2026, 7, 17))`);
+
+  assert.equal(boot.sheet.grid[1][COL['学習内容3'] - 1], afterFirst, '印が二重に付かないこと');
+  assert.equal((afterFirst.match(/─── タスク ───/g) || []).length, 1);
+  assert.equal(second.updatedRows, 0, '変化が無ければ書き込み行も0であること');
+});
+
+test('学習内容が空の空きコマには、印だけが入る', () => {
+  const { boot } = transferWithFree(freeAt([[0, 0], [4, 5]]));
+  assert.equal(boot.sheet.grid[1][COL['学習内容1'] - 1], DIVIDER + '\n');
+  assert.equal(boot.sheet.grid[5][COL['学習内容6'] - 1], DIVIDER + '\n');
+  // 教科名はいつもどおり転記される（空きコマでも教科名は残す）
+  assert.equal(boot.sheet.grid[1][COL['1校時'] - 1], '国語');
 });
 
 test('週案の保存は対象週に含まれない日付を書き込まずに弾く', () => {
