@@ -108,17 +108,20 @@
 
                 cell.className = cls;
 
+                // UX: D&Dの受け取り。コマ同士の入れ替えのほか、サイドパネルの
+                // タスクカードを運んできたときの受け皿にもなるので、全部の行のセルに付ける。
+                cell.addEventListener('dragover', handleDragOver);
+                cell.addEventListener('dragenter', handleDragEnter);
+                cell.addEventListener('dragleave', handleDragLeave);
+                cell.addEventListener('drop', handleDrop);
+
                 if (rowDef.multi) {
                     var pIdx = parseInt(rowDef.key.replace('period', ''));
                     var p = day.periods[pIdx] || { subject: '', unit: '', content: '' };
                     cell.setAttribute('data-period', pIdx);
-                    // UX: D&D（校時セルは閲覧・編集両モードで有効）
+                    // UX: コマの持ち出し（校時セルは閲覧・編集両モードで有効）
                     cell.setAttribute('draggable', 'true');
                     cell.addEventListener('dragstart', handleDragStart);
-                    cell.addEventListener('dragover', handleDragOver);
-                    cell.addEventListener('dragenter', handleDragEnter);
-                    cell.addEventListener('dragleave', handleDragLeave);
-                    cell.addEventListener('drop', handleDrop);
                     cell.addEventListener('dragend', handleDragEnd);
                     if (isEdit) {
                         // 「空」ボタンを廃したので、空き時間かどうかはセルの見た目で示す
@@ -772,27 +775,26 @@
         });
     }
 
-    /**
-     * 選択したタスクを対象の入力欄へ「☐タスク名 + 改行 + ・内容の詳細」形式で追記し、
-     * 未着手タスクを「進行中」に自動更新します。
-     * 空き時間の場合はタスクは区切りマーカーより後（タスク欄）に追記されます。
-     */
-    function applySelectedTasksToTextarea(targetEl, selectedTasks) {
-        if (!targetEl) return;
-
-        // 表示テキスト生成: ☐タスク名 で改行し ・内容の詳細
-        var blocks = selectedTasks.map(function (t) {
+    /** タスクを週案に書く形（☐タスク名 + 改行 + ・準備物）の文字列にします。 */
+    function buildTaskInsertText(selectedTasks) {
+        return selectedTasks.map(function (t) {
             var line = '☐' + (t.content || '');
             if (t.resource) line += '\n・' + t.resource;
             return line;
-        });
-        var addText = blocks.join('\n');
+        }).join('\n');
+    }
 
-        var existing = targetEl.value.replace(/\s+$/, '');
-        targetEl.value = existing ? (existing + '\n' + addText) : addText;
-        autoResizeTextarea(targetEl);
+    /** 既存の内容の末尾へ、1行あけずに追記した文字列を返します。 */
+    function appendTaskText_(existingValue, addText) {
+        var existing = (existingValue || '').replace(/\s+$/, '');
+        return existing ? (existing + '\n' + addText) : addText;
+    }
 
-        // 未着手（未実施）のタスクを進行中（実施中）へ自動変更
+    /**
+     * 週案に書き込んだ未着手タスクを「進行中」へ自動更新します。
+     * @returns {number} 進行中に変えた件数
+     */
+    function startInsertedTasks_(selectedTasks) {
         var toStart = selectedTasks.filter(function (t) { return (t.status || '未着手') === '未着手'; });
         toStart.forEach(function (t) {
             var prevStatus = t.status || '未着手';
@@ -813,9 +815,131 @@
                 .updateTaskStatusFromWebApp(t.id, '進行中');
         });
         if (toStart.length > 0) refreshTaskViews();
+        return toStart.length;
+    }
 
-        showToast('success', selectedTasks.length + '件のタスクを内容に追加しました。'
-            + (toStart.length ? '（' + toStart.length + '件を進行中に変更）' : ''));
+    /** 「◯件のタスクを追加しました」のお知らせ。 */
+    function showTaskInsertToast_(count, startedCount, whereLabel) {
+        showToast('success', count + '件のタスクを' + (whereLabel || '内容') + 'に追加しました。'
+            + (startedCount ? '（' + startedCount + '件を進行中に変更）' : ''));
+    }
+
+    /** 一度でも書き込めたら、サイドパネルの使い方の一言はもう出さない。 */
+    function markTaskInsertLearned_() {
+        try { localStorage.setItem('planTaskInsertLearned', '1'); } catch (e) {}
+    }
+
+    /**
+     * 選択したタスクを対象の入力欄へ「☐タスク名 + 改行 + ・内容の詳細」形式で追記し、
+     * 未着手タスクを「進行中」に自動更新します。
+     * 空き時間の場合はタスクは区切りマーカーより後（タスク欄）に追記されます。
+     */
+    function applySelectedTasksToTextarea(targetEl, selectedTasks) {
+        if (!targetEl) return;
+        targetEl.value = appendTaskText_(targetEl.value, buildTaskInsertText(selectedTasks));
+        autoResizeTextarea(targetEl);
+        showTaskInsertToast_(selectedTasks.length, startInsertedTasks_(selectedTasks));
+    }
+
+    // ===== サイドパネルのタスクカードから、週案セルへ直接記入する =====
+    // 週案を書いている手を止めずにタスクを入れられるように、カードをセルへ運ぶ（D&D）か、
+    // セルを選んでカードの書き込みボタンを押す、の2通りの入口を用意している。
+    // タッチ端末にはD&Dが無いため、ボタン側が本命になる。
+
+    /** 行のキー（period0 など）から校時番号を返します。校時の行でなければ null。 */
+    function periodIndexOfRowKey_(rowKey) {
+        if (!/^period[0-5]$/.test(rowKey || '')) return null;
+        return parseInt(rowKey.replace('period', ''), 10);
+    }
+
+    /** その行の名前（「3校時」「朝学習」など）。お知らせの文面に使います。 */
+    function rowLabelOfKey_(rowKey) {
+        for (var i = 0; i < GRID_ROWS.length; i++) {
+            if (GRID_ROWS[i].key === rowKey) return GRID_ROWS[i].label;
+        }
+        return 'セル';
+    }
+
+    /**
+     * 週案のセルへタスクを書き込みます。
+     * 編集モードでは入力欄へ、閲覧モードでは週データへ直接書いて自動保存します
+     * （閲覧モードのコマ移動・ペーストと同じ道すじ）。
+     * 校時のセルは「学習内容」欄が行き先です。空き時間に設定してあるセルでは、
+     * 区切りより後（タスク欄）に入ります。
+     * @returns {boolean} 書き込めたら true
+     */
+    function insertTasksIntoCell(dayIdx, rowKey, selectedTasks) {
+        if (!selectedTasks || selectedTasks.length === 0) return false;
+        if (!STATE.weekData || !STATE.weekData.days || !STATE.weekData.days[dayIdx]) {
+            showToast('error', '週のデータがまだ読み込まれていません。');
+            return false;
+        }
+        var pIdx = periodIndexOfRowKey_(rowKey);
+        var isPeriod = (pIdx !== null);
+        var addText = buildTaskInsertText(selectedTasks);
+        var dayLabel = STATE.weekData.days[dayIdx].dayLabel || '';
+        var whereLabel = dayLabel + rowLabelOfKey_(rowKey);
+
+        if (STATE.editMode) {
+            var el = isPeriod
+                ? document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]')
+                : document.querySelector('[data-field="' + rowKey + '"][data-day="' + dayIdx + '"]:not([data-period])');
+            if (!el) { showToast('error', 'そのセルには入力欄がありません。'); return false; }
+            el.value = appendTaskText_(el.value, addText);
+            autoResizeTextarea(el);
+            markTaskInsertLearned_();
+            showTaskInsertToast_(selectedTasks.length, startInsertedTasks_(selectedTasks), whereLabel);
+            return true;
+        }
+
+        // 閲覧モード: 週データを書き換えて、まとめて自動保存する
+        pushUndo(); // days を差し替えるため、day はこの後に取り直す
+        var day = STATE.weekData.days[dayIdx];
+        if (!day) return false;
+        if (isPeriod) {
+            var p = day.periods[pIdx] || { subject: '', unit: '', content: '' };
+            p.content = appendTaskText_(p.content, addText);
+            day.periods[pIdx] = p;
+        } else {
+            day[rowKey] = appendTaskText_(day[rowKey], addText);
+        }
+        markWeekDaysMutated();
+        markTaskInsertLearned_();
+        rerenderGridPreservingFocus();
+        persistViewMutation();
+        showTaskInsertToast_(selectedTasks.length, startInsertedTasks_(selectedTasks), whereLabel);
+        return true;
+    }
+
+    /** IDからタスクを1件引きます。 */
+    function findTaskById_(taskId) {
+        return (STATE.allTaskData || []).filter(function (t) { return t.id === taskId; })[0] || null;
+    }
+
+    /** サイドパネルのカードの書き込みボタン。選択中のセルへ書き込みます。 */
+    function insertTaskIntoSelectedCell(taskId) {
+        var task = findTaskById_(taskId);
+        if (!task) { showToast('error', 'タスクが見つかりませんでした。'); return; }
+        var s = STATE.selectedCell;
+        if (!s) {
+            showToast('warning', '先に週案のセルを選んでから押してください。');
+            return;
+        }
+        insertTasksIntoCell(s.day, s.key, [task]);
+    }
+
+    /** カードを運んできたセルへ書き込みます（ドロップ時）。 */
+    function dropTaskOnCell_(cell) {
+        var task = findTaskById_(STATE.dragTaskId);
+        STATE.dragTaskId = null;
+        if (!task || !cell) return;
+        var dayIdx = parseInt(cell.dataset.day, 10);
+        var rowKey = cell.dataset.key;
+        if (isNaN(dayIdx) || !rowKey) return;
+        var rowIdx = parseInt(cell.dataset.row, 10);
+        // どこへ入れたかが分かるように、そのセルを選択状態にしておく
+        if (!isNaN(rowIdx)) selectCell(dayIdx, rowIdx, rowKey, { keepFocus: true });
+        insertTasksIntoCell(dayIdx, rowKey, [task]);
     }
 
     // ===== 編集モード制御 =====
@@ -1737,26 +1861,48 @@
     }
 
     function handleDragOver(e) {
+        // サイドパネルから運んできたタスクは、どの行のセルでも受け取る
+        if (STATE.dragTaskId) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            return;
+        }
+        // コマの入れ替えは、コマ同士のあいだだけ
+        if (!STATE.dragSource) return;
+        var cell = e.target.closest('.grid-cell');
+        if (!cell || cell.dataset.period === undefined) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
     }
 
     function handleDragEnter(e) {
         var cell = e.target.closest('.grid-cell');
-        if (cell && cell.dataset.period !== undefined) {
+        if (!cell) return;
+        if (STATE.dragTaskId) { cell.classList.add('drag-over-task'); return; }
+        if (STATE.dragSource && cell.dataset.period !== undefined) {
             cell.classList.add('drag-over');
         }
     }
 
     function handleDragLeave(e) {
         var cell = e.target.closest('.grid-cell');
-        if (cell) cell.classList.remove('drag-over');
+        if (!cell) return;
+        // セルの中の要素へ移っただけのときは、まだセルから出ていない
+        if (e.relatedTarget && cell.contains(e.relatedTarget)) return;
+        cell.classList.remove('drag-over', 'drag-over-task');
     }
 
     function handleDrop(e) {
-        e.preventDefault();
         var cell = e.target.closest('.grid-cell');
-        if (!cell || !STATE.dragSource || cell.dataset.period === undefined) return;
+        if (!cell) return;
+        if (STATE.dragTaskId) {
+            e.preventDefault();
+            cell.classList.remove('drag-over-task');
+            dropTaskOnCell_(cell);
+            return;
+        }
+        e.preventDefault();
+        if (!STATE.dragSource || cell.dataset.period === undefined) return;
         cell.classList.remove('drag-over');
 
         var srcDay = STATE.dragSource.day;
@@ -1782,9 +1928,15 @@
 
     function handleDragEnd(e) {
         STATE.dragSource = null;
-        document.querySelectorAll('.grid-cell.dragging, .grid-cell.drag-over').forEach(function (el) {
-            el.classList.remove('dragging', 'drag-over');
-        });
+        clearGridDropHighlights();
+    }
+
+    /** ドラッグ中に付けた枠線を、全部はがします。 */
+    function clearGridDropHighlights() {
+        document.querySelectorAll('.grid-cell.dragging, .grid-cell.drag-over, .grid-cell.drag-over-task')
+            .forEach(function (el) {
+                el.classList.remove('dragging', 'drag-over', 'drag-over-task');
+            });
     }
 
     // ===== Phase F: 右クリックコンテキストメニュー =====

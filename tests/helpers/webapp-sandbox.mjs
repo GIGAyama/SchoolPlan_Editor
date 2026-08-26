@@ -118,7 +118,8 @@ export function bootClient(options = {}) {
           };
           const methods = ['saveWeeklyPlanDataV2', 'saveWeeklyPlanDataProtected',
             'getWeeklyPlanDataV2', 'switchActiveClassFromWeb',
-            'createMyDatabase', 'getTenantStatus'];
+            'createMyDatabase', 'getTenantStatus',
+            'updateTaskStatusFromWebApp'];
           methods.forEach(name => {
             api[name] = (...args) => { inflight.push({ name, args, handlers }); };
           });

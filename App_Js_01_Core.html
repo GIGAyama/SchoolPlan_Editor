@@ -28,6 +28,7 @@
         // 表示中の範囲と食い違ったら履歴は捨てる（ensureHistoryScope）。
         historyScope: null,
         dragSource: null,         // D&Dソース {day, period}
+        dragTaskId: null,         // サイドパネルから週案セルへ運んでいるタスクのID
         helpModalOpen: false,     // ショートカットヘルプ表示中
         taskViewMode: 'list',     // タスク表示モード: 'list' or 'card'
         taskFilter: 'all',        // タスク絞り込み: 'all'/'overdue'/'today'/'week'/'nodate'
@@ -65,7 +66,10 @@
         eventLibraryLoaded: false,     // 行事予定PDF一覧 読込済み
         eventLibraryLoading: false,    // 行事予定PDF一覧 読込中（二重呼び出し防止）
         eventLibraryGroups: [],        // 学校ごとのPDFグループ
-        eventSelectedPdfId: null       // 表示中のPDFファイルID
+        eventSelectedPdfId: null,      // 表示中のPDFファイルID
+        // 週案サイドパネル（今週のタスク／行事予定PDF）
+        planSidebarPane: 'task',       // 表示中のパネル: 'task' or 'event'
+        planEventPdfId: null           // サイドパネルで開いている行事予定PDFのファイルID
     };
 
     // UX: 行定義（セルナビゲーション用）
@@ -653,6 +657,62 @@
         var collapsed = (stored === null) ? true : (stored === '1');
         sidebar.classList.toggle('collapsed', collapsed);
         updateTaskSidebarToggleIcon(collapsed);
+
+        var pane = null;
+        try { pane = localStorage.getItem('planSidebarPane'); } catch (e) {}
+        setPlanSidebarPane(pane === 'event' ? 'event' : 'task', { silent: true });
+    }
+
+    // ===== 週案サイドパネルの表示切替（今週のタスク／行事予定PDF）=====
+    /**
+     * サイドパネルに出すものを切り替えます。
+     * 週案を書きながら見たいものは人によって違う（今週のタスク／学校の行事予定）ため、
+     * 同じ場所を切り替えて使えるようにしています。選んだ側は次に開いたときも残ります。
+     * @param {string} pane 'task'（今週のタスク）または 'event'（行事予定PDF）
+     * @param {Object} [opts] opts.silent=true で、収納中でも開かない（起動時の復元用）
+     */
+    function setPlanSidebarPane(pane, opts) {
+        var sidebar = document.getElementById('weeklyTaskSidebar');
+        if (!sidebar) return;
+        if (pane !== 'event') pane = 'task';
+        STATE.planSidebarPane = pane;
+        try { localStorage.setItem('planSidebarPane', pane); } catch (e) {}
+
+        sidebar.classList.toggle('pane-task', pane === 'task');
+        sidebar.classList.toggle('pane-event', pane === 'event');
+
+        var taskPane = document.getElementById('sidebarTaskList');
+        var eventPane = document.getElementById('sidebarEventPdf');
+        if (taskPane) taskPane.style.display = (pane === 'task') ? '' : 'none';
+        if (eventPane) eventPane.style.display = (pane === 'event') ? '' : 'none';
+
+        var tabTask = document.getElementById('wtsTabTask');
+        var tabEvent = document.getElementById('wtsTabEvent');
+        if (tabTask) {
+            tabTask.classList.toggle('active', pane === 'task');
+            tabTask.setAttribute('aria-selected', pane === 'task' ? 'true' : 'false');
+        }
+        if (tabEvent) {
+            tabEvent.classList.toggle('active', pane === 'event');
+            tabEvent.setAttribute('aria-selected', pane === 'event' ? 'true' : 'false');
+        }
+
+        // 収納時の縦書きラベルも、いま選んでいる側の名前にそろえる
+        var cIcon = document.getElementById('taskSidebarCollapsedIcon');
+        var cText = document.getElementById('taskSidebarCollapsedText');
+        if (cIcon) cIcon.textContent = (pane === 'event') ? 'event' : 'task_alt';
+        if (cText) cText.textContent = (pane === 'event') ? '行事予定' : '今週のタスク';
+
+        // タブを押したのに収納されたままだと、何も起きていないように見える
+        if (!(opts && opts.silent) && sidebar.classList.contains('collapsed')) {
+            sidebar.classList.remove('collapsed');
+            updateTaskSidebarToggleIcon(false);
+            try { localStorage.setItem('weeklyTaskSidebarCollapsed', '0'); } catch (e) {}
+        }
+
+        if (pane === 'event' && typeof ensurePlanEventPdfReady === 'function') {
+            ensurePlanEventPdfReady();
+        }
     }
 
     // ===== ブラウザ閉じ/リロード時の警告 =====

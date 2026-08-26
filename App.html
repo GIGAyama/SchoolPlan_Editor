@@ -376,28 +376,65 @@
                     </div>
                 </div>
 
-                <!-- 今週のタスクサイドバー（展開・収納可能） -->
-                <div id="weeklyTaskSidebar" class="weekly-task-sidebar collapsed">
+                <!-- 週案サイドバー（今週のタスク／行事予定PDF を切り替え・展開・収納可能） -->
+                <div id="weeklyTaskSidebar" class="weekly-task-sidebar collapsed pane-task">
                     <div class="weekly-task-sidebar-header">
                         <button class="btn-icon weekly-task-toggle-btn" onclick="toggleTaskSidebar()"
-                            title="タスクパネルを開閉">
+                            title="サイドパネルを開閉">
                             <span class="material-symbols-outlined"
                                 id="taskSidebarToggleIcon">chevron_left</span>
                         </button>
-                        <span class="weekly-task-sidebar-title d-flex align-items-center gap-1"><span
-                                class="material-symbols-outlined fs-6">task_alt</span> 今週のタスク<span
-                                id="sidebarTaskCount" class="sidebar-task-count" style="display:none;">0</span></span>
-                        <div class="weekly-task-sidebar-spacer" style="flex:1"></div>
-                        <button class="btn-icon weekly-task-add-btn" onclick="showManualTaskInput()"
+                        <!-- 表示するものを切り替えるタブ（今週のタスク／行事予定PDF） -->
+                        <div class="weekly-task-sidebar-tabs" role="tablist" aria-label="サイドパネルの表示切替">
+                            <button type="button" class="wts-tab active" id="wtsTabTask" role="tab"
+                                aria-selected="true" aria-controls="sidebarTaskList"
+                                onclick="setPlanSidebarPane('task')" title="今週のタスクを表示">
+                                <span class="material-symbols-outlined fs-6">task_alt</span> タスク<span
+                                    id="sidebarTaskCount" class="sidebar-task-count" style="display:none;">0</span>
+                            </button>
+                            <button type="button" class="wts-tab" id="wtsTabEvent" role="tab"
+                                aria-selected="false" aria-controls="sidebarEventPdf"
+                                onclick="setPlanSidebarPane('event')" title="行事予定のPDFを表示">
+                                <span class="material-symbols-outlined fs-6">event</span> 行事予定
+                            </button>
+                        </div>
+                        <button class="btn-icon weekly-task-add-btn" id="weeklyTaskAddBtn"
+                            onclick="showManualTaskInput()"
                             style="font-size:1.1rem; padding:0 4px; color:var(--primary-text);" title="タスクを追加">+</button>
                     </div>
                     <!-- 収納時に表示する縦書きラベル（クリックで展開） -->
-                    <div class="weekly-task-collapsed-label" onclick="toggleTaskSidebar()" title="タスクパネルを開く">
-                        <span class="material-symbols-outlined fs-6">task_alt</span> 今週のタスク
+                    <div class="weekly-task-collapsed-label" onclick="toggleTaskSidebar()" title="サイドパネルを開く">
+                        <span class="material-symbols-outlined fs-6" id="taskSidebarCollapsedIcon">task_alt</span>
+                        <span id="taskSidebarCollapsedText">今週のタスク</span>
                     </div>
-                    <div id="sidebarTaskList" class="weekly-task-sidebar-content">
+                    <div id="sidebarTaskList" class="weekly-task-sidebar-content" role="tabpanel"
+                        aria-labelledby="wtsTabTask">
                         <!-- JSで動的にタスクを描画 -->
                         <div class="st-empty">タスクを読み込み中...</div>
+                    </div>
+                    <!-- 行事予定PDF（行事予定タブと同じ一覧から選んで、この幅で見る） -->
+                    <div id="sidebarEventPdf" class="weekly-task-sidebar-content plan-event-pane"
+                        role="tabpanel" aria-labelledby="wtsTabEvent" style="display:none;">
+                        <div class="plan-event-picker">
+                            <select id="planEventPdfSelect" class="form-select form-select-sm"
+                                aria-label="表示する行事予定PDF" onchange="onPlanEventPdfSelect(this.value)">
+                                <option value="">読み込み中...</option>
+                            </select>
+                            <a id="planEventPdfOpenLink" class="btn-icon" href="#" target="_blank" rel="noopener"
+                                title="新しいタブで開く" style="display:none;">
+                                <span class="material-symbols-outlined fs-6">open_in_new</span>
+                            </a>
+                            <button type="button" class="btn-icon" onclick="loadEventPdfLibrary(true)"
+                                title="PDF一覧を更新">
+                                <span class="material-symbols-outlined fs-6">refresh</span>
+                            </button>
+                        </div>
+                        <div id="planEventPdfBody" class="plan-event-body">
+                            <div class="plan-event-message">
+                                <span class="material-symbols-outlined">picture_as_pdf</span>
+                                <p>PDF一覧を読み込んでいます...</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
