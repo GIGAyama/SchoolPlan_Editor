@@ -73,7 +73,9 @@ export function shellFilesOf(swSource, baseDir, shellConst) {
     // その形）だけでなく、'./manabi-portal/' のような下の階層もある。
     // 取りこぼすと readFileSync がディレクトリを読もうとして EISDIR で落ちる。
     const relPath = entry.endsWith('/') ? entry + 'index.html' : entry;
-    return { entry, file: path.join(baseDir, relPath.replace(/^\.?\//, '')) };
+    const cleanRel = relPath.replace(/^\.?\//, '');
+    const joined = (baseDir && baseDir !== '.') ? `${baseDir.replace(/\\/g, '/').replace(/\/$/, '')}/${cleanRel}` : cleanRel;
+    return { entry, file: joined };
   });
 }
 
