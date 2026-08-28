@@ -189,21 +189,23 @@ test('倍率を当てたあとに実測で検算し、まだ溢れていれば�
 
 // ===== フォントが効いてから測る =====
 
-test('印刷フォントは @import ではなく <link> で読む', () => {
-  // @import は取得完了を知る手段が無く、未取得のうちは @font-face が登録されないため
-  // document.fonts.ready が即座に解決してしまう。その隙に代替フォントで測ってしまうと、
-  // あとから本来のフォントが効いたときに紙からはみ出す
-  assert.doesNotMatch(print, /@import url\("https:\/\/fonts\.googleapis\.com/,
-    '印刷CSSに @import が残っている');
-  assert.match(print, /<link id="printFontCss" rel="stylesheet" href="/);
+test('印刷は書体を外へ取りにいかない', () => {
+  // 学校のフィルタが「握ったまま返さない」形で塞ぐと、外部スタイルシートの読み込みが
+  // 終わらず印刷プレビューが開かないまま止まる。書体は自己ホストのものを流し込む
+  assert.doesNotMatch(print, /fonts\.googleapis\.com/,
+    '印刷モジュールが外部から書体を取りにいっている');
+  assert.doesNotMatch(print, /@import url\(/, '印刷CSSに @import が残っている');
+  assert.match(print, /window\.getSelfHostedFontCss/, '自己ホストの書体CSSを流し込んでいない');
 });
 
-test('フォントを名指しで読み込んでから測る。届かない環境でも印刷は止めない', () => {
+test('書体を名指しで読み込んでから測る。読めない環境でも印刷は止めない', () => {
+  // @font-face が文書にあっても、実際に使われるまで読み込みは始まらない。
+  // fonts.ready だけに任せると「待つものが無い」として即座に解決し、代替書体のまま測ってしまう
   const body = extractFn(print, 'printWeeklyPlanExec');
   assert.match(body, /fdocReady\.fonts\.load\(/, 'fonts.load で名指しの要求をしていない');
-  assert.match(body, /getElementById\('printFontCss'\)/);
-  assert.match(body, /addEventListener\('error'/, 'フォントCDNが塞がれた場合に進めない');
-  assert.match(body, /setTimeout\(doPrint, 3000\)/, 'フォント待ちが解決しない環境向けの保険が無い');
+  assert.match(body, /\.catch\(function \(\) \{ \/\* 読めなくても代替書体で進む \*\/ \}\)/,
+    '書体が読めないときに進めない');
+  assert.match(body, /setTimeout\(doPrint, 1500\)/, 'フォント待ちが解決しない環境向けの保険が無い');
 });
 
 test('印刷直前にもう一度合わせ直す', () => {

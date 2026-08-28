@@ -27,7 +27,8 @@
     "demo:verify": "node tools/demo-video/verify-scenes.mjs",
     "demo:dry": "node tools/demo-video/record-demo.mjs --dry-run",
     "demo:record": "node tools/demo-video/record-demo.mjs",
-    "build:sw": "node tools/build-sw.mjs"
+    "build:sw": "node tools/build-sw.mjs",
+    "build:fonts": "node tools/fonts/build-fonts.mjs"
   },
   "devDependencies": {
     "@material-symbols/font-400": "^0.45.10",

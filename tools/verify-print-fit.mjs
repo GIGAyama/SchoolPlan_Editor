@@ -11,7 +11,9 @@ const src=fs.readFileSync(new URL('../App_Js_03_Print.html', import.meta.url),'u
 const fn=(n)=>{const a=src.indexOf('function '+n+'(');if(a<0)throw new Error('no '+n);const o=src.indexOf('{',a);let d=0;for(let i=o;i<src.length;i++){if(src[i]==='{')d++;else if(src[i]==='}'&&--d===0)return src.slice(a,i+1);}};
 const vf=(n)=>{const a=src.indexOf('var '+n+' = function');const o=src.indexOf('{',a);let d=0;for(let i=o;i<src.length;i++){if(src[i]==='{')d++;else if(src[i]==='}'&&--d===0)return src.slice(a,i+1)+';';}};
 const consts=(src.match(/var (?:AUTOFIT_[A-Z_]+|MM_TO_PX) = [^;]+;/g)||[]).join('\n');
-const css=new Function(consts+'\n'+fn('buildPrintStyles_')+'\nreturn buildPrintStyles_;')()({fontSize:10,autoFit:true});
+// buildPrintStyles_ は自己ホストの書体CSSを window 経由で取りにいく。
+// Node には window が無いので空を返す形で差し替える（書体の有無は倍率の検証に影響しない）
+const css=new Function('window', consts+'\n'+fn('buildPrintStyles_')+'\nreturn buildPrintStyles_;')({getSelfHostedFontCss:()=>''})({fontSize:10,autoFit:true});
 
 const LONG='場面の移り変わりに注意して、登場人物の気持ちの変化を読み取り、自分の考えをノートにまとめて全体で交流する。';
 const cell=(t)=>'<td><div class="subject">国語</div><div class="unit">「ごんぎつね」</div><div class="content">'+t+'</div></td>';
@@ -76,7 +78,7 @@ const b=await chromium.launch(exe?{executablePath:exe}:{});
 const pg=await b.newPage({viewport:{width:900,height:1200}});
 
 async function run(body, mode){
-  await pg.setContent('<!doctype html><html><head><meta charset="utf-8">'+css.replace(/@import url\("[^"]*"\);/,'')+'</head><body style="width:190mm;margin:0">'+body+'</body></html>');
+  await pg.setContent('<!doctype html><html><head><meta charset="utf-8">'+css+'</head><body style="width:190mm;margin:0">'+body+'</body></html>');
   return pg.evaluate(function(a){
     var pick=a[0], fitSrc=a[1], cs=a[2], cbp=a[3];
     new Function('printFrame', cs+'\n'+cbp+'\n'+pick+'\n'+fitSrc+'\nfitPagesToPrintArea();')({contentWindow:{document:document}});

@@ -114,9 +114,9 @@
     var AUTOFIT_SAFETY_MM = 2;
     var MM_TO_PX = 96 / 25.4;
 
-    // 印刷用フォント（実測してから刷るために、読み込み完了を待てる形で読む）
+    // 測る前に「実際に効かせておく」書体。書体は自己ホスト(App_Fonts.html)なので
+    // 外へ取りにはいかないが、使われるまで読み込みは始まらないので名指しで要求する。
     var PRINT_FONT_FAMILY = 'Zen Maru Gothic';
-    var PRINT_FONT_CSS_URL = 'https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap';
 
     /**
      * 要素の「中身が実際にどこまで伸びているか」を、要素の上端からの px で返す。
@@ -205,6 +205,10 @@
         // 自動調整では倍率が実効サイズを決めるので、基準は固定値にしておく
         var baseFontSize = opts.autoFit ? AUTOFIT_BASE_FONT_SIZE : opts.fontSize;
         var html = '<style>';
+        // 書体は親ページに埋めこんである自己ホストの CSS をそのまま持っていく。
+        // 以前はここから Google Fonts を @import していたが、学校のフィルタが
+        // 塞ぐと印刷プレビューが開かないまま止まる。
+        html += (window.getSelfHostedFontCss ? window.getSelfHostedFontCss() : '');
         html += '@page { size: A4 portrait; margin: 10mm; }';
         html += 'body { font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Meiryo", system-ui, sans-serif; font-size: ' + baseFontSize + 'px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
         html += '.page { width: 100%; height: 277mm; box-sizing: border-box; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; }';
@@ -424,11 +428,6 @@
         var days = STATE.weekData.days || [];
 
         var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>週案_第' + weekNum + '週</title>';
-        // フォントは @import ではなく <link> で読む。@import は取得完了を知る手段が無く、
-        // 未取得のうちは @font-face が文書に登録されないため document.fonts.ready が
-        // 「待つものが無い」として即座に解決してしまう。その状態で高さを測ると代替フォントの
-        // レイアウトを測ることになり、あとから本来のフォントが効いて刷られると紙からはみ出す。
-        html += '<link id="printFontCss" rel="stylesheet" href="' + PRINT_FONT_CSS_URL + '">';
         html += buildPrintStyles_(opts);
         html += '</head><body>';
 
@@ -882,36 +881,25 @@
             };
         } catch (e) { /* onbeforeprint 非対応環境は素通し */ }
 
-        // 高さはフォントに依存するので、フォントが実際に効いてから測る。
-        // <link> の load を待ってから fonts.load() で当該フォントを名指しで要求し、
-        // そのうえで fonts.ready を待つ、の順でないと代替フォントのまま測ってしまう。
+        // 高さはフォントに依存するので、書体が実際に効いてから測る。
+        // 書体は自己ホストで @font-face も印刷文書の <style> に入っているが、
+        // 実際に使われるまで読み込みは始まらない。fonts.ready だけに任せると
+        // 「まだ要求していない＝待つものが無い」として即座に解決し、代替書体のまま
+        // 測ってしまうので、fonts.load() で名指しで要求してから ready を待つ。
         var fdocReady = printFrame.contentWindow.document;
         var waitForFonts = function () {
-            var linkEl = fdocReady.getElementById('printFontCss');
-            var linkDone = new Promise(function (resolve) {
-                if (!linkEl) return resolve();
-                if (linkEl.sheet) return resolve();
-                linkEl.addEventListener('load', function () { resolve(); });
-                // 学校のネットワークでフォントCDNが塞がれていることがある。
-                // 届かないなら代替フォントのまま測って刷る（それはそれで測定と印刷が一致する）
-                linkEl.addEventListener('error', function () { resolve(); });
-            });
-            return linkDone.then(function () {
-                if (!fdocReady.fonts || typeof fdocReady.fonts.load !== 'function') return;
-                var q = '"' + PRINT_FONT_FAMILY + '"';
-                return Promise.all([
-                    fdocReady.fonts.load('400 ' + AUTOFIT_BASE_FONT_SIZE + 'px ' + q),
-                    fdocReady.fonts.load('700 16px ' + q)
-                ]).catch(function () { /* 読めなくても代替フォントで進む */ });
-            }).then(function () {
-                if (fdocReady.fonts && fdocReady.fonts.ready) return fdocReady.fonts.ready;
-            });
+            var q = '"' + PRINT_FONT_FAMILY + '"';
+            return Promise.all([
+                fdocReady.fonts.load('400 ' + AUTOFIT_BASE_FONT_SIZE + 'px ' + q),
+                fdocReady.fonts.load('700 16px ' + q)
+            ]).catch(function () { /* 読めなくても代替書体で進む */ })
+                .then(function () { return fdocReady.fonts.ready; });
         };
-        if (fdocReady.fonts && typeof Promise !== 'undefined') {
+        if (fdocReady.fonts && typeof fdocReady.fonts.load === 'function' && typeof Promise !== 'undefined') {
             waitForFonts().then(function () { setTimeout(doPrint, 150); },
                 function () { setTimeout(doPrint, 150); });
             // フォント待ちが解決しない環境向けのフォールバック
-            setTimeout(doPrint, 3000);
+            setTimeout(doPrint, 1500);
         } else {
             setTimeout(doPrint, 500);
         }
