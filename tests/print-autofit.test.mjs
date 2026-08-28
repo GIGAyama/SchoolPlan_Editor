@@ -214,6 +214,21 @@ test('印刷直前にもう一度合わせ直す', () => {
   assert.match(body, /onbeforeprint = function \(\) \{[\s\S]*?fitPagesToPrintArea\(\)/);
 });
 
+// ===== 測るときと刷るときでレイアウトを揃える =====
+
+test('印刷文書は文字の自動拡大を切る', () => {
+  // スマホの Chrome は viewport 指定の無い文書の文字を自動拡大する。拡大率は
+  // レンダリング面の幅で決まるので、画面外 iframe で測ったときと実際に刷るときで
+  // 別の倍率が掛かり、印刷時だけ行が伸びて時数表や検印欄が下から押し出される
+  assert.match(print, /text-size-adjust: 100%/);
+  assert.match(print, /-webkit-text-size-adjust: 100%/, '古い端末向けの接頭辞が無い');
+});
+
+test('印刷文書にも viewport を持たせる', () => {
+  // 無いとスマホの Chrome が「PC向けページ」と誤認して自動拡大を掛ける
+  assert.match(print, /<meta name="viewport" content="width=device-width, initial-scale=1">/);
+});
+
 // ===== 印刷オプション =====
 
 test('印刷オプションに自動調整があり、既定でON・他の項目と同じく保存される', () => {
