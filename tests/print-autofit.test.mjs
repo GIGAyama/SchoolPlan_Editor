@@ -102,6 +102,116 @@ test('測定できないときは等倍にして素通しする', () => {
   assert.equal(pickFitScale_(flaky, AVAIL, 0.2, 2), 1, '途中から測定不能');
 });
 
+// ===== 中身の実際の下端を測る =====
+
+const contentBottomPx_ = new Function(`${extractFn(print, 'contentBottomPx_')}\nreturn contentBottomPx_;`)();
+
+/** getBoundingClientRect を持つ最小限の偽DOM。top を 0 に固定して読みやすくする。 */
+function fakeEl(scrollHeight, childBottoms, opts) {
+  opts = opts || {};
+  return {
+    scrollHeight,
+    getBoundingClientRect: () => ({ top: opts.top || 0, bottom: (opts.top || 0) + scrollHeight }),
+    querySelectorAll: opts.noQuery ? undefined : () => childBottoms.map(b =>
+      typeof b === 'object' ? b : ({ getBoundingClientRect: () => ({ top: 0, bottom: b, width: 10, height: 5 }) })),
+  };
+}
+
+test('overflow:hidden で隠れて scrollHeight に出ない溢れを、子孫の実座標で拾う', () => {
+  // これが今回の本丸。.page2-right などの内側で溢れると scrollHeight は増えないので、
+  // scrollHeight だけを信じると「収まっている」と誤判定して縮小しそこなう
+  assert.equal(contentBottomPx_(fakeEl(1000, [400, 1200, 900])), 1200);
+});
+
+test('どの子もはみ出していなければ scrollHeight を返す', () => {
+  assert.equal(contentBottomPx_(fakeEl(1000, [400, 900])), 1000);
+});
+
+test('要素の上端を原点にした値を返す（ページ内の位置に依らない）', () => {
+  assert.equal(contentBottomPx_(fakeEl(1000, [{ getBoundingClientRect: () => ({ top: 50, bottom: 1250, width: 10, height: 5 }) }], { top: 50 })), 1200);
+});
+
+test('大きさ0の要素は下端の判定に使わない', () => {
+  // 非表示要素は 0 の矩形を返す。これを拾うと原点まわりの値に引きずられる
+  const hidden = { getBoundingClientRect: () => ({ top: 0, bottom: 5000, width: 0, height: 0 }) };
+  assert.equal(contentBottomPx_(fakeEl(1000, [hidden, 900])), 1000);
+});
+
+test('変換が掛かった状態では、倍率を渡して単位を揃える', () => {
+  // getBoundingClientRect は変換後、scrollHeight は変換前の値。
+  // 揃えないと縮小時に scrollHeight 側が過大に効いて、必要以上に縮めてしまう
+  assert.equal(contentBottomPx_(fakeEl(1000, [400]), 0.5), 500);
+  assert.equal(contentBottomPx_(fakeEl(1000, [1200]), 0.5), 1200, '子の実座標のほうが下ならそちら');
+});
+
+test('測れないときも壊れず、scrollHeight で代替する', () => {
+  assert.equal(contentBottomPx_(null), 0);
+  assert.equal(contentBottomPx_(fakeEl(800, [], { noQuery: true })), 800);
+  const throws = {
+    scrollHeight: 700,
+    getBoundingClientRect: () => { throw new Error('detached'); },
+    querySelectorAll: () => [],
+  };
+  assert.equal(contentBottomPx_(throws), 700);
+  assert.equal(contentBottomPx_(throws, 0.5), 350);
+});
+
+// ===== 用紙からはみ出させない仕掛け =====
+
+test('紙の下端ぎりぎりではなく、安全余白の内側に収める', () => {
+  // 測ったレイアウトと刷られるレイアウトは端末差でずれる。ぴったり100%を狙うと
+  // その差の分だけ最下段（時数表の下の行・検印欄）が黙って切り落とされる
+  assert.match(print, /var AUTOFIT_SAFETY_MM = 2;/);
+  assert.match(print, /var safety = AUTOFIT_SAFETY_MM \* MM_TO_PX/);
+  assert.match(print, /var target = Math\.max\(avail - safety/);
+  assert.match(print, /pickFitScale_\(measureAt, target,/, '目標高さに安全余白が効いていない');
+});
+
+test('高さの測定は contentBottomPx_ に一本化されている', () => {
+  const body = extractFn(print, 'printWeeklyPlanExec');
+  assert.match(body, /return contentBottomPx_\(fit\);/, 'measureAt が実際の下端を見ていない');
+  assert.doesNotMatch(body, /return el\.scrollHeight;/,
+    'scrollHeight だけを見る測定が残っている（内側で隠れた溢れを見落とす）');
+});
+
+test('高さが測れないページには手を出さない', () => {
+  // 目標が 0 になると、検算が「まだ溢れている」と判断してページを極端に縮めてしまう
+  const body = extractFn(print, 'printWeeklyPlanExec');
+  assert.match(body, /if \(!\(avail > 0\)\) continue;/);
+});
+
+test('倍率を当てたあとに実測で検算し、まだ溢れていれば縮め直す', () => {
+  // measureAt の読みが外れても、最後はここで必ず収まる側に寄せる
+  const body = extractFn(print, 'printWeeklyPlanExec');
+  assert.match(body, /var actual = contentBottomPx_\(fit, scale\);/, '当てた状態で測り直していない');
+  assert.match(body, /scale = scale \* \(target \/ actual\)/, '溢れた分だけ縮め直していない');
+});
+
+// ===== フォントが効いてから測る =====
+
+test('印刷フォントは @import ではなく <link> で読む', () => {
+  // @import は取得完了を知る手段が無く、未取得のうちは @font-face が登録されないため
+  // document.fonts.ready が即座に解決してしまう。その隙に代替フォントで測ってしまうと、
+  // あとから本来のフォントが効いたときに紙からはみ出す
+  assert.doesNotMatch(print, /@import url\("https:\/\/fonts\.googleapis\.com/,
+    '印刷CSSに @import が残っている');
+  assert.match(print, /<link id="printFontCss" rel="stylesheet" href="/);
+});
+
+test('フォントを名指しで読み込んでから測る。届かない環境でも印刷は止めない', () => {
+  const body = extractFn(print, 'printWeeklyPlanExec');
+  assert.match(body, /fdocReady\.fonts\.load\(/, 'fonts.load で名指しの要求をしていない');
+  assert.match(body, /getElementById\('printFontCss'\)/);
+  assert.match(body, /addEventListener\('error'/, 'フォントCDNが塞がれた場合に進めない');
+  assert.match(body, /setTimeout\(doPrint, 3000\)/, 'フォント待ちが解決しない環境向けの保険が無い');
+});
+
+test('印刷直前にもう一度合わせ直す', () => {
+  // 測ったあとにフォントが効いてレイアウトが変わっても、刷られる直前の状態で収め直せる
+  const body = extractFn(print, 'printWeeklyPlanExec');
+  assert.match(body, /onbeforeprint = function \(\) \{[\s\S]*?fitPagesToPrintArea\(\)/);
+});
+
 // ===== 印刷オプション =====
 
 test('印刷オプションに自動調整があり、既定でON・他の項目と同じく保存される', () => {
@@ -146,7 +256,7 @@ test('縮小側の下限は、現実には当たらない安全弁に留める',
 });
 
 test('倍率の決定は pickFitScale_ に一本化されている', () => {
-  assert.match(print, /pickFitScale_\(measureAt, avail, AUTOFIT_MIN_SCALE,/);
+  assert.match(print, /pickFitScale_\(measureAt, target, AUTOFIT_MIN_SCALE,/);
   assert.doesNotMatch(print, /var scale = avail \/ natural/,
     '測った幅と当てる幅がズレる割り算一発の縮小が残っている');
   assert.match(print, /var AUTOFIT_MAX_SCALE = 2;/, '拡大の上限は2倍');
