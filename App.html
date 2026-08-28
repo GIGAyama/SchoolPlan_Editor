@@ -38,14 +38,47 @@
             } catch (e) { }
         })();
     </script>
-    <!-- 本文用の Web フォント。
-         これは「字の形が変わるだけ」の依存なので、学校のフィルタリングで
-         fonts.googleapis.com が塞がれても動作に影響しない。
-         届かなかったときに崩れないよう、端末側の日本語フォントを
-         App_Css.html の font-family に必ず後ろへ並べてある。 -->
-    <link
-        href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap"
-        rel="stylesheet">
+    <!-- 本文用の Web フォント（生成物。作り直すには npm run build:fonts）。
+
+         以前は「字の形が変わるだけの依存だから、塞がれても動作に影響しない」と
+         書いてありましたが、それは**フィルタが拒否したとき**の話でした。
+         「握ったまま返さない」形で塞がれると、<head> のスタイルシートの
+         読み込みが終わらず script が動き出さず、真っ白のまま何も起きません
+         （Quarto で 2026-08-23 に実際に起きました）。
+
+         ⚠️ 収録したのは UI の Zen Maru Gothic 500 だけです（gzip 144KB）。
+            学級通信の「書体えらび」の 3 つ（明朝体・教科書体・手書き風）は
+            端末側のフォントに任せています。理由は NW_FONTS のところに
+            書いてあります（App_Js_06_Newsletter.html）。 -->
+    <?!= include('App_Fonts'); ?>
+
+    <script>
+        /**
+         * 自己ホストした書体の CSS を、いま開いているページから取り出す。
+         *
+         * 印刷は別ウィンドウ（や iframe）に HTML を組み立てて渡すので、
+         * そこには親の <style> が効かない。以前はそのウィンドウの中から
+         * Google Fonts を @import していたが、学校のフィルタが塞ぐと
+         * 印刷プレビューが開かないまま止まる。
+         *
+         * 書体は App_Fonts.html（生成物）に data: URI で埋めこんであり、
+         * 親ページの <style> の中にある。**それをそのまま文字列で持っていく。**
+         * 外へは 1 バイトも取りにいかない。
+         *
+         * 目印はタグや id ではなく「中身に data:font/woff2 があること」で探す。
+         * App_Fonts.html は生成物なので、印を打つために手で書き替えたくない。
+         */
+        window.getSelfHostedFontCss = function () {
+            var out = '';
+            var styles = document.querySelectorAll('style');
+            for (var i = 0; i < styles.length; i++) {
+                if (styles[i].textContent.indexOf('data:font/woff2') !== -1) {
+                    out += styles[i].textContent;
+                }
+            }
+            return out;
+        };
+    </script>
 
     <!-- ここから下は「無いと動かない・見た目が壊れる」もの。CDN から読まず、
          リポジトリに焼き込んだものを配る（tools/build-vendor.mjs が生成）。
