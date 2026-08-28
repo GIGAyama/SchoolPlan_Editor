@@ -42,7 +42,9 @@
                 + '</div>'
                 + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 0 2px;">※週のまとめは標準ではフリースペース（時数表と検印欄の間）、コンパクトでは週案表の下に印刷されます<br>※Todoリスト・教科時数表は標準レイアウト（2ページ目）にのみ印刷されます</div>'
                 + '<hr style="margin:12px 0;">'
-                + '<label style="display:flex;align-items:center;gap:8px;">'
+                + '<label style="display:block;"><input type="checkbox" id="po_autoFit"' + (po_('autoFit', true) ? ' checked' : '') + '> 用紙に合わせて文字サイズを自動調整</label>'
+                + '<div style="font-size:0.75rem;color:var(--text-sub);margin:4px 0 10px 20px;">※その週の分量に合わせて、A4に収まる範囲でいちばん大きい文字サイズが自動で選ばれます</div>'
+                + '<label style="display:flex;align-items:center;gap:8px;" id="po_fontRow">'
                 + 'フォントサイズ: <input type="range" id="po_fontSize" min="8" max="14" value="' + storedFontSize + '" style="flex:1;">'
                 + '<span id="po_fontLabel">' + storedFontSize + 'px</span>'
                 + '</label>'
@@ -56,6 +58,16 @@
                 var slider = document.getElementById('po_fontSize');
                 var label = document.getElementById('po_fontLabel');
                 slider.addEventListener('input', function () { label.textContent = slider.value + 'px'; });
+                // 自動調整中は手動サイズが結果に効かない。動かせるまま残すと
+                // 「動かしたのに変わらない」になるので、見た目でも無効だと分かるようにする
+                var auto = document.getElementById('po_autoFit');
+                var fontRow = document.getElementById('po_fontRow');
+                var syncAutoFit = function () {
+                    slider.disabled = auto.checked;
+                    fontRow.style.opacity = auto.checked ? '0.45' : '';
+                };
+                auto.addEventListener('change', syncAutoFit);
+                syncAutoFit();
             }
         }).then(function (result) {
             if (!result.isConfirmed) return;
@@ -75,7 +87,8 @@
                 stats: document.getElementById('po_stats').checked,
                 summary: document.getElementById('po_summary').checked,
                 todo: document.getElementById('po_todo').checked,
-                fontSize: parseInt(document.getElementById('po_fontSize').value)
+                fontSize: parseInt(document.getElementById('po_fontSize').value),
+                autoFit: document.getElementById('po_autoFit').checked
             };
             // 次回のためにチェック状態を保存する(復元は po_ 経由)
             try { localStorage.setItem('weeklyPrintOpts', JSON.stringify(opts)); } catch (e) { }
@@ -83,15 +96,74 @@
         });
     }
 
+    // 自動調整時の基準フォントサイズ。実際に紙へ出る大きさは
+    // 「基準サイズ × pickFitScale_ が選んだ倍率」で決まるので、ここは固定でよい。
+    // スライダーの前回位置を基準にすると、同じ週でも前回の操作で仕上がりが変わってしまう。
+    var AUTOFIT_BASE_FONT_SIZE = 10;
+
+    // 自動調整で拡大してよい上限。予定がほとんど無い週で文字だけが極端に大きくなるのを防ぐ。
+    var AUTOFIT_MAX_SCALE = 2;
+    // 縮小側の下限。「どんな分量でも紙に収める」という従来の保証を壊さないよう、
+    // 現実には決して当たらない値にしてある（当たると溢れた行が切り落とされる）。
+    // 探索を有限区間に閉じ込めるための安全弁であって、意図した縮小限度ではない。
+    var AUTOFIT_MIN_SCALE = 0.05;
+
+    /**
+     * 用紙の高さいっぱいまで使える倍率を二分探索で決める純粋関数。
+     *
+     * ページの中身は「幅を 100/s % にしてから scale(s)」で拡縮する。幅が変われば
+     * 折り返しが変わって高さも変わるので、幅100%で測った高さから割り算一発で出した倍率は当たらない。
+     * 測ったときの幅と、当てたあとの幅が違うからだ。従来の縮小はこのズレの分だけ縮めすぎていて、
+     * 「文字が思ったより小さいのに紙の下は余っている」という出方の原因になっていた。
+     *
+     * measure(s) は「倍率 s のときのレイアウト幅で測った自然な高さ」を返すこと。
+     * s を上げるとレイアウト幅は狭まるので measure(s) は単調非減少、したがって実効高さ
+     * measure(s) * s は s について単調増加になり、二分探索が使える。
+     *
+     * @param {function(number): number} measure 倍率を渡すと自然な高さ(px)を返す関数
+     * @param {number} avail 収めたい高さ(px)
+     * @param {number} minScale 探索の下限
+     * @param {number} maxScale 探索の上限
+     * @return {number} avail に収まる最大の倍率。測定できないときは 1（＝素通し）
+     */
+    function pickFitScale_(measure, avail, minScale, maxScale) {
+        if (!isFinite(avail) || avail <= 0) return 1;
+
+        var fitsAt = function (s) {
+            var h = measure(s);
+            if (!isFinite(h) || h <= 0) return null; // 測定不能
+            return h * s <= avail;
+        };
+
+        // 上限でも収まるなら探索する必要はない（内容が少ない週はここで即決まる）
+        var top = fitsAt(maxScale);
+        if (top === null) return 1;
+        if (top) return maxScale;
+
+        var bottom = fitsAt(minScale);
+        if (bottom === null) return 1;
+        // 下限でも収まらないほど内容が多いときは、下限で妥協する（安全弁）
+        if (!bottom) return minScale;
+
+        var lo = minScale, hi = maxScale;
+        for (var i = 0; i < 12; i++) {
+            var mid = (lo + hi) / 2;
+            if (fitsAt(mid) === true) lo = mid; else hi = mid;
+        }
+        return lo; // 必ず「収まる側」を返す
+    }
+
     /**
      * 週案印刷用の <style> 内CSS文字列を生成する純粋関数。
-     * 副作用なし。opts.fontSize のみを参照する（printWeeklyPlanExec から抽出）。
+     * 副作用なし。opts.fontSize と opts.autoFit のみを参照する（printWeeklyPlanExec から抽出）。
      */
     function buildPrintStyles_(opts) {
+        // 自動調整では倍率が実効サイズを決めるので、基準は固定値にしておく
+        var baseFontSize = opts.autoFit ? AUTOFIT_BASE_FONT_SIZE : opts.fontSize;
         var html = '<style>';
         html += '@import url("https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap");';
         html += '@page { size: A4 portrait; margin: 10mm; }';
-        html += 'body { font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Meiryo", system-ui, sans-serif; font-size: ' + opts.fontSize + 'px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
+        html += 'body { font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Meiryo", system-ui, sans-serif; font-size: ' + baseFontSize + 'px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
         html += '.page { width: 100%; height: 277mm; box-sizing: border-box; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; }';
         html += '.page:last-child { page-break-after: auto; }';
         // 内容がページ高さを超える場合に比例縮小して全行を収めるためのラッパー
@@ -188,7 +260,7 @@
         if (STATE.showSat) visIdx.push(5);
         if (STATE.showSun) visIdx.push(6);
 
-        var html = '<div class="page">';
+        var html = '<div class="page page-grow">';
         html += '<div class="doc-title">週間指導計画簿<div class="doc-week">第' + weekNum + '週</div></div>';
         html += '<table class="grid1 compact-grid">';
 
@@ -359,7 +431,7 @@
         } else {
 
         // ====== 1ページ目 ======
-        html += '<div class="page">';
+        html += '<div class="page page-grow">';
         html += '<div class="doc-title">週間指導計画簿<div class="doc-week">第' + weekNum + '週</div></div>';
         html += '<table class="grid1">';
 
@@ -683,7 +755,9 @@
         doc.write(html);
         doc.close();
 
-        // 各ページの内容をラッパーで包み、ページ高さを超える場合のみ比例縮小して全行を印刷領域に収める
+        // 各ページの内容をラッパーで包み、印刷領域を使い切る倍率まで拡大／縮小する。
+        // 拡大してよいのは .page-grow を付けたページだけ。標準2ページ目はフリースペース
+        // (.free-box) が余った高さを引き受ける設計なので、拡大せず縮小のみに留める。
         var fitPagesToPrintArea = function () {
             var fdoc = printFrame.contentWindow.document;
             var pages = fdoc.querySelectorAll('.page');
@@ -696,14 +770,25 @@
                     page.appendChild(inner);
                 }
                 var fit = page.querySelector('.page-fit');
-                // 一旦リセットしてから自然な高さを測定
+                var canGrow = page.className.indexOf('page-grow') !== -1;
+                // height:100% のままだと scrollHeight が最低でもページ高さを返してしまい、
+                // 「あとどれだけ余っているか」を測れない。拡大するページだけ auto にする。
+                fit.style.height = canGrow ? 'auto' : '100%';
+                var avail = page.clientHeight;
+                // 当てる幅と測る幅を必ず一致させる（ここがズレると縮めすぎ・広げすぎになる）
+                var measureAt = (function (el) {
+                    return function (s) {
+                        el.style.transform = '';
+                        el.style.width = (100 / s) + '%';
+                        return el.scrollHeight;
+                    };
+                })(fit);
+                var scale = pickFitScale_(measureAt, avail, AUTOFIT_MIN_SCALE,
+                    canGrow ? AUTOFIT_MAX_SCALE : 1);
                 fit.style.transform = '';
                 fit.style.width = '100%';
-                var avail = page.clientHeight;
-                var natural = fit.scrollHeight;
-                if (avail > 0 && natural > avail + 2) {
-                    var scale = avail / natural;
-                    // 縮小で横幅が縮まないよう先に横幅を広げてから比例縮小（横はページ幅いっぱいを維持）
+                if (Math.abs(scale - 1) > 0.005) {
+                    // 拡縮しても横はページ幅いっぱいを保つよう、先に幅を逆補正してから比例拡縮
                     fit.style.width = (100 / scale) + '%';
                     fit.style.transform = 'scale(' + scale + ')';
                 }
