@@ -108,6 +108,50 @@
     // 探索を有限区間に閉じ込めるための安全弁であって、意図した縮小限度ではない。
     var AUTOFIT_MIN_SCALE = 0.05;
 
+    // 紙の下端に残す安全余白。測ったレイアウトと実際に刷られるレイアウトは、
+    // フォントの効き方や端末差でわずかにズレる。ぴったり 100% を狙うと、その差の分だけ
+    // 最下段（時数表の下の行や検印欄）が黙って切り落とされるので、ここだけは削らない。
+    var AUTOFIT_SAFETY_MM = 2;
+    var MM_TO_PX = 96 / 25.4;
+
+    // 測る前に「実際に効かせておく」書体。書体は自己ホスト(App_Fonts.html)なので
+    // 外へ取りにはいかないが、使われるまで読み込みは始まらないので名指しで要求する。
+    var PRINT_FONT_FAMILY = 'Zen Maru Gothic';
+
+    /**
+     * 要素の「中身が実際にどこまで伸びているか」を、要素の上端からの px で返す。
+     *
+     * scrollHeight ではなく子孫の実座標を見るのは、印刷CSSに overflow:hidden の箱が
+     * 何段も入っているため（th,td / .page2-right / .summary-box / .todo-box / .free-box …）。
+     * その内側で溢れた分は外側の scrollHeight に伝わらないので、scrollHeight だけを信じると
+     * 「溢れていない」と誤判定して縮小しそこなう。getBoundingClientRect() は祖先の
+     * overflow:hidden に関係なく本来のレイアウト位置を返すので、切り落とされている溢れも拾える。
+     *
+     * getBoundingClientRect() は変換後の座標を返すのに対し scrollHeight は変換前のレイアウト値
+     * なので、el に transform が掛かっている状態で呼ぶときは、その倍率を appliedScale に渡して
+     * 単位を揃えること（揃えないと縮小時に scrollHeight 側が過大に効いて縮めすぎる）。
+     *
+     * @param {Element} el 対象要素
+     * @param {number=} appliedScale el に今掛かっている transform の倍率（無いときは 1）
+     * @return {number} 上端から中身の最下端までの px（測れないときは 0）
+     */
+    function contentBottomPx_(el, appliedScale) {
+        if (!el) return 0;
+        var sc = (typeof appliedScale === 'number' && isFinite(appliedScale) && appliedScale > 0) ? appliedScale : 1;
+        var top = 0;
+        try { top = el.getBoundingClientRect().top; } catch (e) { return (el.scrollHeight || 0) * sc; }
+        var bottom = top + (el.scrollHeight || 0) * sc;
+        var kids = el.querySelectorAll ? el.querySelectorAll('*') : [];
+        for (var i = 0; i < kids.length; i++) {
+            var r;
+            try { r = kids[i].getBoundingClientRect(); } catch (e) { continue; }
+            // 非表示要素は 0 の矩形を返す。下端の判定には使わない
+            if (!r || (r.width === 0 && r.height === 0)) continue;
+            if (r.bottom > bottom) bottom = r.bottom;
+        }
+        return bottom - top;
+    }
+
     /**
      * 用紙の高さいっぱいまで使える倍率を二分探索で決める純粋関数。
      *
@@ -778,22 +822,40 @@
                 // 「あとどれだけ余っているか」を測れない。拡大するページだけ auto にする。
                 fit.style.height = canGrow ? 'auto' : '100%';
                 var avail = page.clientHeight;
+                // 高さが測れないページには触らない。ここで無理に倍率を出すと、
+                // 検算が 0 を目標にしてページを極端に縮めてしまう
+                if (!(avail > 0)) continue;
+                // 紙の下端ぎりぎりを狙わず、安全余白の分だけ内側に収める
+                var safety = AUTOFIT_SAFETY_MM * MM_TO_PX;
+                var target = Math.max(avail - safety, avail * 0.5);
+
+                var applyScale = function (s) {
+                    fit.style.transform = '';
+                    fit.style.width = (Math.abs(s - 1) > 0.005) ? (100 / s) + '%' : '100%';
+                    if (Math.abs(s - 1) > 0.005) {
+                        // 拡縮しても横はページ幅いっぱいを保つよう、先に幅を逆補正してから比例拡縮
+                        fit.style.transform = 'scale(' + s + ')';
+                    }
+                };
                 // 当てる幅と測る幅を必ず一致させる（ここがズレると縮めすぎ・広げすぎになる）
-                var measureAt = (function (el) {
-                    return function (s) {
-                        el.style.transform = '';
-                        el.style.width = (100 / s) + '%';
-                        return el.scrollHeight;
-                    };
-                })(fit);
-                var scale = pickFitScale_(measureAt, avail, AUTOFIT_MIN_SCALE,
+                var measureAt = function (s) {
+                    fit.style.transform = '';
+                    fit.style.width = (100 / s) + '%';
+                    return contentBottomPx_(fit);
+                };
+                var scale = pickFitScale_(measureAt, target, AUTOFIT_MIN_SCALE,
                     canGrow ? AUTOFIT_MAX_SCALE : 1);
-                fit.style.transform = '';
-                fit.style.width = '100%';
-                if (Math.abs(scale - 1) > 0.005) {
-                    // 拡縮しても横はページ幅いっぱいを保つよう、先に幅を逆補正してから比例拡縮
-                    fit.style.width = (100 / scale) + '%';
-                    fit.style.transform = 'scale(' + scale + ')';
+                applyScale(scale);
+
+                // 検算: 変換を当てた「実際の状態」で最下端を測り直す。まだ紙を超えていれば
+                // その比だけ縮めて当て直す。measureAt の読みが何らかの理由で外れていても、
+                // 最後はここで必ず収まる側に寄せられる。
+                for (var k = 0; k < 3; k++) {
+                    var actual = contentBottomPx_(fit, scale);
+                    if (!isFinite(actual) || actual <= target || actual <= 0) break;
+                    scale = scale * (target / actual);
+                    if (scale < AUTOFIT_MIN_SCALE) { scale = AUTOFIT_MIN_SCALE; applyScale(scale); break; }
+                    applyScale(scale);
                 }
             }
         };
@@ -811,10 +873,31 @@
             printFrame.contentWindow.print();
         };
 
-        // フォント読み込み完了後に測定（高さがフォントに依存するため）
+        // 印刷直前にもう一度合わせ直す。フォントが遅れて効いた場合など、測ったあとに
+        // レイアウトが変わっていても、刷られる直前の状態で収め直せる
+        try {
+            printFrame.contentWindow.onbeforeprint = function () {
+                try { fitPagesToPrintArea(); } catch (e) { /* 失敗時はそのまま印刷 */ }
+            };
+        } catch (e) { /* onbeforeprint 非対応環境は素通し */ }
+
+        // 高さはフォントに依存するので、書体が実際に効いてから測る。
+        // 書体は自己ホストで @font-face も印刷文書の <style> に入っているが、
+        // 実際に使われるまで読み込みは始まらない。fonts.ready だけに任せると
+        // 「まだ要求していない＝待つものが無い」として即座に解決し、代替書体のまま
+        // 測ってしまうので、fonts.load() で名指しで要求してから ready を待つ。
         var fdocReady = printFrame.contentWindow.document;
-        if (fdocReady.fonts && fdocReady.fonts.ready && typeof fdocReady.fonts.ready.then === 'function') {
-            fdocReady.fonts.ready.then(function () { setTimeout(doPrint, 150); });
+        var waitForFonts = function () {
+            var q = '"' + PRINT_FONT_FAMILY + '"';
+            return Promise.all([
+                fdocReady.fonts.load('400 ' + AUTOFIT_BASE_FONT_SIZE + 'px ' + q),
+                fdocReady.fonts.load('700 16px ' + q)
+            ]).catch(function () { /* 読めなくても代替書体で進む */ })
+                .then(function () { return fdocReady.fonts.ready; });
+        };
+        if (fdocReady.fonts && typeof fdocReady.fonts.load === 'function' && typeof Promise !== 'undefined') {
+            waitForFonts().then(function () { setTimeout(doPrint, 150); },
+                function () { setTimeout(doPrint, 150); });
             // フォント待ちが解決しない環境向けのフォールバック
             setTimeout(doPrint, 1500);
         } else {

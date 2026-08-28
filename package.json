@@ -22,6 +22,7 @@
     "build:vendor": "node tools/build-vendor.mjs",
     "build:vendor:qrcode": "node tools/build-vendor.mjs qrcode",
     "verify:icons": "node tools/verify-icons.mjs",
+    "verify:print": "node tools/verify-print-fit.mjs",
     "verify:vendor-css": "node tools/compare-vendor-css.mjs",
     "demo:verify": "node tools/demo-video/verify-scenes.mjs",
     "demo:dry": "node tools/demo-video/record-demo.mjs --dry-run",
