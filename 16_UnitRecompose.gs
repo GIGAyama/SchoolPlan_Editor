@@ -236,7 +236,7 @@ function p5LoadUnitContext_(subject, unitName) {
     .filter(function (v) { return !isNaN(v) && v > 0; });
 
   // 週案で既に指導済み・入力済みの時数はロックして書き換えない
-  const planned = p4PlannedHistory_(ss);
+  const planned = p4PlannedHistory_(ss, buildMasterIndex_(all));
   const subjectPlanned = planned[normalizeSubjectName_(subject)];
   const ph = subjectPlanned && subjectPlanned.units[normalizeUnitName_(name)];
   const lockedCount = Math.min(ph ? ph.maxHour : 0, ordered.length);
@@ -469,7 +469,7 @@ function proposeAnnualReallocation(req) {
     const sm = masterIndex[subjectKey];
     if (!sm || sm.units.length === 0) throw new Error('教科「' + req.subject + '」の単元がマスタにありません。');
 
-    const planned = p4PlannedHistory_(ss);
+    const planned = p4PlannedHistory_(ss, masterIndex);
     const tracker = createProgressTracker_(masterIndex, planned);
 
     let lockedTotal = 0;

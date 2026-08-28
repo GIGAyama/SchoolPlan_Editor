@@ -92,8 +92,8 @@ function buildUnitProgressPayload_(masterData, dbData, dbCols, tomorrowMidnight,
 
   // 実施済み（今日まで）と、週案上の割当済み（未来の予定も含む）を分けて集計する。
   // 「もう全部埋まっている」の判定は割当済み基準、表示文言は実施済み基準を使う。
-  const taughtHistory = buildTaughtHistory_(dbData, dbCols, tomorrowMidnight);
-  const plannedHistory = buildTaughtHistory_(dbData, dbCols, farFuture);
+  const taughtHistory = buildTaughtHistory_(dbData, dbCols, tomorrowMidnight, masterIndex);
+  const plannedHistory = buildTaughtHistory_(dbData, dbCols, farFuture, masterIndex);
   const tracker = createProgressTracker_(masterIndex, plannedHistory);
 
   const warnings = [];

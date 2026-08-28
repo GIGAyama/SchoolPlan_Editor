@@ -383,8 +383,31 @@
         return s;
     }
 
-    /** masterMap から、表記ゆれを同一視して該当教科の単元リストを取得します。 */
-    function findMasterMapUnits(masterMap, subject) {
+    /**
+     * 教科セルに書かれている教科名を、分数の大きい順（同率ならセルに書かれた順）で返します。
+     * 例: "国語2/3 行事1/3" → ['国語', '行事']
+     * サーバー側 listSubjectNamesInCell_（99_Utils.gs）と対で直すこと。
+     */
+    function listSubjectNamesInCell(value) {
+        var entries = parseSubjectCellEntries(value).entries;
+        var seen = {};
+        var names = [];
+        entries.forEach(function (e, idx) {
+            var key = normalizeSubjectName(e.subject);
+            if (!key || seen[key]) return;
+            seen[key] = true;
+            var fraction = (e.den === 0) ? 0 : (e.num / e.den);
+            names.push({ name: e.subject, fraction: isFinite(fraction) ? fraction : 0, idx: idx });
+        });
+        names.sort(function (a, b) {
+            if (b.fraction !== a.fraction) return b.fraction - a.fraction;
+            return a.idx - b.idx;
+        });
+        return names.map(function (n) { return n.name; });
+    }
+
+    /** masterMap から、表記ゆれを同一視して該当教科の単元リストを取得します（1教科ぶんの照合）。 */
+    function lookupMasterMapUnits(masterMap, subject) {
         if (!masterMap) return null;
         if (masterMap[subject]) return masterMap[subject];
         var canon = normalizeSubjectName(subject);
@@ -393,6 +416,27 @@
             if (normalizeSubjectName(key) === canon) return masterMap[key];
         }
         return null;
+    }
+
+    /**
+     * 教科セルの値から「単元マスタを引くための教科名」を決めます。
+     *
+     * 教科セルは "国語2/3 行事1/3" のように1コマを分け合って書けるが、
+     * その文字列のままでは当然どの教科の単元マスタにも当たらず、単元ピッカーが
+     * 「単元マスタデータが見つかりません」で止まっていた。セル全体で当たらないときは、
+     * 書かれている教科名を分数の大きい順に試し、マスタに載っている教科を採用する。
+     * どれにも当たらなければセルの値をそのまま返す（見つからない旨の文言は従来どおり）。
+     * サーバー側 resolveMasterSubjectName_（99_Utils.gs）と対で直すこと。
+     */
+    function resolveMasterSubject(masterMap, subject) {
+        var raw = String(subject == null ? '' : subject).trim();
+        if (!raw || !masterMap) return raw;
+        if (lookupMasterMapUnits(masterMap, raw)) return raw;
+        var names = listSubjectNamesInCell(raw);
+        for (var i = 0; i < names.length; i++) {
+            if (lookupMasterMapUnits(masterMap, names[i])) return names[i];
+        }
+        return raw;
     }
 
     // ===== 教科サジェスト =====
@@ -473,12 +517,17 @@
             return;
         }
 
-        // masterMapから該当教科の単元リストを取得（図工/図画工作などの表記ゆれも同一視）
-        var units = STATE.masterData ? findMasterMapUnits(STATE.masterData.masterMap, subject) : null;
+        // masterMapから該当教科の単元リストを取得（図工/図画工作などの表記ゆれも、
+        // "国語2/3 行事1/3" のような分け合いのセルも、マスタのある教科へ寄せる）
+        var masterMap = STATE.masterData ? STATE.masterData.masterMap : null;
+        var masterSubject = resolveMasterSubject(masterMap, subject);
+        var units = lookupMasterMapUnits(masterMap, masterSubject);
         if (!units || units.length === 0) {
             showToast('warning', '「' + subject + '」の単元マスタデータが見つかりません。');
             return;
         }
+        // 以降は「単元マスタを引いた教科」で通す（ピッカーの見出しも学習活動の取得も）
+        subject = masterSubject;
 
         // 単元リストHTML生成（オブジェクト形式と旧文字列形式の両方に対応）
         var unitListHtml = units.map(function (u, i) {

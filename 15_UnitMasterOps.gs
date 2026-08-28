@@ -446,11 +446,16 @@ function p4EnsureRowCapacity_(sheet, neededRows) {
   if (neededRows > max) sheet.insertRowsAfter(max, neededRows - max);
 }
 
-/** 週案全体を対象にした指導履歴を返す内部ヘルパー。 */
-function p4PlannedHistory_(ss) {
+/**
+ * 週案全体を対象にした指導履歴を返す内部ヘルパー。
+ * @param {Spreadsheet} ss
+ * @param {Object} [masterIndex] buildMasterIndex_ の結果。渡すと "国語2/3 行事1/3" のような
+ *   分け合いの教科セルも、単元マスタのある教科の履歴として集計します。
+ */
+function p4PlannedHistory_(ss, masterIndex) {
   const dbSheet = getDbSheet_(ss);
   if (!dbSheet) return {};
-  return buildTaughtHistory_(dbSheet.getDataRange().getValues(), getDbColumns(), upFarFuture_());
+  return buildTaughtHistory_(dbSheet.getDataRange().getValues(), getDbColumns(), upFarFuture_(), masterIndex);
 }
 
 /**
@@ -472,7 +477,8 @@ function checkUnitMasterConsistency() {
     const stdResult = getStandardHours();
     const standardHours = (stdResult && stdResult.success && stdResult.data) ? stdResult.data : [];
 
-    const analysis = analyzeUnitConsistency_(masterData, p4PlannedHistory_(ss), standardHours);
+    const analysis = analyzeUnitConsistency_(
+      masterData, p4PlannedHistory_(ss, buildMasterIndex_(masterData)), standardHours);
     analysis.success = true;
     analysis.checkedAt = formatDate(new Date());
     return analysis;
@@ -503,7 +509,8 @@ function repairUnitMasterConsistency(targets) {
       const masterData = sheet.getRange(1, 1, lastRow, P4_MASTER_WIDTH_).getValues();
       const stdResult = getStandardHours();
       const standardHours = (stdResult && stdResult.success && stdResult.data) ? stdResult.data : [];
-      const analysis = analyzeUnitConsistency_(masterData, p4PlannedHistory_(ss), standardHours);
+      const analysis = analyzeUnitConsistency_(
+        masterData, p4PlannedHistory_(ss, buildMasterIndex_(masterData)), standardHours);
 
       const built = buildRepairedMasterRows_(masterData, analysis, targets);
       if (built.repaired.length === 0) {
@@ -597,7 +604,10 @@ function closeUnitAtTaughtHours(subject, unitName) {
       const subjectKey = normalizeSubjectName_(subject);
       const nameKey = normalizeUnitName_(unitName);
 
-      const history = p4PlannedHistory_(ss);
+      const lastRow = sheet.getLastRow();
+      const all = sheet.getRange(1, 1, lastRow, P4_MASTER_WIDTH_).getValues();
+
+      const history = p4PlannedHistory_(ss, buildMasterIndex_(all));
       const hu = history[subjectKey] && history[subjectKey].units[nameKey];
       const hours = hu ? (hu.maxHour || 0) : 0;
       if (hours <= 0) {
@@ -608,8 +618,6 @@ function closeUnitAtTaughtHours(subject, unitName) {
         };
       }
 
-      const lastRow = sheet.getLastRow();
-      const all = sheet.getRange(1, 1, lastRow, P4_MASTER_WIDTH_).getValues();
       const rowNumbers = [];
       let unitLabel = String(unitName).trim();
       let previousTotal = 0;

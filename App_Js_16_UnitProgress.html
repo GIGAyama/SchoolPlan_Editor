@@ -90,7 +90,8 @@
                 var m = String(p.unit).match(/(.+?)\s*(\d+)\/(\d+)/);
                 if (!m) return;
                 entries.push({
-                    subject: String(p.subject).trim(),
+                    // 分け合いのセル（"国語2/3 行事1/3"）も、単元マスタのある教科の進捗として数える
+                    subject: resolveMasterSubject(STATE.masterData && STATE.masterData.masterMap, p.subject),
                     unitName: m[1].trim(),
                     hour: parseInt(m[2], 10),
                     cellTotal: parseInt(m[3], 10),
@@ -215,11 +216,16 @@
             return;
         }
 
-        var units = STATE.masterData ? findMasterMapUnits(STATE.masterData.masterMap, subject) : null;
+        // 教科セルは "国語2/3 行事1/3" のように1コマを分け合って書けるので、
+        // マスタに載っている側の教科（分数の大きいほうを優先）へ寄せてから引く
+        var masterMap = STATE.masterData ? STATE.masterData.masterMap : null;
+        var masterSubject = resolveMasterSubject(masterMap, subject);
+        var units = lookupMasterMapUnits(masterMap, masterSubject);
         if (!units || units.length === 0) {
             showToast('warning', '「' + subject + '」の単元マスタデータが見つかりません。');
             return;
         }
+        subject = masterSubject;
 
         loadUnitProgress(function (progress) {
             // 保存前の入力もその場で進捗へ反映する（サーバ通信は増えない）
