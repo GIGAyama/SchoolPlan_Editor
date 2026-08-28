@@ -1,0 +1,27 @@
+{
+  "//": "書体の取りこみ方。作り直すには npm run build:fonts（ネットが要る）。UI の Zen Maru Gothic だけを収録する。学級通信の書体えらびは端末側のフォントに任せる（下の NW_FONTS を見ること）",
+  "family": "Zen Maru Gothic",
+  "weights": [
+    500
+  ],
+  "grades": [
+    1,
+    2
+  ],
+  "scan": [
+    "App.html",
+    "App_Css.html",
+    "App_Js_01_Core.html",
+    "07_WebApp.gs"
+  ],
+  "scanExt": [
+    ".html",
+    ".gs"
+  ],
+  "embed": true,
+  "cssPath": "App_Fonts.html",
+  "oflPath": "OFL.txt",
+  "generator": "tools/fonts/build-fonts.mjs",
+  "license": "Zen Maru Gothic 500 — SIL Open Font License 1.1（全文は OFL.txt）",
+  "copyright": "Copyright 2021 The Zen Maru Gothic Project Authors (https://github.com/googlefonts/zen-marugothic)"
+}

@@ -161,7 +161,10 @@
         // 自動調整では倍率が実効サイズを決めるので、基準は固定値にしておく
         var baseFontSize = opts.autoFit ? AUTOFIT_BASE_FONT_SIZE : opts.fontSize;
         var html = '<style>';
-        html += '@import url("https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap");';
+        // 書体は親ページに埋めこんである自己ホストの CSS をそのまま持っていく。
+        // 以前はここから Google Fonts を @import していたが、学校のフィルタが
+        // 塞ぐと印刷プレビューが開かないまま止まる。
+        html += (window.getSelfHostedFontCss ? window.getSelfHostedFontCss() : '');
         html += '@page { size: A4 portrait; margin: 10mm; }';
         html += 'body { font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Meiryo", system-ui, sans-serif; font-size: ' + baseFontSize + 'px; margin: 0; padding: 0; color: #333; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }';
         html += '.page { width: 100%; height: 277mm; box-sizing: border-box; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; }';

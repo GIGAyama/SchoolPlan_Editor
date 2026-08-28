@@ -25,9 +25,10 @@
         --danger-text: #c5221f;
         --warning-text: #a34700;
         --col-sun-text: #c62828;
-        /* 学校のフィルタリングで fonts.googleapis.com が塞がれると
-           Zen Maru Gothic は届かない。そのとき欧文フォントに落ちて
-           日本語がガタつかないよう、端末側の日本語フォントを後ろに並べる。 */
+        /* Zen Maru Gothic は自己ホスト（App_Fonts.html に data: URI で埋めこみ）。
+           収録は 500 の 1 ウェイト＋小学1〜2年の配当漢字までなので、
+           先生が打った珍しい漢字はここに無い。そのとき欧文フォントに落ちて
+           日本語がガタつかないよう、端末側の日本語フォントを後ろに並べておく。 */
         --font-ui: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Yu Gothic UI',
             'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Meiryo', system-ui, sans-serif;
 

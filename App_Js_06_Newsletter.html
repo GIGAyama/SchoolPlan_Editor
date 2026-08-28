@@ -1,12 +1,27 @@
 <script>
     'use strict';
     // ===== 学級通信ブロックエディタ (NW module) =====
+    // 書体えらび。
+    //
+    // ⚠️ 自己ホストしているのは丸ゴシック（Zen Maru Gothic）だけである。
+    //    ほかの 4 つは端末に入っている書体に当てる。以前は 5 つとも
+    //    Google Fonts から読んでいたが、学校のフィルタが塞ぐと
+    //    印刷プレビューが開かないまま止まる。
+    //
+    //    4 つとも埋めこむと 1 ページあたり gzip 577KB になる（実測）。
+    //    しかも学級通信の本文は先生が打つものなので、どの字が来るかは
+    //    先に分からず、収録しきれない。だから端末側に任せる。
+    //
+    //    総称名（serif / cursive）だけに落とすと、教科書体と手書き風が
+    //    同じ見た目になってしまう。GIGA 端末に実際に入っている書体を
+    //    名指ししておく（Windows の「UD デジタル 教科書体」、
+    //    iPad の「ヒラギノ明朝」など）。
     var NW_FONTS = [
-        { label: '丸ゴシック', value: "'Zen Maru Gothic', sans-serif" },
-        { label: 'ゴシック', value: "'Noto Sans JP', sans-serif" },
-        { label: '明朝体', value: "'Noto Serif JP', serif" },
-        { label: '教科書体', value: "'Klee One', cursive" },
-        { label: '手書き風', value: "'Yusei Magic', cursive" }
+        { label: '丸ゴシック', value: "'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', sans-serif" },
+        { label: 'ゴシック', value: "'Noto Sans JP', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo', sans-serif" },
+        { label: '明朝体', value: "'Noto Serif JP', 'Hiragino Mincho ProN', 'Yu Mincho', 'MS Mincho', serif" },
+        { label: '教科書体', value: "'UD デジタル 教科書体 NP-R', 'UD Digi Kyokasho NP-R', 'Klee One', 'Yu Kyokasho', serif" },
+        { label: '手書き風', value: "'Yusei Magic', 'Klee One', 'Hiragino Maru Gothic ProN', cursive" }
     ];
 
     // WordArt: エフェクト自由組み合わせ式のデフォルト色リスト
@@ -2310,7 +2325,11 @@
     };
 
     // ---- Build print-ready HTML (shared between print and Classroom post) ----
-    NW._PRINT_FONTS = 'https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Klee+One:wght@400;600&family=Yusei+Magic&display=swap';
+    // 印刷ウィンドウへ持っていく書体の CSS。親ページに埋めこんである
+    // 自己ホストのものをそのまま文字列で渡す。外へは取りにいかない。
+    NW._PRINT_FONTS = function () {
+        return window.getSelfHostedFontCss ? window.getSelfHostedFontCss() : '';
+    };
     NW._PRINT_CSS = '@page{size:A4 portrait;margin:15mm 18mm;}'
         + 'body{font-family:"Zen Maru Gothic","Hiragino Maru Gothic ProN","Yu Gothic UI","Hiragino Kaku Gothic ProN","Noto Sans JP","Meiryo",system-ui,sans-serif;font-size:12px;color:#202124;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
         // Block container
@@ -2380,7 +2399,7 @@
         return '<!DOCTYPE html><html><head>'
             + '<meta charset="utf-8">'
             + '<style>' + NW._PRINT_CSS + '</style>'
-            + '<link href="' + NW._PRINT_FONTS + '" rel="stylesheet">'
+            + '<style>' + NW._PRINT_FONTS() + '</style>'
             + '</head><body>' + clone.innerHTML + '</body></html>';
     };
 

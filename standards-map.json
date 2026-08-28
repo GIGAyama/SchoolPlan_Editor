@@ -19,6 +19,18 @@
     {
       "canonical": "lib/giga-v5-checks.mjs",
       "local": "scripts/lib/giga-v5-checks.mjs"
+    },
+    {
+      "canonical": "fonts/build-fonts.mjs",
+      "local": "tools/fonts/build-fonts.mjs"
+    },
+    {
+      "canonical": "fonts/chars.mjs",
+      "local": "tools/fonts/chars.mjs"
+    },
+    {
+      "canonical": "fonts/ofl.mjs",
+      "local": "tools/fonts/ofl.mjs"
     }
   ],
   "dirs": [
