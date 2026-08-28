@@ -27,11 +27,18 @@ function parseUnitProgress_(unitText) {
 
 /**
  * 「単元マスタ」の中から、指定された教科・単元名・時間に対応する学習活動を探し出します。
+ * 教科は "国語2/3 行事1/3" のような分け合いのセルでも、マスタに載っている側の教科で引きます。
  */
 function findActivityFromMaster_(masterData, subject, unitName, hourNum) {
+  const masterSubject = resolveMasterSubjectName_(subject, function (key) {
+    for (let i = 1; i < masterData.length; i++) {
+      if (normalizeSubjectName_(masterData[i][MASTER_COL_SUBJECT - 1]) === key) return true;
+    }
+    return false;
+  });
   for (let i = 1; i < masterData.length; i++) {
     const row = masterData[i];
-    if (isSameSubject_(row[MASTER_COL_SUBJECT - 1], subject)
+    if (isSameSubject_(row[MASTER_COL_SUBJECT - 1], masterSubject)
       && isSameUnitName_(row[MASTER_COL_UNIT_NAME - 1], unitName)
       && row[MASTER_COL_HOUR_NUM - 1] == hourNum) {
       return row[MASTER_COL_ACTIVITY - 1];
@@ -77,8 +84,9 @@ function findLastLessonForSlot_(dbData, subject, dayOfWeek, periodIndex, weekSta
     const ourDow = jsDow === 0 ? 6 : jsDow - 1;
     if (ourDow !== dayOfWeek) continue;
 
-    // 同じスロットに同じ教科があるか（図工/図画工作などの表記ゆれも同一視）
-    if (isSameSubject_(row[pColIdx - 1], subject)) {
+    // 同じスロットに同じ教科があるか（図工/図画工作などの表記ゆれも、
+    // "国語2/3 行事1/3" のように1コマを分け合うセルも同一視）
+    if (subjectCellHasSubject_(row[pColIdx - 1], subject)) {
       const parsed = parseUnitProgress_(row[uColIdx - 1]);
       if (parsed) return parsed;
     }
@@ -144,10 +152,25 @@ function buildMasterIndex_(masterData) {
 }
 
 /**
+ * 教科セルの値から、単元マスタに載っている教科名を決めます。
+ * "国語2/3 行事1/3" のように1コマを分け合うセルでも、単元マスタのある教科
+ * （分数の大きいほうを優先）で引けるようにするための入口です。
+ * 単一教科のセルはそのまま返るので、従来の呼び出しの挙動は変わりません。
+ * @param {Object} masterIndex buildMasterIndex_ の結果
+ * @param {*} subjectCell 教科セルの値
+ * @returns {string} 教科名（セルの表記のまま）
+ */
+function resolveSubjectForMaster_(masterIndex, subjectCell) {
+  return resolveMasterSubjectName_(subjectCell, function (key) {
+    return !!(masterIndex && masterIndex[key]);
+  });
+}
+
+/**
  * マスタインデックスから教科・単元名で単元情報を取得します（表記ゆれ吸収）。
  */
 function getMasterUnit_(masterIndex, subject, unitName) {
-  const s = masterIndex[normalizeSubjectName_(subject)];
+  const s = masterIndex[normalizeSubjectName_(resolveSubjectForMaster_(masterIndex, subject))];
   return (s && s.byName[normalizeUnitName_(unitName)]) || null;
 }
 
@@ -156,9 +179,11 @@ function getMasterUnit_(masterIndex, subject, unitName) {
  * @param {Array} dbData データベースの全行データ
  * @param {Object} dbCols 列マップ
  * @param {Date} beforeDate この日付より前（同日は含まない）の記録を指導済みとして集計
+ * @param {Object} [masterIndex] buildMasterIndex_ の結果。渡すと "国語2/3 行事1/3" のように
+ *   1コマを分け合う教科セルも、単元マスタのある教科の履歴として集計します。
  * @returns {Object} subjectKey -> { units: {unitName: {maxHour, cellTotalMax, taught: {hour:true}}}, lastUnitName, lastTime }
  */
-function buildTaughtHistory_(dbData, dbCols, beforeDate) {
+function buildTaughtHistory_(dbData, dbCols, beforeDate, masterIndex) {
   const history = {};
   const limit = beforeDate.getTime();
 
@@ -177,7 +202,7 @@ function buildTaughtHistory_(dbData, dbCols, beforeDate) {
       const parsed = parseUnitProgress_(row[uCol - 1]);
       if (!parsed) continue;
 
-      const key = normalizeSubjectName_(subject);
+      const key = normalizeSubjectName_(resolveSubjectForMaster_(masterIndex, subject));
       if (!history[key]) history[key] = { units: {}, lastUnitName: null, lastTime: 0 };
       const h = history[key];
 
@@ -324,6 +349,8 @@ function collectMismatchWarnings_(masterIndex, history, warnings) {
  * @returns {{unitName: string, currentHour: number, totalHours: number}|null}
  */
 function determineNextLessonSmart_(subject, baseUnitName, masterIndex, tracker, warnings) {
+  // 教科セルが "国語2/3 行事1/3" でも、単元マスタのある教科で引く
+  subject = resolveSubjectForMaster_(masterIndex, subject);
   const subjectKey = normalizeSubjectName_(subject);
   const subjectMaster = masterIndex[subjectKey];
   // 基準単元がマスタのどれに当たるか（表記のゆれは normalizeUnitName_ が吸収する）
@@ -422,7 +449,7 @@ function calculateAutoFillForWebApp(mondayStr, days, options) {
     const weekStartDate = parseDate_(mondayStr);
 
     const masterIndex = buildMasterIndex_(masterData);
-    const history = buildTaughtHistory_(dbData, dbCols, weekStartDate);
+    const history = buildTaughtHistory_(dbData, dbCols, weekStartDate, masterIndex);
     const tracker = createProgressTracker_(masterIndex, history);
     const warnings = [];
     collectMismatchWarnings_(masterIndex, history, warnings);
@@ -433,11 +460,14 @@ function calculateAutoFillForWebApp(mondayStr, days, options) {
       days.forEach(function (day) {
         if (!day || !day.periods || day.found === false) return;
         day.periods.forEach(function (p) {
-          if (!p || !p.subject || String(p.subject).includes('行事')) return;
+          if (!p) return;
+          // "国語2/3 行事1/3" のような分け合いのコマは、単元マスタのある教科の進捗として数える
+          const subject = resolveSubjectForMaster_(masterIndex, p.subject);
+          if (!subject || subject.includes('行事')) return;
           if (!String(p.unit || '').trim() && !String(p.content || '').trim()) return;
           const parsed = parseUnitProgress_(p.unit);
           if (parsed) {
-            const key = normalizeSubjectName_(p.subject);
+            const key = normalizeSubjectName_(subject);
             tracker.markPlanned(key, parsed.unitName, parsed.currentHour);
             presetMarks.push({ subjectKey: key, unitName: parsed.unitName, hour: parsed.currentHour });
           }
@@ -451,7 +481,9 @@ function calculateAutoFillForWebApp(mondayStr, days, options) {
       if (!day.periods || !day.date || day.found === false) return;
 
       day.periods.forEach(function (p, pIdx) {
-        const subject = p.subject;
+        // 教科セルは "国語2/3 行事1/3" のように1コマを分け合って書ける。
+        // セルの文字列のままでは単元マスタに当たらないので、マスタのある教科へ寄せる。
+        const subject = resolveSubjectForMaster_(masterIndex, p && p.subject);
         if (!subject || subject.includes("行事")) return;
         // 空き時間（別教員担当）は自分が授業をしないコマなので、単元も学習内容も入れない。
         // ここで除外しないと、上書きモードで空き時間の印ごと消えてしまう
@@ -687,7 +719,7 @@ function batchAutoFillFromWeek(baseMondayStr) {
     nextMonday.setDate(nextMonday.getDate() + 7);
 
     const masterIndex = buildMasterIndex_(masterData);
-    const history = buildTaughtHistory_(dbData, dbCols, nextMonday);
+    const history = buildTaughtHistory_(dbData, dbCols, nextMonday, masterIndex);
     const tracker = createProgressTracker_(masterIndex, history);
     const warnings = [];
     collectMismatchWarnings_(masterIndex, history, warnings);
@@ -719,8 +751,11 @@ function batchAutoFillFromWeek(baseMondayStr) {
       const dayOfWeek = jsDow === 0 ? 6 : jsDow - 1;
 
       for (const pc of periodCols) {
-        const subject = row[pc.subj - 1];
-        if (!subject || typeof subject !== 'string' || subject.includes('行事')) continue;
+        const subjectCell = row[pc.subj - 1];
+        if (!subjectCell || typeof subjectCell !== 'string') continue;
+        // "国語2/3 行事1/3" のような分け合いのセルは、単元マスタのある教科として扱う
+        const subject = resolveSubjectForMaster_(masterIndex, subjectCell);
+        if (!subject || subject.includes('行事')) continue;
         // 空き時間（別教員担当）は対象外。固定時間割から空きコマが毎週入るようになると
         // 週に何コマもあるのが普通になるため、ここを抜くと一括自動入力の1回で全部消える
         if (isFreeContent_(row[pc.content - 1])) continue;
@@ -857,8 +892,9 @@ function shiftSubjectLessons(subject, startDateStr, endDateStr, direction, count
       if (t < startDate.getTime() || t > endDate.getTime()) continue;
 
       for (const pc of periodCols) {
-        // 「図工」と「図画工作」のような表記ゆれも同一教科としてシフト対象にする
-        if (isSameSubject_(row[pc.subj], subject)) {
+        // 「図工」と「図画工作」のような表記ゆれも、"国語2/3 行事1/3" のように
+        // 1コマを分け合うセルも、同一教科としてシフト対象にする
+        if (subjectCellHasSubject_(row[pc.subj], subject)) {
           refs.push({
             rowIdx: i,
             uIdx: pc.unit,
@@ -907,7 +943,7 @@ function shiftSubjectLessons(subject, startDateStr, endDateStr, direction, count
     if (options.renumber) {
       const masterSheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
       const masterIndex = masterSheet ? buildMasterIndex_(masterSheet.getDataRange().getValues()) : {};
-      const history = buildTaughtHistory_(dbData, dbCols, startDate);
+      const history = buildTaughtHistory_(dbData, dbCols, startDate, masterIndex);
       const tracker = createProgressTracker_(masterIndex, history);
       const subjectKey = normalizeSubjectName_(subject);
 

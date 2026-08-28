@@ -102,6 +102,124 @@ function isSameSubject_(a, b) {
 }
 
 /**
+ * 教科セルの値を「教科名＋分数」の並びとして解析します。
+ *
+ * 教科セルは "国語" のような1教科だけでなく、"国語2/3 行事1/3" のように
+ * 1コマを分け合う複数教科を分数付きで書ける。時数集計・入力検証・単元マスタ照合は
+ * すべてこの解析結果を通すこと（解析ルールの正本はここ）。
+ * クライアント側の parseSubjectCellEntries（App_Js_02_Plan.html）と対で直すこと。
+ *
+ * @param {*} cellValue 教科セルの値
+ * @returns {{entries: Array<{subject: string, fraction: number, num: number, den: number, explicit: boolean}>, unparsedText: string}}
+ */
+function parseSubjectCellEntries_(cellValue) {
+  const result = { entries: [], unparsedText: '' };
+  if (cellValue === null || cellValue === undefined) return result;
+  const normalized = cellValue.toString().trim().replace(/　/g, ' ');
+  if (!normalized) return result;
+
+  const regex = /([^\s\d\/\.]+)(?:[\s]*(\d+\/\d+|\d+\.\d+))?/g;
+  let match;
+  let lastIndex = 0;
+  let unparsed = '';
+  while ((match = regex.exec(normalized)) !== null) {
+    if (match.index > lastIndex) unparsed += normalized.slice(lastIndex, match.index);
+    lastIndex = regex.lastIndex;
+
+    const subject = match[1].trim();
+    if (!subject) continue;
+    let num = 1, den = 1, explicit = false;
+    if (match[2]) {
+      explicit = true;
+      if (match[2].includes('/')) {
+        const parts = match[2].split('/');
+        num = parseInt(parts[0], 10);
+        den = parseInt(parts[1], 10);
+      } else {
+        // 小数を正確な分数に変換（例: "0.5" → 5/10）
+        const decParts = match[2].split('.');
+        den = Math.pow(10, decParts[1].length);
+        num = parseInt(decParts[0], 10) * den + parseInt(decParts[1], 10);
+      }
+    }
+    result.entries.push({ subject, fraction: den === 0 ? NaN : num / den, num, den, explicit });
+  }
+  if (lastIndex < normalized.length) unparsed += normalized.slice(lastIndex);
+  result.unparsedText = unparsed.replace(/\s/g, '');
+  return result;
+}
+
+/**
+ * 教科セルに書かれている教科名を、分数の大きい順（同率ならセルに書かれた順）で返します。
+ * 例: "国語2/3 行事1/3" → ['国語', '行事'] ／ "行事1/3 国語2/3" → ['国語', '行事']
+ * @param {*} cellValue 教科セルの値
+ * @returns {string[]} 教科名（セルの表記のまま。重複は正規化して除く）
+ */
+function listSubjectNamesInCell_(cellValue) {
+  const entries = parseSubjectCellEntries_(cellValue).entries;
+  const seen = {};
+  const names = [];
+  entries.forEach(function (e, idx) {
+    const key = normalizeSubjectName_(e.subject);
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    names.push({ name: e.subject, fraction: isFinite(e.fraction) ? e.fraction : 0, idx: idx });
+  });
+  names.sort(function (a, b) {
+    if (b.fraction !== a.fraction) return b.fraction - a.fraction;
+    return a.idx - b.idx;
+  });
+  return names.map(function (n) { return n.name; });
+}
+
+/**
+ * 教科セルの値から「単元マスタを引くための教科名」を1つ決めます。
+ *
+ * 1コマを分け合う教科セル（"国語2/3 行事1/3"）をそのまま教科名として単元マスタを
+ * 引くと、当然どの教科にも当たらず、単元ピッカーも自動入力も学習内容を出せなかった。
+ * セル全体で当たらないときは、書かれている教科名を分数の大きい順に試し、
+ * 単元マスタに載っている教科を採用する。
+ *
+ * セルの文字列そのものを先に試すのは、"3年体育" のように数字を含む教科名を
+ * 分解して壊さないため。どれにも当たらなければ従来どおりセルの値をそのまま返す
+ * （呼び出し側の「見つからない」メッセージは今までと同じ文言になる）。
+ *
+ * @param {*} cellValue 教科セルの値
+ * @param {function(string):boolean} [hasSubject] 正規化済み教科名を受け取り、
+ *   単元マスタにその教科があるかを返す関数。省略時は分数の大きい教科を返します。
+ * @returns {string} 教科名（セルの表記のまま。空セルなら ''）
+ */
+function resolveMasterSubjectName_(cellValue, hasSubject) {
+  const raw = (cellValue === null || cellValue === undefined) ? '' : String(cellValue).trim();
+  if (!raw) return '';
+  if (typeof hasSubject !== 'function') {
+    const names = listSubjectNamesInCell_(raw);
+    return names.length > 1 ? names[0] : raw;
+  }
+  if (hasSubject(normalizeSubjectName_(raw))) return raw;
+  const names = listSubjectNamesInCell_(raw);
+  for (let i = 0; i < names.length; i++) {
+    if (hasSubject(normalizeSubjectName_(names[i]))) return names[i];
+  }
+  return raw;
+}
+
+/**
+ * 教科セルに、その教科が入っているかを判定します。
+ * "国語2/3 行事1/3" のセルは「国語のコマ」でもあるので、単元シフトや
+ * スロット記憶の突き合わせでは単純な一致ではなくこちらを使います。
+ * @param {*} cellValue 教科セルの値
+ * @param {*} subject 探す教科名
+ * @returns {boolean}
+ */
+function subjectCellHasSubject_(cellValue, subject) {
+  if (isSameSubject_(cellValue, subject)) return true;
+  const names = listSubjectNamesInCell_(cellValue);
+  if (names.length <= 1) return false;
+  return names.some(function (n) { return isSameSubject_(n, subject); });
+}
+
+/**
  * 単元名を突き合わせるためのキーを作ります。**表示にはそのまま使わないこと。**
  *
  * 週案の単元セルは自由入力なので、単元マスタと同じ単元でも「全角スペースが入った」

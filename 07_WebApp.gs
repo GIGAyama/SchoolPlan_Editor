@@ -500,40 +500,9 @@ function parseDate_(dateStr) {
  *   unparsedText: 解析できなかった非空白文字（例: "国語 2" の "2"）。不正入力の検知に使用。
  */
 function parseSubjectCell_(cellValue) {
-  const result = { entries: [], unparsedText: '' };
-  if (cellValue === null || cellValue === undefined) return result;
-  const normalized = cellValue.toString().trim().replace(/　/g, ' ');
-  if (!normalized) return result;
-
-  const regex = /([^\s\d\/\.]+)(?:[\s]*(\d+\/\d+|\d+\.\d+))?/g;
-  let match;
-  let lastIndex = 0;
-  let unparsed = '';
-  while ((match = regex.exec(normalized)) !== null) {
-    if (match.index > lastIndex) unparsed += normalized.slice(lastIndex, match.index);
-    lastIndex = regex.lastIndex;
-
-    const subject = match[1].trim();
-    if (!subject) continue;
-    let num = 1, den = 1, explicit = false;
-    if (match[2]) {
-      explicit = true;
-      if (match[2].includes('/')) {
-        const parts = match[2].split('/');
-        num = parseInt(parts[0], 10);
-        den = parseInt(parts[1], 10);
-      } else {
-        // 小数を正確な分数に変換（例: "0.5" → 5/10）
-        const decParts = match[2].split('.');
-        den = Math.pow(10, decParts[1].length);
-        num = parseInt(decParts[0], 10) * den + parseInt(decParts[1], 10);
-      }
-    }
-    result.entries.push({ subject, fraction: den === 0 ? NaN : num / den, num, den, explicit });
-  }
-  if (lastIndex < normalized.length) unparsed += normalized.slice(lastIndex);
-  result.unparsedText = unparsed.replace(/\s/g, '');
-  return result;
+  // 解析ルールの正本は 99_Utils.gs の parseSubjectCellEntries_（単元マスタ照合でも同じ
+  // 分解が要るため、時数集計だけの関数から共通ユーティリティへ移した）。
+  return parseSubjectCellEntries_(cellValue);
 }
 
 /**
