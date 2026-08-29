@@ -159,12 +159,33 @@ test('測れないときも壊れず、scrollHeight で代替する', () => {
 // ===== 用紙からはみ出させない仕掛け =====
 
 test('紙の下端ぎりぎりではなく、安全余白の内側に収める', () => {
-  // 測ったレイアウトと刷られるレイアウトは端末差でずれる。ぴったり100%を狙うと
+  // 測ったレイアウトと刷られるレイアウトはずれる。ぴったり100%を狙うと
   // その差の分だけ最下段（時数表の下の行・検印欄）が黙って切り落とされる
   assert.match(print, /var AUTOFIT_SAFETY_MM = 2;/);
-  assert.match(print, /var safety = AUTOFIT_SAFETY_MM \* MM_TO_PX/);
   assert.match(print, /var target = Math\.max\(avail - safety/);
   assert.match(print, /pickFitScale_\(measureAt, target,/, '目標高さに安全余白が効いていない');
+});
+
+test('スマホ・タブレットでは安全余白を広く取る', () => {
+  // 実機の PDF で実測したところ、スマホでは印刷のラスタライズ段でレイアウトが
+  // DOM より約2%高くなる（DOM が 1033.4px と申告したページの文字が 1055.3px まで
+  // 描かれていた）。アプリからは検知できないので余白で吸収するしかない。
+  // 2mm(0.72%) では足りず、時数表の行と検印欄が切り落とされる
+  assert.match(print, /var AUTOFIT_SAFETY_MM_MOBILE = 8;/);
+  assert.match(print, /isMobilePrint \? AUTOFIT_SAFETY_MM_MOBILE : AUTOFIT_SAFETY_MM/,
+    '端末で余白を切り替えていない');
+});
+
+test('Chromebook・PC は余白を広げない', () => {
+  // userAgentData.mobile は Chromium が持つ真偽値で、Chromebook は false。
+  // ここを画面幅やタッチの有無で判定すると、タッチ対応 Chromebook まで巻きこんで
+  // 紙を無駄にする
+  const body = extractFn(print, 'printWeeklyPlanExec');
+  assert.match(body, /navigator\.userAgentData/);
+  assert.match(body, /typeof uad\.mobile === 'boolean'/);
+  assert.match(body, /Android\|iPhone\|iPad\|iPod\|Mobile/, 'userAgentData 非対応時の判定が無い');
+  assert.doesNotMatch(body, /innerWidth|matchMedia|ontouchstart/,
+    '画面幅やタッチの有無で判定すると Chromebook を巻きこむ');
 });
 
 test('高さの測定は contentBottomPx_ に一本化されている', () => {
@@ -227,46 +248,6 @@ test('印刷文書は文字の自動拡大を切る', () => {
 test('印刷文書にも viewport を持たせる', () => {
   // 無いとスマホの Chrome が「PC向けページ」と誤認して自動拡大を掛ける
   assert.match(print, /<meta name="viewport" content="width=device-width, initial-scale=1">/);
-});
-
-// ===== 不具合調査用の診断印字 =====
-
-test('診断印字は既定でOFF', () => {
-  // 通常の印刷物に余計な文字を出さない。ONにしたときだけ紙に値が乗る
-  assert.match(print, /id="po_debug"/);
-  assert.match(print, /po_\('debug', false\)/, '既定がOFFになっていない');
-  assert.match(print, /debug: document\.getElementById\('po_debug'\)\.checked/);
-});
-
-test('診断がOFFなら診断行の要素そのものを作らない', () => {
-  // 空要素でも紙に痕跡が出ないよう、opts.debug のときだけ書きこむ。
-  // 呼び出しが1か所で、しかも opts.debug の分岐より後にあることを確かめる
-  const body = extractFn(print, 'printWeeklyPlanExec');
-  const guard = body.indexOf('if (opts.debug) {');
-  assert.notEqual(guard, -1, 'opts.debug の分岐が無い');
-  const calls = body.match(/writeFitDebug_\(/g) || [];
-  assert.equal(calls.length, 1, '診断の書きこみは1か所だけにする');
-  assert.ok(body.indexOf('writeFitDebug_(') > guard, '分岐の外から書きこんでいる');
-});
-
-test('診断行は時数表の行そのものも測る', () => {
-  // 刷り上がりで行が消えるとき、DOM で潰れている(rowH≈0)のか、
-  // DOM は正常なのに描画で失われている(rowH は正常)のかを見分ける唯一の手がかり
-  const body = extractFn(print, 'printWeeklyPlanExec');
-  assert.match(body, /querySelectorAll\('\.stats-table tr'\)/);
-  assert.match(body, /rowH = lastRow\.height/);
-  assert.match(body, /sbot = lastRow\.bottom - page\.getBoundingClientRect\(\)\.top/);
-});
-
-test('診断行には、測ったときと当てた後の両方の値が出る', () => {
-  // どちらがどれだけ食い違っているかを紙の上で見分けるための最低限
-  const fn = extractFn(print, 'writeFitDebug_');
-  for (const key of ['avail', 'target', 'predict', 'actual', 'dpr', 'rows', 'rowH', 'sbot']) {
-    assert.match(fn, new RegExp(key), `診断行に ${key} が無い`);
-  }
-  // onbeforeprint で走り直したかどうかが分かること
-  assert.match(fn, /fit#/);
-  assert.match(print, /fdoc\.fitPassCount = \(fdoc\.fitPassCount \|\| 0\) \+ 1/);
 });
 
 // ===== 印刷オプション =====

@@ -81,8 +81,8 @@ async function run(body, mode){
   await pg.setContent('<!doctype html><html><head><meta charset="utf-8">'+css+'</head><body style="width:190mm;margin:0">'+body+'</body></html>');
   return pg.evaluate(function(a){
     var pick=a[0], fitSrc=a[1], cs=a[2], cbp=a[3];
-    // fitPagesToPrintArea は opts.debug（診断印字）を見るので、既定の opts を渡す
-    new Function('printFrame','opts', cs+'\n'+a[4]+'\n'+cbp+'\n'+pick+'\n'+fitSrc+'\nfitPagesToPrintArea();')({contentWindow:{document:document}},{debug:false});
+    // fitPagesToPrintArea は isMobilePrint を見る。この検証はデスクトップ相当で回す
+    new Function('printFrame','isMobilePrint', cs+'\n'+cbp+'\n'+pick+'\n'+fitSrc+'\nfitPagesToPrintArea();')({contentWindow:{document:document}}, false);
     var page=document.querySelector('.page'), fit=page.querySelector('.page-fit');
     var t=getComputedStyle(fit).transform;
     var sc=t==='none'?1:parseFloat(t.split('(')[1].split(',')[0]);
@@ -91,7 +91,7 @@ async function run(body, mode){
     fit.querySelectorAll('*').forEach(function(el){var r=el.getBoundingClientRect();
       if(r.width===0&&r.height===0)return; if(r.bottom>bot){bot=r.bottom;who=el.className||el.tagName;}});
     return {sc:sc, real:bot-top, avail:page.clientHeight, who:who};
-  },[fn('pickFitScale_'), mode==='new'?vf('fitPagesToPrintArea'):OLD_FIT, consts, fn('contentBottomPx_'), fn('writeFitDebug_')]);
+  },[fn('pickFitScale_'), mode==='new'?vf('fitPagesToPrintArea'):OLD_FIT, consts, fn('contentBottomPx_')]);
 }
 
 const cases=[
