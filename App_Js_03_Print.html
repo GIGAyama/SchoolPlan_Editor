@@ -184,7 +184,10 @@
             // 紙に出た値どうしは一致するのに、実際の刷り上がりだけが溢れる形になる。
             + ' predict=' + r(v.measured * v.chosen) + ' actual=' + r(v.actual)
             + ' dpr=' + r(doc.defaultView ? doc.defaultView.devicePixelRatio : 0)
-            + ' bodyW=' + r(doc.body ? doc.body.clientWidth : 0);
+            + ' bodyW=' + r(doc.body ? doc.body.clientWidth : 0)
+            // 時数表の最終行。rowH がほぼ0なら DOM の時点で行が潰れている。
+            // rowH が正常で sbot も紙の内側なら、失われているのは描画の段
+            + ' rows=' + r(v.rows) + ' rowH=' + r(v.rowH) + ' sbot=' + r(v.sbot);
     }
 
     /**
@@ -916,9 +919,20 @@
                 // 端末で DevTools が使えない（スマホの PWA など）ときに、
                 // 測ったときと刷られたときのどこがどれだけ食い違うかを紙の上で確かめる。
                 if (opts.debug) {
+                    // 時数表の行そのものを測る。刷り上がりで行が消えるとき、
+                    // DOM で行が潰れている（rowH がほぼ0）のか、DOM は正常なのに
+                    // ラスタライズで失われている（rowH は正常で sbot も紙の内側）のかを見分ける。
+                    var rows = page.querySelectorAll('.stats-table tr');
+                    var rowH = -1, sbot = -1;
+                    if (rows.length) {
+                        var lastRow = rows[rows.length - 1].getBoundingClientRect();
+                        rowH = lastRow.height;
+                        sbot = lastRow.bottom - page.getBoundingClientRect().top;
+                    }
                     writeFitDebug_(fdoc, page, fit, {
                         avail: avail, target: target, chosen: chosen, scale: scale,
-                        measured: measured, actual: contentBottomPx_(fit, scale), pass: pass
+                        measured: measured, actual: contentBottomPx_(fit, scale), pass: pass,
+                        rows: rows.length, rowH: rowH, sbot: sbot
                     });
                 }
             }

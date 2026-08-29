@@ -239,15 +239,29 @@ test('診断印字は既定でOFF', () => {
 });
 
 test('診断がOFFなら診断行の要素そのものを作らない', () => {
-  // 空要素でも紙に痕跡が出ないよう、opts.debug のときだけ書きこむ
+  // 空要素でも紙に痕跡が出ないよう、opts.debug のときだけ書きこむ。
+  // 呼び出しが1か所で、しかも opts.debug の分岐より後にあることを確かめる
   const body = extractFn(print, 'printWeeklyPlanExec');
-  assert.match(body, /if \(opts\.debug\) \{\s*\n\s*writeFitDebug_\(/);
+  const guard = body.indexOf('if (opts.debug) {');
+  assert.notEqual(guard, -1, 'opts.debug の分岐が無い');
+  const calls = body.match(/writeFitDebug_\(/g) || [];
+  assert.equal(calls.length, 1, '診断の書きこみは1か所だけにする');
+  assert.ok(body.indexOf('writeFitDebug_(') > guard, '分岐の外から書きこんでいる');
+});
+
+test('診断行は時数表の行そのものも測る', () => {
+  // 刷り上がりで行が消えるとき、DOM で潰れている(rowH≈0)のか、
+  // DOM は正常なのに描画で失われている(rowH は正常)のかを見分ける唯一の手がかり
+  const body = extractFn(print, 'printWeeklyPlanExec');
+  assert.match(body, /querySelectorAll\('\.stats-table tr'\)/);
+  assert.match(body, /rowH = lastRow\.height/);
+  assert.match(body, /sbot = lastRow\.bottom - page\.getBoundingClientRect\(\)\.top/);
 });
 
 test('診断行には、測ったときと当てた後の両方の値が出る', () => {
   // どちらがどれだけ食い違っているかを紙の上で見分けるための最低限
   const fn = extractFn(print, 'writeFitDebug_');
-  for (const key of ['avail', 'target', 'predict', 'actual', 'dpr']) {
+  for (const key of ['avail', 'target', 'predict', 'actual', 'dpr', 'rows', 'rowH', 'sbot']) {
     assert.match(fn, new RegExp(key), `診断行に ${key} が無い`);
   }
   // onbeforeprint で走り直したかどうかが分かること
