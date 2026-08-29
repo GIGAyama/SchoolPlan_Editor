@@ -321,6 +321,22 @@ test(`保存中に使った右クリックメニューのクリアが保存応�
 });
 }
 
+test('編集モードを抜けるときは、ツールバーだけでなくグリッドも描き直す', () => {
+  // 報告された不具合そのもの。タブ切替の autoSaveAndThen が「保存するものが無い」で
+  // 抜ける経路で、以前は STATE.editMode を落として updateEditUI() を呼ぶだけだった。
+  // グリッドは編集用の入力欄を抱えたまま残り、そこへ打った文字は保存されずに消えていた。
+  const c = bootClient();
+  c.run('setEditMode(true)');
+  const before = c.renders.length;
+  let arrived = false;
+  c.run('__switched = false; autoSaveAndThen(function () { __switched = true; });');
+  c.clock.advance();
+  arrived = c.run('__switched');
+  assert.equal(arrived, true, '保存するものが無いなら、画面の切り替えは必ず進むこと');
+  assert.equal(c.STATE.editMode, false);
+  assert.ok(c.renders.length > before, 'モードを落としたのにグリッドを描き直していない');
+});
+
 test('編集モードに入ったあとは閲覧モードの保存応答で画面を書き換えない', () => {
   const c = bootClient();
   // シート側で値が解釈し直された（応答が手元と違う内容で返る）状況にする

@@ -15,19 +15,25 @@
                 return;
             }
             if (!STATE.editMode || !hasUnsavedChanges()) {
-                if (STATE.editMode) { STATE.editMode = false; updateEditUI(); }
+                // 保存するものが無いだけで、編集モードは抜ける。exitEditMode() を通すことで
+                // ツールバーとグリッドが必ず揃う（片方だけ閲覧になると入力が消える）。
+                if (STATE.editMode) exitEditMode();
                 callback(); return;
             }
-            if (_autoSaving) return;
             var days = collectCurrentEditData();
             if (!days) { callback(); return; }
             var errors = validateDaysSubjects(days);
-            if (errors.length) { showToast('error', '教科名の入力に誤りがあるため自動保存できません: ' + errors[0]); return; }
+            if (errors.length) {
+                // ここで callback を呼ばないと画面の切り替えごと起きない。何が起きなかったのかを
+                // 言葉にしておかないと「押したのに何も反応しない」に見える。
+                showToast('error', '教科名の入力に誤りがあるため自動保存できず、画面の切り替えを中止しました: '
+                    + errors[0] + ' 直すか、「キャンセル」で変更を捨ててください。');
+                return;
+            }
             if (!beginSaveRequest()) { whenSaveIdle(function () { window.autoSaveAndThen(callback, retrying); }); return; }
-            _autoSaving = true;
             var cacheKey = p2WeekCacheKey(displayedWeekMondayStr());
             google.script.run.withSuccessHandler(function (result) {
-                _autoSaving = false; endSaveRequest();
+                endSaveRequest();
                 if (typeof p2LogTiming === 'function') p2LogTiming('自動保存（週移動前）', result);
                 if (result.success) {
                     adoptSavedWeekDays(result, days, null, null, cacheKey);
@@ -38,7 +44,7 @@
                         window.autoSaveAndThen(callback, true);
                         return;
                     }
-                    STATE.editMode = false; updateEditUI();
+                    exitEditMode();
                     if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
                     markSaveOutcome('saved', '自動保存しました');
                     showToast('success', '自動保存しました'); callback();
@@ -52,13 +58,15 @@
                 } else {
                     forgetServerWeekContent(cacheKey);
                     markSaveOutcome('error', '自動保存できませんでした');
-                    showToast('error', '自動保存失敗: ' + result.error + ' 手動で保存してください。');
+                    showToast('error', '自動保存失敗: ' + result.error
+                        + ' 手動で保存してください。画面の切り替えは中止しました。');
                 }
             }).withFailureHandler(function (e) {
-                _autoSaving = false; endSaveRequest();
+                endSaveRequest();
                 forgetServerWeekContent(cacheKey);
                 markSaveOutcome('error', '自動保存できませんでした');
-                showToast('error', '自動保存エラー: ' + e.message);
+                showToast('error', '自動保存エラー: ' + e.message
+                    + ' 手動で保存してください。画面の切り替えは中止しました。');
             })
                 .saveWeeklyPlanDataProtected(displayedWeekMondayStr(), days, STATE.weekData.revision, 'auto-save', expectedClassSheetName());
         };

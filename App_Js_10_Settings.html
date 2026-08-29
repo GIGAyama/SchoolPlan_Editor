@@ -331,8 +331,9 @@
             .withSuccessHandler(function (res) {
                 if (res.success) {
                     showToast('success', '' + res.message);
-                    STATE.editMode = false;
-                    updateEditUI();
+                    // 転記でサーバー側の週が書き換わった。手元の編集内容・履歴は
+                    // 転記前のものなので、モードごと捨てて読み直す。
+                    if (typeof p2DiscardLocalEdits === 'function') p2DiscardLocalEdits();
                     // 転記でサーバーの週が書き換わったので、転記前の週キャッシュを必ず捨てる。
                     // 残したままだと doLoadWeeklyPlan() が転記前の内容を先に描いてしまい、
                     // それを保存すると転記した時間割が古い内容で上書きされて消える。

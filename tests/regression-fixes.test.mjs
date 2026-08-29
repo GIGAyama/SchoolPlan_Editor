@@ -21,8 +21,12 @@ test('V1 week-plan client endpoints are gone', () => {
 });
 
 test('shared save-state variables remain declared in App_Js_02_Plan', () => {
-  // App_Js_14(V2)と App_Js_15(保護版)の保存実装がこれらを参照する
-  assert.match(plan, /var _autoSaving = false;/);
+  // App_Js_14(V2)と App_Js_15(保護版)の保存実装がこれらを参照する。
+  // _autoSaving は削除した。beginSaveRequest() を通ったあとにしか立たないので
+  // 「保存中なら待つ」の判定は必ず先に isSaveInFlight() が拾っており、
+  // 残っていた `if (_autoSaving) return;` は到達しないまま callback だけを
+  // 落とす行になっていた（画面の切り替えが黙って起きない不具合の原因）。
+  assert.doesNotMatch(plan, /_autoSaving/);
   assert.match(plan, /var _viewSaveTimer = null;/);
 });
 

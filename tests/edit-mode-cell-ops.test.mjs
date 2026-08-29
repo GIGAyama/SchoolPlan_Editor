@@ -22,6 +22,31 @@ function fnBody(name) {
   return rest.slice(0, next === -1 ? undefined : next);
 }
 
+test('モードの切り替えは setEditMode ひとつだけが行う', () => {
+  // グリッドの中身は renderWeekGrid が STATE.editMode を見て作り分けるので、
+  // セルの姿は「描いた瞬間のモード」で固まる。代入だけして描き直さない経路があると、
+  // ツールバーは「閲覧モード」なのにグリッドは編集用の入力欄のまま、という
+  // 食い違いが残り、そこへ打った文字はどの保存経路にも拾われず消える。
+  const files = ['App_Js_01_Core.html', 'App_Js_02_Plan.html', 'App_Js_10_Settings.html',
+    'App_Js_14_MultiClass.html', 'App_Js_15_DataProtection_Overrides.html'];
+  let total = 0;
+  for (const f of files) total += (read(f).match(/STATE\.editMode\s*=[^=]/g) || []).length;
+  assert.equal(total, 1, 'STATE.editMode への代入は setEditMode の中の1か所だけにすること');
+});
+
+test('モードを切り替えたら、必ずツールバーとグリッドの両方を作り直す', () => {
+  const body = fnBody('setEditMode');
+  assert.match(body, /STATE\.editMode = !!on/);
+  assert.match(body, /updateEditUI\(\)/);
+  assert.match(body, /renderWeekGrid\(/);
+  assert.ok(body.indexOf('updateEditUI()') < body.indexOf('renderWeekGrid('),
+    'ツールバーを整えてからグリッドを描くこと（描画は編集ボタンの表示状態を前提にしない）');
+  // 描いた側のモードもDOMに残す（食い違いを画面でもテストでも見つけられるように）
+  assert.match(fnBody('renderWeekGrid'), /grid\.dataset\.mode = isEdit \? 'edit' : 'view'/);
+  // 閲覧モードなのに入力欄が残っていたら、打たれる前に作り直す（最後の保険）
+  assert.match(plan, /e\.target\.blur\(\);\s*\n\s*if \(STATE\.weekData && STATE\.weekData\.days\) renderWeekGrid/);
+});
+
 test('編集開始時のスナップショットで未保存判定とキャンセルを行う', () => {
   // 編集モードのセル操作は STATE.weekData.days を書き換えるため、
   // days と比べる未保存判定では「操作したのに変更なし」と誤判定して保存が飛ぶ
@@ -29,6 +54,9 @@ test('編集開始時のスナップショットで未保存判定とキャン�
   assert.doesNotMatch(core, /editBuffer/);
   assert.match(fnBody('hasUnsavedChanges'), /STATE\.editBaseline \|\| STATE\.weekData\.days/);
   assert.match(fnBody('exitEditMode'), /STATE\.weekData\.days = baseline/);
+  // 巻き戻した途中の状態を指す履歴を残すと、次の「元に戻す」で捨てた変更が復活する
+  assert.match(fnBody('exitEditMode'), /STATE\.undoStack = \[\]/);
+  assert.match(fnBody('exitEditMode'), /setEditMode\(false\)/);
   assert.match(fnBody('syncEditBaseline'), /STATE\.editBaseline = null/);
   // 出入りの全経路が通る updateEditUI でスナップショットを取り／捨てする
   assert.match(fnBody('updateEditUI'), /syncEditBaseline\(\)/);

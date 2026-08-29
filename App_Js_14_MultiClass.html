@@ -585,10 +585,7 @@
         // 閲覧モードのセル操作の未確定分も捨てる。残すと p2ApplyWeekData が
         // 読み直しを見送ってしまい、書き換えたはずのサーバ側の内容が画面に出ない。
         if (typeof clearViewDirtyWeeks === 'function') clearViewDirtyWeeks();
-        if (STATE.editMode) {
-            STATE.editMode = false;
-            if (typeof updateEditUI === 'function') updateEditUI();
-        }
+        if (STATE.editMode && typeof setEditMode === 'function') setEditMode(false);
     }
 
     function p2UpdateCurrentWeekCache() {
@@ -623,27 +620,30 @@
             return;
         }
         if (!STATE.editMode || !hasUnsavedChanges()) {
-            if (STATE.editMode) { STATE.editMode = false; updateEditUI(); }
+            // 保存するものが無いだけで、編集モードは抜ける。exitEditMode() を通すことで
+            // ツールバーとグリッドが必ず揃う（片方だけ閲覧になると入力が消える）。
+            if (STATE.editMode) exitEditMode();
             callback();
             return;
         }
-        if (_autoSaving) return;
         var days = collectCurrentEditData();
         if (!days) { callback(); return; }
 
         var subjectErrors = validateDaysSubjects(days);
         if (subjectErrors.length > 0) {
-            showToast('error', '教科名の入力に誤りがあるため自動保存できません: ' + subjectErrors[0]
-                + (subjectErrors.length > 1 ? '（他' + (subjectErrors.length - 1) + '件）' : ''));
+            // ここで callback を呼ばないと画面の切り替えごと起きない。何が起きなかったのかを
+            // 言葉にしておかないと「押したのに何も反応しない」に見える。
+            showToast('error', '教科名の入力に誤りがあるため自動保存できず、画面の切り替えを中止しました: '
+                + subjectErrors[0]
+                + (subjectErrors.length > 1 ? '（他' + (subjectErrors.length - 1) + '件）' : '')
+                + ' 直すか、「キャンセル」で変更を捨ててください。');
             return;
         }
 
         if (!beginSaveRequest()) { whenSaveIdle(function () { autoSaveAndThen(callback, retrying); }); return; }
-        _autoSaving = true;
         var cacheKey = p2WeekCacheKey(displayedWeekMondayStr());
         google.script.run
             .withSuccessHandler(function (result) {
-                _autoSaving = false;
                 endSaveRequest();
                 p2LogTiming('自動保存（週移動前）', result);
                 if (result.success) {
@@ -655,8 +655,7 @@
                         autoSaveAndThen(callback, true);
                         return;
                     }
-                    STATE.editMode = false;
-                    updateEditUI();
+                    exitEditMode();
                     p2UpdateCurrentWeekCache();
                     markSaveOutcome('saved', '自動保存しました');
                     showToast('success', '自動保存しました');
@@ -671,15 +670,16 @@
                 } else {
                     forgetServerWeekContent(cacheKey);
                     markSaveOutcome('error', '自動保存できませんでした');
-                    showToast('error', '自動保存失敗: ' + result.error + ' 手動で保存してください。');
+                    showToast('error', '自動保存失敗: ' + result.error
+                        + ' 手動で保存してください。画面の切り替えは中止しました。');
                 }
             })
             .withFailureHandler(function (e) {
-                _autoSaving = false;
                 endSaveRequest();
                 forgetServerWeekContent(cacheKey);
                 markSaveOutcome('error', '自動保存できませんでした');
-                showToast('error', '自動保存エラー: ' + e.message + ' 手動で保存してください。');
+                showToast('error', '自動保存エラー: ' + e.message
+                    + ' 手動で保存してください。画面の切り替えは中止しました。');
             })
             .saveWeeklyPlanDataV2(displayedWeekMondayStr(), days, STATE.weekData.revision);
     }

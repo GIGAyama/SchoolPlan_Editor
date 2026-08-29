@@ -7,6 +7,9 @@
         var isEdit = STATE.editMode;
         grid.innerHTML = '';
         grid.className = 'week-grid' + (isEdit ? ' edit-mode' : '');
+        // どちらの姿で描いたかをDOMに残す。モードとグリッドが食い違っていないかを
+        // 画面上でもテストからも確かめられるようにするため。
+        grid.dataset.mode = isEdit ? 'edit' : 'view';
 
         // 土日の表示設定に応じて列数を変え、表示列がより広く使えるようにする
         var visibleCount = 0;
@@ -992,11 +995,26 @@
     }
 
     // ===== 編集モード制御 =====
+    /**
+     * 週案のモードを切り替える、ただ一つの入口。
+     *
+     * グリッドの中身は renderWeekGrid() が STATE.editMode を見て作り分ける。
+     * つまりセルの姿は「描いた瞬間のモード」で固まる。ここを通さずに
+     * STATE.editMode を書き換えると、ツールバーは「閲覧モード」なのに
+     * グリッドは編集用の入力欄のまま、という食い違いが残り、そこへ打った文字は
+     * どの保存経路にも拾われずに消える（実際にこの不具合が起きた）。
+     * 状態・ツールバー・グリッドの3つは、必ずここで一度に揃える。
+     * @param {boolean} on true で編集モード、false で閲覧モード
+     */
+    function setEditMode(on) {
+        STATE.editMode = !!on;
+        updateEditUI(); // syncEditBaseline() が編集開始時のスナップショットを取り／捨てする
+        if (STATE.weekData && STATE.weekData.days) renderWeekGrid(STATE.weekData.days);
+    }
+
     function toggleEditMode() {
         if (STATE.editMode) { exitEditMode(); return; }
-        STATE.editMode = true;
-        updateEditUI();
-        renderWeekGrid(STATE.weekData.days);
+        setEditMode(true);
         // 編集モードに入った時点で単元の進捗を先読みしておく（ピッカーを開いた時の待ちを消す）
         if (typeof prefetchUnitProgress === 'function') prefetchUnitProgress();
     }
@@ -1015,9 +1033,12 @@
             STATE.weekData.days = baseline;
             markWeekDaysMutated();
         }
-        STATE.editMode = false;
-        updateEditUI();
-        if (STATE.weekData && STATE.weekData.days) renderWeekGrid(STATE.weekData.days);
+        // 履歴も一緒に捨てる。days をスナップショットへ巻き戻したので、その途中の状態を
+        // 指す履歴を残すと、次に編集モードへ入って「元に戻す」を押した瞬間に、
+        // 捨てたはずの変更が復活してしまう。
+        STATE.undoStack = [];
+        STATE.redoStack = [];
+        setEditMode(false);
     }
 
     /**
@@ -1155,7 +1176,6 @@
     // App_Js_15_DataProtection_Overrides(保護版)が最終実装になる。
     // persistViewMutation(閲覧モードでのD&D等の自動保存)も同様。
     // 以下の変数はそれらの実装から参照されるため、宣言はここに残す。
-    var _autoSaving = false;
     var _viewSaveTimer = null;
     // ディレイ待ちの保存処理。週移動・学級切替・画面切替の直前に前倒しで送るために持つ。
     var _viewSaveRunner = null;
@@ -1587,7 +1607,6 @@
     // @param {Object[]} [attemptedDays] 保存しようとした内容
     // @param {Function} [overwrite] 上書き再保存（サーバの最新リビジョンを受け取る）
     function handleSaveConflict(result, attemptedDays, overwrite) {
-        _autoSaving = false;
         var current = result && result.current;
         if (typeof Swal === 'undefined') {
             showToast('error', 'この週は他で更新されています。最新を読み込み直してください。');
@@ -1616,10 +1635,9 @@
             denyButtonColor: '#f9ab00'
         }).then(function (r) {
             if (r.isConfirmed) {
-                STATE.editMode = false;
-                updateEditUI();
-                // 手元の内容を捨てると決めた読み直しなので、閲覧モードの未確定の変更も
-                // 一緒に捨てる（残すと読み直しそのものが見送られてしまう）。
+                // 手元の内容を捨てると決めた読み直しなので、編集モード・履歴・未確定の
+                // 変更をまとめて捨てる（残すと読み直しそのものが見送られてしまう）。
+                if (typeof p2DiscardLocalEdits === 'function') p2DiscardLocalEdits();
                 doLoadWeeklyPlan({ force: true });
             } else if (r.isDenied && canOverwrite) {
                 overwrite(current.revision);
@@ -1806,9 +1824,16 @@
     // 編集モード: 入力欄にフォーカスが入ったら、そのセルを選択状態にする。
     // これでコピー / ペースト / クリアの対象が、いま編集しているセルと必ず一致する。
     document.addEventListener('focusin', function (e) {
-        if (!STATE.editMode) return;
         if (!isGridInput(e.target)) return;
-        selectCellFromElement(e.target, { keepFocus: true });
+        if (STATE.editMode) {
+            selectCellFromElement(e.target, { keepFocus: true });
+            return;
+        }
+        // 閲覧モードなのに入力欄がある＝どこかで描き直しを取りこぼしている。
+        // ここへ打った文字はどの保存経路にも拾われず消えるので、打たれる前に作り直す。
+        // 切り替えは setEditMode() に集約したので本来ここは通らない。最後の保険。
+        e.target.blur();
+        if (STATE.weekData && STATE.weekData.days) renderWeekGrid(STATE.weekData.days);
     });
 
     /**
