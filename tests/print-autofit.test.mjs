@@ -229,6 +229,32 @@ test('印刷文書にも viewport を持たせる', () => {
   assert.match(print, /<meta name="viewport" content="width=device-width, initial-scale=1">/);
 });
 
+// ===== 不具合調査用の診断印字 =====
+
+test('診断印字は既定でOFF', () => {
+  // 通常の印刷物に余計な文字を出さない。ONにしたときだけ紙に値が乗る
+  assert.match(print, /id="po_debug"/);
+  assert.match(print, /po_\('debug', false\)/, '既定がOFFになっていない');
+  assert.match(print, /debug: document\.getElementById\('po_debug'\)\.checked/);
+});
+
+test('診断がOFFなら診断行の要素そのものを作らない', () => {
+  // 空要素でも紙に痕跡が出ないよう、opts.debug のときだけ書きこむ
+  const body = extractFn(print, 'printWeeklyPlanExec');
+  assert.match(body, /if \(opts\.debug\) \{\s*\n\s*writeFitDebug_\(/);
+});
+
+test('診断行には、測ったときと当てた後の両方の値が出る', () => {
+  // どちらがどれだけ食い違っているかを紙の上で見分けるための最低限
+  const fn = extractFn(print, 'writeFitDebug_');
+  for (const key of ['avail', 'target', 'predict', 'actual', 'dpr']) {
+    assert.match(fn, new RegExp(key), `診断行に ${key} が無い`);
+  }
+  // onbeforeprint で走り直したかどうかが分かること
+  assert.match(fn, /fit#/);
+  assert.match(print, /fdoc\.fitPassCount = \(fdoc\.fitPassCount \|\| 0\) \+ 1/);
+});
+
 // ===== 印刷オプション =====
 
 test('印刷オプションに自動調整があり、既定でON・他の項目と同じく保存される', () => {
