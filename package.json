@@ -18,7 +18,7 @@
     "check:json": "node scripts/check-project.mjs --json",
     "check:self": "node scripts/check-project.mjs --self-test",
     "test": "node --test",
-    "quality": "node tools/build-sw.mjs --check && npm run check && npm test",
+    "quality": "node tools/build-sw.mjs --check && node tools/build-app-links.mjs --check && npm run check && npm test",
     "build:vendor": "node tools/build-vendor.mjs",
     "build:vendor:qrcode": "node tools/build-vendor.mjs qrcode",
     "verify:icons": "node tools/verify-icons.mjs",
@@ -28,7 +28,8 @@
     "demo:dry": "node tools/demo-video/record-demo.mjs --dry-run",
     "demo:record": "node tools/demo-video/record-demo.mjs",
     "build:sw": "node tools/build-sw.mjs",
-    "build:fonts": "node tools/fonts/build-fonts.mjs"
+    "build:fonts": "node tools/fonts/build-fonts.mjs",
+    "build:app-links": "node tools/build-app-links.mjs"
   },
   "devDependencies": {
     "@material-symbols/font-400": "^0.45.10",
