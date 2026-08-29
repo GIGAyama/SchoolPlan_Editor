@@ -304,12 +304,42 @@
     document.body.appendChild(host);
   }
 
-  function start() {
+  function render() {
     var got = resolve(settings());
     if (!got.items.length) return;                // slug が分からない。何も出さない
     var host = build(got.items);
     if (host) place(host);
   }
+
+  /* 置き場所を、少しだけ待つ。
+     ⚠️ React や Vue のアプリは、画面を DOMContentLoaded より**後**に描く。
+        そのとき <div data-giga-links> はまだ無い。そこで諦めると、
+        置き場所が見つからないだけでなく、**そこに書いた data-links も読めない**。
+        黙って既定の 3 本が画面のいちばん下に出る。
+        2026-08-29 に Reversi（React）で実際に起きた。フッターに置いたはずの
+        リンクが本文の下に落ち、外したはずの「つかいかた」も出ていた。
+     待っても来なければ、いちばん下に出す（置き場所が無いアプリの約束は、そのまま）。 */
+  var SLOT_WAIT_MS = 1500;
+  function whenSlotReady(go) {
+    if (document.querySelector('[data-giga-links]')) return go();
+    if (typeof MutationObserver !== 'function') return go();
+    var done = false;
+    var timer = null;
+    var obs = new MutationObserver(function () {
+      if (document.querySelector('[data-giga-links]')) finish();
+    });
+    function finish() {
+      if (done) return;
+      done = true;
+      obs.disconnect();
+      if (timer) clearTimeout(timer);
+      go();
+    }
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+    timer = setTimeout(finish, SLOT_WAIT_MS);
+  }
+
+  function start() { whenSlotReady(render); }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);
