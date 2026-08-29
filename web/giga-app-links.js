@@ -350,6 +350,17 @@
   }
 
   var shown = null;                               // いま出しているもの
+  var shownSlot = null;                           // 置き場所の中に出したなら、その置き場所
+
+  /* まだ画面にあるか。
+     ⚠️ isConnected を直に読まないこと。持っていない古い browser では必ず
+        undefined になり、「消えた」と読めてしまう。下の見張りはそれを見て
+        出しなおすので、画面が描き替わるたびに出しなおし続けることになる。 */
+  function inPage(node) {
+    if (!node) return false;
+    if (typeof node.isConnected === 'boolean') return node.isConnected;
+    return document.contains(node);
+  }
 
   /** 出す（すでに出ていれば、出しなおして置き場所へ移す）。 */
   function paint() {
@@ -360,6 +371,7 @@
     if (shown && shown.parentNode) shown.parentNode.removeChild(shown);
     shown = host;
     place(host);
+    shownSlot = document.querySelector('[data-giga-links]');
   }
 
   /* 置き場所が後から来るアプリへの手当て。
@@ -374,30 +386,45 @@
         置き場所を持たないアプリ（Typa）でリンクが 1.5 秒あとに出るようにしてしまった。
         フッターの無いアプリは艦隊にいくつもあり、そちらのほうが数が多い。
 
-     **先に出す。後から置き場所が来たら、出しなおして移す。** どちらも待たせない。 */
+     **先に出す。後から置き場所が来たら、出しなおして移す。** どちらも待たせない。
+
+     ⚠️ 置き場所へ移したあとも見張りをやめないこと。React のフッターは
+        画面によって消えることがある（宿題ポストは {view !== 'admin' && <Footer/>}、
+        教材プリントメーカーは {!currentTextbookId && <Footer/>}）。
+        置き場所ごと消えると、その中に出したリンクも一緒に消える。
+        そこで見張りを畳んでいると、**画面を 1 回切り替えただけで
+        リンクが二度と戻らない。** しかも何も起きないので気づけない。
+
+     ⚠️ ただし、ふだんは何も調べないこと。この見張りは画面が描き替わるたびに
+        呼ばれる。置き場所の中に居て、それがまだ画面にあるなら、そこで返す
+        （プロパティを 2 つ読むだけ）。querySelector は必要になるまで呼ばない。 */
   var SLOT_WAIT_MS = 1500;
   function watchForSlot() {
     if (typeof MutationObserver !== 'function') return;
-    var done = false;
     var timer = null;
-    function stop() {
-      if (done) return;
-      done = true;
-      obs.disconnect();
-      if (timer) clearTimeout(timer);
-    }
     var obs = new MutationObserver(function () {
-      if (!document.querySelector('[data-giga-links]')) return;
-      stop();
-      paint();                                    // 置き場所へ移し、そこの data-links も読み直す
+      if (shownSlot) {
+        /* 置き場所の中に居る。安いほうから見て、変わっていなければ何もしない。 */
+        if (inPage(shown) && inPage(shownSlot)) return;
+        paint();                                  // 置き場所ごと消えた。出しなおす
+        return;
+      }
+      /* まだ置き場所を見つけていない（画面のいちばん下に出してある）。 */
+      if (document.querySelector('[data-giga-links]')) paint();
     });
     obs.observe(document.documentElement, { childList: true, subtree: true });
-    timer = setTimeout(stop, SLOT_WAIT_MS);
+    /* 置き場所を持たないアプリでは、待っても来ない。そこまでで見張りを畳む。
+       画面のいちばん下（<body> の直下）は、アプリの描き替えで消えることが
+       無いので、そのあと見張り続ける理由が無い。 */
+    timer = setTimeout(function () {
+      if (!shownSlot) obs.disconnect();
+    }, SLOT_WAIT_MS);
+    return timer;
   }
 
   function start() {
     paint();                                      // まず出す。待たせない
-    if (!document.querySelector('[data-giga-links]')) watchForSlot();
+    watchForSlot();
   }
 
   if (document.readyState === 'loading') {
