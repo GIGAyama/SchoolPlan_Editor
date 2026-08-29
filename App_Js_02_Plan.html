@@ -7,6 +7,9 @@
         var isEdit = STATE.editMode;
         grid.innerHTML = '';
         grid.className = 'week-grid' + (isEdit ? ' edit-mode' : '');
+        // どちらの姿で描いたかをDOMに残す。モードとグリッドが食い違っていないかを
+        // 画面上でもテストからも確かめられるようにするため。
+        grid.dataset.mode = isEdit ? 'edit' : 'view';
 
         // 土日の表示設定に応じて列数を変え、表示列がより広く使えるようにする
         var visibleCount = 0;
@@ -108,22 +111,26 @@
 
                 cell.className = cls;
 
-                // UX: D&Dの受け取り。コマ同士の入れ替えのほか、サイドパネルの
-                // タスクカードを運んできたときの受け皿にもなるので、全部の行のセルに付ける。
-                cell.addEventListener('dragover', handleDragOver);
-                cell.addEventListener('dragenter', handleDragEnter);
-                cell.addEventListener('dragleave', handleDragLeave);
-                cell.addEventListener('drop', handleDrop);
+                // UX: D&Dの受け取り（編集モードのみ）。コマ同士の入れ替えのほか、
+                // サイドパネルのタスクカードを運んできたときの受け皿にもなるので、
+                // 編集モードでは全部の行のセルに付ける。
+                if (isEdit) {
+                    cell.addEventListener('dragover', handleDragOver);
+                    cell.addEventListener('dragenter', handleDragEnter);
+                    cell.addEventListener('dragleave', handleDragLeave);
+                    cell.addEventListener('drop', handleDrop);
+                }
 
                 if (rowDef.multi) {
                     var pIdx = parseInt(rowDef.key.replace('period', ''));
                     var p = day.periods[pIdx] || { subject: '', unit: '', content: '' };
                     cell.setAttribute('data-period', pIdx);
-                    // UX: コマの持ち出し（校時セルは閲覧・編集両モードで有効）
-                    cell.setAttribute('draggable', 'true');
-                    cell.addEventListener('dragstart', handleDragStart);
-                    cell.addEventListener('dragend', handleDragEnd);
                     if (isEdit) {
+                        // UX: コマの持ち出し（編集モードのみ）。閲覧モードで draggable を
+                        // 付けたままだと、文字を選ぼうとしただけでセルごと動いてしまう。
+                        cell.setAttribute('draggable', 'true');
+                        cell.addEventListener('dragstart', handleDragStart);
+                        cell.addEventListener('dragend', handleDragEnd);
                         // 「空」ボタンを廃したので、空き時間かどうかはセルの見た目で示す
                         if (isFreeContent(p.content)) cell.classList.add('free-slot');
                         cell.innerHTML = renderPeriodEdit(pIdx, i, p);
@@ -172,23 +179,21 @@
                         else selectCell(i, rowIdx, rowDef.key, { keepFocus: true });
                     });
                 }
-                // UX: 右クリックコンテキストメニュー（コピー / ペースト / クリア / 元に戻す）。
-                // 閲覧モードだけでなく編集モードでも同じ操作を出す。ただし編集モードで
-                // 文字を選択している時は、ブラウザ標準のテキストメニューを優先して邪魔しない。
+                // UX: 右クリックのセル操作メニュー（編集モードのみ）。
+                // 閲覧モードは読むだけなので、ブラウザ標準のメニューに任せる
+                // （リンクを新しいタブで開く・選んだ文字をコピーする、が使える）。
+                // 編集モードでも、文字を選択している時は標準のテキストメニューを優先する。
+                // タッチ端末の入口は、選択中セルに出る「セル操作」ハンドル（⋮）。
                 var ctxPeriod = rowDef.multi ? parseInt(rowDef.key.replace('period', '')) : null;
-                cell.addEventListener('contextmenu', function (e) {
-                    // セル内のリンクは「新しいタブで開く」等が必要なのでブラウザ標準に任せる
-                    if (e.target.closest && e.target.closest('a')) return;
-                    if (isEdit && hasTextSelection(e.target)) return;
-                    e.preventDefault();
-                    selectCell(i, rowIdx, rowDef.key, { keepFocus: isEdit });
-                    showContextMenu(e, i, ctxPeriod, rowDef.key);
-                });
-                // タッチ端末には右クリックが無いため、閲覧モードでは長押しを代替にする。
-                // 編集モードの長押しは文字選択・標準の貼り付けに使うので奪わず、
-                // 代わりに選択中セルへ出る「セル操作」ハンドル（⋮）を入口にする。
-                if (rowDef.multi && !isEdit) {
-                    attachTouchLongPress(cell, i, rowIdx, rowDef.key, ctxPeriod);
+                if (isEdit) {
+                    cell.addEventListener('contextmenu', function (e) {
+                        // セル内のリンクは「新しいタブで開く」等が必要なのでブラウザ標準に任せる
+                        if (e.target.closest && e.target.closest('a')) return;
+                        if (hasTextSelection(e.target)) return;
+                        e.preventDefault();
+                        selectCell(i, rowIdx, rowDef.key, { keepFocus: true });
+                        showContextMenu(e, i, ctxPeriod, rowDef.key);
+                    });
                 }
 
                 grid.appendChild(cell);
@@ -910,15 +915,14 @@
     }
 
     /**
-     * 週案のセルへタスクを書き込みます。
-     * 編集モードでは入力欄へ、閲覧モードでは週データへ直接書いて自動保存します
-     * （閲覧モードのコマ移動・ペーストと同じ道すじ）。
-     * 校時のセルは「学習内容」欄が行き先です。空き時間に設定してあるセルでは、
-     * 区切りより後（タスク欄）に入ります。
+     * 週案のセルへタスクを書き込みます（編集モードのみ）。
+     * 行き先はセルの入力欄です。校時のセルは「学習内容」欄が行き先で、
+     * 空き時間に設定してあるセルでは区切りより後（タスク欄）に入ります。
      * @returns {boolean} 書き込めたら true
      */
     function insertTasksIntoCell(dayIdx, rowKey, selectedTasks) {
         if (!selectedTasks || selectedTasks.length === 0) return false;
+        if (!requireEditMode()) return false;
         if (!STATE.weekData || !STATE.weekData.days || !STATE.weekData.days[dayIdx]) {
             showToast('error', '週のデータがまだ読み込まれていません。');
             return false;
@@ -929,33 +933,13 @@
         var dayLabel = STATE.weekData.days[dayIdx].dayLabel || '';
         var whereLabel = dayLabel + rowLabelOfKey_(rowKey);
 
-        if (STATE.editMode) {
-            var el = isPeriod
-                ? document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]')
-                : document.querySelector('[data-field="' + rowKey + '"][data-day="' + dayIdx + '"]:not([data-period])');
-            if (!el) { showToast('error', 'そのセルには入力欄がありません。'); return false; }
-            el.value = appendTaskText_(el.value, addText);
-            autoResizeTextarea(el);
-            markTaskInsertLearned_();
-            showTaskInsertToast_(selectedTasks.length, startInsertedTasks_(selectedTasks), whereLabel);
-            return true;
-        }
-
-        // 閲覧モード: 週データを書き換えて、まとめて自動保存する
-        pushUndo(); // days を差し替えるため、day はこの後に取り直す
-        var day = STATE.weekData.days[dayIdx];
-        if (!day) return false;
-        if (isPeriod) {
-            var p = day.periods[pIdx] || { subject: '', unit: '', content: '' };
-            p.content = appendTaskText_(p.content, addText);
-            day.periods[pIdx] = p;
-        } else {
-            day[rowKey] = appendTaskText_(day[rowKey], addText);
-        }
-        markWeekDaysMutated();
+        var el = isPeriod
+            ? document.querySelector('[data-field="content"][data-day="' + dayIdx + '"][data-period="' + pIdx + '"]')
+            : document.querySelector('[data-field="' + rowKey + '"][data-day="' + dayIdx + '"]:not([data-period])');
+        if (!el) { showToast('error', 'そのセルには入力欄がありません。'); return false; }
+        el.value = appendTaskText_(el.value, addText);
+        autoResizeTextarea(el);
         markTaskInsertLearned_();
-        rerenderGridPreservingFocus();
-        persistViewMutation();
         showTaskInsertToast_(selectedTasks.length, startInsertedTasks_(selectedTasks), whereLabel);
         return true;
     }
@@ -967,6 +951,7 @@
 
     /** サイドパネルのカードの書き込みボタン。選択中のセルへ書き込みます。 */
     function insertTaskIntoSelectedCell(taskId) {
+        if (!requireEditMode()) return;
         var task = findTaskById_(taskId);
         if (!task) { showToast('error', 'タスクが見つかりませんでした。'); return; }
         var s = STATE.selectedCell;
@@ -992,11 +977,43 @@
     }
 
     // ===== 編集モード制御 =====
+    /**
+     * 週案のモードを切り替える、ただ一つの入口。
+     *
+     * グリッドの中身は renderWeekGrid() が STATE.editMode を見て作り分ける。
+     * つまりセルの姿は「描いた瞬間のモード」で固まる。ここを通さずに
+     * STATE.editMode を書き換えると、ツールバーは「閲覧モード」なのに
+     * グリッドは編集用の入力欄のまま、という食い違いが残り、そこへ打った文字は
+     * どの保存経路にも拾われずに消える（実際にこの不具合が起きた）。
+     * 状態・ツールバー・グリッドの3つは、必ずここで一度に揃える。
+     * @param {boolean} on true で編集モード、false で閲覧モード
+     */
+    function setEditMode(on) {
+        STATE.editMode = !!on;
+        updateEditUI(); // syncEditBaseline() が編集開始時のスナップショットを取り／捨てする
+        if (STATE.weekData && STATE.weekData.days) renderWeekGrid(STATE.weekData.days);
+    }
+
+    // 閲覧モードで書き換えようとしたときの案内。閲覧モードは読むだけと決めたので、
+    // 勝手に編集モードへは入らず、どうすれば編集できるかだけを伝える。
+    // showToast は同じ文言の連発をまとめるので、続けて操作しても積み上がらない。
+    var VIEW_MODE_HINT = '閲覧モードです。書き換えるには右上の「編集」を押してください。';
+
+    /**
+     * 週データを書き換える操作の入口。閲覧モードなら案内だけ出して false を返します。
+     * 画面からの導線は renderWeekGrid 側で編集モードのときしか作らないので、
+     * ここはキーボードなど別経路から入ってきたときのための二重の守りです。
+     * @returns {boolean} 書き換えてよければ true
+     */
+    function requireEditMode() {
+        if (STATE.editMode) return true;
+        showToast('info', VIEW_MODE_HINT);
+        return false;
+    }
+
     function toggleEditMode() {
         if (STATE.editMode) { exitEditMode(); return; }
-        STATE.editMode = true;
-        updateEditUI();
-        renderWeekGrid(STATE.weekData.days);
+        setEditMode(true);
         // 編集モードに入った時点で単元の進捗を先読みしておく（ピッカーを開いた時の待ちを消す）
         if (typeof prefetchUnitProgress === 'function') prefetchUnitProgress();
     }
@@ -1015,9 +1032,12 @@
             STATE.weekData.days = baseline;
             markWeekDaysMutated();
         }
-        STATE.editMode = false;
-        updateEditUI();
-        if (STATE.weekData && STATE.weekData.days) renderWeekGrid(STATE.weekData.days);
+        // 履歴も一緒に捨てる。days をスナップショットへ巻き戻したので、その途中の状態を
+        // 指す履歴を残すと、次に編集モードへ入って「元に戻す」を押した瞬間に、
+        // 捨てたはずの変更が復活してしまう。
+        STATE.undoStack = [];
+        STATE.redoStack = [];
+        setEditMode(false);
     }
 
     /**
@@ -1153,67 +1173,14 @@
     // ===== 保存系の状態変数 =====
     // autoSaveAndThen / saveWeeklyPlan は App_Js_14_MultiClass(V2)で定義され、
     // App_Js_15_DataProtection_Overrides(保護版)が最終実装になる。
-    // persistViewMutation(閲覧モードでのD&D等の自動保存)も同様。
-    // 以下の変数はそれらの実装から参照されるため、宣言はここに残す。
-    var _autoSaving = false;
-    var _viewSaveTimer = null;
-    // ディレイ待ちの保存処理。週移動・学級切替・画面切替の直前に前倒しで送るために持つ。
-    var _viewSaveRunner = null;
-    // 閲覧モードのセル操作をまとめるための待ち時間。
-    var VIEW_SAVE_DELAY_MS = 450;
-
-    /**
-     * 閲覧モードの自動保存を仕掛け直します（同時に1本だけ）。
-     * 続けて操作したときは最後の1回にまとまります。
-     */
-    function scheduleViewSave(run) {
-        clearTimeout(_viewSaveTimer);
-        _viewSaveRunner = run;
-        _viewSaveTimer = setTimeout(function () {
-            _viewSaveRunner = null;
-            run();
-            refreshSaveStatus();
-        }, VIEW_SAVE_DELAY_MS);
-        // 仕掛けた時点から「保存中」を出す。実際に送るまでの待ちも、
-        // 利用者から見れば保存が終わっていない時間であることに変わりはない。
-        refreshSaveStatus();
-    }
-
-    /**
-     * 待たせてある自動保存を今すぐ送ります。
-     * 週移動・学級切替・画面切替の前に必ず通すこと。サーバ側の保存先は
-     * 「いまアクティブな学級シート」で決まるため、切替後に届いた保存は
-     * 別の学級のシートへ書かれてしまう。
-     */
-    function flushPendingViewSave() {
-        var run = _viewSaveRunner;
-        if (!run) return;
-        clearTimeout(_viewSaveTimer);
-        _viewSaveRunner = null;
-        run();
-        refreshSaveStatus();
-    }
-
-    /** 閲覧モードの変更が、まだサーバへ届いていない状態か（離脱警告に使う）。 */
-    function hasPendingViewSave() {
-        if (_viewSaveRunner) return true;
-        if (_saveInFlight) return true;
-        for (var qKey in _viewSaveQueue) {
-            if (Object.prototype.hasOwnProperty.call(_viewSaveQueue, qKey)) return true;
-        }
-        // 保存に失敗して手元にだけ残っている変更も「まだ届いていない」に含める。
-        for (var dKey in _viewDirtyWeeks) {
-            if (Object.prototype.hasOwnProperty.call(_viewDirtyWeeks, dKey)) return true;
-        }
-        return false;
-    }
 
     // ===== 手元の週データを書き換えた回数 =====
-    // 保存はGASの往復に数秒かかることがある。その間に次のセル操作をすると、
-    // 先に飛ばした保存の応答（＝保存した時点の内容）が後から返ってくる。
-    // その内容で手元を上書きすると、応答を待つ間に行った操作がまとめて巻き戻り、
-    // 「月・火・水と消したのに木曜を消した頃に火・水が復活する」という壊れ方をする。
-    // 保存要求を出した時点の回数を控えておき、応答時に変わっていたら取り込まない。
+    // 保存はGASの往復に数秒かかることがある。編集モードのセル操作（⋮ / 右クリックの
+    // ペースト・クリア・入れ替え・元に戻す）は入力欄ではなく STATE.weekData.days を
+    // 直接書き換えるので、「保存する」を押したあとの往復中にも実行できてしまう。
+    // その状態で応答（＝保存した時点の内容）を取り込むと、待つあいだに行った操作が
+    // まとめて巻き戻る。保存要求を出した時点の回数を控えておき、応答時に変わっていたら
+    // 取り込まない。
     var _weekDaysMutationSeq = 0;
 
     /** セル操作などで STATE.weekData.days を書き換えたことを記録します。 */
@@ -1224,83 +1191,6 @@
     /** いまの書き換え回数。保存要求を出す側が控え、応答時に見比べます。 */
     function weekDaysMutationSeq() {
         return _weekDaysMutationSeq;
-    }
-
-    // ===== 閲覧モードの「まだサーバへ届いていない変更」 =====
-    // 閲覧モードのコマの移動・クリア・ペースト・元に戻すは、編集モードと違って
-    // 入力欄ではなく STATE.weekData.days だけを書き換える。保存はまとめてから送るため、
-    // 実際にサーバへ届くまでには数百ミリ秒＋GASの往復ぶんの間がある。
-    //
-    // その間に週の読み込み応答が届くと、これまでは STATE.weekData ごと差し替えていた。
-    // 週を開くときはキャッシュを先に描いて数秒後にサーバ応答を当てるので、
-    // 「週を開いてすぐコマを動かす」だけでこの重なりが起きる。すると
-    //   1) 動かしたコマが画面から消えて、操作が無かったことになる
-    //   2) 手元のリビジョンが保存前へ巻き戻り、以降の保存が毎回「保存の競合」になる
-    // という壊れ方をした（編集モードでは hasUnsavedChanges() で守られていた経路）。
-    //
-    // どの週に未確定の変更があるかを控えておき、読み込み側（p2ApplyWeekData）が
-    // その週の差し替えを見送れるようにする。
-    var _viewDirtyWeeks = {};
-
-    /**
-     * 閲覧モードの変更を手元に加えたことを、週ごとに記録します。
-     * @param {string} key 週キャッシュキー（学級＋月曜日）
-     */
-    function markViewWeekDirty(key) {
-        if (key) _viewDirtyWeeks[key] = weekDaysMutationSeq();
-    }
-
-    /**
-     * その週の保存が通ったことを記録します。
-     * @param {string} key 週キャッシュキー
-     * @param {number} savedSeq 保存要求を出した時点の weekDaysMutationSeq()。
-     *   そのあとに書き換えていれば未確定のまま残す（後続の保存で改めて解消される）。
-     */
-    function markViewWeekSaved(key, savedSeq) {
-        if (!key || !Object.prototype.hasOwnProperty.call(_viewDirtyWeeks, key)) return;
-        if (_viewDirtyWeeks[key] <= savedSeq) delete _viewDirtyWeeks[key];
-    }
-
-    /** その週に、まだサーバへ届いていない閲覧モードの変更があるか。 */
-    function hasDirtyViewWeek(key) {
-        return !!key && Object.prototype.hasOwnProperty.call(_viewDirtyWeeks, key);
-    }
-
-    /**
-     * 未確定の変更の記録をすべて捨てます。
-     * 手元の内容を捨てて読み直すと決めたとき（競合時の「最新を読み込む」・
-     * サーバ側を書き換えた直後の強制読み直し）だけ呼ぶこと。
-     */
-    function clearViewDirtyWeeks() {
-        _viewDirtyWeeks = {};
-        // 手元を捨てて読み直す＝サーバ側の内容も別経路で変わっている可能性がある。
-        // 古い控えを残すと、送るべき保存を「同じ内容だ」と誤って省いてしまう。
-        forgetServerWeekContent();
-    }
-
-    // ===== 閲覧モードの自動保存の待ち行列 =====
-    // 進行中の保存があるあいだの保存要求は、週ごとに最新の1件だけ待たせる。
-    // 待っている1件は実行時に最新の days を読み直して送るため、待機中に増えた変更も
-    // まとめて保存される。要求ごとに待たせると、同じ内容の保存がセル操作の回数だけ
-    // 積み上がり、GASのロック待ちで保存全体が遅くなる。
-    var _viewSaveQueue = {};
-
-    /**
-     * 進行中の保存の完了後に、その週の保存を1回だけ実行します。
-     * @param {string} key 週の識別子（月曜日の日付文字列）
-     * @param {Function} run 実行する保存処理
-     */
-    function queueViewSave(key, run) {
-        var alreadyQueued = Object.prototype.hasOwnProperty.call(_viewSaveQueue, key);
-        _viewSaveQueue[key] = run;
-        refreshSaveStatus();
-        if (alreadyQueued) return;
-        whenSaveIdle(function () {
-            var fn = _viewSaveQueue[key];
-            delete _viewSaveQueue[key];
-            if (fn) fn();
-            refreshSaveStatus();
-        });
     }
 
     // ===== 保存要求の直列化 =====
@@ -1368,13 +1258,7 @@
      * 利用者から見れば、どれも「操作したのにまだ保存されていない」時間である。
      */
     function saveStatusBusy() {
-        if (_saveInFlight) return true;
-        if (_viewSaveRunner) return true;
-        if (_afterSaveQueue.length) return true;
-        for (var key in _viewSaveQueue) {
-            if (Object.prototype.hasOwnProperty.call(_viewSaveQueue, key)) return true;
-        }
-        return false;
+        return _saveInFlight || _afterSaveQueue.length > 0;
     }
 
     /**
@@ -1424,55 +1308,6 @@
         }
     }
 
-    // ===== サーバが持っている週の内容 =====
-    // 閲覧モードのセル操作は、中身が変わらなくても自動保存を仕掛ける。
-    //   ・空のコマを「クリア」する
-    //   ・元に戻す → やり直す で元の内容に戻る
-    //   ・D&Dでコマを動かして、また元の場所へ戻す
-    //   ・同じ内容をペーストする
-    // どれも保存すべき差が無いのに、GASの往復（数秒）と保存ロックを1回ぶん使い、
-    // 後続の保存まで待たされる。そこで「サーバが確かに持っている内容」を控えておき、
-    // 送る中身がそれと同じなら往復ごと省く。
-    //
-    // 控えは必ずリビジョンとセットで持ち、リビジョンが一致するときだけ使う。
-    // 他の経路（復元・転記・別タブ）でサーバ側が変われば必ずリビジョンが変わるので、
-    // 古い控えを「同じ内容だ」と誤って信じてしまうことがない。
-    var _serverWeekContent = {};
-
-    /**
-     * サーバの応答から、その週の確定内容を控えます。
-     * 手元の状態からは絶対に作らないこと（届いていない変更を届いたことにしてしまう）。
-     * @param {string} key 週キャッシュキー（学級＋月曜日）
-     * @param {*} revision サーバが返したリビジョン
-     * @param {Array} days サーバが返した days
-     */
-    function rememberServerWeekContent(key, revision, days) {
-        if (!key || !revision || !days) return;
-        _serverWeekContent[key] = { revision: revision, json: JSON.stringify(days) };
-    }
-
-    /**
-     * 控えを捨てます。引数を省くと全部捨てます。
-     * 保存が失敗・競合したとき、サーバ側を直接書き換えたときに呼ぶこと。
-     */
-    function forgetServerWeekContent(key) {
-        if (key) delete _serverWeekContent[key];
-        else _serverWeekContent = {};
-    }
-
-    /**
-     * その週の手元の内容が、サーバの持っているものと同じか。
-     * 同じなら保存を送らなくてよい（送っても「変更はありませんでした」が返るだけ）。
-     * @param {string} key 週キャッシュキー
-     * @param {Object} weekData 表示中（または保存対象）の週データ
-     */
-    function matchesServerWeekContent(key, weekData) {
-        if (!key || !weekData || !weekData.days) return false;
-        var known = _serverWeekContent[key];
-        if (!known || !weekData.revision || known.revision !== weekData.revision) return false;
-        return known.json === JSON.stringify(weekData.days);
-    }
-
     // ===== 保存結果の取り込み =====
     // サーバは「シートに実際に入った値」を days で返す。スプレッドシートが
     // 入力を解釈し直した場合（"007"→7 など）に手元の値がずれ続けないよう、
@@ -1481,9 +1316,7 @@
     //   応答が返るまでに手元を書き換えていたら、サーバの返した「保存時点の内容」で
     //   上書きしない（応答待ちのあいだに行ったセル操作がまとめて巻き戻るのを防ぐ）。
     //   取り込まなかった分は、後続の保存が最新の内容を送り直すことで揃う。
-    // @param {string} [cacheKey] 週キャッシュキー。渡すと、取り込んだ内容を
-    //   「サーバが持っている内容」として控える（同じ内容の保存を省くために使う）。
-    function adoptSavedWeekDays(result, fallbackDays, weekData, mutationSeq, cacheKey) {
+    function adoptSavedWeekDays(result, fallbackDays, weekData, mutationSeq) {
         var target = weekData || STATE.weekData;
         if (!target) return false;
         // 保存が通った時点で「編集を始めた時の内容」は保存済みの内容に置き換わる。
@@ -1492,9 +1325,6 @@
         var stale = (mutationSeq !== undefined && mutationSeq !== null
             && mutationSeq !== weekDaysMutationSeq());
         var saved = (result && result.days && result.days.length) ? result.days : fallbackDays;
-        // 控えはサーバの応答そのものから作る。取り込みを見送った回でも、サーバが
-        // その内容を持っていることは変わらないため、控えは残しておいてよい。
-        if (cacheKey) rememberServerWeekContent(cacheKey, result && result.revision, saved);
         if (stale) return false;
         var normalized = JSON.stringify(saved) !== JSON.stringify(target.days);
         target.days = saved;
@@ -1510,7 +1340,6 @@
         return new Promise(function (resolve) {
             var days = collectCurrentEditData();
             if (!days) { resolve(false); return; }
-            var cacheKey = p2WeekCacheKey(displayedWeekMondayStr());
             var run = function () {
                 if (!beginSaveRequest()) { whenSaveIdle(run); return; }
                 google.script.run
@@ -1518,7 +1347,7 @@
                         endSaveRequest();
                         if (typeof p2LogTiming === 'function') p2LogTiming('保存してから実行（' + source + '）', result);
                         if (result.success) {
-                            adoptSavedWeekDays(result, days, null, null, cacheKey);
+                            adoptSavedWeekDays(result, days, null, null);
                             STATE.weekData.revision = result.revision;
                             if (typeof p2UpdateCurrentWeekCache === 'function') p2UpdateCurrentWeekCache();
                             cancelEdit();
@@ -1526,12 +1355,10 @@
                             showToast('success', result.message);
                             resolve(true);
                         } else if (result.conflict) {
-                            forgetServerWeekContent(cacheKey);
                             markSaveOutcome('error', '保存の競合');
                             handleSaveConflict(result, days);
                             resolve(false);
                         } else {
-                            forgetServerWeekContent(cacheKey);
                             markSaveOutcome('error');
                             showToast('error', '保存失敗: ' + result.error);
                             resolve(false);
@@ -1539,7 +1366,6 @@
                     })
                     .withFailureHandler(function (e) {
                         endSaveRequest();
-                        forgetServerWeekContent(cacheKey);
                         markSaveOutcome('error', '保存できませんでした（通信エラー）');
                         showToast('error', '通信エラー: ' + e.message);
                         resolve(false);
@@ -1587,7 +1413,6 @@
     // @param {Object[]} [attemptedDays] 保存しようとした内容
     // @param {Function} [overwrite] 上書き再保存（サーバの最新リビジョンを受け取る）
     function handleSaveConflict(result, attemptedDays, overwrite) {
-        _autoSaving = false;
         var current = result && result.current;
         if (typeof Swal === 'undefined') {
             showToast('error', 'この週は他で更新されています。最新を読み込み直してください。');
@@ -1616,10 +1441,9 @@
             denyButtonColor: '#f9ab00'
         }).then(function (r) {
             if (r.isConfirmed) {
-                STATE.editMode = false;
-                updateEditUI();
-                // 手元の内容を捨てると決めた読み直しなので、閲覧モードの未確定の変更も
-                // 一緒に捨てる（残すと読み直しそのものが見送られてしまう）。
+                // 手元の内容を捨てると決めた読み直しなので、編集モード・履歴・未確定の
+                // 変更をまとめて捨てる（残すと読み直しそのものが見送られてしまう）。
+                if (typeof p2DiscardLocalEdits === 'function') p2DiscardLocalEdits();
                 doLoadWeeklyPlan({ force: true });
             } else if (r.isDenied && canOverwrite) {
                 overwrite(current.revision);
@@ -1642,6 +1466,9 @@
     function startEditAtSelectedCell() {
         if (!STATE.selectedCell || STATE.editMode) return;
         toggleEditMode();
+        // 自分でボタンを押したわけではないので、モードが変わったことを言葉にしておく
+        // （ツールバーの「編集」ボタンからの切替では出さない。押した本人は分かっている）。
+        showToast('info', '編集モードにしました。終わったら「保存する」を押してください。');
         // 選択セルの入力欄にフォーカス
         setTimeout(function () {
             var s = STATE.selectedCell;
@@ -1658,52 +1485,6 @@
     // ダブルタップ判定用: 直前にタップしたセルと時刻
     var _lastCellTap = { day: -1, row: -1, time: 0 };
     var DOUBLE_TAP_MS = 400;
-
-    /**
-     * 校時セルに「タッチ長押しでコンテキストメニュー」を取り付けます。
-     * タッチ端末には右クリックがないため、長押しをその代替にします
-     * （Androidの標準長押し contextmenu とも共存。閲覧モード専用）。
-     */
-    var LONG_PRESS_MS = 550;
-    function attachTouchLongPress(cell, dayIdx, rowIdx, key, pIdx) {
-        var timer = null;
-        var fired = false;
-        var sx = 0, sy = 0;
-        cell.addEventListener('touchstart', function (e) {
-            if (STATE.editMode || e.touches.length !== 1) return;
-            fired = false;
-            var t = e.touches[0];
-            sx = t.clientX; sy = t.clientY;
-            var px = t.pageX, py = t.pageY;
-            timer = setTimeout(function () {
-                timer = null;
-                fired = true;
-                selectCell(dayIdx, rowIdx, key);
-                showContextMenu({ pageX: px, pageY: py }, dayIdx, pIdx);
-            }, LONG_PRESS_MS);
-        }, { passive: true });
-        cell.addEventListener('touchmove', function (e) {
-            if (!timer) return;
-            var t = e.touches[0];
-            // スクロール操作と区別: 指が動いたら長押しをキャンセル
-            if (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10) {
-                clearTimeout(timer);
-                timer = null;
-            }
-        }, { passive: true });
-        cell.addEventListener('touchend', function (e) {
-            if (timer) { clearTimeout(timer); timer = null; }
-            if (fired) {
-                // メニュー表示直後の指離しで発生するクリックがメニューを閉じないよう抑止
-                e.preventDefault();
-                fired = false;
-            }
-        });
-        cell.addEventListener('touchcancel', function () {
-            if (timer) { clearTimeout(timer); timer = null; }
-            fired = false;
-        });
-    }
 
     // ===== 編集モードでもセル操作を使えるようにするための土台 =====
     // 編集モードでは「本当の値」は STATE.weekData.days ではなく画面の入力欄にある。
@@ -1806,9 +1587,16 @@
     // 編集モード: 入力欄にフォーカスが入ったら、そのセルを選択状態にする。
     // これでコピー / ペースト / クリアの対象が、いま編集しているセルと必ず一致する。
     document.addEventListener('focusin', function (e) {
-        if (!STATE.editMode) return;
         if (!isGridInput(e.target)) return;
-        selectCellFromElement(e.target, { keepFocus: true });
+        if (STATE.editMode) {
+            selectCellFromElement(e.target, { keepFocus: true });
+            return;
+        }
+        // 閲覧モードなのに入力欄がある＝どこかで描き直しを取りこぼしている。
+        // ここへ打った文字はどの保存経路にも拾われず消えるので、打たれる前に作り直す。
+        // 切り替えは setEditMode() に集約したので本来ここは通らない。最後の保険。
+        e.target.blur();
+        if (STATE.weekData && STATE.weekData.days) renderWeekGrid(STATE.weekData.days);
     });
 
     /**
@@ -1947,6 +1735,7 @@
     }
 
     function undo() {
+        if (!requireEditMode()) return;
         ensureHistoryScope();
         if (STATE.undoStack.length === 0) { showToast('info', '元に戻せる操作がありません'); return; }
         syncEditBufferToState();
@@ -1954,10 +1743,10 @@
         STATE.weekData.days = STATE.undoStack.pop();
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        persistViewMutation();
     }
 
     function redo() {
+        if (!requireEditMode()) return;
         ensureHistoryScope();
         if (STATE.redoStack.length === 0) { showToast('info', 'やり直す操作がありません'); return; }
         syncEditBufferToState();
@@ -1965,7 +1754,6 @@
         STATE.weekData.days = STATE.redoStack.pop();
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        persistViewMutation();
     }
 
     // ===== Phase D: コピー＆ペースト =====
@@ -2003,6 +1791,7 @@
      * @returns {boolean} 貼り付けたら true
      */
     function pasteCellData(opts) {
+        if (!requireEditMode()) return false;
         if (!STATE.clipboard || !STATE.selectedCell || !STATE.weekData) return false;
         var s = STATE.selectedCell;
         var rowDef = GRID_ROWS[s.row];
@@ -2024,12 +1813,12 @@
         }
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        persistViewMutation();
         return true;
     }
 
     // ===== Phase B: セルクリア =====
     function clearCellData() {
+        if (!requireEditMode()) return;
         if (!STATE.selectedCell || !STATE.weekData) return;
         var s = STATE.selectedCell;
         var rowDef = GRID_ROWS[s.row];
@@ -2044,11 +1833,12 @@
         }
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        persistViewMutation();
     }
 
     // ===== Phase C: ドラッグ＆ドロップ =====
     function handleDragStart(e) {
+        // ドラッグ中は毎フレーム呼ばれるので、ここは無言で止める（案内は handleDrop で出す）
+        if (!STATE.editMode) return;
         var cell = e.target.closest('.grid-cell');
         if (!cell) return;
         var day = parseInt(cell.dataset.day);
@@ -2060,6 +1850,7 @@
     }
 
     function handleDragOver(e) {
+        if (!STATE.editMode) return;
         // サイドパネルから運んできたタスクは、どの行のセルでも受け取る
         if (STATE.dragTaskId) {
             e.preventDefault();
@@ -2075,6 +1866,7 @@
     }
 
     function handleDragEnter(e) {
+        if (!STATE.editMode) return;
         var cell = e.target.closest('.grid-cell');
         if (!cell) return;
         if (STATE.dragTaskId) { cell.classList.add('drag-over-task'); return; }
@@ -2092,6 +1884,7 @@
     }
 
     function handleDrop(e) {
+        if (!requireEditMode()) return;
         var cell = e.target.closest('.grid-cell');
         if (!cell) return;
         if (STATE.dragTaskId) {
@@ -2122,7 +1915,6 @@
 
         markWeekDaysMutated();
         rerenderGridPreservingFocus();
-        persistViewMutation();
     }
 
     function handleDragEnd(e) {
@@ -2170,6 +1962,8 @@
      * @param {string} [rowKey] 行のキー（省略時は選択中セルから引く）
      */
     function showContextMenu(e, dayIdx, pIdx, rowKey) {
+        // 閲覧モードには入口を作っていない。別経路から来たときのための保険なので無言で止める
+        if (!STATE.editMode) return;
         hideContextMenu();
         // 別の週・学級から持ち越した履歴は、ここで捨ててから有効無効を決める
         ensureHistoryScope();
@@ -2241,6 +2035,7 @@
     }
 
     function handleContextAction(action, dayIdx, pIdx, rowKey) {
+        if (!requireEditMode()) return;
         if (!STATE.weekData || !STATE.weekData.days) return;
         var isPeriod = (pIdx !== null && pIdx !== undefined && !isNaN(pIdx));
         if (!rowKey && STATE.selectedCell) rowKey = STATE.selectedCell.key;
@@ -2288,7 +2083,6 @@
                 }
                 markWeekDaysMutated();
                 rerenderGridPreservingFocus();
-                persistViewMutation();
                 break;
             case 'clearPeriod':
                 if (!isPeriod) break;
@@ -2298,7 +2092,6 @@
                 }
                 markWeekDaysMutated();
                 rerenderGridPreservingFocus();
-                persistViewMutation();
                 break;
         }
     }
@@ -2345,6 +2138,9 @@
         // 何も起こらない。その空振りをコマのコピーに充てることで、閲覧モードと同じキーが
         // そのまま使える。文字を選択している時はブラウザ標準のコピーを邪魔しない。
         if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+            // 閲覧モードでは横取りしない。選んだ文字のブラウザ標準のコピーがそのまま効く
+            // （案内も出さない。コピーは壊れていないのに毎回出るとうるさい）。
+            if (!STATE.editMode) return;
             if (!isInput) {
                 e.preventDefault();
                 copyCellData();
@@ -2437,8 +2233,8 @@
             return;
         }
 
-        // Delete / Backspace: セルクリア（閲覧モード＋セル選択時）
-        if ((e.key === 'Delete' || e.key === 'Backspace') && STATE.selectedCell && !STATE.editMode) {
+        // Delete / Backspace: セルクリア（セル選択時。入力欄の中には届かない）
+        if ((e.key === 'Delete' || e.key === 'Backspace') && STATE.selectedCell) {
             e.preventDefault();
             clearCellData();
             return;
@@ -2449,7 +2245,10 @@
     function showShortcutHelp() {
         Swal.fire({
             title: '⌨ キーボードショートカット',
-            html: '<table style="width:100%;text-align:left;font-size:0.85rem;border-collapse:collapse;">'
+            html: '<div style="text-align:left;font-size:0.85rem;margin-bottom:10px;padding:8px;'
+                + 'background:var(--surface-hover);border-radius:6px;">'
+                + '閲覧モードは読むだけです。書き換えるときは <kbd>E</kbd> か「編集」を押してください。</div>'
+                + '<table style="width:100%;text-align:left;font-size:0.85rem;border-collapse:collapse;">'
                 + '<tr style="border-bottom:2px solid #e0e0e0"><th style="padding:6px;color:var(--primary)">キー</th><th style="padding:6px">アクション</th></tr>'
                 + '<tr><td style="padding:4px 6px"><kbd>E</kbd></td><td>編集モード切替</td></tr>'
                 + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>保存</td></tr>'
@@ -2458,19 +2257,18 @@
                 + '<tr><td style="padding:4px 6px"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></td><td>セル移動（閲覧モード）</td></tr>'
                 + '<tr><td style="padding:4px 6px"><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>セル間フォーカス移動（編集モード）</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>←</kbd><kbd>→</kbd></td><td>前週 / 翌週へ移動</td></tr>'
-                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>セル（コマ）をコピー<br><span style="color:#999;font-size:0.78rem">編集モードでは、文字を選択していない時にコマ全体のコピーになります</span></td></tr>'
-                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>セル（コマ）をペースト<br><span style="color:#999;font-size:0.78rem">編集モードでは、コピーしたコマならセルごと・他アプリの文字なら文字として貼り付きます</span></td></tr>'
-                + '<tr><td style="padding:4px 6px"><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>セルをクリア（閲覧モード）<br><span style="color:#999;font-size:0.78rem">編集モードでは右クリック / <kbd>⋮</kbd> メニューの「クリア」を使います</span></td></tr>'
-                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す<br><span style="color:#999;font-size:0.78rem">入力欄では文字の取り消しが優先。セル操作の取り消しは右クリック / <kbd>⋮</kbd> メニューから</span></td></tr>'
-                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>やり直し</td></tr>'
+                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>コマをコピー（編集モード）<br><span style="color:#999;font-size:0.78rem">文字を選択していない時にコマ全体のコピーになります。閲覧モードでは、選んだ文字がふつうにコピーされます</span></td></tr>'
+                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>コマをペースト（編集モード）<br><span style="color:#999;font-size:0.78rem">コピーしたコマならセルごと・他アプリの文字なら文字として貼り付きます</span></td></tr>'
+                + '<tr><td style="padding:4px 6px"><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>選択中のセルをクリア（編集モード）<br><span style="color:#999;font-size:0.78rem">右クリック / <kbd>⋮</kbd> メニューの「クリア」でも同じことができます</span></td></tr>'
+                + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す（編集モード）<br><span style="color:#999;font-size:0.78rem">入力欄では文字の取り消しが優先。セル操作の取り消しは右クリック / <kbd>⋮</kbd> メニューから</span></td></tr>'
+                + '<tr><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>やり直し（編集モード）</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>印刷</td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>?</kbd></td><td>このヘルプを表示</td></tr>'
                 + '<tr style="border-bottom:2px solid #e0e0e0"><th style="padding:6px;color:var(--primary)">マウス / タッチ操作</th><th style="padding:6px">アクション</th></tr>'
-                + '<tr><td style="padding:4px 6px">ダブルタップ<br>（ダブルクリック）</td><td>そのセルの編集を開始（閲覧モード）</td></tr>'
-                + '<tr><td style="padding:4px 6px">右クリック</td><td>セル操作メニュー（コピー / ペースト / クリア / 元に戻す）<br><span style="color:#999;font-size:0.78rem">閲覧モード・編集モードのどちらでも使えます。編集モードで文字を選択している時はブラウザ標準のメニューになります</span></td></tr>'
-                + '<tr><td style="padding:4px 6px">コマを長押し</td><td>セル操作メニュー（閲覧モード）</td></tr>'
+                + '<tr><td style="padding:4px 6px">ダブルタップ<br>（ダブルクリック）</td><td>そのセルの編集を開始（閲覧モードから編集モードへ入ります）</td></tr>'
+                + '<tr><td style="padding:4px 6px">右クリック</td><td>セル操作メニュー（編集モード）<br><span style="color:#999;font-size:0.78rem">コピー / ペースト / クリア / 元に戻す。文字を選択している時はブラウザ標準のメニューになります。閲覧モードでは、いつもブラウザ標準のメニューです</span></td></tr>'
                 + '<tr style="border-bottom:1px solid #eee"><td style="padding:4px 6px"><kbd>⋮</kbd>（選択中セルの右上）</td><td>セル操作メニュー（編集モード）<br><span style="color:#999;font-size:0.78rem">リンク挿入・単元マスタから選択・タスクから選択・空き時間の切替も、すべてこのメニューにあります。セルの上にボタンを出すと入力中の文字が隠れてしまうため、⋮ ひとつにまとめました</span></td></tr>'
-                + '<tr><td colspan="2" style="padding:8px 6px;color:#999;font-size:0.78rem">💡 ドラッグ＆ドロップによるコマの入れ替えは、閲覧モード・編集モードのどちらでも使えます</td></tr>'
+                + '<tr><td colspan="2" style="padding:8px 6px;color:#999;font-size:0.78rem">💡 ドラッグ＆ドロップによるコマの入れ替えと、タスクのカードのセルへの書き込みは、編集モードで使えます</td></tr>'
                 + '</table>',
             width: 520,
             confirmButtonText: '閉じる',

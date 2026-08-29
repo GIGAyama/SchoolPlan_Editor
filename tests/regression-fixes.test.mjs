@@ -21,9 +21,16 @@ test('V1 week-plan client endpoints are gone', () => {
 });
 
 test('shared save-state variables remain declared in App_Js_02_Plan', () => {
-  // App_Js_14(V2)と App_Js_15(保護版)の保存実装がこれらを参照する
-  assert.match(plan, /var _autoSaving = false;/);
-  assert.match(plan, /var _viewSaveTimer = null;/);
+  // App_Js_14(V2)と App_Js_15(保護版)の保存実装がこれらを参照する。
+  // _autoSaving は削除した。beginSaveRequest() を通ったあとにしか立たないので
+  // 「保存中なら待つ」の判定は必ず先に isSaveInFlight() が拾っており、
+  // 残っていた `if (_autoSaving) return;` は到達しないまま callback だけを
+  // 落とす行になっていた（画面の切り替えが黙って起きない不具合の原因）。
+  assert.doesNotMatch(plan, /_autoSaving/);
+  // 閲覧モードのセル操作用の遅延保存（_viewSaveTimer / scheduleViewSave）も
+  // 撤去した。閲覧モードは読むだけになり、保存は「手動保存」「タブ切替などの
+  // 自動保存」「保存してから実行」の3本だけになった。
+  assert.doesNotMatch(plan, /_viewSaveTimer|scheduleViewSave|persistViewMutation/);
 });
 
 test('batch autofill and shift lessons use the protected save and clear the week cache', () => {
@@ -153,9 +160,11 @@ test('every client save path goes through the serialization gate', () => {
                                 ['App_Js_15_DataProtection_Overrides', read('App_Js_15_DataProtection_Overrides.html')]]) {
     const begins = source.match(/beginSaveRequest\(\)/g) || [];
     const ends = source.match(/endSaveRequest\(\)/g) || [];
-    assert.ok(begins.length >= 3, `${name}: expected the gate on manual/auto/view saves, got ${begins.length}`);
-    // 成功・失敗の両ハンドラで解放する(3経路×2)
-    assert.ok(ends.length >= 6, `${name}: expected endSaveRequest in both handlers, got ${ends.length}`);
+    // 保存の入口は手動保存とタブ切替などの自動保存の2本
+    // （閲覧モードのセル操作の自動保存は、閲覧モードを読み取り専用にして無くなった）
+    assert.ok(begins.length >= 2, `${name}: expected the gate on manual/auto saves, got ${begins.length}`);
+    // 成功・失敗の両ハンドラで解放する(2経路×2)
+    assert.ok(ends.length >= 4, `${name}: expected endSaveRequest in both handlers, got ${ends.length}`);
     assert.match(source, /adoptSavedWeekDays\(result, days/);
   }
   // 「保存してから実行」系も同じゲートを通す

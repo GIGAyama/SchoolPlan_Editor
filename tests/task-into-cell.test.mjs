@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import { bootClient, setWeek, makeDays } from './helpers/webapp-sandbox.mjs';
 
 // 週案の右のサイドパネルまわりの回帰防止。
-//   1. タスクカードから、週案のセルへ直接タスクを書き込めること
+//   1. タスクカードから、週案のセルへ直接タスクを書き込めること（編集モードのみ）
 //   2. サイドパネルを「今週のタスク」と「行事予定PDF」で切り替えられること
-// 1 は週データを書き換えて自動保存まで走るので、壊れると「入れたのに消える」
-// 「元に戻せない」といった、あとから気づきにくい壊れ方をする。
+// 1 の書き込み先はセルの入力欄。閲覧モードは読むだけなので、書き込まずに案内を出す
+// （書き込めてしまうと、そのまま保存されずに消える）。
 
 const read = file => fs.readFileSync(file, 'utf8');
 
@@ -27,58 +27,78 @@ function fnBody(src, name) {
   return rest.slice(0, next === -1 ? undefined : next);
 }
 
-/** タスクを入れられる状態のサンドボックスを起動する。 */
-function bootWithTasks(tasks) {
-  const h = bootClient();
+/**
+ * タスクを入れられる状態のサンドボックスを起動する。
+ * 書き込み先はセルの入力欄なので、セレクタごとに同じ要素を返す DOM で動かす。
+ */
+function bootWithTasks(tasks, opts = {}) {
+  const h = bootClient({ gridInputs: true });
   // タスク一覧のビュー更新は App_Js_11_Task 側。ここでは呼ばれたことだけ数える。
   h.run('var __taskViewRefreshes = 0; refreshTaskViews = function () { __taskViewRefreshes++; };');
   setWeek(h, '2026/08/17', makeDays());
   h.STATE.allTaskData = tasks;
   h.STATE.taskDataLoaded = true;
+  if (opts.viewMode !== true) h.run('setEditMode(true)');
   return h;
+}
+
+/** 編集モードのセルの入力欄の中身。書き込み先はここ（週データではない）。 */
+function cellValue(h, dayIdx, rowKey) {
+  const m = /^period([0-5])$/.exec(rowKey);
+  const selector = m
+    ? `[data-field="content"][data-day="${dayIdx}"][data-period="${m[1]}"]`
+    : `[data-field="${rowKey}"][data-day="${dayIdx}"]:not([data-period])`;
+  return h.gridInput(selector).value;
 }
 
 const TASK = { id: 't1', content: '算数のプリントを印刷する', resource: 'プリント20枚', status: '未着手', dueDate: '2026-08-19' };
 
-test('閲覧モードでコマへ入れると、学習内容の末尾にタスクが書かれる', () => {
+test('コマへ入れると、学習内容の入力欄の末尾にタスクが書かれる', () => {
   const h = bootWithTasks([{ ...TASK }]);
   const ok = h.run(`insertTasksIntoCell(1, 'period2', [STATE.allTaskData[0]])`);
   assert.equal(ok, true);
-  const p = h.STATE.weekData.days[1].periods[2];
-  assert.equal(p.content, '☐算数のプリントを印刷する\n・プリント20枚');
+  assert.equal(cellValue(h, 1, 'period2'), '☐算数のプリントを印刷する\n・プリント20枚');
   // 教科・単元は触らない（コマの中身を壊さない）
-  assert.match(p.subject, /^教科火/);
+  assert.match(h.STATE.weekData.days[1].periods[2].subject, /^教科火/);
 });
 
 test('すでに書かれている内容は消さず、そのあとに足す', () => {
   const h = bootWithTasks([{ ...TASK }]);
-  h.STATE.weekData.days[0].morning = '朝読書';
+  h.gridInput('[data-field="morning"][data-day="0"]:not([data-period])').value = '朝読書';
   h.run(`insertTasksIntoCell(0, 'morning', [STATE.allTaskData[0]])`);
-  assert.equal(h.STATE.weekData.days[0].morning,
+  assert.equal(cellValue(h, 0, 'morning'),
     '朝読書\n☐算数のプリントを印刷する\n・プリント20枚');
 });
 
 test('空き時間のコマでは、区切りより後ろ（タスク欄）に入る', () => {
   const h = bootWithTasks([{ ...TASK }]);
   const divider = h.run('FREE_TASK_DIVIDER');
-  h.STATE.weekData.days[2].periods[0].content = '自習\n' + divider + '\n';
+  h.gridInput('[data-field="content"][data-day="2"][data-period="0"]').value = '自習\n' + divider + '\n';
   h.run(`insertTasksIntoCell(2, 'period0', [STATE.allTaskData[0]])`);
-  const content = h.STATE.weekData.days[2].periods[0].content;
+  const content = cellValue(h, 2, 'period0');
   assert.ok(content.indexOf(divider) < content.indexOf('☐算数のプリントを印刷する'),
     '空き時間のタスクは区切りより後ろに入ること');
 });
 
-test('閲覧モードで入れた分は、自動保存に載って元にも戻せる', () => {
+test('入れただけでは保存を送らない（保存は「保存する」を押したとき）', () => {
   const h = bootWithTasks([{ ...TASK }]);
-  const before = h.inflight.length;
   h.run(`insertTasksIntoCell(3, 'afterschool', [STATE.allTaskData[0]])`);
-  assert.equal(h.STATE.undoStack.length, 1, '履歴に積んでから書き換えること');
-
   h.clock.advance();
-  assert.ok(h.inflight.length > before, '自動保存が送られること');
+  const saves = h.inflight.filter(c => /^saveWeeklyPlanData/.test(c.name));
+  assert.equal(saves.length, 0, '入力欄へ書いただけで保存を飛ばさないこと');
+  assert.equal(h.clock.pending, 0, '遅延保存のタイマーも仕掛けないこと');
+});
 
-  h.run('undo()');
-  assert.equal(h.STATE.weekData.days[3].afterschool, '', '元に戻せること');
+test('閲覧モードでは書き込まず、編集モードへの入り方を知らせる', () => {
+  const h = bootWithTasks([{ ...TASK }], { viewMode: true });
+  const before = JSON.stringify(h.STATE.weekData.days);
+  const ok = h.run(`insertTasksIntoCell(1, 'period2', [STATE.allTaskData[0]])`);
+  assert.equal(ok, false);
+  assert.equal(cellValue(h, 1, 'period2'), '', '入力欄にも書かないこと');
+  assert.equal(JSON.stringify(h.STATE.weekData.days), before, '週データも触らないこと');
+  assert.ok(h.toasts.some(([type, msg]) => type === 'info' && /閲覧モード/.test(msg)));
+  // タスクのステータスも動かさない（入れていないのに進行中になってしまう）
+  assert.equal(h.STATE.allTaskData[0].status, '未着手');
 });
 
 test('未着手のタスクは、入れた時点で進行中になる', () => {
@@ -109,8 +129,7 @@ test('運んできたカードは、落としたセルへ入る', () => {
   const h = bootWithTasks([{ ...TASK }]);
   h.STATE.dragTaskId = 't1';
   h.run(`dropTaskOnCell_({ dataset: { day: '4', row: '10', key: 'period5' } })`);
-  assert.equal(h.STATE.weekData.days[4].periods[5].content,
-    '☐算数のプリントを印刷する\n・プリント20枚');
+  assert.equal(cellValue(h, 4, 'period5'), '☐算数のプリントを印刷する\n・プリント20枚');
   // 運び終えたら、次のドラッグに持ち越さない
   assert.equal(h.STATE.dragTaskId, null);
   // どこへ入れたかが分かるように、そのセルを選んでおく
@@ -125,21 +144,20 @@ test('セルを選ばずにボタンを押したら、先に選ぶよう知ら�
   h.STATE.selectedCell = null;
   h.run(`insertTaskIntoSelectedCell('t1')`);
   assert.ok(h.toasts.some(([type]) => type === 'warning'));
-  assert.equal(h.STATE.weekData.days[0].morning, '');
+  assert.equal(cellValue(h, 0, 'morning'), '');
 });
 
 // ===== 静的検査: 画面まわりの配線 =====
 
-test('編集モードでは、入力欄の側へ書き込む（週データを直接触らない）', () => {
+test('書き込み先は入力欄だけ（週データを直接触らない）', () => {
   const body = fnBody(plan, 'insertTasksIntoCell');
-  // 編集中は入力欄の値が最新。days を書き換えると、打っている途中の文字が消える
-  assert.match(body, /if \(STATE\.editMode\) \{/);
+  // 入力欄の値が「本当の値」。days を書き換えると、打っている途中の文字が消える
   assert.match(body, /el\.value = appendTaskText_\(el\.value, addText\)/);
   assert.match(body, /autoResizeTextarea\(el\)/);
-  // 閲覧モードは履歴 → 書き換え → 再描画 → 自動保存の順
-  const view = body.slice(body.indexOf('// 閲覧モード'));
-  assert.ok(view.indexOf('pushUndo()') < view.indexOf('markWeekDaysMutated()'));
-  assert.ok(view.indexOf('markWeekDaysMutated()') < view.indexOf('persistViewMutation()'));
+  assert.doesNotMatch(body, /STATE\.weekData\.days\[dayIdx\]\s*=|day\[rowKey\] =/);
+  // 閲覧モードの分岐（days を直接書いて自動保存する道）は無くした
+  assert.doesNotMatch(body, /persistViewMutation|pushUndo/);
+  assert.match(body, /if \(!requireEditMode\(\)\) return false;/);
 });
 
 test('タスクカードは、つかんで週案セルへ運べる', () => {

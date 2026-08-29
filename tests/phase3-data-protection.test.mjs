@@ -181,10 +181,11 @@ test('tasks, unit master rows, and newsletters use a recoverable trash', () => {
 
 test('frontend routes all week mutations through protected save API', () => {
   const calls = frontend.match(/saveWeeklyPlanDataProtected/g) || [];
-  assert.ok(calls.length >= 3, `expected at least 3 protected save routes, got ${calls.length}`);
+  assert.ok(calls.length >= 2, `expected at least 2 protected save routes, got ${calls.length}`);
   assert.match(frontend, /'auto-save'/);
   assert.match(frontend, /'manual-save'/);
-  assert.match(frontend, /'view-mutation'/);
+  // 'view-mutation' は無くなった。閲覧モードは読むだけで、そこから保存は飛ばない。
+  assert.doesNotMatch(frontend, /'view-mutation'/);
 });
 
 test('frontend replaces hard deletes with trash or backup-protected operations', () => {

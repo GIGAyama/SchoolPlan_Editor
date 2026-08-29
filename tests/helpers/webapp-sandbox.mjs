@@ -74,6 +74,8 @@ export function makeDays(opts = {}) {
  * クライアントを起動したサンドボックスを返します。
  * @param {Object} [options] options.protectedOverrides=true で App_Js_15 の保護版を有効にする。
  *   options.extraFiles に include ファイル名を足すと、既定の読み込みのあとに続けて読む。
+ *   options.gridInputs=true で document.querySelector が同じセレクタに同じ要素を返す
+ *   （編集モードのグリッドの入力欄に書き込んだ結果を読み取るために使う）。
  */
 export function bootClient(options = {}) {
   const clock = makeClock();
@@ -88,6 +90,21 @@ export function bootClient(options = {}) {
     addEventListener: noop, focus: noop, blur: noop, contains: () => false,
     querySelector: () => null, querySelectorAll: () => [], closest: () => null,
     value: '', dataset: {}, innerHTML: '', textContent: ''
+  };
+
+  // options.gridInputs=true で、同じセレクタに毎回同じ要素を返す。
+  // 編集モードのグリッドは「本当の値」が入力欄の中にあるので、
+  // 書き込んだ結果を読み取るにはセレクタごとに実体が要る。
+  const inputs = new Map();
+  const queryOne = (selector) => {
+    if (!options.gridInputs) return Object.create(elementStub);
+    if (!inputs.has(selector)) {
+      const el = Object.create(elementStub);
+      el.value = '';
+      el.style = {};
+      inputs.set(selector, el);
+    }
+    return inputs.get(selector);
   };
 
   const sandbox = {
@@ -105,7 +122,7 @@ export function bootClient(options = {}) {
     document: {
       addEventListener: noop, body: elementStub, activeElement: null,
       getElementById: () => Object.create(elementStub),
-      querySelector: () => Object.create(elementStub),
+      querySelector: (selector) => queryOne(selector),
       querySelectorAll: () => [],
       createElement: () => Object.create(elementStub)
     },
@@ -152,7 +169,12 @@ export function bootClient(options = {}) {
     showToast = function (type, msg) { __toasts.push([type, msg]); };
     renderWeekGrid = function (days) { __renders.push(JSON.parse(JSON.stringify(days))); };
     rerenderGridPreservingFocus = function () { renderWeekGrid(STATE.weekData.days); };
-    collectCurrentEditData = function () { return STATE.weekData ? STATE.weekData.days : null; };
+    // 実物は入力欄の値からその都度組み立て直す（days とは別の配列になる）。
+    // 同じ配列を返してしまうと gridDiffersFromSaved が常に「差なし」になり、
+    // 保存の往復中に増えた変更を拾い直す仕組みが検査できない。
+    collectCurrentEditData = function () {
+        return STATE.weekData ? JSON.parse(JSON.stringify(STATE.weekData.days)) : null;
+    };
     updateWeekHeader = function () {};
     renderWeeklyTaskPanel = function () {};
     updateEditUI = function () { syncEditBaseline(); };
@@ -168,7 +190,10 @@ export function bootClient(options = {}) {
   const run = code => vm.runInContext(code, context);
   const STATE = run('STATE');
 
-  return { STATE, clock, inflight, toasts, renders, run, context };
+  /** options.gridInputs=true のとき、そのセレクタが指す入力欄の実体。 */
+  const gridInput = (selector) => queryOne(selector);
+
+  return { STATE, clock, inflight, toasts, renders, run, context, gridInput };
 }
 
 /** 表示中の週を1つ設定します（サーバから読み込んだ直後の状態）。 */

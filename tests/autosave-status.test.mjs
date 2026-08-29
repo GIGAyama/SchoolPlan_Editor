@@ -5,14 +5,15 @@ import vm from 'node:vm';
 
 // 週案の自動保存まわりの回帰防止。
 //
-// 1) 保存中であることが画面に出ているか
-//    手動保存は「保存する」ボタンが「保存中...」に変わるので分かるが、自動保存
-//    （週移動前・閲覧モードのセル操作）はボタンを通らない。GASの往復は数秒かかる
-//    ため、そのあいだ何も起きていないように見えていた。
+// 保存中であることが画面に出ているかを見る。手動保存は「保存する」ボタンが
+// 「保存中...」に変わるので分かるが、タブ切替・週移動・学級切替のときの自動保存は
+// ボタンを通らない。GASの往復は数秒かかるため、そのあいだ何も起きていないように
+// 見えていた。
 //
-// 2) 中身の変わらない保存を送っていないか
-//    空のコマを「クリア」する、元に戻す→やり直す、コマを動かして元へ戻す——
-//    どれも保存すべき差が無いのに往復1回ぶん（＋保存ロック1回ぶん）使っていた。
+// 「中身の変わらない保存を送らない」の2本は削除した。あれは閲覧モードのセル操作が
+// 差の無い自動保存を連発することへの節約で、閲覧モードを読み取り専用にして
+// その経路ごと無くなった。いま残る自動保存はタブ切替のときだけで、送る前に
+// hasUnsavedChanges() で差を見ているため、そもそも差の無い保存が飛ばない。
 //
 // 実物のクライアントコードを読み込み、DOM とサーバ呼び出しだけ差し替えて確かめる。
 
@@ -207,23 +208,22 @@ for (const variant of [
   { label: '保護版保存', options: { protectedOverrides: true } }
 ]) {
 
-test(`閲覧モードの自動保存でも「保存中」が画面に出る（${variant.label}）`, () => {
+test(`タブ切替の自動保存でも「保存中」が画面に出る（${variant.label}）`, () => {
   const c = bootClient(variant.options);
   assert.equal(c.saveStatus(), null, '何もしていないうちは出さない');
 
-  // セル操作をした時点から出す。実際に送るまでのディレイ待ちも、
-  // 利用者から見れば「操作したのにまだ保存されていない」時間である。
-  c.run(`handleContextAction('clearDay', 0, 0)`);
-  assert.equal(c.saveStatus().text, '保存中...', 'ディレイ待ちのあいだも保存中と出すこと');
-  assert.match(c.saveStatus().className, /is-saving/);
-
-  c.clock.advance(450);
+  c.run('setEditMode(true)');
+  c.STATE.weekData.days[0].event = '運動会';
+  c.run('__switched = false; autoSaveAndThen(function () { __switched = true; });');
   assert.equal(c.inflight.length, 1);
-  assert.equal(c.saveStatus().text, '保存中...', '送信中も保存中と出したままにすること');
+  assert.equal(c.saveStatus().text, '保存中...', '送信中は保存中と出すこと');
+  assert.match(c.saveStatus().className, /is-saving/);
 
   c.respondOne();
   c.clock.advance(0);
-  assert.equal(c.saveStatus().text, '保存しました');
+  assert.equal(c.run('__switched'), true, '保存が通ったら画面の切り替えへ進むこと');
+  assert.equal(c.STATE.editMode, false, '保存できたら閲覧モードへ戻すこと');
+  assert.equal(c.saveStatus().text, '自動保存しました');
   assert.match(c.saveStatus().className, /is-saved/);
 
   // 成功の表示は残し続けない
@@ -233,17 +233,21 @@ test(`閲覧モードの自動保存でも「保存中」が画面に出る（${
 
 test(`自動保存に失敗したら、その表示が消えずに残る（${variant.label}）`, () => {
   const c = bootClient(variant.options);
-  c.run(`handleContextAction('clearDay', 0, 0)`);
-  c.clock.advance(450);
+  c.run('setEditMode(true)');
+  c.STATE.weekData.days[0].event = '運動会';
+  c.run('__switched = false; autoSaveAndThen(function () { __switched = true; });');
   c.failOne();
   c.clock.advance(10000);
   assert.ok(c.saveStatus(), '失敗の表示は消さないこと（気づかないまま離れてしまう）');
   assert.match(c.saveStatus().className, /is-error/);
+  // 保存できていない内容を抱えたまま画面を切り替えると、そこで消えてしまう
+  assert.equal(c.run('__switched'), false, '保存できないうちは画面を切り替えないこと');
+  assert.equal(c.STATE.editMode, true, '編集モードのまま留まること');
 });
 
 test(`手動保存でも同じ表示が出る（${variant.label}）`, () => {
   const c = bootClient(variant.options);
-  c.STATE.editMode = true;
+  c.run('setEditMode(true)');
   c.STATE.weekData.days[0].event = '運動会';
   c.run('saveWeeklyPlan()');
   assert.equal(c.saveStatus().text, '保存中...');
@@ -252,58 +256,5 @@ test(`手動保存でも同じ表示が出る（${variant.label}）`, () => {
   assert.equal(c.saveStatus().text, '保存しました');
 });
 
-test(`中身が変わらない自動保存は送らない（${variant.label}）`, () => {
-  const c = bootClient(variant.options);
-
-  // まず1回保存して、サーバの持っている内容を控えさせる
-  c.run(`handleContextAction('clearDay', 0, 0)`);
-  c.clock.advance(450);
-  c.respondOne();
-  c.clock.advance();
-  assert.equal(c.inflight.length, 0);
-
-  // すでに空の月曜をもう一度クリアしても、送る差が無いので往復させない
-  c.run(`handleContextAction('clearDay', 0, 0)`);
-  c.clock.advance(450);
-  assert.equal(c.inflight.length, 0, '同じ内容の保存で往復してはいけない');
-  assert.equal(c.saveStatus().text, '保存しました', '保存済みであることは画面に出すこと');
-
-  // 元に戻して、やり直す。差し引き変わっていないので送らない
-  c.run('undo(); redo();');
-  c.clock.advance(450);
-  assert.equal(c.inflight.length, 0, '元に戻して やり直せば内容は同じ。往復してはいけない');
-
-  // 本当に変わったときは、もちろん送る
-  c.run(`handleContextAction('clearDay', 1, 0)`);
-  c.clock.advance(450);
-  assert.equal(c.inflight.length, 1, '内容が変わったら保存すること');
-  c.respondOne();
-  c.clock.advance();
-
-  // 元に戻すとサーバの内容と食い違う。これも、もちろん送る
-  c.run('undo()');
-  c.clock.advance(450);
-  assert.equal(c.inflight.length, 1, '元に戻した内容は保存すること');
-});
-
-test(`保存が失敗したあとは、同じ内容でも省略せずに送り直す（${variant.label}）`, () => {
-  const c = bootClient(variant.options);
-
-  c.run(`handleContextAction('clearDay', 0, 0)`);
-  c.clock.advance(450);
-  c.respondOne();
-  c.clock.advance();
-
-  // 控えを持っている状態で、次の保存が失敗する
-  c.run(`handleContextAction('clearDay', 1, 0)`);
-  c.clock.advance(450);
-  c.failOne();
-  c.clock.advance();
-
-  // 失敗した内容は手元にしか無い。省略してはいけない。
-  c.run(`handleContextAction('clearDay', 1, 0)`);
-  c.clock.advance(450);
-  assert.equal(c.inflight.length, 1, '保存できていない内容を「同じだから」と省いてはいけない');
-});
 
 }
