@@ -1,0 +1,277 @@
+<!--
+  この HTML は tools/build-app-links.mjs が作ります。手で編集しないこと。
+  中身は正本 standards/web/giga-app-links.js（配布物 web/giga-app-links.js）です。
+
+  画面から「つかいかた・紹介記事・利用規約・プライバシー」へつなぐ 4 本のリンクを、
+  <div data-giga-links> の中に出します。
+
+  ⚠️ slug をここで渡しているのは、GAS の画面が script.google.com（または
+     googleusercontent.com）で動いていて、ホスト名から自分が何のアプリか
+     分からないためです。渡さないと、部品は何も出しません
+     （当てずっぽうに組むと、存在しないアプリの利用規約へ飛ばすことになる）。
+-->
+<script>window.GIGA_APP_LINKS = { slug: 'schoolplan-editor' };</script>
+<script>
+/* eslint-disable */
+/**
+ * =====================================================================
+ * giga-app-links.js — アプリから「行き先」へつなぐ 4 本のリンク（正本）
+ * =====================================================================
+ *
+ * 画面の中に、次の 4 つへの入口を出す。
+ *
+ *   つかいかた   https://giga-school.com/apps/<slug>/manual/
+ *   紹介記事     https://giga-school.com/apps/<slug>/
+ *   利用規約     https://<slug>.giga-school.com/terms.html
+ *   プライバシー https://<slug>.giga-school.com/privacy.html
+ *
+ * ── なぜ正本にするのか ───────────────────────────────
+ *
+ * 紹介記事へのリンクは、42 本のリポジトリに手で書かれていた。文言は
+ * 「使い方を読む」「使い方をみる」で揺れ、当時 31 本のうち 9 本には
+ * 「置く場所が無い」という理由でリンクそのものが無かった。
+ *
+ * さらに、利用規約とプライバシーポリシーは 37 本が自分のサブドメインに
+ * 持っているのに、**アプリの画面からは 1 本も辿れなかった**。
+ * トップページのカードからしか行けない。アプリだけを見つけた人には
+ * 存在しないのと同じだった。
+ *
+ * 42 か所に手で書くと、次に文言を変えるときもまた 42 か所になる。
+ * ここを 1 本にして、配って回る。
+ *
+ * ── 使い方（ふつうのアプリ）─────────────────────────
+ *
+ *   <script src="./giga-app-links.js" defer><\/script>
+ *
+ * ⚠️ この説明の中の <\/script> に \ が入っているのは、書き間違いではない。
+ *    このファイルは GAS のために <script> で囲んで取りこむことがあり、
+ *    そのとき、コメントの中の閉じタグでも script が終わってしまう。
+ *    実際 2026-08-29 に、囲んだ側が途中で切れて、残りが素の HTML として
+ *    画面に出た。閉じタグをそのまま書かないこと。
+ *
+ * slug は自分がいるホスト名（<slug>.giga-school.com）から決まるので、
+ * たいていのアプリは、この 1 行のほかに書くことがない。
+ *
+ * ── 使い方（GAS のアプリ）──────────────────────────
+ *
+ * GAS は自分の HTML ファイルしか配れないので <script src> が使えない。
+ * このファイルの中身を <script> で囲んで取りこみ、先に slug を渡す。
+ *
+ *   <script>window.GIGA_APP_LINKS = { slug: '<slug>' };<\/script>
+ *   <script> …このファイルの中身… <\/script>
+ *
+ * ⚠️ ここに本物のアプリ名を例として書かないこと。このファイルは 42 本へ
+ *    バイト単位で同じものが配られる。1 本の名前が混ざると、他の 41 本に
+ *    よそのアプリの名前が配られることになる（検査が止める）。
+ *
+ * ── どこに出るか ───────────────────────────────────
+ *
+ * 画面に <div data-giga-links></div> があれば、その中に出す。
+ * ヘッダーに置けばヘッダーに、フッターに置けばフッターに出る。
+ *
+ * 置き場所が無ければ、画面のいちばん下に控えめな行として出す。
+ * **フッターを持たないアプリでも行き先ができる**ようにするため。
+ * 「フッターに足して」と場所で頼んだせいで 9 本が取り残された、という
+ * 失敗があった。場所ではなく目的で書いてある。
+ *
+ * ── 決めごと ──────────────────────────────────────
+ *
+ * ・外部から何も読まない（Zero External CDN）。書体も色も自前。
+ * ・Shadow DOM で親のスタイルと切り離す。Bootstrap のアプリでも
+ *   Tailwind のアプリでも同じ見た目になる。
+ * ・行き先はすべて絶対 URL。GAS の画面は iframe の中で、しかも
+ *   別のドメイン（script.google.com）で動くので、相対パスは違う先を指す。
+ * ・すべて target="_blank"。iframe の中で同じタブに開くと、枠の中に
+ *   マニュアルが出てアプリへ戻れなくなる。
+ * ・タップ領域は 48px 以上（艦隊のルール 2）。
+ * ・slug が分からなければ、何も出さない。壊れたリンクを出すより出さない。
+ *
+ * ⚠️ このファイルはアプリ固有の文字を 1 つも持たない。42 本に同じものが
+ *    バイト単位で配られる（standards/check-drift.mjs の normalize が要らない）。
+ *    アプリの名前や URL をここに書き足さないこと。
+ * =====================================================================
+ */
+
+(function () {
+  'use strict';
+
+  var SITE = 'https://giga-school.com';
+  var HOST_RE = /^([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.giga-school\.com$/;
+  var SAFE_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+  /* 出せる行き先。並び順もここで決まる。
+     つかいかたが先頭なのは、画面の前で困っている人がいちばん先に要るものだから。
+     紹介記事（なぜ作ったか）はその次に置く。 */
+  var LINKS = [
+    { id: 'manual',  label: 'つかいかた',   of: function (s) { return SITE + '/apps/' + s + '/manual/'; } },
+    { id: 'article', label: '紹介記事',     of: function (s) { return SITE + '/apps/' + s + '/'; } },
+    { id: 'terms',   label: '利用規約',     of: function (s) { return 'https://' + s + '.giga-school.com/terms.html'; } },
+    { id: 'privacy', label: 'プライバシー', of: function (s) { return 'https://' + s + '.giga-school.com/privacy.html'; } }
+  ];
+
+  var DEFAULT_IDS = LINKS.map(function (l) { return l.id; });
+
+  /**
+   * 出す行き先を決める。ここは画面に触らない純粋な関数にしてある。
+   * DOM の無いところ（node --test）から、そのまま呼んで確かめられるようにするため。
+   *
+   * @param {object} o
+   * @param {string} [o.slug]     はっきり渡された slug。あればこれを使う
+   * @param {string} [o.hostname] いま居るホスト名。<slug>.giga-school.com なら slug が取れる
+   * @param {string} [o.links]    出すものを絞る（"manual,terms" のように）
+   * @returns {{slug: string, items: {id: string, label: string, href: string}[]}}
+   */
+  function resolve(o) {
+    var opt = o || {};
+    var slug = String(opt.slug || '').trim();
+
+    /* 渡されていなければ、居るホスト名から取る。
+       ⚠️ 取れない場所（GAS の script.google.com、file://、localhost）は
+          必ずある。そこで当てずっぽうに組むと、存在しないアプリの
+          利用規約へ飛ばすことになる。取れなければ何も出さない。 */
+    if (!slug) {
+      var m = HOST_RE.exec(String(opt.hostname || ''));
+      slug = m ? m[1] : '';
+    }
+    if (!SAFE_SLUG.test(slug)) return { slug: '', items: [] };
+
+    var want = String(opt.links == null ? '' : opt.links).trim();
+    var ids = want
+      ? want.split(',').map(function (s) { return s.trim(); }).filter(Boolean)
+      : DEFAULT_IDS;
+
+    var items = [];
+    /* LINKS の順に並べる。data-links の書き順では並べない。
+       アプリごとに並びが変わると、いつも同じ場所にある、が崩れる。 */
+    LINKS.forEach(function (l) {
+      if (ids.indexOf(l.id) === -1) return;
+      items.push({ id: l.id, label: l.label, href: l.of(slug) });
+    });
+    return { slug: slug, items: items };
+  }
+
+  /* テストと、アプリ側から呼びたいときのために出しておく。
+     画面のあるなしに関わらず、ここまでは必ず通る。 */
+  var api = { resolve: resolve, LINKS: LINKS };
+  if (typeof window !== 'undefined') window.GigaAppLinks = api;
+  if (typeof globalThis !== 'undefined') globalThis.GigaAppLinks = api;
+
+  /* ここから下は画面がある時だけ。node から読んだときは、ここで終わる。 */
+  if (typeof document === 'undefined' || typeof window === 'undefined') return;
+  if (window.__GIGA_APP_LINKS_LOADED__) return;      // 二重に出さない
+  window.__GIGA_APP_LINKS_LOADED__ = true;
+
+  var TAG = 'giga-app-links';
+
+  /** 設定の読み場所。先に書いてあるものが勝つ。 */
+  function settings() {
+    var conf = window.GIGA_APP_LINKS || {};
+    /* 自分を読み込んだ <script> の data-* も見る。
+       document.currentScript は defer でも読み込み中は取れるが、
+       DOMContentLoaded を待ったあとでは null になるので、先に取っておく。 */
+    var el = self.__gigaAppLinksScript || null;
+    var data = (el && el.dataset) || {};
+    return {
+      slug: conf.slug || data.slug || '',
+      links: conf.links || data.links || '',
+      hostname: window.location && window.location.hostname
+    };
+  }
+
+  var mine = document.currentScript || null;
+  self.__gigaAppLinksScript = mine;
+
+  var STYLE = [
+    ':host{all:initial;display:block;font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic UI",Meiryo,sans-serif}',
+    '.row{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:center;justify-content:center;padding:.25rem}',
+    /* 48px は艦隊の下限。rem で書くと文字を小さくした端末で下回るので px で置く */
+    'a{display:inline-flex;align-items:center;gap:.35em;min-height:48px;min-width:48px;',
+    'padding:0 .7em;border-radius:10px;font-size:14px;line-height:1.3;text-decoration:none;',
+    'color:#42506b;background:transparent;transition:background-color .15s,color .15s}',
+    'a:hover{background:rgba(26,115,232,.10);color:#1a4fa8}',
+    'a:focus-visible{outline:3px solid #1a73e8;outline-offset:2px}',
+    'svg{inline-size:1.05em;block-size:1.05em;flex:none}',
+    /* 暗い画面の端末でも読めるようにする。アプリ側の指定は Shadow DOM で
+       届かないので、こちらで両方を持つ */
+    '@media (prefers-color-scheme: dark){',
+    'a{color:#c3ccdd}a:hover{background:rgba(150,190,255,.16);color:#eaf1ff}}',
+    '@media (prefers-reduced-motion: reduce){a{transition:none}}',
+    /* 紙にはリンクを写しても押せない。ただし行き先の文字は残す */
+    '@media print{.row{display:block;text-align:center}a{min-height:0;padding:0 .4em}}'
+  ].join('');
+
+  /* 絵は 4 つだけなので、線を直接持つ。アイコンの webfont は取りこまない
+     （bootstrap-icons を丸ごと入れると 229KB。使う分だけなら数百バイト）。 */
+  var ICONS = {
+    manual: 'M4 4.5A1.5 1.5 0 0 1 5.5 3H12v14H5.5A1.5 1.5 0 0 1 4 15.5zM12 3h2.5A1.5 1.5 0 0 1 16 4.5v11a1.5 1.5 0 0 1-1.5 1.5H12',
+    article: 'M4 3h9l3 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM7 8h6M7 11h6M7 14h4',
+    terms: 'M5 3h7l3 3v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM8 9h4M8 12h4',
+    privacy: 'M10 3l6 2.5v4c0 3.6-2.4 6.8-6 7.5-3.6-.7-6-3.9-6-7.5v-4z'
+  };
+
+  function icon(id) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 20 20');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.6');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', ICONS[id] || ICONS.article);
+    svg.appendChild(path);
+    return svg;
+  }
+
+  function build(items) {
+    var host = document.createElement(TAG);
+    var root = host.attachShadow ? host.attachShadow({ mode: 'open' }) : null;
+    if (!root) return null;                       // Shadow DOM が無い環境では出さない
+
+    var style = document.createElement('style');
+    style.textContent = STYLE;
+    root.appendChild(style);
+
+    var nav = document.createElement('nav');
+    nav.className = 'row';
+    nav.setAttribute('aria-label', 'このアプリについて');
+    items.forEach(function (it) {
+      var a = document.createElement('a');
+      a.href = it.href;
+      /* iframe の中で同じタブに開くと、枠の中にページが出てアプリへ戻れなくなる。
+         rel は noopener と noreferrer の両方。開いた先に元の画面を触らせない。 */
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.appendChild(icon(it.id));
+      a.appendChild(document.createTextNode(it.label));
+      nav.appendChild(a);
+    });
+    root.appendChild(nav);
+    return host;
+  }
+
+  function place(host) {
+    var slot = document.querySelector('[data-giga-links]');
+    if (slot) { slot.appendChild(host); return; }
+    /* 置き場所が無いアプリ。画面のいちばん下に置く。
+       position を触らないので、アプリの操作の邪魔にはならない。 */
+    host.style.margin = '0.5rem 0 max(0.5rem, env(safe-area-inset-bottom))';
+    document.body.appendChild(host);
+  }
+
+  function start() {
+    var got = resolve(settings());
+    if (!got.items.length) return;                // slug が分からない。何も出さない
+    var host = build(got.items);
+    if (host) place(host);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+</script>
