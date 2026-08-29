@@ -48,7 +48,6 @@
                 + 'フォントサイズ: <input type="range" id="po_fontSize" min="8" max="14" value="' + storedFontSize + '" style="flex:1;">'
                 + '<span id="po_fontLabel">' + storedFontSize + 'px</span>'
                 + '</label>'
-                + '<label style="display:block;margin-top:10px;font-size:0.75rem;color:var(--text-sub);"><input type="checkbox" id="po_debug"' + (po_('debug', false) ? ' checked' : '') + '> 診断情報を印刷する（不具合調査用）</label>'
                 + '</div>',
             width: 420,
             confirmButtonText: '印刷する',
@@ -89,10 +88,7 @@
                 summary: document.getElementById('po_summary').checked,
                 todo: document.getElementById('po_todo').checked,
                 fontSize: parseInt(document.getElementById('po_fontSize').value),
-                autoFit: document.getElementById('po_autoFit').checked,
-                // 既定OFF。ONのときだけ、フィットの実測値をページ右下に極小で刷る。
-                // 端末で DevTools が使えないときの唯一の調べる手段になる
-                debug: document.getElementById('po_debug').checked
+                autoFit: document.getElementById('po_autoFit').checked
             };
             // 次回のためにチェック状態を保存する(復元は po_ 経由)
             try { localStorage.setItem('weeklyPrintOpts', JSON.stringify(opts)); } catch (e) { }
@@ -116,6 +112,11 @@
     // フォントの効き方や端末差でわずかにズレる。ぴったり 100% を狙うと、その差の分だけ
     // 最下段（時数表の下の行や検印欄）が黙って切り落とされるので、ここだけは削らない。
     var AUTOFIT_SAFETY_MM = 2;
+    // スマホ・タブレットでは、印刷のラスタライズ段でレイアウトが DOM より
+    // 約2%高くなる（実機の PDF で実測: DOM が 1033.4px と申告したページの文字が、
+    // 実際には 1055.3px まで描かれていた）。アプリからは検知できないので、
+    // 余白で吸収するしかない。8mm は用紙の約2.9%で、実測のズレ2.1%を覆う。
+    var AUTOFIT_SAFETY_MM_MOBILE = 8;
     var MM_TO_PX = 96 / 25.4;
 
     // 測る前に「実際に効かせておく」書体。書体は自己ホスト(App_Fonts.html)なので
@@ -154,40 +155,6 @@
             if (r.bottom > bottom) bottom = r.bottom;
         }
         return bottom - top;
-    }
-
-    /**
-     * 不具合調査用の診断行を、ページの右下に差しこむ（既定では呼ばれない）。
-     *
-     * スマホの PWA からは DevTools が使えないため、値を紙に刷るのが唯一の確かめ方になる。
-     * 同じ週を端末を変えて刷り、この行を見比べれば、avail・測定した下端・当てた後の実測の
-     * どれがどれだけ食い違っているかが分かる。
-     *
-     * @param {Document} doc 印刷文書
-     * @param {Element} page 対象の .page
-     * @param {Element} fit  その中の .page-fit
-     * @param {Object} v 表示する値
-     */
-    function writeFitDebug_(doc, page, fit, v) {
-        var line = page.querySelector('.fit-debug');
-        if (!line) {
-            line = doc.createElement('div');
-            line.className = 'fit-debug';
-            page.appendChild(line);
-        }
-        var r = function (n) { return (typeof n === 'number' && isFinite(n)) ? Math.round(n * 100) / 100 : '?'; };
-        line.textContent = 'fit#' + v.pass
-            + ' avail=' + r(v.avail) + ' target=' + r(v.target)
-            + ' scale=' + r(v.chosen) + '→' + r(v.scale)
-            // predict は「測った高さ×倍率」＝この倍率なら紙の上でここに来るはず、という予測。
-            // actual は倍率を当てた後の実測。印刷時にレイアウトが伸びていれば、
-            // 紙に出た値どうしは一致するのに、実際の刷り上がりだけが溢れる形になる。
-            + ' predict=' + r(v.measured * v.chosen) + ' actual=' + r(v.actual)
-            + ' dpr=' + r(doc.defaultView ? doc.defaultView.devicePixelRatio : 0)
-            + ' bodyW=' + r(doc.body ? doc.body.clientWidth : 0)
-            // 時数表の最終行。rowH がほぼ0なら DOM の時点で行が潰れている。
-            // rowH が正常で sbot も紙の内側なら、失われているのは描画の段
-            + ' rows=' + r(v.rows) + ' rowH=' + r(v.rowH) + ' sbot=' + r(v.sbot);
     }
 
     /**
@@ -261,7 +228,6 @@
         html += '.page-fit { width: 100%; height: 100%; transform-origin: top left; }';
         // 不具合調査用の診断行。診断ONのときだけ中身が入る（OFFなら要素自体を作らない）
         html += '.page { position: relative; }';
-        html += '.fit-debug { position: absolute; right: 0; bottom: 0; font-size: 5px; line-height: 1; color: #999; white-space: nowrap; }';
         html += 'table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-bottom: 0; }';
         html += 'th, td { border: 1px solid #333; padding: 3px; vertical-align: top; word-wrap: break-word; overflow: hidden; }';
         html += 'th { text-align: center; font-weight: normal; }';
@@ -855,11 +821,18 @@
         // 各ページの内容をラッパーで包み、印刷領域を使い切る倍率まで拡大／縮小する。
         // 拡大してよいのは .page-grow を付けたページだけ。標準2ページ目はフリースペース
         // (.free-box) が余った高さを引き受ける設計なので、拡大せず縮小のみに留める。
+        // スマホ・タブレットかどうか。userAgentData.mobile は Chromium が持つ真偽値で、
+        // Chromebook は false になる（CrOS はモバイル扱いではない）。未対応環境は UA 文字列で見る。
+        var isMobilePrint = (function () {
+            try {
+                var uad = navigator.userAgentData;
+                if (uad && typeof uad.mobile === 'boolean') return uad.mobile;
+            } catch (e) { /* 参照できない環境は下の判定に任せる */ }
+            return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+        })();
+
         var fitPagesToPrintArea = function () {
             var fdoc = printFrame.contentWindow.document;
-            // 何回目の実行か。2 以上なら onbeforeprint で走り直している。
-            // 外の変数ではなく文書に持たせて、この関数だけで完結させる
-            var pass = (fdoc.fitPassCount = (fdoc.fitPassCount || 0) + 1);
             var pages = fdoc.querySelectorAll('.page');
             for (var pi = 0; pi < pages.length; pi++) {
                 var page = pages[pi];
@@ -879,10 +852,9 @@
                 // 検算が 0 を目標にしてページを極端に縮めてしまう
                 if (!(avail > 0)) continue;
                 // 紙の下端ぎりぎりを狙わず、安全余白の分だけ内側に収める
-                var safety = AUTOFIT_SAFETY_MM * MM_TO_PX;
+                var safety = (isMobilePrint ? AUTOFIT_SAFETY_MM_MOBILE : AUTOFIT_SAFETY_MM) * MM_TO_PX;
                 var target = Math.max(avail - safety, avail * 0.5);
 
-                var measured = -1;   // 倍率を決めたときに測れていた下端
                 var applyScale = function (s) {
                     fit.style.transform = '';
                     fit.style.width = (Math.abs(s - 1) > 0.005) ? (100 / s) + '%' : '100%';
@@ -899,9 +871,6 @@
                 };
                 var scale = pickFitScale_(measureAt, target, AUTOFIT_MIN_SCALE,
                     canGrow ? AUTOFIT_MAX_SCALE : 1);
-                var chosen = scale;
-                measureAt(scale);
-                measured = contentBottomPx_(fit);
                 applyScale(scale);
 
                 // 検算: 変換を当てた「実際の状態」で最下端を測り直す。まだ紙を超えていれば
@@ -915,26 +884,6 @@
                     applyScale(scale);
                 }
 
-                // 不具合調査用。既定では何も出さない。
-                // 端末で DevTools が使えない（スマホの PWA など）ときに、
-                // 測ったときと刷られたときのどこがどれだけ食い違うかを紙の上で確かめる。
-                if (opts.debug) {
-                    // 時数表の行そのものを測る。刷り上がりで行が消えるとき、
-                    // DOM で行が潰れている（rowH がほぼ0）のか、DOM は正常なのに
-                    // ラスタライズで失われている（rowH は正常で sbot も紙の内側）のかを見分ける。
-                    var rows = page.querySelectorAll('.stats-table tr');
-                    var rowH = -1, sbot = -1;
-                    if (rows.length) {
-                        var lastRow = rows[rows.length - 1].getBoundingClientRect();
-                        rowH = lastRow.height;
-                        sbot = lastRow.bottom - page.getBoundingClientRect().top;
-                    }
-                    writeFitDebug_(fdoc, page, fit, {
-                        avail: avail, target: target, chosen: chosen, scale: scale,
-                        measured: measured, actual: contentBottomPx_(fit, scale), pass: pass,
-                        rows: rows.length, rowH: rowH, sbot: sbot
-                    });
-                }
             }
         };
 
