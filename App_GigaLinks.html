@@ -15,15 +15,16 @@
 /* eslint-disable */
 /**
  * =====================================================================
- * giga-app-links.js — アプリから「行き先」へつなぐ 4 本のリンク（正本）
+ * giga-app-links.js — アプリから「行き先」へつなぐ 3 本のリンク（正本）
  * =====================================================================
  *
- * 画面の中に、次の 4 つへの入口を出す。
+ * 画面の中に、次の 3 つへの入口を出す。
  *
  *   つかいかた   https://giga-school.com/apps/<slug>/manual/
- *   紹介記事     https://giga-school.com/apps/<slug>/
  *   利用規約     https://<slug>.giga-school.com/terms.html
  *   プライバシー https://<slug>.giga-school.com/privacy.html
+ *
+ * ⚠️ 紹介記事（/apps/<slug>/）は出さない。2026-08-29 に外した。理由は下の LINKS。
  *
  * ── なぜ正本にするのか ───────────────────────────────
  *
@@ -69,6 +70,24 @@
  * 画面に <div data-giga-links></div> があれば、その中に出す。
  * ヘッダーに置けばヘッダーに、フッターに置けばフッターに出る。
  *
+ * ── 出すものを絞る ─────────────────────────────────
+ *
+ * data-links は、次のどこに書いても効く。
+ *
+ *   <script src="./giga-app-links.js" data-links="terms,privacy" defer><\/script>
+ *   <div data-giga-links data-links="terms,privacy"></div>
+ *   window.GIGA_APP_LINKS = { links: 'terms,privacy' };
+ *
+ * ⚠️ 2026-08-29 まで、<div> のほうに書いても効かなかった。しかも**黙って
+ *    全部出る**ので、絞ったつもりの側は気づけない。置き場所のすぐ隣に
+ *    書くほうが自然なので、読む側を増やして罠を消した。
+ *
+ * マニュアルがまだ無いアプリでは "terms,privacy" にする。
+ * 既定のまま出すと、行き止まりの「つかいかた」が 1 本増える。
+ * マニュアルを書いたら、この属性ごと消す（既定は 3 つとも出る）。
+ *
+ * 並び順は、書いた順ではなく下の LINKS の順になる。
+ *
  * 置き場所が無ければ、画面のいちばん下に控えめな行として出す。
  * **フッターを持たないアプリでも行き先ができる**ようにするため。
  * 「フッターに足して」と場所で頼んだせいで 9 本が取り残された、という
@@ -101,10 +120,15 @@
 
   /* 出せる行き先。並び順もここで決まる。
      つかいかたが先頭なのは、画面の前で困っている人がいちばん先に要るものだから。
-     紹介記事（なぜ作ったか）はその次に置く。 */
+
+     ⚠️ 紹介記事（/apps/<slug>/）はここに置かない。2026-08-29 に外した。
+        あれは「なぜ作ったか」を、まだ使っていない先生に向けて書いたもので、
+        いま画面の前にいて「このボタンは何ですか」と困っている人が
+        求めているものではない。そもそもこの部品は、42 本のフッターが
+        揃って紹介記事を指していたのを直すために作った。
+        読み物への道は、つかいかたのページの中に置いてある。 */
   var LINKS = [
     { id: 'manual',  label: 'つかいかた',   of: function (s) { return SITE + '/apps/' + s + '/manual/'; } },
-    { id: 'article', label: '紹介記事',     of: function (s) { return SITE + '/apps/' + s + '/'; } },
     { id: 'terms',   label: '利用規約',     of: function (s) { return 'https://' + s + '.giga-school.com/terms.html'; } },
     { id: 'privacy', label: 'プライバシー', of: function (s) { return 'https://' + s + '.giga-school.com/privacy.html'; } }
   ];
@@ -171,9 +195,16 @@
        DOMContentLoaded を待ったあとでは null になるので、先に取っておく。 */
     var el = self.__gigaAppLinksScript || null;
     var data = (el && el.dataset) || {};
+    /* 置き場所の <div data-giga-links> の data-* も見る。
+       ⚠️ 2026-08-29、data-links をこちらへ書いて効かず、しかも黙って全部
+          出た。絞ったつもりの側は気づけない。書く人にとっては、置き場所の
+          すぐ隣に書くほうが自然なので、罠を消す側で解いた。
+       ここは start() から呼ぶので、<div> はもう在る。 */
+    var slotEl = document.querySelector('[data-giga-links]');
+    var slot = (slotEl && slotEl.dataset) || {};
     return {
-      slug: conf.slug || data.slug || '',
-      links: conf.links || data.links || '',
+      slug: conf.slug || data.slug || slot.slug || '',
+      links: conf.links || data.links || slot.links || '',
       hostname: window.location && window.location.hostname
     };
   }
@@ -183,6 +214,9 @@
 
   var STYLE = [
     ':host{all:initial;display:block;font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic UI",Meiryo,sans-serif}',
+    /* 置き場所が無くて <body> の末尾へ出したとき。style 属性は CSP で
+       効かないことがあるので、余白もここで付ける（place() を参照）。 */
+    ':host(.giga-app-links--end){margin:.5rem 0 max(.5rem, env(safe-area-inset-bottom))}',
     '.row{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:center;justify-content:center;padding:.25rem}',
     /* 48px は艦隊の下限。rem で書くと文字を小さくした端末で下回るので px で置く */
     'a{display:inline-flex;align-items:center;gap:.35em;min-height:48px;min-width:48px;',
@@ -204,7 +238,6 @@
      （bootstrap-icons を丸ごと入れると 229KB。使う分だけなら数百バイト）。 */
   var ICONS = {
     manual: 'M4 4.5A1.5 1.5 0 0 1 5.5 3H12v14H5.5A1.5 1.5 0 0 1 4 15.5zM12 3h2.5A1.5 1.5 0 0 1 16 4.5v11a1.5 1.5 0 0 1-1.5 1.5H12',
-    article: 'M4 3h9l3 3v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM7 8h6M7 11h6M7 14h4',
     terms: 'M5 3h7l3 3v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM8 9h4M8 12h4',
     privacy: 'M10 3l6 2.5v4c0 3.6-2.4 6.8-6 7.5-3.6-.7-6-3.9-6-7.5v-4z'
   };
@@ -220,7 +253,7 @@
     svg.setAttribute('aria-hidden', 'true');
     svg.setAttribute('focusable', 'false');
     var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', ICONS[id] || ICONS.article);
+    path.setAttribute('d', ICONS[id] || ICONS.manual);
     svg.appendChild(path);
     return svg;
   }
@@ -230,9 +263,29 @@
     var root = host.attachShadow ? host.attachShadow({ mode: 'open' }) : null;
     if (!root) return null;                       // Shadow DOM が無い環境では出さない
 
-    var style = document.createElement('style');
-    style.textContent = STYLE;
-    root.appendChild(style);
+    /* ⚠️ <style> を入れるだけにしない。
+       CSP が `style-src 'self'`（'unsafe-inline' なし）の画面では、Shadow DOM の
+       中でも <style> は弾かれる。弾かれても例外は飛ばず、リンクは出たまま
+       **見た目だけが落ちる**。2026-08-29 に Gobblet で実際に起きて、48px の
+       タップ領域が 28px になっていた（艦隊のルール 2 を割る）。しかも画面には
+       出ているので、コンソールを読むまで気づけない。
+
+       構築可能なスタイルシートは style-src の対象外なので、使えるならそちらを使う。
+       使えない古い browser には <style> で降りる（そちらは CSP も古いか無い）。 */
+    var styled = false;
+    try {
+      if (root.adoptedStyleSheets && typeof CSSStyleSheet === 'function') {
+        var sheet = new CSSStyleSheet();
+        sheet.replaceSync(STYLE);
+        root.adoptedStyleSheets = [sheet];
+        styled = true;
+      }
+    } catch (e) { styled = false; }
+    if (!styled) {
+      var style = document.createElement('style');
+      style.textContent = STYLE;
+      root.appendChild(style);
+    }
 
     var nav = document.createElement('nav');
     nav.className = 'row';
@@ -256,8 +309,12 @@
     var slot = document.querySelector('[data-giga-links]');
     if (slot) { slot.appendChild(host); return; }
     /* 置き場所が無いアプリ。画面のいちばん下に置く。
-       position を触らないので、アプリの操作の邪魔にはならない。 */
-    host.style.margin = '0.5rem 0 max(0.5rem, env(safe-area-inset-bottom))';
+       position を触らないので、アプリの操作の邪魔にはならない。
+
+       ⚠️ ここで host.style.margin と書かない。style 属性も CSP の style-src が
+          見ているので、`style-src 'self'` の画面では黙って効かない。
+          余白は上の STYLE の :host(.giga-app-links--end) で付ける。 */
+    host.className = 'giga-app-links--end';
     document.body.appendChild(host);
   }
 
