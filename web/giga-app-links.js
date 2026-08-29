@@ -53,19 +53,25 @@
  *
  * ── どこに出るか ───────────────────────────────────
  *
- * 画面に <div data-giga-links></div> があれば、その中に出す。
+ * 画面に <span data-giga-links></span> があれば、その中に出す。
  * ヘッダーに置けばヘッダーに、フッターに置けばフッターに出る。
+ *
+ * ⚠️ 置き場所は <span>（行の中に並ぶもの）にすること。<div> にすると、
+ *    そこで必ず改行が入り、フッターが 2 行になる。2026-08-29、
+ *    デジタル・クラス新聞社のフッターが 115px まで太って、新聞を作る
+ *    場所を押しつぶしていた。部品そのものは行の一部として振る舞うので
+ *    （:host が inline-flex）、包む側さえ行の中にあれば 1 行に収まる。
  *
  * ── 出すものを絞る ─────────────────────────────────
  *
  * data-links は、次のどこに書いても効く。
  *
  *   <script src="./giga-app-links.js" data-links="terms,privacy" defer><\/script>
- *   <div data-giga-links data-links="terms,privacy"></div>
+ *   <span data-giga-links data-links="terms,privacy"></span>
  *   window.GIGA_APP_LINKS = { links: 'terms,privacy' };
  *
  * ⚠️ 2026-08-29 まで、<div> のほうに書いても効かなかった。しかも**黙って
- *    全部出る**ので、絞ったつもりの側は気づけない。置き場所のすぐ隣に
+ *    全部出る**ので、絞ったつもりの側は気づけない。置き場所のすぐ横に
  *    書くほうが自然なので、読む側を増やして罠を消した。
  *
  * マニュアルがまだ無いアプリでは "terms,privacy" にする。
@@ -88,7 +94,11 @@
  *   別のドメイン（script.google.com）で動くので、相対パスは違う先を指す。
  * ・すべて target="_blank"。iframe の中で同じタブに開くと、枠の中に
  *   マニュアルが出てアプリへ戻れなくなる。
- * ・タップ領域は 48px 以上（艦隊のルール 2）。
+ * ・見えている高さは 26px、押せる大きさは 48px（艦隊のルール 2）。
+ *   高さそのものを 48px にすると、この 1 行だけでフッターが 56px になり、
+ *   アプリの表示領域を押しつぶす。当たり判定だけを ::after で外へ広げる。
+ * ・狭い画面では文字を落として絵だけにする。1 行に収めるため。
+ *   文字は消さずに読み上げ用に残すので、名前は失われない。
  * ・slug が分からなければ、何も出さない。壊れたリンクを出すより出さない。
  *
  * ⚠️ このファイルはアプリ固有の文字を 1 つも持たない。42 本に同じものが
@@ -199,25 +209,51 @@
   self.__gigaAppLinksScript = mine;
 
   var STYLE = [
-    ':host{all:initial;display:block;font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic UI",Meiryo,sans-serif}',
-    /* 置き場所が無くて <body> の末尾へ出したとき。style 属性は CSP で
-       効かないことがあるので、余白もここで付ける（place() を参照）。 */
-    ':host(.giga-app-links--end){margin:.5rem 0 max(.5rem, env(safe-area-inset-bottom))}',
-    '.row{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:center;justify-content:center;padding:.25rem}',
-    /* 48px は艦隊の下限。rem で書くと文字を小さくした端末で下回るので px で置く */
-    'a{display:inline-flex;align-items:center;gap:.35em;min-height:48px;min-width:48px;',
-    'padding:0 .7em;border-radius:10px;font-size:14px;line-height:1.3;text-decoration:none;',
+    /* 行そのものではなく「行の中の一部品」として振る舞う。
+       ⚠️ display:block に戻さないこと。そこで必ず改行が入り、著作権表示と
+          別の行になる。2026-08-29、デジタル・クラス新聞社のフッターが
+          2 行・115px まで太って、新聞を作る場所を押しつぶしていた。 */
+    ':host{all:initial;display:inline-flex;vertical-align:middle;',
+    'font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic UI",Meiryo,sans-serif}',
+    /* 置き場所が無くて <body> の末尾へ出したとき。こちらは 1 行を占めてよい。
+       style 属性は CSP で効かないことがあるので、余白もここで付ける（place() を参照）。 */
+    ':host(.giga-app-links--end){display:flex;justify-content:center;inline-size:100%;',
+    'margin:.5rem 0 max(.5rem, env(safe-area-inset-bottom))}',
+    /* 折り返さない。折り返すと、収めたはずの 1 行がまた 2 行になる。 */
+    '.row{display:flex;flex-wrap:nowrap;align-items:center;gap:.1rem}',
+    /* 見えている高さは 26px。
+       ⚠️ min-height:48px と書かないこと。それをやるとこの 1 行だけで
+          フッターが 56px になる。押せる大きさ（艦隊のルール 2 の 48px）は
+          下の ::after で当たり判定だけを外へ広げて確保する。
+       ⚠️ min-inline-size:48px を外さないこと。当たり判定だけを広げると、
+          隣どうしの 48px が重なって、押したつもりと違うほうが開く。
+       px で置くのは、rem だと文字を小さくした端末で下限を割るため。 */
+    'a{position:relative;display:inline-flex;align-items:center;justify-content:center;',
+    'gap:.3em;min-inline-size:48px;block-size:26px;padding:0 .45em;border-radius:8px;',
+    'font-size:13px;line-height:1;white-space:nowrap;text-decoration:none;',
     'color:#42506b;background:transparent;transition:background-color .15s,color .15s}',
+    /* 指で押せる大きさ。見た目は 26px のまま、当たり判定だけ 48px にする。 */
+    'a::after{content:"";position:absolute;inset-block-start:50%;inset-inline-start:50%;',
+    'transform:translate(-50%,-50%);inline-size:100%;block-size:48px}',
     'a:hover{background:rgba(26,115,232,.10);color:#1a4fa8}',
     'a:focus-visible{outline:3px solid #1a73e8;outline-offset:2px}',
-    'svg{inline-size:1.05em;block-size:1.05em;flex:none}',
+    'svg{inline-size:15px;block-size:15px;flex:none}',
+    /* 狭い画面では文字を落として絵だけにする。1 行に収めるため。
+       ⚠️ display:none にしないこと。読み上げからも消えて、絵だけのリンクに
+          名前が無くなる。見えなくするだけにして、名前は残す。 */
+    '@media (max-width: 640px){.t{position:absolute;inline-size:1px;block-size:1px;',
+    'margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}',
+    /* 絵だけになると、文字が添えられていたときより読み取りにくい。少し大きくする。 */
+    'svg{inline-size:18px;block-size:18px}}',
     /* 暗い画面の端末でも読めるようにする。アプリ側の指定は Shadow DOM で
        届かないので、こちらで両方を持つ */
     '@media (prefers-color-scheme: dark){',
     'a{color:#c3ccdd}a:hover{background:rgba(150,190,255,.16);color:#eaf1ff}}',
     '@media (prefers-reduced-motion: reduce){a{transition:none}}',
-    /* 紙にはリンクを写しても押せない。ただし行き先の文字は残す */
-    '@media print{.row{display:block;text-align:center}a{min-height:0;padding:0 .4em}}'
+    /* 紙にはリンクを写しても押せない。当たり判定は要らないが、文字は戻す
+       （絵だけが並んだ紙は、あとから読んで何のことか分からない）。 */
+    '@media print{a{block-size:auto;padding:0 .4em}a::after{display:none}',
+    '.t{position:static;inline-size:auto;block-size:auto;margin:0;overflow:visible;clip-path:none}}'
   ].join('');
 
   /* 絵は 4 つだけなので、線を直接持つ。アイコンの webfont は取りこまない
@@ -283,8 +319,17 @@
          rel は noopener と noreferrer の両方。開いた先に元の画面を触らせない。 */
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
+      /* 狭い画面では文字が見えなくなるので、指で押す人のために名前を残す。
+         読み上げには下の <span> がそのまま読まれるので、aria-label は付けない
+         （付けると 2 つ名前を持つことになる）。 */
+      a.title = it.label;
       a.appendChild(icon(it.id));
-      a.appendChild(document.createTextNode(it.label));
+      /* 文字は <span class="t"> で包む。狭い画面ではこれだけを見えなくして
+         絵だけにする。地の文のままだと、消す手が無い。 */
+      var t = document.createElement('span');
+      t.className = 't';
+      t.appendChild(document.createTextNode(it.label));
+      a.appendChild(t);
       nav.appendChild(a);
     });
     root.appendChild(nav);
@@ -304,42 +349,56 @@
     document.body.appendChild(host);
   }
 
-  function render() {
+  var shown = null;                               // いま出しているもの
+
+  /** 出す（すでに出ていれば、出しなおして置き場所へ移す）。 */
+  function paint() {
     var got = resolve(settings());
     if (!got.items.length) return;                // slug が分からない。何も出さない
     var host = build(got.items);
-    if (host) place(host);
+    if (!host) return;
+    if (shown && shown.parentNode) shown.parentNode.removeChild(shown);
+    shown = host;
+    place(host);
   }
 
-  /* 置き場所を、少しだけ待つ。
+  /* 置き場所が後から来るアプリへの手当て。
      ⚠️ React や Vue のアプリは、画面を DOMContentLoaded より**後**に描く。
         そのとき <div data-giga-links> はまだ無い。そこで諦めると、
         置き場所が見つからないだけでなく、**そこに書いた data-links も読めない**。
         黙って既定の 3 本が画面のいちばん下に出る。
         2026-08-29 に Reversi（React）で実際に起きた。フッターに置いたはずの
         リンクが本文の下に落ち、外したはずの「つかいかた」も出ていた。
-     待っても来なければ、いちばん下に出す（置き場所が無いアプリの約束は、そのまま）。 */
+
+     ⚠️ だからといって「待ってから出す」にしないこと。同じ日に、そう書いて
+        置き場所を持たないアプリ（Typa）でリンクが 1.5 秒あとに出るようにしてしまった。
+        フッターの無いアプリは艦隊にいくつもあり、そちらのほうが数が多い。
+
+     **先に出す。後から置き場所が来たら、出しなおして移す。** どちらも待たせない。 */
   var SLOT_WAIT_MS = 1500;
-  function whenSlotReady(go) {
-    if (document.querySelector('[data-giga-links]')) return go();
-    if (typeof MutationObserver !== 'function') return go();
+  function watchForSlot() {
+    if (typeof MutationObserver !== 'function') return;
     var done = false;
     var timer = null;
-    var obs = new MutationObserver(function () {
-      if (document.querySelector('[data-giga-links]')) finish();
-    });
-    function finish() {
+    function stop() {
       if (done) return;
       done = true;
       obs.disconnect();
       if (timer) clearTimeout(timer);
-      go();
     }
+    var obs = new MutationObserver(function () {
+      if (!document.querySelector('[data-giga-links]')) return;
+      stop();
+      paint();                                    // 置き場所へ移し、そこの data-links も読み直す
+    });
     obs.observe(document.documentElement, { childList: true, subtree: true });
-    timer = setTimeout(finish, SLOT_WAIT_MS);
+    timer = setTimeout(stop, SLOT_WAIT_MS);
   }
 
-  function start() { whenSlotReady(render); }
+  function start() {
+    paint();                                      // まず出す。待たせない
+    if (!document.querySelector('[data-giga-links]')) watchForSlot();
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);
