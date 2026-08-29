@@ -118,7 +118,7 @@ curl -sI https://schoolplan-editor.giga-school.com/note/images/01-week-plan.png 
 | 文字の大きさは8ptから14pt | `App_Js_03_Print.html` の `po_fontSize`（`min="8" max="14"`） |
 | はみ出したページを自動で縮める | `App_Js_03_Print.html` の `fitPagesToPrintArea`（中身の高さと紙の高さを比べ、超えた場合のみ比例縮小） |
 | 土曜の列が印刷に効く | `App_Js_01_Core.html` の `STATE.showSat` / `showSun` と `App_Js_03_Print.html` の `weekendNote` |
-| 閲覧モード自動保存・編集モード手動保存 | `App_Js_02_Plan.html` の `persistViewMutation`（600msデバウンス保存）、`saveWeeklyPlanData`、画面切替時自動保存、`beforeunload` 警告 |
+| 閲覧モードは読むだけ・書き換えは編集モード | `App_Js_02_Plan.html` の `setEditMode` / `requireEditMode`。保存は `saveWeeklyPlan`（手動）、`autoSaveAndThen`（画面切替時）、`beforeunload` 警告 |
 | 振り返りの質問は4つ | `App_Js_04_Reflection.html` の質問定義（changes / seika / kadai / tokki） |
 | 学級通信のブロックは9種類 | `App.html` のブロック追加パレット |
 | 整合性チェックは7種類 | `App_Js_18_UnitMasterCheck.html` の `UMC_ISSUE_LABELS` |

@@ -7,8 +7,22 @@ import { bootClient, setWeek, makeDays, clone } from './helpers/webapp-sandbox.m
 // このアプリはスプレッドシートが唯一の保存先で、画面の状態がそのまま保存される。
 // そのため、画面上のデータが別の週・別の学級のものに入れ替わると、
 // そのまま保存されて利用者のデータが失われる。
+//
+// 週データを書き換えるのは編集モードだけ（閲覧モードは読むだけ）なので、
+// ここでの筋書きも編集モードから始める。
 
 const subjectsOf = days => days.map(d => d.periods[0].subject).join(',');
+
+/** 送信済みの保存を1件、成功として返す。 */
+function respondSave(c, revision) {
+  const call = c.inflight.shift();
+  assert.ok(call && /^saveWeeklyPlanData/.test(call.name), '保存が送られていること');
+  call.handlers.ok({
+    success: true, message: 'saved', revision: revision || 'r2', days: clone(call.args[1])
+  });
+  c.clock.advance();
+  return call;
+}
 
 for (const variant of [
   { label: 'V2保存', options: {} },
@@ -20,16 +34,22 @@ for (const variant of [
     setWeek(c, '2026/08/17', makeDays({ tag: 'A', month: 8, firstDay: 17 }));
 
     // 8月の週でセル操作 → 履歴が積まれる
+    c.run('setEditMode(true)');
     c.run(`handleContextAction('clearDay', 0, 0)`);
-    c.clock.advance();
     assert.ok(c.STATE.undoStack.length > 0);
 
-    // 9月の週へ移動
+    // 週を移動する。編集モードなら、まず自動保存を挟んでから移る。
+    c.run('__moved = false; autoSaveAndThen(function () { __moved = true; });');
+    respondSave(c);
+    assert.equal(c.run('__moved'), true, '保存が通ったら移動へ進むこと');
+    assert.equal(c.STATE.editMode, false, '保存できたら閲覧モードへ戻すこと');
+    assert.equal(c.STATE.undoStack.length, 0, '編集モードを抜けたら履歴は捨てること');
+
+    // 9月の週へ
     setWeek(c, '2026/09/14', makeDays({ tag: 'B', month: 9, firstDay: 14 }), 'r9');
-    assert.equal(c.STATE.undoStack.length, 0, '別の週へ移ったら履歴は捨てること');
 
     const before = subjectsOf(c.STATE.weekData.days);
-    c.run(`undo()`);
+    c.run('setEditMode(true); undo();');
     assert.equal(subjectsOf(c.STATE.weekData.days), before,
       '前の週の内容が9月の週に入ってはいけない');
     assert.equal(c.STATE.weekData.days[0].date, '2026/09/14');
@@ -40,28 +60,34 @@ for (const variant of [
   test(`学級を切り替えたあとの「元に戻す」が前の学級の内容を持ち込まない（${variant.label}）`, () => {
     const c = bootClient(variant.options);
     c.STATE.multiClass = { enabled: true, activeSheet: '1組', classes: [] };
-    setWeek(c, '2026/08/17', makeDays({ tag: '1組' }));
+    setWeek(c, '2026/08/17', makeDays({ tag: '甲組' }));
+    c.run('setEditMode(true)');
     c.run(`handleContextAction('clearDay', 0, 0)`);
-    c.clock.advance();
     assert.ok(c.STATE.undoStack.length > 0);
 
+    c.run('__moved = false; autoSaveAndThen(function () { __moved = true; });');
+    respondSave(c);
+    assert.equal(c.run('__moved'), true);
+
     // 同じ週のまま2組へ。日付が一致するため、履歴を使うと本当に書き込めてしまう。
+    // （教科名は「数字を含まない単一の教科名」でないと保存時の検証に弾かれるので、
+    //   学級の目印には数字を使わない）
     c.STATE.multiClass.activeSheet = '2組';
-    setWeek(c, '2026/08/17', makeDays({ tag: '2組' }), 'r2');
+    setWeek(c, '2026/08/17', makeDays({ tag: '乙組' }), 'r2');
     assert.equal(c.STATE.undoStack.length, 0, '別の学級へ移ったら履歴は捨てること');
 
-    c.run(`undo()`);
-    assert.match(subjectsOf(c.STATE.weekData.days), /2組/);
-    assert.doesNotMatch(subjectsOf(c.STATE.weekData.days), /1組/);
+    c.run('setEditMode(true); undo();');
+    assert.match(subjectsOf(c.STATE.weekData.days), /乙組/);
+    assert.doesNotMatch(subjectsOf(c.STATE.weekData.days), /甲組/);
   });
 
   test(`編集中の未保存入力を、あとから届いた読み込み結果で消さない（${variant.label}）`, () => {
     const c = bootClient(variant.options);
     setWeek(c, '2026/08/17', makeDays({ tag: 'A' }));
 
-    // 編集モードに入り、入力を変える（collectCurrentEditData は days を返すスタブなので
+    // 編集モードに入り、入力を変える（collectCurrentEditData は days から作るスタブなので
     // days を直接書き換えることが「入力欄をいじった」ことに相当する）
-    c.run(`STATE.editMode = true; updateEditUI();`);
+    c.run('setEditMode(true)');
     c.STATE.weekData.days[0].periods[0].subject = '入力中';
     assert.equal(c.run(`hasUnsavedChanges()`), true);
 
@@ -75,10 +101,35 @@ for (const variant of [
     assert.equal(c.renders.length, rendersBefore, '編集中のグリッドを描き直さないこと');
   });
 
+  test(`閲覧モードには手元だけの変更が無いので、読み込み結果をそのまま反映する（${variant.label}）`, () => {
+    // 閲覧モードを読み取り専用にしたことで得られた性質。以前は閲覧モードのセル操作が
+    // STATE.weekData.days にしか無く、あとから届く読み込み応答と重なると
+    //   1) 動かしたコマが消える
+    //   2) 手元のリビジョンが保存前へ巻き戻り、以降の保存が競合で弾かれ続ける
+    // という壊れ方をしたため、週ごとに「未確定」を控える仕掛けが要っていた。
+    // いまは書き換えが編集モードにしか無いので、その仕掛けごと不要になった。
+    const c = bootClient(variant.options);
+    setWeek(c, '2026/08/17', makeDays({ tag: 'A' }), 'r1');
+    assert.equal(c.STATE.editMode, false);
+
+    // 閲覧モードでセル操作を試みても、週データは変わらない
+    c.run(`handleContextAction('clearDay', 0, 0)`);
+    assert.match(subjectsOf(c.STATE.weekData.days), /A教科/);
+    c.clock.advance();
+    assert.equal(c.inflight.length, 0, '閲覧モードから保存を送らないこと');
+
+    // だから、あとから届いた読み込み応答はためらわず当てられる
+    c.run(`p2ApplyWeekData(${JSON.stringify({
+      success: true, mondayDateStr: '2026/08/17', days: makeDays({ tag: '他端末' }), revision: 'r3'
+    })})`);
+    assert.match(subjectsOf(c.STATE.weekData.days), /他端末/);
+    assert.equal(c.STATE.weekData.revision, 'r3');
+  });
+
   test(`サーバ側を書き換えた直後の読み直しは手元の編集より優先される（${variant.label}）`, () => {
     const c = bootClient(variant.options);
     setWeek(c, '2026/08/17', makeDays({ tag: 'A' }));
-    c.run(`STATE.editMode = true; updateEditUI();`);
+    c.run('setEditMode(true)');
     c.STATE.weekData.days[0].periods[0].subject = '入力中';
 
     // 固定時間割の転記・復元・DBクリアの直後は、手元の内容はもう意味を持たない
@@ -91,102 +142,49 @@ for (const variant of [
     assert.equal(c.STATE.editMode, false);
   });
 
-  test(`週移動・学級切替の前に、待たせてある保存を先に送る（${variant.label}）`, () => {
+  test(`画面切替の前に、編集中の未保存を送る（${variant.label}）`, () => {
     const c = bootClient(variant.options);
     setWeek(c, '2026/08/17', makeDays({ tag: 'A' }));
 
-    // セル操作 → 保存はディレイ待ち（まだ送信していない）
+    c.run('setEditMode(true)');
     c.run(`handleContextAction('clearDay', 0, 0)`);
-    assert.equal(c.inflight.length, 0);
-    assert.equal(c.run(`hasPendingViewSave()`), true, '未送信の変更として数えること');
+    assert.equal(c.inflight.length, 0, 'セル操作だけでは送らないこと');
 
-    // 画面切替・学級切替の共通入口を通ると、先に送られる
+    // 画面切替・週移動・学級切替の共通入口を通ると、先に送られる
     c.run(`autoSaveAndThen(function () {})`);
     assert.equal(c.inflight.length, 1, '切替の前に保存を送ること');
     assert.equal(c.inflight[0].args[0], '2026/08/17');
   });
 
-  test(`表示していない週の保存でも、その週のキャッシュが最新になる（${variant.label}）`, () => {
+  test(`保存が通ったら、その週のキャッシュも保存後の内容になる（${variant.label}）`, () => {
     const c = bootClient(variant.options);
     setWeek(c, '2026/08/17', makeDays({ tag: 'A' }));
 
+    c.run('setEditMode(true)');
     c.run(`handleContextAction('clearDay', 0, 0)`);
-    c.clock.advance(450);
-    assert.equal(c.inflight.length, 1);
+    c.run('saveWeeklyPlan()');
+    respondSave(c, 'r2');
 
-    // 応答を待つあいだに別の週へ移動
-    setWeek(c, '2026/09/14', makeDays({ tag: 'B', month: 9, firstDay: 14 }), 'r9');
-
-    // 移動元の週の保存が完了する
-    const call = c.inflight.shift();
-    call.handlers.ok({ success: true, message: 'saved', revision: 'r2', days: clone(call.args[1]) });
-    c.clock.advance();
-
-    // 戻ったときに保存前の内容が出ないこと
+    // 週を移動して戻ったときに、保存前の内容が出ないこと
     const cached = c.run(`p2GetCachedWeek('2026/08/17')`);
-    assert.ok(cached, '移動元の週のキャッシュが残っていること');
-    const cleared = cached.days[0].periods.every(p => !p.subject);
-    assert.ok(cleared, 'キャッシュが保存後の内容になっていること');
+    assert.ok(cached, 'その週のキャッシュが残っていること');
+    assert.ok(cached.days[0].periods.every(p => !p.subject),
+      'キャッシュが保存後の内容になっていること');
     assert.equal(cached.revision, 'r2', 'キャッシュのリビジョンも更新すること');
-  });
-
-  // 実際に起きた不具合:
-  //   編集モードを経ずに、閲覧モードのままコマを動かす・消すと、保存できないことがあった。
-  //   週を開くとキャッシュを先に描いてから数秒後にサーバ応答を当てるため、
-  //   「開いてすぐ操作する」と応答が操作の上に重なる。閲覧モードの変更は入力欄ではなく
-  //   STATE.weekData.days にしか無いので、応答で差し替えると操作ごと消えたうえ、
-  //   手元のリビジョンが保存前へ巻き戻り、以降の保存が「保存の競合」で弾かれ続けた。
-  test(`閲覧モードのセル操作が、あとから届く同じ週の読み込み応答で消えない（${variant.label}）`, () => {
-    const c = bootClient(variant.options);
-    setWeek(c, '2026/08/17', makeDays({ tag: 'A' }), 'r1');
-
-    // 週を開いた直後（サーバ応答を待っている最中）に、閲覧モードのままコマを消す
-    c.run(`handleContextAction('clearDay', 0, 0)`);
-    assert.equal(c.STATE.editMode, false, '閲覧モードのままであること');
-
-    // 保存が送られる前に、この週のサーバ応答（＝消す前の内容）が届く
-    c.run(`p2ApplyWeekData(${JSON.stringify({
-      success: true, mondayDateStr: '2026/08/17', days: makeDays({ tag: 'A' }), revision: 'r1'
-    })})`);
-
-    assert.ok(c.STATE.weekData.days[0].periods.every(p => !p.subject),
-      '読み込み応答で、閲覧モードのクリアが消えてはいけない');
-    assert.equal(c.STATE.weekData.revision, 'r1',
-      '手元のリビジョンが保存前へ巻き戻ってはいけない');
-
-    // 保存はそのまま通る（基準リビジョンが巻き戻っていないので競合にならない）
-    c.clock.advance(450);
-    const call = c.inflight.shift();
-    assert.ok(call && /^saveWeeklyPlanData/.test(call.name), '保存が送られること');
-    assert.equal(call.args[2], 'r1', '保存の基準リビジョンが正しいこと');
-    call.handlers.ok({ success: true, message: 'saved', revision: 'r2', days: clone(call.args[1]) });
-    c.clock.advance();
-    assert.equal(c.STATE.weekData.revision, 'r2');
-    assert.ok(c.run(`p2GetCachedWeek('2026/08/17')`).days[0].periods.every(p => !p.subject),
-      'キャッシュも保存後の内容になること');
-
-    // 保存が済めば、そのあとの読み込み応答は通常どおり反映される
-    c.run(`p2ApplyWeekData(${JSON.stringify({
-      success: true, mondayDateStr: '2026/08/17', days: makeDays({ tag: '他端末' }), revision: 'r3'
-    })})`);
-    assert.match(c.STATE.weekData.days[0].periods[0].subject, /他端末/,
-      '未確定の変更が無くなったら読み込み結果を反映すること');
   });
 
   test(`週移動の読み込み中に保存が通っても、移動元の内容が移動先の週にならない（${variant.label}）`, () => {
     const c = bootClient(variant.options);
     setWeek(c, '2026/08/17', makeDays({ tag: 'A' }), 'r1');
 
+    c.run('setEditMode(true)');
     c.run(`handleContextAction('clearDay', 0, 0)`);
-    c.clock.advance(450);
+    c.run('saveWeeklyPlan()');
     assert.equal(c.inflight.length, 1);
 
     // 翌週へ移動する。読み込みが終わるまで、画面に出ているのは移動元の週のまま。
     c.STATE.mondayStr = '2026/08/24';
-
-    const call = c.inflight.shift();
-    call.handlers.ok({ success: true, message: 'saved', revision: 'r2', days: clone(call.args[1]) });
-    c.clock.advance();
+    respondSave(c, 'r2');
 
     assert.equal(c.STATE.weekData.mondayDateStr, '2026/08/17',
       '画面に出ているデータの週を、移動先の週で上書きしてはいけない');
@@ -196,23 +194,22 @@ for (const variant of [
       '移動元の内容を移動先の週としてキャッシュしないこと');
   });
 
-  test(`閲覧モードの保存を送っている間は、週の読み込みを待たせる（${variant.label}）`, () => {
+  test(`保存を送っている間は、週の読み込みを待たせる（${variant.label}）`, () => {
     const c = bootClient(variant.options);
     setWeek(c, '2026/08/17', makeDays({ tag: 'A' }), 'r1');
 
-    // セル操作の直後に週を移動する（保存はまだディレイ待ち）
+    // 編集したまま週を移動する（移動の前に自動保存が走る）
+    c.run('setEditMode(true)');
     c.run(`handleContextAction('clearDay', 0, 0)`);
     c.run(`navigateWeek(1)`);
     c.clock.advance();
 
     assert.equal(c.inflight.filter(x => /^saveWeeklyPlanData/.test(x.name)).length, 1,
-      '移動の前に、待たせてある保存を送ること');
+      '移動の前に、編集中の内容を送ること');
     assert.equal(c.inflight.filter(x => x.name === 'getWeeklyPlanDataV2').length, 0,
       '保存がシートへ入る前に読み込むと、変更が消えた内容をキャッシュに残してしまう');
 
-    const call = c.inflight.shift();
-    call.handlers.ok({ success: true, message: 'saved', revision: 'r2', days: clone(call.args[1]) });
-    c.clock.advance();
+    respondSave(c, 'r2');
 
     const loads = c.inflight.filter(x => x.name === 'getWeeklyPlanDataV2');
     assert.equal(loads.length, 1, '保存が済んでから読み込むこと');
@@ -222,10 +219,11 @@ for (const variant of [
   test(`保存要求には表示中の学級シート名を添える（${variant.label}）`, () => {
     const c = bootClient(variant.options);
     c.STATE.multiClass = { enabled: true, activeSheet: '1組', classes: [] };
-    setWeek(c, '2026/08/17', makeDays({ tag: '1組' }));
+    setWeek(c, '2026/08/17', makeDays({ tag: '甲組' }));
 
+    c.run('setEditMode(true)');
     c.run(`handleContextAction('clearDay', 0, 0)`);
-    c.clock.advance(450);
+    c.run('saveWeeklyPlan()');
     assert.equal(c.inflight.length, 1);
     // サーバ側は「いまアクティブな学級」へ書くため、意図した学級名を照合させる
     assert.ok(c.inflight[0].args.indexOf('1組') >= 0,

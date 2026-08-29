@@ -86,6 +86,33 @@ test('sync で days が差し替わるため day は pushUndo の後に取り直
   }
 });
 
+test('週データを書き換える関数は、閲覧モードで素通りしない', () => {
+  // 画面からの導線は renderWeekGrid が編集モードのときしか作らないが、
+  // キーボードなど別経路から入れてしまうので、関数の入口でも止める。
+  for (const name of ['pasteCellData', 'clearCellData', 'undo', 'redo',
+                      'handleDrop', 'handleContextAction', 'insertTasksIntoCell',
+                      'insertTaskIntoSelectedCell']) {
+    assert.match(fnBody(name), /requireEditMode\(\)/, `${name} に閲覧モードのガードが無い`);
+  }
+  // 案内を出すだけで、勝手に編集モードへは入らない
+  const guard = fnBody('requireEditMode');
+  assert.match(guard, /if \(STATE\.editMode\) return true;/);
+  assert.match(guard, /showToast\('info', VIEW_MODE_HINT\)/);
+  assert.doesNotMatch(guard, /setEditMode|toggleEditMode/);
+  // ドラッグ中は毎フレーム呼ばれるので、そこでは案内を出さない（無言で止める）
+  for (const name of ['handleDragStart', 'handleDragOver', 'handleDragEnter']) {
+    assert.match(fnBody(name), /if \(!STATE\.editMode\) return;/, `${name} のガードが無い`);
+    assert.doesNotMatch(fnBody(name), /requireEditMode/, `${name} で案内を出すとドラッグ中に連発する`);
+  }
+});
+
+test('閲覧モードでは、書き込みの配線そのものを作らない', () => {
+  const body = fnBody('renderWeekGrid');
+  // D&Dの受け取りも、コマの持ち出しも、編集モードのときだけ取り付ける
+  assert.match(body, /if \(isEdit\) \{\s*\n\s*cell\.addEventListener\('dragover'/);
+  assert.match(body, /if \(isEdit\) \{[\s\S]{0,240}cell\.setAttribute\('draggable', 'true'\)/);
+});
+
 test('セル操作後の再描画は編集中のフォーカスとカーソル位置を保つ', () => {
   assert.match(fnBody('rerenderGridPreservingFocus'), /captureGridFocus\(\)[\s\S]*renderWeekGrid[\s\S]*restoreGridFocus/);
   assert.match(fnBody('restoreGridFocus'), /setSelectionRange/);
@@ -103,12 +130,14 @@ test('編集モードでも選択セルが入力欄のフォーカスに追従�
 
 test('編集モードの文字操作を奪わない', () => {
   // 文字を選択している間は、ブラウザ標準のコピー／右クリックメニューを優先する
-  assert.match(plan, /if \(isEdit && hasTextSelection\(e\.target\)\) return;/);
+  assert.match(plan, /if \(hasTextSelection\(e\.target\)\) return;/);
   // セル内のリンクの右クリックはブラウザ標準（新しいタブで開く等）に任せる
   assert.match(plan, /e\.target\.closest\('a'\)\) return;/);
   assert.match(plan, /isGridInput\(e\.target\) && !hasTextSelection\(e\.target\)/);
-  // 長押しは編集モードでは取り付けない（文字選択・標準の貼り付けに使う）
-  assert.match(plan, /if \(rowDef\.multi && !isEdit\) \{\s*\n\s*attachTouchLongPress/);
+  // 長押しのメニューは廃した。閲覧モードは読むだけなので、タブレットでも
+  // 長押し＝文字選択・コールアウト（コピー）というブラウザ標準のままにする。
+  assert.doesNotMatch(plan, /attachTouchLongPress/);
+  assert.doesNotMatch(read('App_Css.html'), /-webkit-touch-callout/);
 });
 
 test('コピーしたコマの貼り付けだけがセル単位のペーストになる', () => {
@@ -119,9 +148,11 @@ test('コピーしたコマの貼り付けだけがセル単位のペースト�
   assert.match(fnBody('pasteCellData'), /opts && opts\.silent/);
 });
 
-test('セル操作メニューは両モード・校時以外の行からも開ける', () => {
-  // 校時セル限定だったコンテキストメニューを全セルへ広げる
-  assert.doesNotMatch(plan, /if \(rowDef\.multi\) \{\s*\n\s*cell\.addEventListener\('contextmenu'/);
+test('セル操作メニューは編集モードでだけ、校時以外の行からも開ける', () => {
+  // 閲覧モードは読むだけ。メニューの取り付けごと編集モードの中に閉じる。
+  assert.match(plan, /if \(isEdit\) \{\s*\n\s*cell\.addEventListener\('contextmenu'/);
+  // 別経路から呼ばれたときのために、メニュー自体も閲覧モードでは開かない
+  assert.match(fnBody('showContextMenu'), /if \(!STATE\.editMode\) return;/);
   const menu = fnBody('showContextMenu');
   assert.match(menu, /ctxItem\('copy'/);
   assert.match(menu, /ctxItem\('paste'/);

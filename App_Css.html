@@ -4403,16 +4403,6 @@
         touch-action: manipulation;
     }
 
-    /* タッチ端末では、閲覧モードのセルで長押しメニューと競合する
-       テキスト選択・コールアウトを無効化する（編集モードの入力欄とPCは従来どおり） */
-    @media (pointer: coarse) {
-        .week-grid:not(.edit-mode) .grid-cell {
-            -webkit-touch-callout: none;
-            -webkit-user-select: none;
-            user-select: none;
-        }
-    }
-
     /* ===== 行事予定（年間行事予定PDF）ビュー ===== */
     /* ビューア(iframe)を残り画面いっぱいに広げるため、このビューだけ全体スクロールを止める */
     #view-events.active {

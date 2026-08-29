@@ -320,29 +320,8 @@
         if (!data || !data.success) return false;
         var force = !!(opts && opts.force);
 
-        // サーバが持っている内容として控えておく（同じ内容の自動保存を省くために使う）。
-        // リビジョンとセットで持つので、この応答が古くても誤った省略にはならない。
-        if (data.mondayDateStr && typeof rememberServerWeekContent === 'function') {
-            rememberServerWeekContent(p2WeekCacheKey(data.mondayDateStr), data.revision, data.days);
-        }
-
-        // 閲覧モードのセル操作（コマの移動・クリア・ペースト・元に戻す）は、保存が
-        // サーバへ届くまで手元の STATE.weekData.days にしか無い。表示中の週について
-        // その変更が未確定のあいだは、読み込み結果を当ててはいけない。
-        // キャッシュ表示 → 数秒後にサーバ応答、という二段階で描くため、
-        // 「週を開いてすぐコマを動かす」だけでこの重なりが起きる。当ててしまうと
-        // 動かしたコマが消えるうえ、手元のリビジョンが保存前へ巻き戻り、
-        // 以降の保存が毎回「保存の競合」で弾かれるようになる。
-        // 未確定の変更は、進行中の保存が通った時点で解消される。
-        if (!force && data.mondayDateStr
-            && typeof hasDirtyViewWeek === 'function'
-            && typeof displayedWeekMondayStr === 'function'
-            && displayedWeekMondayStr() === data.mondayDateStr
-            && hasDirtyViewWeek(p2WeekCacheKey(data.mondayDateStr))) {
-            // キャッシュも書き換えない。保存前の内容で上書きすると、次にこの週を
-            // 開いたときに変更が消えた状態が描かれてしまう。
-            return true;
-        }
+        // 手元にしか無い変更は、編集モードの入力欄の中だけ（閲覧モードは読むだけ）。
+        // その守りは下の hasUnsavedChanges() のガードが受け持つ。
 
         // キャッシュは常に最新にしておく。画面へ反映しない場合でも、次にこの週を
         // 開いたときに古い内容が出ないようにするため。
@@ -363,20 +342,6 @@
             if (STATE.mondayStr === data.mondayDateStr && typeof loadHoursSummary === 'function') loadHoursSummary();
         }, 120);
         return true;
-    }
-
-    /**
-     * 表示していない週の保存後に、その週のキャッシュだけを差し替えます。
-     * 週を移動したあとに保存が届いた場合、これを行わないと移動元の週のキャッシュが
-     * 保存前のまま残り、戻ったときに古い内容が描かれて競合の原因になる。
-     * @param {string} cacheKey 保存要求を出した時点のキャッシュキー（学級切替後もずれない）
-     */
-    function p2CacheWeekByKey(cacheKey, mondayStr, weekData) {
-        if (!cacheKey || !weekData || !weekData.days || !STATE.performance) return;
-        var copy = JSON.parse(JSON.stringify(weekData));
-        copy.success = true;
-        copy.mondayDateStr = mondayStr;
-        STATE.performance.weekCache[cacheKey] = { data: copy, savedAt: Date.now() };
     }
 
     function p2ShowWeekLoading() {
@@ -565,7 +530,6 @@
     function p2InvalidateWeekCache(reloadCurrentWeek) {
         if (STATE.performance && STATE.performance.weekCache) STATE.performance.weekCache = {};
         // サーバ側を直接書き換えたあとなので、控えている「サーバが持っている内容」も捨てる
-        if (typeof forgetServerWeekContent === 'function') forgetServerWeekContent();
         // 週の内容が変われば単元の進捗も変わる（p2UpdateCurrentWeekCache と同じ理由）
         STATE.unitProgress = null;
         STATE.unitProgressLoading = false;
@@ -582,9 +546,6 @@
         STATE.editBaseline = null;
         STATE.undoStack = [];
         STATE.redoStack = [];
-        // 閲覧モードのセル操作の未確定分も捨てる。残すと p2ApplyWeekData が
-        // 読み直しを見送ってしまい、書き換えたはずのサーバ側の内容が画面に出ない。
-        if (typeof clearViewDirtyWeeks === 'function') clearViewDirtyWeeks();
         if (STATE.editMode && typeof setEditMode === 'function') setEditMode(false);
     }
 
@@ -611,10 +572,6 @@
     // 持ったまま届き、自分の保存が「競合」として弾かれてしまう。
     // retrying: 保存の往復中に打たれた文字を拾うための、1回限りの再保存かどうか
     function autoSaveAndThen(callback, retrying) {
-        // 週移動・学級切替・画面切替の直前は、待たせてある閲覧モードの保存を先に送る。
-        // サーバ側の保存先は「いまアクティブな学級シート」で決まるため、切替後に届いた
-        // 保存は別の学級のシートへ書かれてしまう。
-        flushPendingViewSave();
         if (isSaveInFlight()) {
             whenSaveIdle(function () { autoSaveAndThen(callback, retrying); });
             return;
@@ -641,13 +598,12 @@
         }
 
         if (!beginSaveRequest()) { whenSaveIdle(function () { autoSaveAndThen(callback, retrying); }); return; }
-        var cacheKey = p2WeekCacheKey(displayedWeekMondayStr());
         google.script.run
             .withSuccessHandler(function (result) {
                 endSaveRequest();
                 p2LogTiming('自動保存（週移動前）', result);
                 if (result.success) {
-                    adoptSavedWeekDays(result, days, null, null, cacheKey);
+                    adoptSavedWeekDays(result, days, null, null);
                     STATE.weekData.revision = result.revision;
                     // 往復のあいだに打たれた文字は days に入っていない。ここで編集モードを
                     // 抜けて描き直すとその分が消えるので、もう一度だけ保存してから進む。
@@ -661,14 +617,12 @@
                     showToast('success', '自動保存しました');
                     callback();
                 } else if (result.conflict) {
-                    forgetServerWeekContent(cacheKey);
                     markSaveOutcome('error', '保存の競合');
                     handleSaveConflict(result, days, function (revision) {
                         STATE.weekData.revision = revision;
                         autoSaveAndThen(callback);
                     });
                 } else {
-                    forgetServerWeekContent(cacheKey);
                     markSaveOutcome('error', '自動保存できませんでした');
                     showToast('error', '自動保存失敗: ' + result.error
                         + ' 手動で保存してください。画面の切り替えは中止しました。');
@@ -676,15 +630,18 @@
             })
             .withFailureHandler(function (e) {
                 endSaveRequest();
-                forgetServerWeekContent(cacheKey);
                 markSaveOutcome('error', '自動保存できませんでした');
                 showToast('error', '自動保存エラー: ' + e.message
                     + ' 手動で保存してください。画面の切り替えは中止しました。');
             })
-            .saveWeeklyPlanDataV2(displayedWeekMondayStr(), days, STATE.weekData.revision);
+            // 保存先はサーバ側の「アクティブな学級」で決まる。切替と行き違うと
+            // 別の学級のシートへ書かれてしまうので、意図した学級名を添えて照合させる。
+            .saveWeeklyPlanDataV2(displayedWeekMondayStr(), days, STATE.weekData.revision,
+                expectedClassSheetName());
     }
 
-    function saveWeeklyPlan() {
+    // retrying: 保存の往復中に打たれた文字・セル操作を拾うための、1回限りの再保存かどうか
+    function saveWeeklyPlan(retrying) {
         var days = collectCurrentEditData();
         if (!days) return;
         var subjectErrors = validateDaysSubjects(days);
@@ -701,7 +658,6 @@
         // 保存中もグリッドは操作できる。応答を待つあいだの右クリックメニューのセル操作を
         // 保存済みの内容で消してしまわないよう、要求時点の書き換え回数を控えておく。
         var mutationSeq = weekDaysMutationSeq();
-        var cacheKey = p2WeekCacheKey(displayedWeekMondayStr());
 
         google.script.run
             .withSuccessHandler(function (result) {
@@ -710,23 +666,23 @@
                 btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
                 p2LogTiming('週案の保存', result);
                 if (result.success) {
-                    adoptSavedWeekDays(result, days, null, mutationSeq, cacheKey);
+                    adoptSavedWeekDays(result, days, null, mutationSeq);
                     STATE.weekData.revision = result.revision;
                     p2UpdateCurrentWeekCache();
+                    // 往復のあいだに打った文字とセル操作は、送った days に入っていない。
+                    // ここで閲覧モードへ戻して描き直すとその分が消えるので、
+                    // もう一度だけ保存してから戻る（自動保存と同じ流儀）。
+                    if (!retrying && gridDiffersFromSaved(days)) { saveWeeklyPlan(true); return; }
                     cancelEdit();
                     markSaveOutcome('saved');
                     showToast('success', result.message);
-                    // 保存に間に合わなかったセル操作は、閲覧モードへ戻ってから保存し直す
-                    if (weekDaysMutationSeq() !== mutationSeq) persistViewMutation();
                 } else if (result.conflict) {
-                    forgetServerWeekContent(cacheKey);
                     markSaveOutcome('error', '保存の競合');
                     handleSaveConflict(result, days, function (revision) {
                         STATE.weekData.revision = revision;
                         saveWeeklyPlan();
                     });
                 } else {
-                    forgetServerWeekContent(cacheKey);
                     markSaveOutcome('error');
                     showToast('error', '保存失敗: ' + result.error);
                 }
@@ -735,90 +691,13 @@
                 endSaveRequest();
                 btn.disabled = false;
                 btn.innerHTML = '<span class="material-symbols-outlined fs-6">save</span> 保存する';
-                forgetServerWeekContent(cacheKey);
                 markSaveOutcome('error', '保存できませんでした（通信エラー）');
                 showToast('error', '通信エラー: ' + e.message);
             })
-            .saveWeeklyPlanDataV2(displayedWeekMondayStr(), days, STATE.weekData.revision);
+            // 保存先はサーバ側の「アクティブな学級」で決まる。切替と行き違うと
+            // 別の学級のシートへ書かれてしまうので、意図した学級名を添えて照合させる。
+            .saveWeeklyPlanDataV2(displayedWeekMondayStr(), days, STATE.weekData.revision,
+                expectedClassSheetName());
     }
 
-    // 閲覧モードのセル操作（右クリックメニュー・D&D）の自動保存。
-    // 保存はGASの往復に数秒かかるため、応答を待つあいだにも次の操作ができる。
-    // その前提で次の3点を守ること。守らないと、応答が先行する古い内容を持ち込み、
-    // 一度消したコマが復活してその状態のまま保存されてしまう。
-    //   1) 送る内容は要求時点のスナップショットにする（送信後の書き換えを巻き込まない）
-    //   2) 応答の取り込みは weekDaysMutationSeq が変わっていない時だけ行う
-    //   3) 待たせる保存は週ごとに1件だけ（実行時に最新の days を読み直して送る）
-    function persistViewMutation() {
-        if (STATE.editMode || !STATE.weekData || !STATE.mondayStr) return;
-        var weekData = STATE.weekData;
-        // 送るのは画面に出ているデータなので、送り先もそのデータの週にする
-        var mondayStr = displayedWeekMondayStr();
-        // 学級を切り替えたあとでも「その週・その学級」のキャッシュを更新できるよう、
-        // キーは要求を組み立てた時点のものを使う。
-        var cacheKey = p2WeekCacheKey(mondayStr);
-        var expectedSheet = expectedClassSheetName();
-        // 保存がサーバへ届くまでは、この週の内容は手元にしか無い。
-        // 読み込み応答で差し替えられないよう、未確定であることを記録しておく。
-        markViewWeekDirty(cacheKey);
-        scheduleViewSave(runViewSave);
-
-        function runViewSave() {
-            if (!weekData.days) return;
-            // 送る中身がサーバの持っているものと同じなら、往復ごと省く。
-            // （空のコマのクリア・元に戻す→やり直す・コマを元の場所へ戻す、で起きる）
-            if (matchesServerWeekContent(cacheKey, weekData)) {
-                markViewWeekSaved(cacheKey, weekDaysMutationSeq());
-                p2CacheWeekByKey(cacheKey, mondayStr, weekData);
-                markSaveOutcome('saved');
-                return;
-            }
-            if (!beginSaveRequest()) { queueViewSave(cacheKey, runViewSave); return; }
-            var mutationSeq = weekDaysMutationSeq();
-            var days = JSON.parse(JSON.stringify(weekData.days));
-            google.script.run
-                .withSuccessHandler(function (result) {
-                    endSaveRequest();
-                    p2LogTiming('自動保存（セル操作）', result);
-                    if (result.success) {
-                        weekData.revision = result.revision;
-                        markViewWeekSaved(cacheKey, mutationSeq);
-                        // 編集モードに入っていたら入力欄の方が新しいので取り込まない。
-                        // 週を移動していたら、この応答はもう画面上の週のものではない。
-                        var sameWeek = (STATE.weekData === weekData);
-                        var normalized = (sameWeek && !STATE.editMode)
-                            ? adoptSavedWeekDays(result, days, weekData, mutationSeq, cacheKey)
-                            : false;
-                        // 取り込まない回でも、サーバが持っている内容は控えておく
-                        if (!(sameWeek && !STATE.editMode)) {
-                            rememberServerWeekContent(cacheKey, result.revision,
-                                (result.days && result.days.length) ? result.days : days);
-                        }
-                        // 保存が通れば時数・単元進捗のキャッシュは作り直しが要る（編集中でも同じ）
-                        if (sameWeek) p2UpdateCurrentWeekCache();
-                        else p2CacheWeekByKey(cacheKey, mondayStr, weekData);
-                        if (normalized) renderWeekGrid(weekData.days);
-                        markSaveOutcome('saved');
-                    } else if (result.conflict) {
-                        forgetServerWeekContent(cacheKey);
-                        markSaveOutcome('error', '保存の競合');
-                        handleSaveConflict(result, days, function (revision) {
-                            weekData.revision = revision;
-                            runViewSave();
-                        });
-                    } else {
-                        forgetServerWeekContent(cacheKey);
-                        markSaveOutcome('error', '変更を保存できませんでした');
-                        showToast('error', '変更の保存に失敗: ' + result.error);
-                    }
-                })
-                .withFailureHandler(function (e) {
-                    endSaveRequest();
-                    forgetServerWeekContent(cacheKey);
-                    markSaveOutcome('error', '変更を保存できませんでした（通信エラー）');
-                    showToast('error', '変更の保存に失敗（通信エラー）: ' + e.message);
-                })
-                .saveWeeklyPlanDataV2(mondayStr, days, weekData.revision, expectedSheet);
-        }
-    }
 </script>
