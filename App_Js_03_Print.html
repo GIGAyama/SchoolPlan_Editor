@@ -235,26 +235,57 @@
     }
 
     /**
+     * 刷るあいだの題を、入口ページ（giga-school.com のシェル）へ知らせる。
+     *
+     * ⚠️ ファイル名になるのは、刷る文書の題ではなく **いちばん外側のページの題**。
+     * このアプリは入口ページ → GAS → アプリ本体、と iframe が三重になっていて、
+     * いちばん外側は別のドメインなので、こちらから直に書き替えることはできない。
+     * 便りを送って、あちら（docs/app-url.js）に当ててもらう。
+     * これをしないと、どの週を刷っても入口ページの題のまま
+     * 「週案エディタ - School Plan Note.pdf」で保存される。
+     *
+     * 宛先は、シェルからの応答（shellAck）で分かった相手だけを名指しする
+     * （App.html が window.__shellOrigin に控える）。分からないうちは送らない。
+     * 宛先を '*' にすると、このアプリを埋めこんだ相手が誰であっても届いてしまう。
+     * シェルの外（GAS の URL を直に開いたとき）では、そもそも控えが無いので何もしない。
+     *
+     * @param {?string} title 刷るあいだの題。元に戻すときは null
+     */
+    function postShellTitle_(title) {
+        var origin = window.__shellOrigin;
+        if (typeof origin !== 'string' || origin.indexOf('https://') !== 0) return;
+        try {
+            window.top.postMessage({ type: 'schoolPlanNote:printTitle', title: title }, origin);
+        } catch (e) { /* 届かない置き方なら諦める */ }
+    }
+
+    /**
      * 画面のタブに出ている題を、刷るあいだだけ差し替える。戻す関数を返す。
      *
-     * ブラウザによっては、刷る文書（iframe）ではなく、いちばん外側のページの題を
-     * ファイル名に使う。そちらの環境でも週の名前が付くようにするための差し替えで、
+     * 自分の document.title と、入口ページの題の両方に当てる。ブラウザによって
+     * ファイル名の出どころが違い（刷る文書の題／いちばん外側のページの題）、
+     * どちらが読まれても週の名前が付くようにするため。
      * 印刷が終わったら必ず元に戻す（戻し忘れるとタブの名前が変わったままになる）。
      *
      * @param {string} newTitle 刷るあいだだけ入れておく題
      * @return {function()} 元に戻す関数。二度呼んでも戻すのは一度だけ
      */
     function swapHostTitle_(newTitle) {
-        var noop = function () { };
         var prev;
-        try { prev = document.title; } catch (e) { return noop; }
+        try { prev = document.title; } catch (e) { prev = null; }
         var done = false;
         var restore = function () {
             if (done) return;
             done = true;
-            try { document.title = prev; } catch (e) { /* 戻せなくても印刷そのものは済んでいる */ }
+            if (prev !== null) {
+                try { document.title = prev; } catch (e) { /* 戻せなくても印刷そのものは済んでいる */ }
+            }
+            postShellTitle_(null);
         };
-        try { document.title = newTitle; } catch (e) { return noop; }
+        if (prev !== null) {
+            try { document.title = newTitle; } catch (e) { /* 当てられなくても入口ページ側に賭ける */ }
+        }
+        postShellTitle_(newTitle);
         setTimeout(restore, HOST_TITLE_RESTORE_MS);
         return restore;
     }

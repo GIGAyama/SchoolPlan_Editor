@@ -10,6 +10,7 @@ import fs from 'node:fs';
 
 const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
 const print = read('App_Js_03_Print.html');
+const shell = read('docs/app-url.js');
 
 /**
  * HTML内JSから関数1つ分を、波括弧の対応を数えて切り出す。
@@ -106,4 +107,91 @@ test('外側のページの題も刷るあいだだけ差し替え、印刷後�
   assert.ok(afterPrint.includes('restoreHostTitle();'), '印刷後に題を戻していない');
   // afterprint が来ない環境でも戻るように、時間切れの戻しがあること
   assert.match(print, /setTimeout\(restore, HOST_TITLE_RESTORE_MS\);/);
+});
+
+test('入口ページ（シェル）にも題を送り、戻すときは null を送る', () => {
+  // アプリ本体は三重の iframe の内側にいる。ファイル名になるのはいちばん外側の
+  // ページの題なので、そこへ送らないと週の名前は付かない
+  const swap = extractFn(print, 'swapHostTitle_');
+  assert.ok(swap.includes('postShellTitle_(newTitle);'), 'シェルへ題を送っていない');
+  assert.ok(swap.includes('postShellTitle_(null);'), 'シェルへ戻す合図を送っていない');
+  assert.match(print, /type: 'schoolPlanNote:printTitle'/);
+  // 宛先は shellAck で分かった相手だけ。'*'（誰にでも届く）では送らない
+  const post = extractFn(print, 'postShellTitle_');
+  assert.ok(post.includes('window.__shellOrigin'), '宛先をシェルの素性から取っていない');
+  assert.ok(!/postMessage\([^)]*'\*'/.test(post), "宛先に '*' を使っている");
+  assert.match(read('App.html'), /window\.__shellOrigin = e\.origin;/);
+});
+
+// ===== 入口ページ側（docs/app-url.js）の受け取り =====
+
+const readPrintTitleMessage = new Function(
+  `${extractFn(shell, 'readPrintTitleMessage')}\nreturn readPrintTitleMessage;`
+)();
+
+const APP_ORIGIN = 'https://n-abc123def-script.googleusercontent.com';
+const msg = title => ({ type: 'schoolPlanNote:printTitle', title });
+
+test('アプリ本体から届いた正しい形の題は受けつける', () => {
+  assert.equal(
+    readPrintTitleMessage(APP_ORIGIN, msg('週案第23週(8月31日-9月6日)')),
+    '週案第23週(8月31日-9月6日)'
+  );
+  assert.equal(readPrintTitleMessage('https://script.google.com', msg('週案第2週(4月1日-4月7日)')),
+    '週案第2週(4月1日-4月7日)');
+  // 週番号や日付が欠けた縮退形も、こちらが作りうる形なので受けつける
+  assert.equal(readPrintTitleMessage(APP_ORIGIN, msg('週案第23週')), '週案第23週');
+  assert.equal(readPrintTitleMessage(APP_ORIGIN, msg('週案(8月31日)')), '週案(8月31日)');
+  assert.equal(readPrintTitleMessage(APP_ORIGIN, msg('週案')), '週案');
+});
+
+test('title が null なら「元に戻す」と読む', () => {
+  assert.equal(readPrintTitleMessage(APP_ORIGIN, msg(null)), null);
+  assert.equal(readPrintTitleMessage(APP_ORIGIN, { type: 'schoolPlanNote:printTitle' }), null);
+});
+
+test('よそから届いた便りは受けつけない', () => {
+  // 題を書き替えられるだけとはいえ、素性の分からない相手には従わない
+  for (const origin of [
+    'https://evil.example.com',
+    'https://googleusercontent.com.evil.example.com',
+    'http://localhost:8080',
+    'null',
+    ''
+  ]) {
+    assert.equal(readPrintTitleMessage(origin, msg('週案第23週(8月31日-9月6日)')), undefined,
+      `受けつけてはいけない送り元: ${origin}`);
+  }
+});
+
+test('こちらが作らない形の題は受けつけない', () => {
+  for (const bad of [
+    '週案エディタ - School Plan Note',
+    '<script>alert(1)</script>',
+    '週案第23週(8/31-9/6)',
+    '週案第9999週',
+    '週案第23週(8月31日-9月6日) ほか',
+    123,
+    { toString: () => '週案' }
+  ]) {
+    assert.equal(readPrintTitleMessage(APP_ORIGIN, msg(bad)), undefined,
+      `受けつけてはいけない題: ${String(bad)}`);
+  }
+});
+
+test('別の種類の便りには手を出さない', () => {
+  assert.equal(readPrintTitleMessage(APP_ORIGIN, { type: 'schoolPlanNote:ready' }), undefined);
+  assert.equal(readPrintTitleMessage(APP_ORIGIN, null), undefined);
+});
+
+test('シェルは受け取った題を当て、時間切れで必ず元へ戻す', () => {
+  assert.match(shell, /var SHELL_TITLE = document\.title;/);
+  assert.match(shell, /document\.title = SHELL_TITLE;/);
+  assert.match(shell, /PRINT_TITLE_RESTORE_MS/);
+  // ready ハンドシェイクより先に見て、印刷の便りをそちらへ流さないこと
+  const handler = shell.slice(shell.indexOf("addEventListener('message'"));
+  assert.ok(
+    handler.indexOf('readPrintTitleMessage') < handler.indexOf("'schoolPlanNote:ready'"),
+    '印刷の便りが ready の判定より後になっている'
+  );
 });
