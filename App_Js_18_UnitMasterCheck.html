@@ -71,15 +71,19 @@
                     return '<span class="umc-badge' + (t === 'TAUGHT_EXCEEDS_TOTAL' ? ' umc-badge-warn' : '') + '">'
                         + escHtml(UMC_ISSUE_LABELS[t] || t) + '</span>';
                 }).join('');
+                // 総時数と行数は別。「指導しない（全0時間）」の単元は行を残したまま 0 のまま直す。
+                var planTotal = (u.repairPlan.declaredTotal === undefined)
+                    ? u.repairPlan.totalHours : u.repairPlan.declaredTotal;
                 var plan = u.repairable
-                    ? '修復後: 全' + u.repairPlan.totalHours + '時間・' + u.repairPlan.totalHours + '行'
+                    ? '修復後: 全' + planTotal + '時間・' + u.repairPlan.totalHours + '行'
                       + (u.repairPlan.padRows > 0 ? '（' + u.repairPlan.padRows + '行を追加）' : '')
                     : '自動修復の対象外';
                 return '<label class="umc-item">'
                     + '<input type="checkbox" class="umc-check" data-idx="' + i + '"' + (u.repairable ? ' checked' : ' disabled') + '>'
                     + '<span class="umc-item-body">'
                     + '<span class="umc-item-title">' + escHtml(u.subject) + ' / ' + escHtml(u.unitName)
-                    + ' <span class="umc-rows">（現在 ' + u.rowCount + '行 / 総時数 ' + u.declaredTotal + '）</span></span>'
+                    + ' <span class="umc-rows">（現在 ' + u.rowCount + '行 / 総時数 '
+                    + (u.skipped ? '0・指導しない' : u.declaredTotal) + '）</span></span>'
                     + '<span class="umc-badges">' + badges + '</span>'
                     + '<span class="umc-plan">' + escHtml(plan) + '</span>'
                     + '</span></label>';

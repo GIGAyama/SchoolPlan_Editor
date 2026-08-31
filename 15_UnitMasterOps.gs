@@ -69,8 +69,12 @@ function analyzeUnitConsistency_(masterData, plannedHistory, standardHours) {
     u.firstRow = u.sheetRows[0];
     u.lastRow = u.sheetRows[u.sheetRows.length - 1];
 
-    const declared = u.declaredValues.filter(function (v) { return !isNaN(v) && v > 0; });
+    const numeric = u.declaredValues.filter(function (v) { return !isNaN(v); });
+    const declared = numeric.filter(function (v) { return v > 0; });
     u.declaredTotal = declared.length ? Math.max.apply(null, declared) : 0;
+    // 総時数に 0 と書いてある＝「指導しない（終了扱い）」の印。空欄（未設定）とは分ける。
+    // 判定の規則は 04_AutoFill.gs の isMasterUnitSkipped_ と同じにしておく。
+    u.skipped = !u.declaredTotal && numeric.some(function (v) { return v === 0; });
 
     const ph = plannedHistory && plannedHistory[u.subjectKey]
       && plannedHistory[u.subjectKey].units[normalizeUnitName_(u.unitName)];
@@ -118,6 +122,10 @@ function analyzeUnitConsistency_(masterData, plannedHistory, standardHours) {
     const targetRows = Math.max(u.rowCount, u.plannedHour);
     u.repairPlan = {
       totalHours: targetRows,
+      // 総時数の列へ書き戻す値。行数と別に持つのは「指導しない（全0時間）」の印を
+      // 修復で消さないため。ここを totalHours と一本にすると、行数 0 と読まれて
+      // その単元の行がまるごと消える。
+      declaredTotal: u.skipped ? 0 : targetRows,
       renumber: u.issues.indexOf('HOUR_DUPLICATE') !== -1
         || u.issues.indexOf('HOUR_GAP') !== -1
         || u.issues.indexOf('MISSING_HOUR') !== -1,
@@ -145,8 +153,9 @@ function analyzeUnitConsistency_(masterData, plannedHistory, standardHours) {
     }
     const t = totalsByKey[u.subjectKey];
     t.unitCount++;
-    // 実効時数の決め方（04_AutoFill.gs の effectiveTotal）に合わせる
-    t.unitHoursTotal += (u.declaredTotal > 0 ? u.declaredTotal : u.rowCount);
+    // 実効時数の決め方（04_AutoFill.gs の effectiveTotal）に合わせる。
+    // 「指導しない」単元は 0 時間。行数で数えると年間の合計が実態より膨らむ。
+    t.unitHoursTotal += u.skipped ? 0 : (u.declaredTotal > 0 ? u.declaredTotal : u.rowCount);
   });
   const subjectTotals = Object.keys(totalsByKey).map(function (k) {
     const t = totalsByKey[k];
@@ -269,6 +278,9 @@ function buildRepairedMasterRows_(masterData, analysis, targets) {
     }).map(function (x) { return x.row; });
 
     const targetRows = u.repairPlan.totalHours;
+    // 総時数の列は行数と別。「指導しない（全0時間）」の単元は 0 のまま書き戻す。
+    const declaredTotal = (u.repairPlan.declaredTotal === undefined)
+      ? targetRows : u.repairPlan.declaredTotal;
     const subjectLabel = sorted[0][MASTER_COL_SUBJECT - 1];
     const nameLabel = sorted[0][MASTER_COL_UNIT_NAME - 1];
 
@@ -277,7 +289,7 @@ function buildRepairedMasterRows_(masterData, analysis, targets) {
       out.push([
         subjectLabel,
         nameLabel,
-        targetRows,
+        declaredTotal,
         h,
         src ? src[MASTER_COL_ACTIVITY - 1] : ''   // 不足分は空の学習活動で埋める（内容は消さない）
       ]);
@@ -569,7 +581,126 @@ function repairUnitMasterConsistency(targets) {
 }
 
 /**
- * [Webアプリ API] 単元を「ここまでで終了」にします。
+ * 「終了にする / 指導を再開する」で各単元の総時数をいくつにするかを決めます
+ * （純粋関数・テスト対象）。シートには触れず、書き込む値を計算するだけです。
+ *
+ * 決め方:
+ *  - close: 週案に入っている時数（未来の週の分も含む）。1時間も入っていなければ **0**。
+ *    0 は「今年は指導しない」の印で、04_AutoFill.gs の isMasterUnitSkipped_ が
+ *    終了済みとして扱います。行は消さないので、来年また使えます。
+ *  - reopen: その単元の行数（週案に入っている時数のほうが多ければそちら）。
+ *    「指導しない」にした単元を元に戻すための逆操作です。
+ *
+ * 何時間目まで入っているかはクライアントの言い値を使わず、必ずここで数え直します。
+ *
+ * @param {Array<Array>} masterData 単元マスタの全行（1行目はヘッダー）
+ * @param {Object} plannedHistory buildTaughtHistory_ の結果（週案全体を対象にしたもの）
+ * @param {string} subject 教科名
+ * @param {Array<string>} unitNames 単元名（表記のゆれは normalizeUnitName_ が吸収します）
+ * @param {string} [mode] 'close'（既定）または 'reopen'
+ * @returns {{items: Array<Object>, changedCount: number}}
+ *   item = { unitName, rowNumbers, previousTotal, totalHours, plannedHour, changed, error }
+ */
+function p4PlanUnitClosures_(masterData, plannedHistory, subject, unitNames, mode) {
+  const reopen = (mode === 'reopen');
+  const subjectKey = normalizeSubjectName_(subject);
+  const history = (plannedHistory && plannedHistory[subjectKey]) || { units: {} };
+
+  const items = [];
+  const seen = {};
+  (unitNames || []).forEach(function (raw) {
+    const name = String(raw === undefined || raw === null ? '' : raw).trim();
+    if (!name) return;
+    const nameKey = normalizeUnitName_(name);
+    if (seen[nameKey]) return;   // 同じ単元を2回渡されても1回だけ扱う
+    seen[nameKey] = true;
+
+    const rowNumbers = [];
+    let unitLabel = name;
+    let previousTotal = 0;
+    let declaredZero = false;
+    for (let i = 1; i < masterData.length; i++) {
+      const row = masterData[i] || [];
+      if (!isSameSubject_(row[MASTER_COL_SUBJECT - 1], subject)) continue;
+      if (normalizeUnitName_(row[MASTER_COL_UNIT_NAME - 1]) !== nameKey) continue;
+      rowNumbers.push(i + 1);
+      unitLabel = String(row[MASTER_COL_UNIT_NAME - 1]).trim();
+      const declared = parseInt(row[MASTER_COL_TOTAL_HOURS - 1], 10);
+      if (!isNaN(declared)) {
+        if (declared > previousTotal) previousTotal = declared;
+        if (declared === 0) declaredZero = true;
+      }
+    }
+
+    const hu = history.units[nameKey];
+    const plannedHour = hu ? (hu.maxHour || 0) : 0;
+
+    if (rowNumbers.length === 0) {
+      items.push({
+        unitName: unitLabel, rowNumbers: [], previousTotal: 0, totalHours: 0,
+        plannedHour: plannedHour, changed: false,
+        error: '単元「' + name + '」が単元マスタに見つかりません。'
+      });
+      return;
+    }
+
+    // 総時数を減らすほうは週案の記入を下回らせない。増やすほう（再開）は行数を基準にする。
+    const totalHours = reopen
+      ? Math.max(rowNumbers.length, plannedHour)
+      : plannedHour;
+
+    if (reopen && !(declaredZero && previousTotal === 0)) {
+      items.push({
+        unitName: unitLabel, rowNumbers: rowNumbers, previousTotal: previousTotal,
+        totalHours: previousTotal, plannedHour: plannedHour, changed: false,
+        error: '「' + unitLabel + '」は「指導しない」に設定されていません。'
+      });
+      return;
+    }
+
+    // すでにその値なら書かない（空欄と 0 は別物なので、0 は「0 と書いてある」まで見る）
+    const already = rowNumbers.every(function (rn) {
+      const declared = parseInt(masterData[rn - 1][MASTER_COL_TOTAL_HOURS - 1], 10);
+      return !isNaN(declared) && declared === totalHours;
+    });
+
+    items.push({
+      unitName: unitLabel, rowNumbers: rowNumbers, previousTotal: previousTotal,
+      totalHours: totalHours, plannedHour: plannedHour, changed: !already
+    });
+  });
+
+  return {
+    items: items,
+    changedCount: items.filter(function (x) { return x.changed; }).length
+  };
+}
+
+/** 「終了にする / 再開する」の結果を1行の知らせにまとめます（純粋関数・テスト対象）。 */
+function p4DescribeUnitClosures_(items, mode) {
+  const reopen = (mode === 'reopen');
+  const changed = items.filter(function (x) { return x.changed; });
+  const failed = items.filter(function (x) { return x.error; });
+  const verb = reopen ? '指導を再開しました' : '終了にしました';
+
+  if (changed.length === 0) {
+    if (failed.length > 0) return failed[0].error;
+    return reopen ? 'すでに指導する設定になっています。' : 'すでに終了になっています。';
+  }
+
+  let message;
+  if (changed.length === 1) {
+    const one = changed[0];
+    message = '「' + one.unitName + '」を全' + one.totalHours + '時間として' + verb + '。';
+  } else {
+    message = changed.length + '単元を' + verb + '。';
+  }
+  if (failed.length > 0) message += '（' + failed.length + '単元は変更できませんでした）';
+  return message;
+}
+
+/**
+ * [Webアプリ API] 単元をまとめて「ここまでで終了」にします。
  *
  * 5時間で組んだ単元を3時間で終えることは実際よくあります。これまでは終わりに
  * する手立てが無く、その単元がいつまでも未消化として残り、自動入力が何度も
@@ -579,21 +710,72 @@ function repairUnitMasterConsistency(targets) {
  *  - 行は消しません。余った時間の学習活動は来年のためにそのまま残ります
  *    （実効時数は 04_AutoFill.gs の effectiveTotal が総時数を正として決めるため、
  *     行が余っていても「終了」として扱われます）
+ *  - 1時間も入っていない単元は **全0時間**（＝今年は指導しない）になります。
+ *    学期の途中で「この単元は結局やらなかった」と決めたときのための形で、
+ *    行を消さないので来年また使えます
  *  - 何時間目まで入っているかはクライアントの言い値を使わず、ここで数え直します
  *  - 未来の週に入っている分も含めて数えるので、入力済みのコマが総時数を超えて
  *    宙に浮くことはありません
  *  - 単元マスタは全学級で共通なので、この操作は全学級に効きます
  *
+ * 何単元まとめて渡されても、復元ポイント・書き込み・監査ログは1回ずつです
+ * （1件ずつ呼ぶと復元ポイントが単元の数だけ増え、途中で失敗したときに
+ * どこまで戻せばよいのか分からなくなります）。
+ *
  * @param {string} subject 教科名
- * @param {string} unitName 単元名（表記のゆれは normalizeUnitName_ が吸収します）
+ * @param {Array<string>} unitNames 単元名の配列（表記のゆれは吸収します）
+ * @returns {Object} { success, changedCount, items, snapshotId, message }
+ */
+function closeUnitsAtTaughtHours(subject, unitNames) {
+  return p4ApplyUnitClosures_(subject, unitNames, 'close');
+}
+
+/**
+ * [Webアプリ API] 「指導しない（全0時間）」にした単元を、また指導する状態へ戻します。
+ *
+ * 総時数をその単元の行数（週案に入っている時数のほうが多ければそちら）へ戻すだけで、
+ * 学習活動には触れません。まとめて終了にしたあとの取り消しに使います。
+ *
+ * @param {string} subject 教科名
+ * @param {Array<string>} unitNames 単元名の配列
+ * @returns {Object} { success, changedCount, items, snapshotId, message }
+ */
+function reopenClosedUnits(subject, unitNames) {
+  return p4ApplyUnitClosures_(subject, unitNames, 'reopen');
+}
+
+/**
+ * [Webアプリ API・旧名] 単元1件を「ここまでで終了」にします。
+ * まとめて終了にする実装（closeUnitsAtTaughtHours）へ委譲します。
+ *
+ * @param {string} subject 教科名
+ * @param {string} unitName 単元名
  * @returns {Object} { success, changed, unitName, totalHours, previousTotal, snapshotId, message }
  */
 function closeUnitAtTaughtHours(subject, unitName) {
+  const res = closeUnitsAtTaughtHours(subject, [unitName]);
+  if (!res || !res.success) return res;
+  const one = (res.items && res.items[0]) || {};
+  if (one.error) return { success: false, error: one.error };
+  return {
+    success: true,
+    changed: !!one.changed,
+    unitName: one.unitName,
+    totalHours: one.totalHours,
+    previousTotal: one.previousTotal,
+    snapshotId: res.snapshotId,
+    message: res.message
+  };
+}
+
+/** closeUnitsAtTaughtHours / reopenClosedUnits の中身。書き込みは1回にまとめます。 */
+function p4ApplyUnitClosures_(subject, unitNames, mode) {
   try {
     validateParams_(
-      { subject, unitName },
-      { subject: { required: true, type: 'string' }, unitName: { required: true, type: 'string' } }
+      { subject, unitNames },
+      { subject: { required: true, type: 'string' }, unitNames: { required: true, isArray: true } }
     );
+    if (unitNames.length === 0) throw new Error('単元が選択されていません。');
     ensureDataProtectionReady_();
 
     return p3WithUserLock_(20000, function () {
@@ -601,53 +783,27 @@ function closeUnitAtTaughtHours(subject, unitName) {
       const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
       if (!sheet || sheet.getLastRow() < 2) throw new Error('単元マスタにデータがありません。');
 
-      const subjectKey = normalizeSubjectName_(subject);
-      const nameKey = normalizeUnitName_(unitName);
-
       const lastRow = sheet.getLastRow();
       const all = sheet.getRange(1, 1, lastRow, P4_MASTER_WIDTH_).getValues();
+      const planned = p4PlannedHistory_(ss, buildMasterIndex_(all));
 
-      const history = p4PlannedHistory_(ss, buildMasterIndex_(all));
-      const hu = history[subjectKey] && history[subjectKey].units[nameKey];
-      const hours = hu ? (hu.maxHour || 0) : 0;
-      if (hours <= 0) {
-        return {
-          success: false,
-          error: 'この単元はまだ週案に入っていないため、終了にできません。'
-            + '（総時数を変えたいときは「単元」タブで直してください）'
-        };
-      }
+      const plan = p4PlanUnitClosures_(all, planned, subject, unitNames, mode);
+      const message = p4DescribeUnitClosures_(plan.items, mode);
 
-      const rowNumbers = [];
-      let unitLabel = String(unitName).trim();
-      let previousTotal = 0;
-      for (let i = 1; i < all.length; i++) {
-        if (!isSameSubject_(all[i][MASTER_COL_SUBJECT - 1], subject)) continue;
-        if (normalizeUnitName_(all[i][MASTER_COL_UNIT_NAME - 1]) !== nameKey) continue;
-        rowNumbers.push(i + 1);
-        unitLabel = String(all[i][MASTER_COL_UNIT_NAME - 1]).trim();
-        const declared = parseInt(all[i][MASTER_COL_TOTAL_HOURS - 1], 10);
-        if (!isNaN(declared) && declared > previousTotal) previousTotal = declared;
-      }
-      if (rowNumbers.length === 0) {
-        throw new Error('単元「' + unitName + '」が単元マスタに見つかりません。');
-      }
-
-      const alreadyClosed = rowNumbers.every(function (rn) {
-        return parseInt(all[rn - 1][MASTER_COL_TOTAL_HOURS - 1], 10) === hours;
-      });
-      if (alreadyClosed) {
-        return {
-          success: true, changed: false, unitName: unitLabel,
-          totalHours: hours, previousTotal: previousTotal,
-          message: '「' + unitLabel + '」はすでに全' + hours + '時間になっています。'
-        };
+      // 1件も変わらないときは復元ポイントも監査ログも作らない。
+      // 見つからない単元しか渡されなかった場合だけは失敗として返す。
+      if (plan.changedCount === 0) {
+        const blocked = plan.items.filter(function (x) { return x.error; });
+        if (blocked.length === plan.items.length && blocked.length > 0) {
+          return { success: false, error: message, items: plan.items };
+        }
+        return { success: true, changedCount: 0, items: plan.items, message: message };
       }
 
       const snapshotId = p3CreateSnapshot_(
         'unitMaster',
         'sheet::' + SHEET_NAME_UNIT_MASTER,
-        '自動: 単元を終了にする前',
+        mode === 'reopen' ? '自動: 単元の指導を再開する前' : '自動: 単元を終了にする前',
         {
           schemaVersion: P3_SCHEMA_VERSION_,
           spreadsheetId: ss.getId(),
@@ -658,28 +814,43 @@ function closeUnitAtTaughtHours(subject, unitName) {
 
       // 総時数の列だけを1回で書き戻す（他の単元の行は読んだ値をそのまま置く）
       const totals = all.slice(1).map(function (r) { return [r[MASTER_COL_TOTAL_HOURS - 1]]; });
-      rowNumbers.forEach(function (rn) { totals[rn - 2] = [hours]; });
+      plan.items.forEach(function (item) {
+        if (!item.changed) return;
+        item.rowNumbers.forEach(function (rn) { totals[rn - 2] = [item.totalHours]; });
+      });
       sheet.getRange(2, MASTER_COL_TOTAL_HOURS, totals.length, 1).setValues(totals);
 
+      const changed = plan.items.filter(function (x) { return x.changed; });
       p3RecordAudit_(
-        'UNIT_MASTER_CLOSE',
+        mode === 'reopen' ? 'UNIT_MASTER_REOPEN' : 'UNIT_MASTER_CLOSE',
         'unitMaster',
         SHEET_NAME_UNIT_MASTER,
-        '「' + unitLabel + '」を全' + hours + '時間として終了',
-        { totalHours: previousTotal, rowCount: rowNumbers.length },
-        { totalHours: hours, snapshotId: snapshotId },
-        'close_' + Utilities.getUuid()
+        message,
+        {
+          totals: changed.map(function (x) {
+            return { unitName: x.unitName, totalHours: x.previousTotal };
+          })
+        },
+        {
+          totals: changed.map(function (x) {
+            return { unitName: x.unitName, totalHours: x.totalHours };
+          }),
+          snapshotId: snapshotId
+        },
+        (mode === 'reopen' ? 'reopen_' : 'close_') + Utilities.getUuid()
       );
       invalidateUnitProgressCache_();
 
       return {
-        success: true, changed: true, unitName: unitLabel,
-        totalHours: hours, previousTotal: previousTotal, snapshotId: snapshotId,
-        message: '「' + unitLabel + '」を全' + hours + '時間として終了にしました。'
+        success: true,
+        changedCount: plan.changedCount,
+        items: plan.items,
+        snapshotId: snapshotId,
+        message: message
       };
     });
   } catch (e) {
-    logError('closeUnitAtTaughtHours', e);
+    logError('p4ApplyUnitClosures_', e);
     return { success: false, error: e.message };
   }
 }

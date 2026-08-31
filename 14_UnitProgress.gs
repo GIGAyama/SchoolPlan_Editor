@@ -111,13 +111,17 @@ function buildUnitProgressPayload_(masterData, dbData, dbCols, tomorrowMidnight,
       const th = taughtHistory[subjectKey] && taughtHistory[subjectKey].units[normalizeUnitName_(u.name)];
       const taughtHour = th ? th.maxHour : 0;
       const done = tracker.isFinished(subjectKey, u.name);
-      const masterTotal = (u.declaredTotal || 0) || (u.maxHourRow || 0);
+      // 総時数に 0 と書かれた単元＝「指導しない」。行数で埋め戻さない（04_AutoFill.gs と対）
+      const skipped = isMasterUnitSkipped_(u);
+      const masterTotal = skipped ? 0 : ((u.declaredTotal || 0) || (u.maxHourRow || 0));
 
       const unit = {
         unitName: u.name,
         order: u.order,
         declaredTotal: u.declaredTotal || 0,
         masterRowHours: u.maxHourRow || 0,
+        // 「指導しない（全0時間）」。status は done だが、画面では別の見せ方をする
+        skipped: skipped,
         effectiveTotal: effectiveTotal,
         taughtHour: taughtHour,
         plannedHour: plannedHour,

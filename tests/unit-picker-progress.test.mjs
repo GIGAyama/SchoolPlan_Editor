@@ -221,3 +221,129 @@ test('マスタの総時数を正とする（週案の分母に押し戻され�
   assert.equal(closed.status, 'done');
   assert.equal(after.subjects.国語.nextUnitName, '大造じいさん');
 });
+
+// ===== 「指導しない（総時数 0）」の単元 =====
+//
+// 判定の規則はサーバの 04_AutoFill.gs isMasterUnitSkipped_ と同じ。
+// 片方だけ直すと、保存前と保存後で同じ単元の見え方が変わる。
+
+test('「指導しない」単元は、保存前の重ね合わせでも終了のまま', () => {
+  const progress = makeProgress();
+  const unit = progress.subjects.国語.units[0];
+  unit.declaredTotal = 0;
+  unit.masterRowHours = 3;
+  unit.effectiveTotal = 0;
+  unit.skipped = true;
+  unit.status = 'done';
+
+  // 別の単元を1時間入れて、その場の引き直しを通す
+  const after = sync({ 0: { 0: { subject: '国語', unit: '大造じいさん 1/2' } } }, progress);
+  const closed = unitOf(after, 'ごんぎつね');
+  assert.equal(closed.status, 'done', '行数（3）で引き直すと終了が解けます');
+  assert.equal(closed.effectiveTotal, 0);
+  assert.equal(after.subjects.国語.nextUnitName, '大造じいさん', '飛ばして次の単元を指すべき');
+});
+
+test('「指導しない」単元に週案の記入があっても、行数で全N時間に戻らない', () => {
+  const progress = makeProgress();
+  const unit = progress.subjects.国語.units[0];
+  unit.declaredTotal = 0;
+  unit.masterRowHours = 3;
+  unit.effectiveTotal = 0;
+  unit.skipped = true;
+  unit.status = 'done';
+
+  const after = sync({ 0: { 0: { subject: '国語', unit: 'ごんぎつね 1/3' } } }, progress);
+  const closed = unitOf(after, 'ごんぎつね');
+  assert.equal(closed.effectiveTotal, 1, '週案の分母（3）で埋め戻すと終了が解けます');
+  assert.equal(closed.status, 'done');
+});
+
+// ===== ピッカーの行と、まとめて終了にする =====
+
+/** App_Js_16 を読み込んだサンドボックスで式を評価し、値を持ち帰る。 */
+function evalInPicker(expr, setup = '') {
+  const harness = bootClient({ extraFiles: ['App_Js_16_UnitProgress.html'] });
+  if (setup) harness.run(setup);
+  return JSON.parse(harness.run(`JSON.stringify(${expr})`));
+}
+
+const UNIT = (over) => Object.assign({
+  unitName: 'ごんぎつね', order: 0, declaredTotal: 3, masterRowHours: 3,
+  effectiveTotal: 3, taughtHour: 0, plannedHour: 0, nextHour: 1,
+  status: 'untaught', isNext: false, overTaught: false, totalMismatch: false, skipped: false
+}, over);
+
+test('まとめて終了にできるのは、まだ終わっていない単元だけ', () => {
+  const setup = `__untaught = ${JSON.stringify(UNIT({}))};`
+    + `__progress = ${JSON.stringify(UNIT({ status: 'inProgress', plannedHour: 2 }))};`
+    + `__done = ${JSON.stringify(UNIT({ status: 'done', plannedHour: 3 }))};`
+    + `__skipped = ${JSON.stringify(UNIT({ status: 'done', skipped: true, effectiveTotal: 0 }))};`;
+  const flags = evalInPicker(
+    '[isClosableUnit(__untaught), isClosableUnit(__progress), isClosableUnit(__done), isClosableUnit(__skipped)]',
+    setup
+  );
+  assert.deepEqual(flags, [true, true, false, false]);
+});
+
+test('終了にすると何時間になるか（未指導は0時間＝指導しない）', () => {
+  const setup = `__untaught = ${JSON.stringify(UNIT({}))};`
+    + `__progress = ${JSON.stringify(UNIT({ status: 'inProgress', plannedHour: 2 }))};`;
+  const hours = evalInPicker('[closureHoursOf(__untaught), closureHoursOf(__progress)]', setup);
+  assert.deepEqual(hours, [0, 2]);
+});
+
+test('未指導の単元にも終了のボタンを出す（文言は「指導しない」）', () => {
+  const html = evalInPicker(`buildUnitPickerItem(${JSON.stringify(UNIT({}))}, 0)`);
+  assert.ok(html.includes('>指導しない</button>'), html);
+  assert.ok(html.includes('data-closable="1"'), '選択の対象にならない行になっています');
+  assert.ok(html.includes('未指導'));
+});
+
+test('指導途中の単元のボタンは、これまでどおり「◯時間で終了」', () => {
+  const html = evalInPicker(
+    `buildUnitPickerItem(${JSON.stringify(UNIT({ status: 'inProgress', plannedHour: 2, taughtHour: 2 }))}, 0)`
+  );
+  assert.ok(html.includes('>2時間で終了</button>'), html);
+});
+
+test('「指導しない」単元は指導済みと見分けがつき、選び直しの対象にならない', () => {
+  const html = evalInPicker(
+    `buildUnitPickerItem(${JSON.stringify(UNIT({ status: 'done', skipped: true, effectiveTotal: 0 }))}, 0)`
+  );
+  assert.ok(html.includes('指導しない'), html);
+  assert.ok(html.includes('全0時間'), html);
+  assert.ok(!html.includes('data-closable'), 'もう終わっている単元を選べてしまいます');
+  assert.ok(!html.includes('up-close-btn'), html);
+});
+
+test('指導済みの単元には終了のボタンを出さない', () => {
+  const html = evalInPicker(
+    `buildUnitPickerItem(${JSON.stringify(UNIT({ status: 'done', plannedHour: 3, taughtHour: 3 }))}, 0)`
+  );
+  assert.ok(html.includes('指導済み'));
+  assert.ok(!html.includes('up-close-btn'), html);
+});
+
+test('まとめて終了・指導の再開は、専用のサーバAPIを1回だけ呼ぶ', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync('App_Js_16_UnitProgress.html', 'utf8');
+  // 1件ずつ呼ぶと復元ポイントが単元の数だけ増え、どこまで戻せばよいか分からなくなる
+  assert.match(src, /\.closeUnitsAtTaughtHours\(subject, names\)/);
+  assert.match(src, /\.reopenClosedUnits\(subject, names\)/);
+  assert.doesNotMatch(src, /closeUnitAtTaughtHours/);
+});
+
+test('終了にする前に、未保存の入力を保存させる', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync('App_Js_16_UnitProgress.html', 'utf8');
+  // サーバは保存済みの週案から時数を数え直す。打ったばかりの時間を数に入れないまま
+  // 実行すると、画面の「3時間で終了」に対して全0時間（＝指導しない）が書かれる。
+  assert.match(src, /hasUnsavedChanges/);
+  assert.match(src, /saveCurrentWeekOnce\('close-units'\)/);
+  assert.match(src, /saveBeforeClosure\(\)\.then/);
+  // 何が起きるかは確認画面に書いてある（ボタンが「保存して終了にする」に変わる）
+  assert.match(src, /保存して終了にする/);
+  // 保存すると編集モードを抜ける。そこでピッカーを開き直すとタスク選択へ落ちる。
+  assert.match(src, /if \(STATE\.editMode\) openUnitPicker\(dayIdx, pIdx\)/);
+});

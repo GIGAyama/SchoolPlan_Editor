@@ -26,10 +26,18 @@
     }
 
     .up-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
         padding: 8px 12px;
         border-bottom: 1px solid var(--border);
         cursor: pointer;
         transition: background 0.15s;
+    }
+
+    .up-item-body {
+        flex: 1;
+        min-width: 0;
     }
 
     .up-item:last-child {
@@ -102,6 +110,14 @@
         color: #1e8e3e;
     }
 
+    /* 「指導しない（全0時間）」。指導し終えた単元と見分けがつくようにする。
+       ダイアログの地は SweetAlert2 が常に白なので、白地で読める色を直に置く。 */
+    .up-badge-skipped {
+        background: rgba(128, 128, 128, 0.14);
+        color: #5f6368;
+        border-color: rgba(128, 128, 128, 0.35);
+    }
+
     .up-note {
         font-size: 0.66rem;
         color: var(--warning, #e65100);
@@ -137,6 +153,161 @@
         opacity: 0.8;
         text-align: left;
         line-height: 1.6;
+    }
+
+    .up-close-list {
+        text-align: left;
+        margin: 0 0 4px;
+        padding-left: 1.2em;
+        font-size: 0.86rem;
+        line-height: 1.8;
+        /* 一度に何十単元も終了にできる。全部並べて画面からはみ出すより、
+           畳んで中で送れるようにする。 */
+        max-height: 220px;
+        overflow-y: auto;
+    }
+
+    /* ===== まとめて終了にする ===== */
+    .up-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    /* まとめ操作の入口。押すまでは一覧の邪魔をしないよう控えめに置く。 */
+    .up-bulk-enter {
+        background: transparent;
+        color: inherit;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 2px 10px;
+        font-size: 0.72rem;
+        cursor: pointer;
+        /* 指の入る大きさを確保する（タブレットで検索欄を押さないため） */
+        min-height: 30px;
+        white-space: nowrap;
+    }
+
+    .up-bulk-enter:hover {
+        background: rgba(128, 128, 128, 0.12);
+    }
+
+    /* まとめ操作に入ったら入口は用済み。「やめる」は下のバーにある。 */
+    .up-bulk-on .up-bulk-enter {
+        display: none;
+    }
+
+    /* 選択のしるし。まとめ操作に入るまでは場所を取らない。 */
+    .up-check {
+        display: none;
+        flex: 0 0 auto;
+        inline-size: 20px;
+        block-size: 20px;
+        margin-top: 2px;
+        border: 2px solid var(--border);
+        border-radius: 4px;
+    }
+
+    .up-bulk-on .up-check {
+        display: block;
+    }
+
+    /* 指導済み・「指導しない」の行は選べない。空の枠を出すと押せそうに見える。 */
+    .up-bulk-on .up-check-off {
+        border-color: transparent;
+    }
+
+    .up-bulk-on .up-item:not([data-closable]) {
+        cursor: default;
+        opacity: 0.4;
+    }
+
+    /* まとめ操作の最中は行ごとの「◯時間で終了」を隠す。
+       押すつもりの無い1件だけが終了になる事故を防ぐ。 */
+    .up-bulk-on .up-close-btn {
+        display: none;
+    }
+
+    .up-item-picked {
+        background: rgba(26, 115, 232, 0.10);
+    }
+
+    .up-item-picked .up-check {
+        background: var(--primary, #1a73e8);
+        border-color: var(--primary, #1a73e8);
+        /* ✓ は文字を置かずに枠線で描く（フォントに依らない） */
+        position: relative;
+    }
+
+    .up-item-picked .up-check::after {
+        content: '';
+        position: absolute;
+        inset-inline-start: 5px;
+        inset-block-start: 1px;
+        inline-size: 5px;
+        block-size: 10px;
+        border: solid #fff;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+    }
+
+    .up-bulk-hint,
+    .up-bulkbar {
+        display: none;
+    }
+
+    .up-bulk-on .up-bulk-hint {
+        display: block;
+        font-size: 0.74rem;
+        line-height: 1.6;
+        margin-bottom: 6px;
+        color: inherit;
+        opacity: 0.85;
+    }
+
+    .up-bulk-on .up-bulkbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+    }
+
+    .up-bulk-sub {
+        background: transparent;
+        color: inherit;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 4px 10px;
+        font-size: 0.74rem;
+        cursor: pointer;
+        /* 指の入る大きさ。並んだボタンを押し間違えると全学級に効く操作になる。 */
+        min-height: 44px;
+    }
+
+    .up-bulk-sub:hover {
+        background: rgba(128, 128, 128, 0.12);
+    }
+
+    .up-bulk-run {
+        flex: 1;
+        min-width: 180px;
+        min-height: 44px;
+        background: var(--primary, #1a73e8);
+        color: #fff;
+        border: 1px solid var(--primary, #1a73e8);
+        border-radius: 6px;
+        padding: 4px 12px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .up-bulk-run:disabled {
+        background: #9aa0a6;
+        border-color: #9aa0a6;
+        cursor: not-allowed;
     }
 
     .up-toggle-done {
