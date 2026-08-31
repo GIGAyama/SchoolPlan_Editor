@@ -276,6 +276,15 @@ test('宿題と持ち物は1件1行の箇条書きになる', () => {
     'Windows 由来の改行(CRLF)でも分かれること');
 });
 
+test('1件ずつが行として分かれる（並べただけの inline にしない）', () => {
+  // <span> で並べると中黒が横につながって「・連絡帳・上履き」の1行になる。
+  // 行として分けるのはブロック要素であることが根拠なので、そこを固定する。
+  const html = schedListCell_('連絡帳\n上履き\n雑巾');
+  assert.equal((html.match(/<div /g) || []).length, 3, '1件につき1つの div になっていない');
+  assert.doesNotMatch(html, /<span/, 'inline 要素で並べている');
+  assert.doesNotMatch(html, /display:\s*inline/, 'div を inline に戻している');
+});
+
 test('空の行は落とす。中身が無いセルは空のまま', () => {
   assert.deepEqual(lines(schedListCell_('連絡帳\n\n  \n上履き')), ['連絡帳', '上履き']);
   assert.equal(schedListCell_(''), '');
