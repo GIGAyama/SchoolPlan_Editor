@@ -258,3 +258,68 @@ test('集約ルールに出てくる教科名もひらがなにできる（中�
   assert.equal(subjMap['外体育'], 'そとたいいく');
   assert.notEqual(subjMap['中体育'], subjMap['外体育']);
 });
+
+// ===== 宿題・持ち物の箇条書き =====
+
+const schedListCell_ = new Function(
+  `var escHtml = function (s) { return String(s == null ? '' : s)
+     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+   ${extractFn(nl, 'schedListCell_')}\nreturn schedListCell_;`)();
+
+const lines = html => [...html.matchAll(/>・([^<]*)</g)].map(m => m[1]);
+
+test('宿題と持ち物は1件1行の箇条書きになる', () => {
+  // 週案の入力欄は3行のテキストエリアで、先生は1件ずつ改行して書く。
+  // escHtml しただけだと改行が潰れて「れんらくちょううわばき」と繋がって出る。
+  assert.deepEqual(lines(schedListCell_('連絡帳\n上履き\n雑巾')), ['連絡帳', '上履き', '雑巾']);
+  assert.deepEqual(lines(schedListCell_('連絡帳\r\n上履き')), ['連絡帳', '上履き'],
+    'Windows 由来の改行(CRLF)でも分かれること');
+});
+
+test('空の行は落とす。中身が無いセルは空のまま', () => {
+  assert.deepEqual(lines(schedListCell_('連絡帳\n\n  \n上履き')), ['連絡帳', '上履き']);
+  assert.equal(schedListCell_(''), '');
+  assert.equal(schedListCell_('  \n \n'), '');
+  assert.equal(schedListCell_(null), '');
+  assert.equal(schedListCell_(undefined), '');
+});
+
+test('先生がすでに付けた中黒やハイフンを二重にしない', () => {
+  assert.deepEqual(lines(schedListCell_('・連絡帳\n- 上履き\n※ 雑巾')), ['連絡帳', '上履き', '雑巾']);
+});
+
+test('セルの中身はエスケープする', () => {
+  assert.doesNotMatch(schedListCell_('<script>x</script>'), /<script>/);
+});
+
+test('左詰めとぶら下げインデントは inline style で入る', () => {
+  // CSS を連れていけない Classroom 書き出しでも箇条書きの形を保つため。
+  // td 側は既定が中央ぞろえ（.nw-schedule-block td { text-align: center }）なので、
+  // セルにも左詰めを当てないと箇条書きが中央に寄る。
+  assert.match(schedListCell_('あ'), /text-indent:-0\.9em;/);
+  assert.match(nl, /\(asList \? ' style="text-align:left;"' : ''\)/,
+    'セルに左詰めを当てていない');
+});
+
+test('箇条書きにするのは宿題と持ち物だけ。ほかの行は今までどおり', () => {
+  const fields = new Function(
+    `${/var SCHED_LIST_FIELDS = \[[^\]]*\];/.exec(nl)[0]}\nreturn SCHED_LIST_FIELDS;`)();
+  assert.deepEqual(fields, ['homework', 'items']);
+});
+
+test('宿題と持ち物は複数行で編集できる（1行の入力欄だと改行が落ちる）', () => {
+  // <input> に改行入りの値を入れると、開いた時点で改行が消えて箇条書きが潰れる
+  assert.match(nl, /input: asList \? 'textarea' : 'text',/);
+  assert.match(nl, /var asList = SCHED_LIST_FIELDS\.indexOf\(rowType\) >= 0;/);
+});
+
+// ===== プレビューのページ分けの目安 =====
+
+test('あてにならないページ分けの目安は出さない', () => {
+  // 267mm 決め打ちで線を引いていたが、実際の改ページ位置とは合わない。
+  // 合わない目安は、無いより読み手を惑わせる。
+  const css = read('App_Css.html');
+  assert.doesNotMatch(nl, /renderPageBreaks/, 'ページ分けの目安を描く処理が残っている');
+  assert.doesNotMatch(nl, /nw-page-break-marker/, '目安の要素が残っている');
+  assert.doesNotMatch(css, /nw-page-break-marker/, '目安のCSSが残っている');
+});

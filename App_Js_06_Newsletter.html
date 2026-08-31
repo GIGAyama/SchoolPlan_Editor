@@ -349,8 +349,6 @@
             page.appendChild(NW._createInsertBtn(block.id));
         });
         NW.autoSave();
-        // Render A4 page break markers
-        NW.renderPageBreaks();
     };
 
     // ---- Insert button between blocks ----
@@ -442,29 +440,6 @@
         NW._historyIdx = -1;
         NW.pushHistory();
         showToast('success', 'レイアウトを作成しました');
-    };
-
-    NW.renderPageBreaks = function () {
-        var page = document.getElementById('nwEditorPage');
-        page.querySelectorAll('.nw-page-break-marker').forEach(function (el) { el.remove(); });
-        // Derive px-per-mm from the known CSS padding-top (15mm)
-        var cs = window.getComputedStyle(page);
-        var paddingTopPx = parseFloat(cs.paddingTop);
-        if (!paddingTopPx || paddingTopPx <= 0) return;
-        var mmToPx = paddingTopPx / 15; // padding-top = 15mm
-        // Print uses @page{margin:15mm 18mm}, printable height = 267mm per page
-        var pageContentH = 267 * mmToPx;
-        var totalH = page.scrollHeight;
-        // First break at paddingTop + 267mm; subsequent every 267mm
-        for (var i = 1; ; i++) {
-            var y = paddingTopPx + pageContentH * i;
-            if (y >= totalH - 10) break;
-            var marker = document.createElement('div');
-            marker.className = 'nw-page-break-marker';
-            marker.style.top = y + 'px';
-            marker.setAttribute('data-page', 'ページ ' + i + ' / ' + (i + 1));
-            page.appendChild(marker);
-        }
     };
 
     /**
@@ -1066,6 +1041,35 @@
     }
     NW.schedDateLabel_ = schedDateLabel_;
 
+    /**
+     * 宿題・持ち物のセルを、1件1行の箇条書きにして返す。
+     *
+     * 週案の入力欄は3行のテキストエリアで、先生は持ち物を1件ずつ改行して書く。
+     * これまでは escHtml しただけだったので改行が潰れ、「れんらくちょううわばきぞうきん」の
+     * ように1行につながって出ていた。
+     *
+     * 中黒とぶら下げインデント・左詰めは inline style で入れる。CSS を連れていけない
+     * Classroom への書き出しでも、箇条書きの形を保つため。
+     *
+     * @param {string} val セルの中身（改行区切り）
+     * @return {string} 箇条書きのHTML。中身が無いときは空文字
+     */
+    function schedListCell_(val) {
+        var lines = String(val == null ? '' : val).split(/\r\n|\r|\n/);
+        var out = '';
+        for (var i = 0; i < lines.length; i++) {
+            // 先生がすでに「・」や「-」を付けている行は、中黒を二重にしない
+            var body = lines[i].trim().replace(/^[・･·\-‐−–—●○◎※*＊]+\s*/, '').trim();
+            if (!body) continue;
+            out += '<div style="padding-left:0.9em;text-indent:-0.9em;">・' + escHtml(body) + '</div>';
+        }
+        return out;
+    }
+    NW.schedListCell_ = schedListCell_;
+
+    // 箇条書きにして左詰めで出す行。ここに無い行はこれまでどおり中央ぞろえの1行
+    var SCHED_LIST_FIELDS = ['homework', 'items'];
+
     // 表の左端の見出し。ひらがな表記の学年ではこちらを使う。
     // 教科名だけひらがなにして「1校時」「持ち物」が漢字のままだと、
     // 子どもには読めない行が混ざったままになる。
@@ -1213,11 +1217,13 @@
 
         // 1行ぶんの小さな行（休み時間・放課後・宿題・持ち物）
         function simpleRow(label, field) {
+            var asList = SCHED_LIST_FIELDS.indexOf(field) >= 0;
             var row = '<tr><td class="nw-sched-label">' + escHtml(schedRowLabel_(label)) + '</td>';
             days.forEach(function (day, di) {
                 var val = getCellVal(field + '_' + di, day[field] || '');
-                row += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'' + field + '\',' + di + ')">'
-                    + escHtml(val) + '</td>';
+                row += '<td class="nw-sched-small nw-sched-cell"' + (asList ? ' style="text-align:left;"' : '')
+                    + ' onclick="NW.editSchedCell(\'' + bid + '\',\'' + field + '\',' + di + ')">'
+                    + (asList ? schedListCell_(val) : escHtml(val)) + '</td>';
             });
             return row + '</tr>';
         }
@@ -1515,14 +1521,17 @@
             var overKey = rowType + '_' + dayIdx;
             var origVal = day[rowType] || '';
             var curVal = overrides.hasOwnProperty(overKey) ? overrides[overKey] : origVal;
+            // 宿題・持ち物は1件1行の箇条書きで出す。1行の <input> で編集させると、
+            // 開いた時点で改行が落ちて箇条書きが1行に潰れるので、複数行で編集させる。
+            var asList = SCHED_LIST_FIELDS.indexOf(rowType) >= 0;
             Swal.fire({
                 title: day.dayLabel + ' - ' + (labels[rowType] || rowType),
-                input: 'text',
+                input: asList ? 'textarea' : 'text',
                 inputValue: curVal,
                 showCancelButton: true,
                 confirmButtonText: '保存',
                 cancelButtonText: 'キャンセル',
-                inputPlaceholder: labels[rowType] + 'を入力...'
+                inputPlaceholder: labels[rowType] + 'を入力...' + (asList ? '（1行に1つ）' : '')
             }).then(function (result) {
                 if (!result.isConfirmed) return;
                 NW.pushHistory();
@@ -2550,7 +2559,7 @@
         NW.saveEditable();
         var page = document.getElementById('nwEditorPage');
         var clone = page.cloneNode(true);
-        clone.querySelectorAll('.nw-block-handle,.nw-block-actions,.nw-schedule-options,.nw-empty-editor,.nw-image-placeholder,.nw-gallery-add,.nw-gallery-remove,.nw-page-break-marker,.nw-insert-row,.nw-col-img-placeholder,.nw-col-img-remove').forEach(function (el) { el.remove(); });
+        clone.querySelectorAll('.nw-block-handle,.nw-block-actions,.nw-schedule-options,.nw-empty-editor,.nw-image-placeholder,.nw-gallery-add,.nw-gallery-remove,.nw-insert-row,.nw-col-img-placeholder,.nw-col-img-remove').forEach(function (el) { el.remove(); });
         clone.querySelectorAll('.nw-block').forEach(function (el) {
             var decoBorder = el.getAttribute('data-deco-border');
             el.style.border = decoBorder ? ('2px solid ' + decoBorder) : 'none';

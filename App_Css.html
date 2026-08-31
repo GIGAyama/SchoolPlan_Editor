@@ -2035,31 +2035,6 @@
         vertical-align: middle;
     }
 
-    /* --- A4 Page break markers --- */
-    .nw-page-break-marker {
-        position: absolute;
-        left: 0;
-        right: 0;
-        height: 0;
-        border-top: 2px dashed #ea4335;
-        z-index: 5;
-        pointer-events: none;
-    }
-
-    .nw-page-break-marker::after {
-        content: attr(data-page);
-        position: absolute;
-        left: 0;
-        top: -10px;
-        font-size: 0.65rem;
-        color: #ea4335;
-        background: #fff;
-        padding: 1px 6px;
-        border-radius: 3px;
-        border: 1px solid #ea4335;
-        white-space: nowrap;
-    }
-
     /* --- Color picker (used in SweetAlert) --- */
     .nw-color-grid {
         display: flex;
