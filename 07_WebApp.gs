@@ -1940,6 +1940,19 @@ function sendTaskReminderTestFromWebApp() {
 // ===================================================
 
 /**
+ * 単元マスタの「総時間数」セルを画面用に整えます。
+ *
+ * `値 || ''` で済ませられないのは、**0 が意味を持つ**ためです。総時数 0 は
+ * 「今年はこの単元を指導しない（終了扱い）」の印で、空欄（未設定）とは別物です
+ * （04_AutoFill.gs の isMasterUnitSkipped_）。0 を空にして返すと、単元タブの表で
+ * 総時数が空に見え、その行を1文字直して保存しただけで印が消えます。
+ */
+function umTotalHoursValue_(v) {
+  if (v === 0 || v === '0') return 0;
+  return v || '';
+}
+
+/**
  * [Webアプリ API] 単元マスタの全データを取得します
  * @returns {Object} { success, rows: [{subject, unitName, totalHours, hourNum, activity, rowIndex}], subjects: string[] }
  */
@@ -1964,7 +1977,7 @@ function getUnitMasterData() {
         rowIndex: i + 2, // シート上の実際の行番号(1-based)
         subject: subject,
         unitName: r[MASTER_COL_UNIT_NAME - 1] || '',
-        totalHours: r[MASTER_COL_TOTAL_HOURS - 1] || '',
+        totalHours: umTotalHoursValue_(r[MASTER_COL_TOTAL_HOURS - 1]),
         hourNum: r[MASTER_COL_HOUR_NUM - 1] || '',
         activity: r[MASTER_COL_ACTIVITY - 1] || ''
       });
@@ -1995,7 +2008,7 @@ function updateUnitMasterRow(rowIndex, data) {
     sheet.getRange(rowIndex, 1, 1, 5).setValues([[
       data.subject || '',
       data.unitName || '',
-      data.totalHours || '',
+      umTotalHoursValue_(data.totalHours),
       data.hourNum || '',
       data.activity || ''
     ]]);
@@ -2025,7 +2038,7 @@ function insertUnitMasterRow(afterRowIndex, data) {
     sheet.getRange(insertAt, 1, 1, 5).setValues([[
       data.subject || '',
       data.unitName || '',
-      data.totalHours || '',
+      umTotalHoursValue_(data.totalHours),
       data.hourNum || '',
       data.activity || ''
     ]]);
@@ -2086,7 +2099,7 @@ function batchUpdateUnitMaster(updates) {
         allData[rowIdx] = [
           u.data.subject || '',
           u.data.unitName || '',
-          u.data.totalHours || '',
+          umTotalHoursValue_(u.data.totalHours),
           u.data.hourNum || '',
           u.data.activity || ''
         ];

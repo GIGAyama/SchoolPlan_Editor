@@ -112,7 +112,9 @@
         if (!sp || !sp.units) return;
 
         sp.units.forEach(function (u) {
-            var done = u.effectiveTotal > 0 && u.plannedHour >= u.effectiveTotal;
+            // 「指導しない（全0時間）」は1時間も入っていなくても終了扱い
+            // （サーバの isMasterUnitSkipped_ と対）。
+            var done = u.skipped || (u.effectiveTotal > 0 && u.plannedHour >= u.effectiveTotal);
             // 指導済みの単元には次の時間が存在しないため、総時数を超えないよう丸める
             // （丸めないとピッカーがマスタに無い時数をセルへ書き込んでしまう）。
             u.nextHour = done
@@ -120,7 +122,7 @@
                 : u.plannedHour + 1;
             u.status = done ? 'done' : (u.plannedHour > 0 ? 'inProgress' : 'untaught');
             // 実効時数と同じく、単元マスタの総時数を正とする（14_UnitProgress.gs と対）
-            var masterTotal = (u.declaredTotal || 0) || (u.masterRowHours || 0);
+            var masterTotal = u.skipped ? 0 : ((u.declaredTotal || 0) || (u.masterRowHours || 0));
             u.overTaught = !!(masterTotal && u.plannedHour > masterTotal);
             u.isNext = false;
         });
@@ -181,9 +183,15 @@
             // 単元マスタの総時数を正とし、セルの分母（n/N の N）はマスタに総時数が
             // 無いときの穴埋めにとどめる。ここで分母を max に混ぜていると、
             // 「ここまでで終了」で総時数を減らしても週案の古い分母に押し戻される。
-            var masterTotal = (unit.declaredTotal || 0) || (unit.masterRowHours || 0);
-            var total = masterTotal || Math.max(unit.effectiveTotal || 0, e.cellTotal || 0);
-            unit.effectiveTotal = Math.max(total, unit.plannedHour);
+            if (unit.skipped) {
+                // 「指導しない」単元は総時数 0 が正。週案の分母で埋め戻すと、
+                // 終了にしたはずの単元がまた全N時間に戻ってしまう。
+                unit.effectiveTotal = unit.plannedHour;
+            } else {
+                var masterTotal = (unit.declaredTotal || 0) || (unit.masterRowHours || 0);
+                var total = masterTotal || Math.max(unit.effectiveTotal || 0, e.cellTotal || 0);
+                unit.effectiveTotal = Math.max(total, unit.plannedHour);
+            }
         });
 
         touched.forEach(refreshProgressSubject);
@@ -239,10 +247,27 @@
         });
     }
 
+    /**
+     * 「まとめて終了にする」で選べる単元かどうか。
+     * 指導済み・「指導しない」は用が無いので選べない。
+     */
+    function isClosableUnit(u) {
+        return !!u && u.status !== 'done';
+    }
+
+    /** 「終了にする」と何時間になるか。1時間も入っていなければ 0（＝指導しない）。 */
+    function closureHoursOf(u) {
+        return Math.max(0, u.plannedHour || 0);
+    }
+
     /** 単元1件分の行HTMLを組み立てる。 */
     function buildUnitPickerItem(u, idx) {
         var statusLabel, statusClass;
-        if (u.status === 'done') {
+        if (u.skipped) {
+            // 総時数 0＝「今年は指導しない」。指導し終えた単元とは見分けられるようにする。
+            statusLabel = '指導しない';
+            statusClass = 'up-badge-skipped';
+        } else if (u.status === 'done') {
             statusLabel = '指導済み';
             statusClass = 'up-badge-done';
         } else if (u.status === 'inProgress') {
@@ -259,25 +284,37 @@
         if (u.overTaught) notes += '<span class="up-note">総時数を超えて指導済み</span>';
         if (u.totalMismatch) notes += '<span class="up-note">総時数のぶんだけ行がありません</span>';
 
-        // 着手済みで、まだ総時数に届いていない単元にだけ「ここまでで終了」を出す。
-        // 未指導の単元には出しても意味がなく、指導済みの単元にはもう用が無い。
-        var closeBtn = (u.status === 'inProgress' && u.plannedHour > 0 && u.plannedHour < u.effectiveTotal)
-            ? '<button type="button" class="up-close-btn" data-close-idx="' + idx + '">'
-              + u.plannedHour + '時間で終了</button>'
-            : '';
+        // まだ終わっていない単元にだけ「終了」を出す。指導し終えた単元にはもう用が無い。
+        // 1時間も入っていない単元は「指導しない」（総時数 0）になる。
+        var closeBtn = '';
+        if (isClosableUnit(u)) {
+            var hours = closureHoursOf(u);
+            closeBtn = '<button type="button" class="up-close-btn" data-close-idx="' + idx + '">'
+                + (hours > 0 ? hours + '時間で終了' : '指導しない')
+                + '</button>';
+        }
+
+        // 選択のしるしは、まとめ操作に入るまで場所を取らない（既定は非表示）。
+        var check = isClosableUnit(u)
+            ? '<span class="up-check" aria-hidden="true"></span>'
+            : '<span class="up-check up-check-off" aria-hidden="true"></span>';
 
         return '<div class="up-item' + (u.isNext ? ' up-item-next' : '') + (u.status === 'done' ? ' up-item-done' : '') + '" '
-            + 'data-idx="' + idx + '" data-name="' + escAttr(u.unitName.toLowerCase()) + '" data-status="' + escAttr(u.status) + '">'
+            + 'data-idx="' + idx + '" data-name="' + escAttr(u.unitName.toLowerCase()) + '" data-status="' + escAttr(u.status) + '"'
+            + (isClosableUnit(u) ? ' data-closable="1"' : '') + '>'
+            + check
+            + '<div class="up-item-body">'
             + '<div class="up-item-main">'
             + (u.isNext ? '<span class="up-next-tag">次はここから</span>' : '')
             + '<strong>' + escHtml(u.unitName) + '</strong>'
-            + '<span class="up-hours">（全' + u.effectiveTotal + '時間）</span>'
+            + '<span class="up-hours">（' + (u.skipped ? '全0時間' : '全' + u.effectiveTotal + '時間') + '）</span>'
             + '</div>'
             + '<div class="up-item-sub"><span class="up-badge ' + statusClass + '">' + escHtml(statusLabel) + '</span>' + notes + closeBtn + '</div>'
+            + '</div>'
             + '</div>';
     }
 
-    /** ピッカー本体。検索・指導済みの折りたたみつき。 */
+    /** ピッカー本体。検索・指導済みの折りたたみ・まとめて終了つき。 */
     function showUnitPickerModal(dayIdx, pIdx, subject, sp) {
         // 表示順: 次に指導する単元 → 未指導/指導中（マスタ順） → 指導済み（マスタ順）
         var active = sp.units.filter(function (u) { return u.status !== 'done'; });
@@ -287,6 +324,7 @@
             return a.order - b.order;
         });
         var ordered = active.concat(done);
+        var closable = ordered.filter(isClosableUnit);
 
         // マスタに無い単元は、進捗が別々に数えられてしまう。空白や記号のゆれは
         // 自動で吸収するので、ここに出るのは本当に別の名前で書かれたもの。
@@ -297,10 +335,18 @@
               + '</div>'
             : '';
 
+        // まとめ操作に入る入口。終了にできる単元が2つ以上あるときだけ出す
+        // （1つしかないなら行の「◯時間で終了」のほうが早い）。
+        var bulkEntry = (closable.length >= 2)
+            ? '<button type="button" class="up-bulk-enter" id="upBulkEnter">まとめて終了にする</button>'
+            : '';
+
         var html =
-            '<div class="up-picker">'
+            '<div class="up-picker" id="upPicker">'
             + '<input type="text" id="upSearch" class="form-control form-control-sm" placeholder="単元名で検索...">'
-            + '<div class="up-count" id="upCount"></div>'
+            + '<div class="up-head"><div class="up-count" id="upCount"></div>' + bulkEntry + '</div>'
+            + '<div class="up-bulk-hint" id="upBulkHint">終了にする単元をえらんでください。'
+            + '週案に入っていない単元は「全0時間（指導しない）」になります。</div>'
             + '<div class="up-list" id="upList">'
             + active.map(function (u) { return buildUnitPickerItem(u, ordered.indexOf(u)); }).join('')
             + '</div>'
@@ -311,6 +357,12 @@
                   + '</div>'
                 : '')
             + '<div class="up-empty" id="upEmpty" style="display:none;">該当する単元がありません</div>'
+            + '<div class="up-bulkbar" id="upBulkBar">'
+            + '<button type="button" class="up-bulk-sub" id="upSelectAll">表示中をすべて選ぶ</button>'
+            + '<button type="button" class="up-bulk-sub" id="upSelectNone">選択を消す</button>'
+            + '<button type="button" class="up-bulk-run" id="upBulkRun" disabled>選んだ単元を終了にする</button>'
+            + '<button type="button" class="up-bulk-sub" id="upBulkCancel">やめる</button>'
+            + '</div>'
             + orphanNote
             + '</div>';
 
@@ -323,11 +375,17 @@
             cancelButtonText: '閉じる',
             didOpen: function () {
                 var container = Swal.getHtmlContainer();
+                var picker = container.querySelector('#upPicker');
                 var searchEl = container.querySelector('#upSearch');
                 var countEl = container.querySelector('#upCount');
                 var emptyEl = container.querySelector('#upEmpty');
                 var doneToggle = container.querySelector('#upToggleDone');
                 var doneList = container.querySelector('#upDoneList');
+                var bulkEnter = container.querySelector('#upBulkEnter');
+                var bulkRun = container.querySelector('#upBulkRun');
+                var bulkMode = false;
+                // 選んだ単元は ordered の添字で覚える（検索で行が隠れても消えない）
+                var selected = {};
 
                 function visibleItems() {
                     return container.querySelectorAll('.up-item:not(.up-hidden)');
@@ -342,6 +400,31 @@
                     });
                     countEl.textContent = shown + ' / ' + sp.units.length + ' 単元';
                     emptyEl.style.display = (visibleItems().length === 0) ? '' : 'none';
+                }
+
+                function selectedUnits() {
+                    return Object.keys(selected)
+                        .filter(function (k) { return selected[k]; })
+                        .map(function (k) { return ordered[parseInt(k, 10)]; })
+                        .filter(isClosableUnit);
+                }
+
+                function refreshSelection() {
+                    container.querySelectorAll('.up-item').forEach(function (el) {
+                        el.classList.toggle('up-item-picked', !!selected[el.dataset.idx]);
+                    });
+                    var n = selectedUnits().length;
+                    bulkRun.disabled = (n === 0);
+                    bulkRun.textContent = n > 0
+                        ? '選んだ' + n + '単元を終了にする'
+                        : '選んだ単元を終了にする';
+                }
+
+                function setBulkMode(on) {
+                    bulkMode = on;
+                    picker.classList.toggle('up-bulk-on', on);
+                    if (!on) selected = {};
+                    refreshSelection();
                 }
 
                 function applyFilter() {
@@ -368,6 +451,30 @@
                     });
                 }
 
+                if (bulkEnter) {
+                    bulkEnter.addEventListener('click', function () { setBulkMode(true); });
+                }
+                container.querySelector('#upBulkCancel').addEventListener('click', function () {
+                    setBulkMode(false);
+                });
+                container.querySelector('#upSelectAll').addEventListener('click', function () {
+                    // 「表示中」だけを選ぶ。検索で絞ってから全部、という使い方ができる。
+                    visibleItems().forEach(function (el) {
+                        if (el.dataset.closable) selected[el.dataset.idx] = true;
+                    });
+                    refreshSelection();
+                });
+                container.querySelector('#upSelectNone').addEventListener('click', function () {
+                    selected = {};
+                    refreshSelection();
+                });
+                bulkRun.addEventListener('click', function () {
+                    var units = selectedUnits();
+                    if (units.length === 0) return;
+                    Swal.close();
+                    confirmCloseUnits(dayIdx, pIdx, subject, units);
+                });
+
                 container.querySelectorAll('.up-close-btn').forEach(function (btn) {
                     btn.addEventListener('click', function (ev) {
                         // 行クリック（＝その単元を入力する）へ伝えない
@@ -375,7 +482,7 @@
                         var u = ordered[parseInt(btn.dataset.closeIdx, 10)];
                         if (!u) return;
                         Swal.close();
-                        confirmCloseUnit(dayIdx, pIdx, subject, u);
+                        confirmCloseUnits(dayIdx, pIdx, subject, [u]);
                     });
                 });
 
@@ -383,58 +490,159 @@
                     item.addEventListener('click', function () {
                         var u = ordered[parseInt(item.dataset.idx, 10)];
                         if (!u) return;
+                        if (bulkMode) {
+                            // まとめ操作の最中は、行クリックは選択の切り替えにあてる
+                            if (!item.dataset.closable) return;
+                            selected[item.dataset.idx] = !selected[item.dataset.idx];
+                            refreshSelection();
+                            return;
+                        }
+                        if (u.skipped) {
+                            // 総時数 0 のままでは時間目を選べない。先に指導を再開する。
+                            Swal.close();
+                            confirmReopenUnit(dayIdx, pIdx, subject, u);
+                            return;
+                        }
                         Swal.close();
                         openHourPicker(dayIdx, pIdx, subject, u.unitName, u.effectiveTotal, u.nextHour);
                     });
                 });
 
                 refreshCount();
+                refreshSelection();
                 searchEl.focus();
             }
         });
     }
 
     /**
-     * 「この単元はここまでで終了」の確認と実行。
+     * 「この単元は終了」の確認と実行（1件でもまとめてでも同じ道を通る）。
      *
-     * 単元マスタの総時数を、週案に入っている時数へ合わせます。行は消さないので
-     * 余った時間の学習活動は残ります。単元マスタは全学級で共通なので、
-     * その旨を確認画面に必ず書きます。
+     * 単元マスタの総時数を、週案に入っている時数へ合わせます。1時間も入っていない
+     * 単元は全0時間＝「指導しない」になります。行は消さないので、余った時間の
+     * 学習活動は残ります。単元マスタは全学級で共通なので、その旨を確認画面に必ず書きます。
      */
-    function confirmCloseUnit(dayIdx, pIdx, subject, u) {
-        var hours = u.plannedHour;
-        var rest = Math.max(0, u.effectiveTotal - hours);
+    function confirmCloseUnits(dayIdx, pIdx, subject, units) {
+        if (!units || units.length === 0) return;
+
+        var rows = units.map(function (u) {
+            var hours = closureHoursOf(u);
+            var after = hours > 0 ? '全' + hours + '時間' : '全0時間（指導しない）';
+            return '<li><strong>' + escHtml(u.unitName) + '</strong>: 全' + u.effectiveTotal + '時間 → ' + after + '</li>';
+        }).join('');
+        // 学習活動が残る単元が1つでもあれば、消えないことを書く（消したと思わせない）
+        var keepsRows = units.some(function (u) { return u.effectiveTotal > closureHoursOf(u); });
+
         Swal.fire({
-            title: '「' + u.unitName + '」を終了にしますか？',
-            html: '単元マスタの総時数を <strong>全' + u.effectiveTotal + '時間 → 全' + hours + '時間</strong> に変更します。'
+            title: units.length === 1
+                ? '「' + units[0].unitName + '」を終了にしますか？'
+                : '選んだ' + units.length + '単元を終了にしますか？',
+            html: '<ul class="up-close-list">' + rows + '</ul>'
                 + '<div class="up-close-note">'
-                + (rest > 0 ? '残り' + rest + '時間ぶんの学習活動は消さずに残します（来年また使えます）。<br>' : '')
+                + unsavedClosureNote()
+                + (keepsRows ? '残りの時間ぶんの学習活動は消さずに残します（来年また使えます）。<br>' : '')
+                + '単元マスタは全学級で共通のため、この変更は<strong>すべての学級</strong>に反映されます。<br>'
+                + '実行前の状態は復元ポイントとして保存されます。'
+                + '</div>',
+            icon: 'question',
+            width: 560,
+            showCancelButton: true,
+            confirmButtonText: hasUnsavedWeekInput() ? '保存して終了にする' : '終了にする',
+            cancelButtonText: 'やめる'
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            runUnitClosure(dayIdx, pIdx, subject, units, 'close');
+        });
+    }
+
+    /** 「指導しない」にした単元を、また指導する状態へ戻す確認と実行。 */
+    function confirmReopenUnit(dayIdx, pIdx, subject, u) {
+        var hours = Math.max(u.masterRowHours || 0, u.plannedHour || 0, 1);
+        Swal.fire({
+            title: '「' + u.unitName + '」の指導を再開しますか？',
+            html: 'この単元は「指導しない（全0時間）」になっています。'
+                + '単元マスタの総時数を <strong>全' + hours + '時間</strong> に戻してから、時間目を選べるようにします。'
+                + '<div class="up-close-note">'
+                + unsavedClosureNote()
                 + '単元マスタは全学級で共通のため、この変更は<strong>すべての学級</strong>に反映されます。<br>'
                 + '実行前の状態は復元ポイントとして保存されます。'
                 + '</div>',
             icon: 'question',
             showCancelButton: true,
-            confirmButtonText: '終了にする',
+            confirmButtonText: hasUnsavedWeekInput() ? '保存して再開する' : '指導を再開する',
             cancelButtonText: 'やめる'
         }).then(function (result) {
             if (!result.isConfirmed) return;
-            google.script.run
-                .withSuccessHandler(function (res) {
-                    if (!res || !res.success) {
-                        showToast('error', '終了にできませんでした: ' + ((res && res.error) || '不明なエラー'));
-                        return;
-                    }
-                    // 単元マスタが変わったので、マスタと進捗のキャッシュを捨てて取り直す
-                    if (typeof invalidateMasterData === 'function') invalidateMasterData();
-                    else { STATE.unitProgress = null; STATE.unitProgressLoading = false; }
-                    // 総時数の変更は画面のどこにも出ないので、これは知らせる必要がある
-                    showToast('success', res.message);
-                    openUnitPicker(dayIdx, pIdx);
-                })
-                .withFailureHandler(function (e) {
-                    showToast('error', '終了にできませんでした: ' + (e && e.message ? e.message : e));
-                })
-                .closeUnitAtTaughtHours(subject, u.unitName);
+            runUnitClosure(dayIdx, pIdx, subject, [u], 'reopen');
         });
+    }
+
+    /**
+     * いま画面に、まだ保存していない入力があるか。
+     *
+     * サーバは何時間目まで入っているかを**保存済みの週案**から数え直します
+     * （クライアントの言い値を使わないため）。いま打ったばかりの時間はサーバに
+     * まだ無いので、そのまま実行すると画面の「3時間で終了」に対して全0時間
+     * （＝指導しない）が書かれる、という食い違いが起こります。
+     */
+    function hasUnsavedWeekInput() {
+        return typeof hasUnsavedChanges === 'function' && hasUnsavedChanges();
+    }
+
+    /** 確認画面に添える「先に保存します」の一言。保存済みなら何も出さない。 */
+    function unsavedClosureNote() {
+        return hasUnsavedWeekInput()
+            ? '未保存の入力があります。時数は<strong>保存済みの週案</strong>から数え直すため、'
+              + '先にこの週を保存してから実行します。<br>'
+            : '';
+    }
+
+    /**
+     * 終了・再開の前に、編集中の入力を保存します。
+     * 一括自動入力・コマ移動と同じ「保存して実行」の流儀に揃えています。
+     * 確認画面で保存することは伝えてあるので、ここでもう一度は尋ねません。
+     *
+     * @returns {Promise<boolean>} 続けてよければ true
+     */
+    function saveBeforeClosure() {
+        if (!hasUnsavedWeekInput()) return Promise.resolve(true);
+        if (typeof saveCurrentWeekOnce !== 'function') return Promise.resolve(true);
+        return saveCurrentWeekOnce('close-units');
+    }
+
+    /** 終了・再開をサーバへ投げ、単元マスタと進捗を取り直してピッカーを開き直す。 */
+    function runUnitClosure(dayIdx, pIdx, subject, units, mode) {
+        saveBeforeClosure().then(function (ok) {
+            // 保存に失敗したら単元マスタには触らない（数え直す元が古いままになる）
+            if (!ok) return;
+            postUnitClosure(dayIdx, pIdx, subject, units, mode);
+        });
+    }
+
+    function postUnitClosure(dayIdx, pIdx, subject, units, mode) {
+        var names = units.map(function (u) { return u.unitName; });
+        var failLabel = (mode === 'reopen') ? '指導を再開できませんでした: ' : '終了にできませんでした: ';
+        var runner = google.script.run
+            .withSuccessHandler(function (res) {
+                if (!res || !res.success) {
+                    showToast('error', failLabel + ((res && res.error) || '不明なエラー'));
+                    return;
+                }
+                // 単元マスタが変わったので、マスタと進捗のキャッシュを捨てて取り直す
+                if (typeof invalidateMasterData === 'function') invalidateMasterData();
+                else { STATE.unitProgress = null; STATE.unitProgressLoading = false; }
+                // 総時数の変更は画面のどこにも出ないので、これは知らせる必要がある。
+                // 1件も変わらなかったとき（すでに終了・単元が見つからない）は
+                // 成功の緑にしない。何が起きたかは res.message が持っている。
+                showToast(res.changedCount > 0 ? 'success' : 'info', res.message);
+                // 保存して実行したときは編集モードを抜けている。セルの入力欄がもう無いので
+                // 開き直すとタスク選択のほうへ落ちてしまう。編集中のときだけ開き直す。
+                if (STATE.editMode) openUnitPicker(dayIdx, pIdx);
+            })
+            .withFailureHandler(function (e) {
+                showToast('error', failLabel + (e && e.message ? e.message : e));
+            });
+        if (mode === 'reopen') runner.reopenClosedUnits(subject, names);
+        else runner.closeUnitsAtTaughtHours(subject, names);
     }
 </script>

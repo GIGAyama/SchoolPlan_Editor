@@ -112,7 +112,7 @@ function addWarning_(warnings, message) {
  * 実効総時数（大きい方）の判断に使えるようにします。
  * @param {Array} masterData 単元マスタの全行データ
  * @returns {Object} subjectKey(正規化教科名) -> { units: [unit], byName: {unitName: unit} }
- *   unit = { name, declaredTotal, maxHourRow, activities: {hourNum: activity}, order }
+ *   unit = { name, declaredTotal, declaredZero, maxHourRow, activities: {hourNum: activity}, order }
  */
 function buildMasterIndex_(masterData) {
   const subjects = {};
@@ -132,13 +132,20 @@ function buildMasterIndex_(masterData) {
     const nameKey = normalizeUnitName_(displayName);
     let unit = s.byName[nameKey];
     if (!unit) {
-      unit = { name: displayName, declaredTotal: 0, maxHourRow: 0, activities: {}, order: s.units.length };
+      unit = {
+        name: displayName, declaredTotal: 0, declaredZero: false,
+        maxHourRow: 0, activities: {}, order: s.units.length
+      };
       s.byName[nameKey] = unit;
       s.units.push(unit);
     }
 
     const declared = parseInt(row[MASTER_COL_TOTAL_HOURS - 1], 10);
-    if (!isNaN(declared) && declared > unit.declaredTotal) unit.declaredTotal = declared;
+    if (!isNaN(declared)) {
+      if (declared > unit.declaredTotal) unit.declaredTotal = declared;
+      // 総時数に 0 と**書いてある**行の印。空欄（未設定）とは別物として持つ。
+      if (declared === 0) unit.declaredZero = true;
+    }
 
     const hourNum = parseInt(row[MASTER_COL_HOUR_NUM - 1], 10);
     if (!isNaN(hourNum) && hourNum > 0) {
@@ -149,6 +156,24 @@ function buildMasterIndex_(masterData) {
     }
   }
   return subjects;
+}
+
+/**
+ * 「指導しない（全0時間）」と決められた単元かどうかを返します。
+ *
+ * 総時数の列が **空欄** なら「まだ決めていない」なので行数などで補うが、
+ * **0 と書いてある**なら「今年はこの単元を指導しない」と先生が決めた印として扱い、
+ * 指導し終えた単元と同じように、自動入力もピッカーもそこへ戻らないようにする。
+ *
+ * 週案から「まとめて終了にする」で未指導の単元を終了にすると、この 0 が入る。
+ * 一部の行だけ 0 で他の行に時数がある単元は、時数のあるほうを正とする
+ * （書きかけ・打ち間違いを「指導しない」と取り違えないため）。
+ *
+ * @param {Object|null} unit buildMasterIndex_ が作る単元
+ * @returns {boolean}
+ */
+function isMasterUnitSkipped_(unit) {
+  return !!(unit && unit.declaredZero && !unit.declaredTotal);
 }
 
 /**
@@ -259,7 +284,9 @@ function createProgressTracker_(masterIndex, history) {
     const mu = sm ? sm.byName[normalizeUnitName_(unitName)] : null;
     const hu = historyUnit_(subjectKey, unitName);
     let total = mu ? (mu.declaredTotal || 0) : 0;
-    if (!total) {
+    // 「指導しない（全0時間）」の単元は 0 のまま返す。ここで行数や週案の分母を
+    // 埋め戻すと、終了にしたはずの単元がまた未消化に戻ってしまう。
+    if (!total && !isMasterUnitSkipped_(mu)) {
       if (mu) total = mu.maxHourRow || 0;
       if (!total && hu) total = hu.cellTotalMax || 0;
       if (!total && fallbackTotal) total = fallbackTotal;
@@ -280,7 +307,12 @@ function createProgressTracker_(masterIndex, history) {
 
   function isFinished(subjectKey, unitName, fallbackTotal) {
     const total = effectiveTotal(subjectKey, unitName, fallbackTotal);
-    return total > 0 && maxProgress(subjectKey, unitName) >= total;
+    if (total <= 0) {
+      // 1時間も入っていない単元でも、「指導しない」と決めてあれば終了として扱う。
+      const sm = masterIndex[subjectKey];
+      return isMasterUnitSkipped_(sm ? sm.byName[normalizeUnitName_(unitName)] : null);
+    }
+    return maxProgress(subjectKey, unitName) >= total;
   }
 
   function markPlanned(subjectKey, unitName, hour) {
@@ -322,6 +354,15 @@ function collectMismatchWarnings_(masterIndex, history, warnings) {
       const hu = h.units[nameKey];
       const mu = sm.byName[nameKey];
       if (!mu) return;
+      if (isMasterUnitSkipped_(mu)) {
+        // 「指導しない」と決めた単元に週案の記入がある。総時数（0）との差を
+        // 不一致として並べても直しようがないので、どう直すかのほうを伝える。
+        if (hu.maxHour > 0) {
+          addWarning_(warnings, subjectKey + '「' + mu.name + '」: 「指導しない（全0時間）」に設定されていますが、週案には'
+            + hu.maxHour + '時間目まで入っています。指導するなら単元マスタの総時数を戻してください。');
+        }
+        return;
+      }
       // 総時数を正とするので、警告の基準もマスタの総時数（未設定なら行数）に合わせる
       const masterTotal = (mu.declaredTotal || 0) || (mu.maxHourRow || 0);
       if (!masterTotal) return;

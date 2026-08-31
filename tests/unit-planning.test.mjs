@@ -775,3 +775,217 @@ test('短く閉じた単元に「行が足りない」の印を付けない', ()
   ];
   assert.equal(findUnit(payloadFor(context, short, []), '国語', '行が足りない').totalMismatch, true);
 });
+
+// ===== 「指導しない（総時数 0）」の単元 =====
+//
+// 週案の単元ピッカーから「まとめて終了にする」で未指導の単元を終了にすると、
+// 単元マスタの総時数へ 0 が入る。これは「今年はこの単元を指導しない」の印で、
+// 空欄（＝まだ決めていない）とは別物として扱う。ここを取り違えると、
+// 終了にしたはずの単元へ自動入力が何度でも戻ってくる。
+
+const SKIP_MASTER = [
+  ['教科', '単元名', '総時間数', '何時間目'],
+  ['国語', 'やらない単元', 0, 1],
+  ['国語', 'やらない単元', 0, 2],
+  ['国語', 'つぎの単元', 2, 1],
+  ['国語', 'つぎの単元', 2, 2],
+  // 総時数が空欄。これは「未設定」なので、これまでどおり行数で補う
+  ['国語', '総時数なし', '', 1],
+  ['国語', '総時数なし', '', 2]
+];
+
+test('総時数 0 の単元は、1時間も入っていなくても指導済みとして扱う', () => {
+  const context = loadContext();
+  const unit = findUnit(payloadFor(context, SKIP_MASTER, []), '国語', 'やらない単元');
+  assert.equal(unit.skipped, true);
+  assert.equal(unit.status, 'done');
+  assert.equal(unit.effectiveTotal, 0, '行数（2）で埋め戻すと、また未消化に戻ります');
+  assert.equal(unit.isNext, false);
+});
+
+test('総時数が空欄の単元は「指導しない」ではない（これまでどおり行数で補う）', () => {
+  const context = loadContext();
+  const unit = findUnit(payloadFor(context, SKIP_MASTER, []), '国語', '総時数なし');
+  assert.equal(unit.skipped, false);
+  assert.equal(unit.status, 'untaught');
+  assert.equal(unit.effectiveTotal, 2);
+});
+
+test('「次はここから」は、指導しない単元を飛ばして次の単元を指す', () => {
+  const context = loadContext();
+  const payload = payloadFor(context, SKIP_MASTER, []);
+  assert.equal(payload.subjects['国語'].nextUnitName, 'つぎの単元');
+});
+
+test('自動入力は、指導しない単元へ戻らない', () => {
+  const context = loadContext();
+  const masterIndex = context.buildMasterIndex_(SKIP_MASTER);
+  const tracker = context.createProgressTracker_(masterIndex, {});
+  const next = context.determineNextLessonSmart_('国語', null, masterIndex, tracker, []);
+  assert.equal(next.unitName, 'つぎの単元');
+  assert.equal(next.currentHour, 1);
+});
+
+test('一部の行にだけ 0 が入っている単元は「指導しない」と読まない', () => {
+  const context = loadContext();
+  // 打ち間違い・書きかけを「指導しない」と取り違えると、単元が黙って消える
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目'],
+    ['国語', '書きかけ', 0, 1],
+    ['国語', '書きかけ', 3, 2],
+    ['国語', '書きかけ', 3, 3]
+  ];
+  const unit = findUnit(payloadFor(context, master, []), '国語', '書きかけ');
+  assert.equal(unit.skipped, false);
+  assert.equal(unit.effectiveTotal, 3);
+  assert.equal(unit.status, 'untaught');
+});
+
+test('指導しない単元に週案の記入があれば、直し方を添えて知らせる', () => {
+  const context = loadContext();
+  const payload = payloadFor(context, SKIP_MASTER, [
+    [[2026, 3, 10], '国語', 'やらない単元 1/2']
+  ]);
+  const warning = host(payload.warnings).find(w => w.includes('やらない単元'));
+  assert.ok(warning, '週案に入っているのに何も言わないと、消えたように見えます');
+  assert.ok(warning.includes('総時数を戻して'), '直し方が書かれていません');
+});
+
+test('指導しない単元は、教科の単元時数計に数えない', () => {
+  const context = loadContext();
+  const result = analyze(context, [
+    ['教科', '単元名', '総時間数', '何時間目', '活動'],
+    ['国語', 'やる', 3, 1, 'a'],
+    ['国語', 'やる', 3, 2, 'b'],
+    ['国語', 'やる', 3, 3, 'c'],
+    ['国語', 'やらない', 0, 1, 'd'],
+    ['国語', 'やらない', 0, 2, 'e']
+  ]);
+  const byName = Object.fromEntries(result.units.map((u) => [u.unitName, u]));
+  assert.equal(byName['やらない'].skipped, true);
+  assert.deepEqual(host(byName['やらない'].issues), [], '0 は不整合ではありません');
+  assert.equal(result.subjectTotals[0].unitHoursTotal, 3,
+    '行数で数えると年間の合計が実態より膨らみます');
+});
+
+test('修復しても「指導しない」の印は消えず、行も消えない', () => {
+  const context = loadContext();
+  // 何時間目が重複している＝修復の対象。総時数は 0 のまま残さなければならない
+  const master = [
+    ['教科', '単元名', '総時間数', '何時間目', '活動'],
+    ['国語', 'やらない', 0, 1, 'a'],
+    ['国語', 'やらない', 0, 1, 'b']
+  ];
+  const analysis = analyze(context, master);
+  assert.equal(analysis.units[0].repairPlan.totalHours, 2, '行は2本のまま');
+  assert.equal(analysis.units[0].repairPlan.declaredTotal, 0, '総時数は 0 のまま');
+
+  const built = context.buildRepairedMasterRows_(master, analysis, [
+    { subject: '国語', unitName: 'やらない' }
+  ]);
+  const rows = host(built.rows).filter((r) => r[1] === 'やらない');
+  assert.equal(rows.length, 2, '総時数 0 を行数と読むと、単元の行がまるごと消えます');
+  assert.deepEqual(rows.map((r) => r[2]), [0, 0]);
+  assert.deepEqual(rows.map((r) => r[3]), [1, 2]);
+  assert.deepEqual(rows.map((r) => r[4]), ['a', 'b'], '学習活動は失われない');
+});
+
+// ===== まとめて終了にする／指導を再開する =====
+
+const CLOSE_MASTER = [
+  ['教科', '単元名', '総時間数', '何時間目', '活動'],
+  ['国語', '指導中', 5, 1, 'a'],
+  ['国語', '指導中', 5, 2, 'b'],
+  ['国語', '指導中', 5, 3, 'c'],
+  ['国語', '指導中', 5, 4, 'd'],
+  ['国語', '指導中', 5, 5, 'e'],
+  ['国語', '未指導', 2, 1, 'f'],
+  ['国語', '未指導', 2, 2, 'g'],
+  ['国語', 'やらない', 0, 1, 'h'],
+  ['国語', 'やらない', 0, 2, 'i']
+];
+
+const CLOSE_PLANNED = {
+  '国語': { units: { '指導中': { displayName: '指導中', maxHour: 3, cellTotalMax: 5, taught: {} } } }
+};
+
+const planClosures = (context, names, mode) =>
+  context.p4PlanUnitClosures_(CLOSE_MASTER, CLOSE_PLANNED, '国語', names, mode);
+
+test('指導途中の単元は週案に入っている時数で、未指導の単元は0時間で終了になる', () => {
+  const context = loadContext();
+  const plan = planClosures(context, ['指導中', '未指導']);
+  const byName = Object.fromEntries(host(plan.items).map((x) => [x.unitName, x]));
+
+  assert.equal(byName['指導中'].totalHours, 3, '週案は3時間目まで');
+  assert.equal(byName['指導中'].previousTotal, 5);
+  assert.equal(byName['指導中'].changed, true);
+  assert.deepEqual(host(byName['指導中'].rowNumbers), [2, 3, 4, 5, 6], '同じ単元の行すべてを直す');
+
+  assert.equal(byName['未指導'].totalHours, 0, '1時間も入っていない単元は「指導しない」');
+  assert.equal(byName['未指導'].changed, true);
+  assert.equal(plan.changedCount, 2);
+});
+
+test('終了にする時数は、クライアントの言い値ではなく週案から数え直す', () => {
+  const context = loadContext();
+  // 週案に何も入っていない状態で「指導中」を渡しても、3時間にはならない
+  const plan = context.p4PlanUnitClosures_(CLOSE_MASTER, {}, '国語', ['指導中']);
+  assert.equal(host(plan.items)[0].totalHours, 0);
+});
+
+test('すでにその時数になっている単元は書き換えない', () => {
+  const context = loadContext();
+  const plan = planClosures(context, ['やらない']);
+  assert.equal(host(plan.items)[0].changed, false);
+  assert.equal(plan.changedCount, 0);
+});
+
+test('同じ単元を2回渡しても1回だけ扱い、マスタに無い単元は理由を返す', () => {
+  const context = loadContext();
+  const plan = planClosures(context, ['未指導', '未指導', '幻の単元']);
+  assert.equal(plan.items.length, 2);
+  const missing = host(plan.items).find((x) => x.error);
+  assert.ok(missing.error.includes('幻の単元'));
+  assert.equal(missing.changed, false);
+  assert.equal(plan.changedCount, 1);
+});
+
+test('単元名の表記がゆれていても同じ単元として終了にする', () => {
+  const context = loadContext();
+  const plan = planClosures(context, ['　未 指導 ']);
+  assert.equal(host(plan.items)[0].unitName, '未指導', 'マスタの表記を返す');
+  assert.equal(host(plan.items)[0].changed, true);
+});
+
+test('指導を再開すると、総時数が行数へ戻る', () => {
+  const context = loadContext();
+  const plan = planClosures(context, ['やらない'], 'reopen');
+  const item = host(plan.items)[0];
+  assert.equal(item.totalHours, 2);
+  assert.equal(item.changed, true);
+});
+
+test('「指導しない」になっていない単元は再開の対象にしない', () => {
+  const context = loadContext();
+  const plan = planClosures(context, ['指導中'], 'reopen');
+  const item = host(plan.items)[0];
+  assert.equal(item.changed, false);
+  assert.ok(item.error.includes('指導しない'));
+});
+
+test('まとめて終了にした結果は、件数の分かる知らせにまとまる', () => {
+  const context = loadContext();
+  const one = context.p4DescribeUnitClosures_(planClosures(context, ['指導中']).items, 'close');
+  assert.ok(one.includes('「指導中」'), one);
+  assert.ok(one.includes('全3時間'), one);
+
+  const many = context.p4DescribeUnitClosures_(planClosures(context, ['指導中', '未指導']).items, 'close');
+  assert.ok(many.includes('2単元'), many);
+
+  const none = context.p4DescribeUnitClosures_(planClosures(context, ['やらない']).items, 'close');
+  assert.ok(none.includes('すでに'), none);
+
+  const reopened = context.p4DescribeUnitClosures_(planClosures(context, ['やらない'], 'reopen').items, 'reopen');
+  assert.ok(reopened.includes('指導を再開'), reopened);
+});
