@@ -1734,10 +1734,14 @@
         width: 52px;
     }
 
+    /* 日付は「9/14」のように 0 を落として出す（App_Js_06_Newsletter.html の schedDateLabel_）。
+       大きさは時間割ブロックの「日付」で選べる。実際の px は span の inline style で入る
+       （Classroom への書き出しは CSS を連れていけないため、クラスだけでは効かない）。
+       ここの値は inline style が無いときの受け皿。
+       薄い白（opacity .85）は濃い帯の上で読みにくかったので不透明に戻してある。 */
     .nw-sched-date {
-        font-size: 0.65rem;
+        font-size: 0.8rem;
         font-weight: 400;
-        opacity: 0.85;
     }
 
     .nw-schedule-block td {
@@ -2396,6 +2400,108 @@
 
         .nw-col-cell {
             border-style: none !important;
+        }
+    }
+
+    /* --- 画面そのものが刷られたときの保険 ---
+       週案も学級通信も、印刷は専用の iframe に紙用の文書を組み立ててから刷る。
+       だが Ctrl+P やブラウザのメニュー、印刷ダイアログの再実行から刷られると、
+       紙に出るのは iframe ではなくこの画面の文書になる。
+       画面は #app を 100dvh・overflow:hidden に閉じこめ、内側のペインを
+       スクロールさせる作りなので、そのまま刷ると「いま見えている1画面ぶん」だけが
+       出て、下は黙って切り落とされる。印刷プレビューに画面が切れて出るのはこれ。
+       紙のときだけ高さの縛りと内側スクロールを外し、中身を紙へ流し込む。 */
+    @media print {
+
+        /* ダークテーマのまま刷ると、薄い文字色が白い紙に乗って読めなくなる。
+           紙のときだけ明るい側の色に戻す。ダークを当てている 2 つの規則
+           （:root[data-theme="dark"] と自動ダークの :root:not([data-theme="light"])）と
+           同じ強さで、あとに書いてあるぶんこちらが勝つ。
+           値は上の :root（ライト）と同じもの。ズレは tests/print-autofit.test.mjs が見ている。 */
+        :root[data-theme="dark"],
+        :root:not([data-theme="light"]) {
+            --primary-light: #e8f0fe;
+            --surface: #ffffff;
+            --surface-2: #f8f9fa;
+            --surface-3: #f1f3f4;
+            --border: #dadce0;
+            --text-main: #202124;
+            --text-sub: #5f6368;
+            --text-hint: #686c70;
+            --primary-text: #1461c8;
+            --secondary-text: #137746;
+            --danger-text: #c5221f;
+            --warning-text: #a34700;
+            --col-sun-text: #c62828;
+            --bg-card: #ffffff;
+            --surface-hover: #e8eaed;
+            --danger-light: #fce8e6;
+            --warning-light: #fef7e0;
+            --success-light: #e6f4ea;
+            --cell-today-bg: #fafcff;
+            --cell-today-border: #b3cef5;
+            --cell-sat-bg: #f8fbff;
+            --cell-sun-bg: #fff8f8;
+            --cell-holiday-bg: #fdecef;
+            --col-sat: #1565c0;
+            --col-holiday: #c62828;
+            --col-event: #d32f2f;
+            --kbd-bg: #f5f5f5;
+            --kbd-border: #ccc;
+            --kbd-text: #333;
+            --hover-soft: #f0f0f0;
+            --row-edit-bg: #fffde7;
+        }
+
+        html,
+        body {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            background: #fff !important;
+            color: #202124 !important;
+        }
+
+        #app {
+            display: block !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+        }
+
+        .view {
+            min-height: 0 !important;
+        }
+
+        /* 表示中のビューだけを、紙の高さに縛られない普通のブロックとして流す */
+        .view.active {
+            display: block !important;
+            flex: none !important;
+            overflow: visible !important;
+        }
+
+        /* 内側でスクロールしている箱。ここを開けないと下端が切れたまま出る */
+        .plan-layout,
+        .hours-content,
+        .nw-page-scroll,
+        .integration-body,
+        .file-list-container,
+        .pdf-queue-list,
+        .weekly-task-sidebar-content {
+            overflow: visible !important;
+            max-height: none !important;
+            height: auto !important;
+        }
+
+        /* 押すためのもの・浮かせているものは紙に出さない。
+           とくにヘッダーは position:sticky なので、残すと各ページの先頭に重なる。 */
+        .app-header,
+        .weekly-task-sidebar,
+        .nw-block-palette,
+        #toastStack,
+        .swal2-container,
+        #printFrameHost {
+            display: none !important;
         }
     }
 

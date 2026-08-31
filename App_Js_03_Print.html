@@ -418,21 +418,29 @@
             btn.innerHTML = '<span class="material-symbols-outlined fs-6">hourglass_empty</span> 準備中...';
         }
 
+        // display:none だと要素がレイアウトを持たず高さ測定(scrollHeight)が0になり自動縮小が効かない。
+        // レイアウトを保ったまま画面から隠す必要がある。横幅は印刷可能領域(A4縦, 左右10mm余白)に合わせる。
+        //
+        // 以前は iframe 自身を left:-9999px に飛ばしていた。position:fixed の箱を画面の外へ置くと、
+        // 実装によってはスクロールできる範囲がそこまで広がる。印刷ダイアログを開いた拍子に
+        // 画面が横へ飛び、ダイアログの下でアプリが切れて見える原因になる。
+        // 代わりに「大きさ0・overflow:hidden の入れ物」に入れ、画面の左上で切り落とす。
+        // iframe の中のレイアウトは外側の切り落としに左右されないので、実測はそのまま効く。
+        var printHost = document.getElementById('printFrameHost');
+        if (!printHost) {
+            printHost = document.createElement('div');
+            printHost.id = 'printFrameHost';
+            document.body.appendChild(printHost);
+        }
         var printFrame = document.getElementById('printFrame');
         if (!printFrame) {
             printFrame = document.createElement('iframe');
             printFrame.id = 'printFrame';
-            document.body.appendChild(printFrame);
         }
-        // display:none だと要素がレイアウトを持たず高さ測定(scrollHeight)が0になり自動縮小が効かない。
-        // オフスクリーンに配置してレイアウトを保ちつつ画面外に隠す。横幅は印刷可能領域(A4縦, 左右10mm余白)に合わせる。
-        printFrame.style.display = 'block';
-        printFrame.style.position = 'fixed';
-        printFrame.style.left = '-9999px';
-        printFrame.style.top = '0';
-        printFrame.style.width = '190mm';
-        printFrame.style.height = '600mm';
-        printFrame.style.border = '0';
+        if (printFrame.parentNode !== printHost) printHost.appendChild(printFrame);
+        printHost.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;'
+            + 'overflow:hidden;border:0;pointer-events:none;z-index:-1;';
+        printFrame.style.cssText = 'display:block;width:190mm;height:600mm;border:0;';
 
         var doc = printFrame.contentWindow.document;
         doc.open();
@@ -905,6 +913,12 @@
         try {
             printFrame.contentWindow.onbeforeprint = function () {
                 try { fitPagesToPrintArea(); } catch (e) { /* 失敗時はそのまま印刷 */ }
+            };
+            // 刷り終わったら入れ物ごと畳む。次に刷るときは冒頭で組み立て直すので、
+            // 測り終えた枠を画面に残す理由は無い。print() がダイアログを待たずに返る
+            // 環境があるので、畳むのは afterprint だけに任せる（早く畳むとプレビューが空になる）。
+            printFrame.contentWindow.onafterprint = function () {
+                try { printHost.style.display = 'none'; } catch (e) { /* 実害は無い */ }
             };
         } catch (e) { /* onbeforeprint 非対応環境は素通し */ }
 

@@ -304,3 +304,80 @@ test('余りを測るため、拡大するページだけ高さを auto にす�
   // height:100% のままだと scrollHeight が最低でもページ高さを返し、余りが測れない
   assert.match(print, /fit\.style\.height = canGrow \? 'auto' : '100%'/);
 });
+
+// ===== 印刷ダイアログの下でアプリが切れて見える件 =====
+
+const appCss = read('App_Css.html');
+const newsletter = read('App_Js_06_Newsletter.html');
+
+test('測定用の枠を画面の外へ飛ばさない（スクロールできる範囲を広げない）', () => {
+  // position:fixed の箱を left:-9999px へ置くと、実装によってはそこまでスクロールできる
+  // 範囲が広がる。印刷ダイアログを開いた拍子に画面が横へ飛び、ダイアログの下で
+  // アプリが切れて見える。大きさ0・overflow:hidden の入れ物で左上に切り落とす。
+  assert.doesNotMatch(print, /style\.left = '-9999px'/,
+    '測定用 iframe がまだ画面外へ飛ばされている');
+  assert.doesNotMatch(newsletter, /top:-10000px;left:-10000px/,
+    '学級通信の印刷用 iframe がまだ画面外へ飛ばされている');
+  for (const [name, src] of [['週案', print], ['学級通信', newsletter]]) {
+    assert.match(src, /position:fixed;top:0;left:0;width:0;height:0;/,
+      `${name}: 印刷用 iframe を大きさ0の入れ物に入れていない`);
+    assert.match(src, /overflow:hidden;/, `${name}: 入れ物で切り落としていない`);
+  }
+});
+
+test('枠は大きさを保ったまま隠す（display:none にすると高さが測れない）', () => {
+  // 実測は iframe の中のレイアウトで行う。外側の切り落としは中に影響しない
+  assert.match(print, /printFrame\.style\.cssText = 'display:block;width:190mm;height:600mm/);
+});
+
+test('刷り終わったら測定用の枠を畳む', () => {
+  // print() がダイアログを待たずに返る環境があるので、畳むのは afterprint に任せる
+  assert.match(print, /onafterprint = function \(\) \{[\s\S]*?printHost\.style\.display = 'none'/);
+  assert.doesNotMatch(print, /print\(\);\s*\n\s*try \{ printHost\.style\.display = 'none'/,
+    'print() の直後に畳むとプレビューが空になる環境がある');
+});
+
+test('画面そのものが刷られても切り落とされない', () => {
+  // 週案も学級通信も専用 iframe で刷るが、Ctrl+P やブラウザのメニューから刷られると
+  // 紙に出るのは画面の文書のほう。#app は 100dvh・overflow:hidden に閉じこめて
+  // 内側をスクロールさせる作りなので、そのままだと1画面ぶんだけが出て下は消える。
+  assert.match(appCss, /#app \{[\s\S]*?height: 100dvh;[\s\S]*?overflow: hidden;/,
+    '前提が変わっている（#app が 100dvh でなくなった）ので、この検査を見直すこと');
+  const printBlocks = appCss.match(/@media print \{[\s\S]*?\n    \}/g) || [];
+  const joined = printBlocks.join('\n');
+  assert.match(joined, /#app \{[\s\S]*?height: auto !important;[\s\S]*?overflow: visible !important;/,
+    '紙のときに #app の高さと内側スクロールを外していない');
+  assert.match(joined, /\.view\.active \{[\s\S]*?overflow: visible !important;/,
+    '紙のときにビューの内側スクロールを外していない');
+  assert.match(joined, /#printFrameHost \{[\s\S]*?display: none !important;/,
+    '測定用の枠を紙から外していない（余計な空ページになる）');
+});
+
+test('紙ではダークテーマの色を明るい側へ戻す。値はライトの正本と一致させる', () => {
+  // 薄い文字色のまま白い紙に刷ると読めない。@media print で戻しているが、
+  // 値を写している以上ズレる。ここで :root（ライト）と突き合わせて固定する。
+  const rootLight = /^    :root \{\n([\s\S]*?)^    \}$/m.exec(appCss);
+  assert.ok(rootLight, ':root（ライト）のトークン定義が見つからない');
+  const light = Object.fromEntries(
+    [...rootLight[1].matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(m => [m[1], m[2].trim()]));
+
+  // ダークを当てている規則が上書きしているトークン（影・オーバーレイは紙に出ないので除く）
+  const darkBlocks = [...appCss.matchAll(/:root(?:\[data-theme="dark"\]|:not\(\[data-theme="light"\]\)) \{\n([\s\S]*?)\n\s*\}/g)];
+  assert.ok(darkBlocks.length >= 2, 'ダークのトークン定義が見つからない');
+
+  const printBlock = /@media print \{\n([\s\S]*?)\n    \}\n/.exec(
+    appCss.slice(appCss.indexOf('画面そのものが刷られたときの保険')));
+  assert.ok(printBlock, '紙用のトークン戻しが見つからない');
+  const reset = Object.fromEntries(
+    [...printBlock[1].matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(m => [m[1], m[2].trim()]));
+
+  const skip = /^--(shadow|overlay)/;
+  for (const [, body] of darkBlocks) {
+    for (const [, name] of body.matchAll(/(--[\w-]+):/g)) {
+      if (skip.test(name)) continue;
+      assert.ok(name in reset, `${name} が紙で明るい側に戻されていない`);
+      assert.equal(reset[name], light[name],
+        `${name} の紙用の値が :root（ライト）とズレている`);
+    }
+  }
+});
