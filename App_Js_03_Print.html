@@ -145,6 +145,12 @@
     var AUTOFIT_SAFETY_MM_MOBILE = 8;
     var MM_TO_PX = 96 / 25.4;
 
+    // 差し替えたタブの題を、念のため戻すまでの時間。印刷ダイアログを閉じたら
+    // afterprint で戻すので、ここに当たるのは afterprint が来ない環境だけ。
+    // ファイル名は印刷プレビューが開いた時点で決まっているので、
+    // ダイアログを開いたまま時間切れになっても、出てくる名前は変わらない。
+    var HOST_TITLE_RESTORE_MS = 60000;
+
     // 測る前に「実際に効かせておく」書体。書体は自己ホスト(App_Fonts.html)なので
     // 外へ取りにはいかないが、使われるまで読み込みは始まらないので名指しで要求する。
     var PRINT_FONT_FAMILY = 'Zen Maru Gothic';
@@ -226,6 +232,73 @@
             if (fitsAt(mid) === true) lo = mid; else hi = mid;
         }
         return lo; // 必ず「収まる側」を返す
+    }
+
+    /**
+     * 画面のタブに出ている題を、刷るあいだだけ差し替える。戻す関数を返す。
+     *
+     * ブラウザによっては、刷る文書（iframe）ではなく、いちばん外側のページの題を
+     * ファイル名に使う。そちらの環境でも週の名前が付くようにするための差し替えで、
+     * 印刷が終わったら必ず元に戻す（戻し忘れるとタブの名前が変わったままになる）。
+     *
+     * @param {string} newTitle 刷るあいだだけ入れておく題
+     * @return {function()} 元に戻す関数。二度呼んでも戻すのは一度だけ
+     */
+    function swapHostTitle_(newTitle) {
+        var noop = function () { };
+        var prev;
+        try { prev = document.title; } catch (e) { return noop; }
+        var done = false;
+        var restore = function () {
+            if (done) return;
+            done = true;
+            try { document.title = prev; } catch (e) { /* 戻せなくても印刷そのものは済んでいる */ }
+        };
+        try { document.title = newTitle; } catch (e) { return noop; }
+        setTimeout(restore, HOST_TITLE_RESTORE_MS);
+        return restore;
+    }
+
+    /**
+     * 印刷文書の題（＝「PDFに保存」したときにブラウザが出してくる既定のファイル名）を作る。
+     *
+     * 週案は毎週刷るものなので、名前が同じだと保存先で「(1)」「(2)」が並び、
+     * 開くまでどの週か分からない。名前だけで「いつの週か」が分かるようにする。
+     *
+     * ⚠️ 日付の区切りに「/」は使えない。ブラウザは題をそのままファイル名にするとき、
+     * ファイル名に使えない文字（/ ? : * " < > |）を機械的に置き換えるので、
+     * 「8/31-9/6」と書いても保存されるのは「8-31-9-6」のような読めないものになる。
+     * 「8月31日-9月6日」なら、どの OS でもそのまま残る。同じ理由で、週番号が
+     * 取れなかったとき（'?'）は「第?週」を出さずに落とす。
+     *
+     * @param {number|string} weekNum 週番号（不明なときは '?' や空が来る）
+     * @param {Array<Object>} days 月曜から日曜までの日データ（date は 'yyyy/MM/dd'）
+     * @return {string} 例: 週案第23週(8月31日-9月6日)
+     */
+    function buildPrintDocTitle_(weekNum, days) {
+        var monthDay = function (d) {
+            if (!d || typeof d.date !== 'string') return '';
+            var p = d.date.split('/');
+            if (p.length < 3) return '';
+            var m = parseInt(p[1], 10);
+            var day = parseInt(p[2], 10);
+            if (!isFinite(m) || !isFinite(day) || m < 1 || day < 1) return '';
+            return m + '月' + day + '日';
+        };
+        var list = (days && days.length) ? days : [];
+        var first = '';
+        var last = '';
+        for (var i = 0; i < list.length; i++) {
+            var md = monthDay(list[i]);
+            if (!md) continue;
+            if (!first) first = md;
+            last = md;
+        }
+        var title = '週案';
+        var wn = (weekNum === 0 || weekNum) ? String(weekNum) : '';
+        if (wn && wn !== '?') title += '第' + wn + '週';
+        if (first) title += '(' + first + ((last && last !== first) ? '-' + last : '') + ')';
+        return title;
     }
 
     /**
@@ -474,7 +547,10 @@
         var weekNum = STATE.weekData.weekNum !== undefined && STATE.weekData.weekNum !== null ? STATE.weekData.weekNum : '?';
         var days = STATE.weekData.days || [];
 
-        var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>週案_第' + weekNum + '週</title>';
+        // 題は「PDFに保存」の既定のファイル名になる。どの週のものかが名前で分かるようにする
+        var docTitle = buildPrintDocTitle_(weekNum, days);
+
+        var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + escHtml(docTitle) + '</title>';
         // viewport が無いと、スマホの Chrome がこの文書を「PC向けページ」と誤認して
         // 文字を自動拡大する。測るときと刷るときでレイアウトを揃えるために必ず入れる。
         html += '<meta name="viewport" content="width=device-width, initial-scale=1">';
@@ -922,6 +998,7 @@
         };
 
         var printed = false;
+        var restoreHostTitle = function () { };
         var doPrint = function () {
             if (printed) return;
             printed = true;
@@ -930,6 +1007,10 @@
                 btn.disabled = false;
                 btn.innerHTML = '<span class="material-symbols-outlined fs-6">print</span> 印刷';
             }
+            // ファイル名の出どころはブラウザによって違う。刷る文書（iframe）の <title> を
+            // 見るものと、いちばん外側のページの題を見るもの（Chrome はこちら）がある。
+            // 外側の題は画面のタブに出ているものなので、刷るあいだだけ差し替えて必ず戻す。
+            restoreHostTitle = swapHostTitle_(docTitle);
             printFrame.contentWindow.focus();
             printFrame.contentWindow.print();
         };
@@ -945,6 +1026,7 @@
             // 環境があるので、畳むのは afterprint だけに任せる（早く畳むとプレビューが空になる）。
             printFrame.contentWindow.onafterprint = function () {
                 try { printHost.style.display = 'none'; } catch (e) { /* 実害は無い */ }
+                restoreHostTitle();
             };
         } catch (e) { /* onbeforeprint 非対応環境は素通し */ }
 
