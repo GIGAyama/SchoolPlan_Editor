@@ -984,20 +984,49 @@
     };
 
     // ---- 1年生用: 教科名ひらがな変換マップ ----
+    // ⚠️ 時数画面の既定教科（App_Js_05_Hours.html の defaultSubjects）と、
+    //    集約ルール（07_WebApp.gs の SUBJECT_AGGREGATION_RULES_）に出てくる名前を
+    //    ひととおり載せてある。ここに無い教科名は漢字のまま出るので、
+    //    1年生の通信で読めない行が混ざる。教科を増やしたらここにも足すこと。
+    //    中体育・外体育は体育館（なか）と校庭（そと）の体育。先生が書き分けた
+    //    区別を潰さないよう、合算せず字のとおりに読みを当てている。
     var SUBJECT_HIRAGANA_MAP = {
         '国語': 'こくご',
+        '社会': 'しゃかい',
         '算数': 'さんすう',
+        '理科': 'りか',
         '生活': 'せいかつ',
         '音楽': 'おんがく',
         '図画工作': 'ずがこうさく',
+        '家庭': 'かてい',
         '体育': 'たいいく',
+        '中体育': 'なかたいいく',
+        '外体育': 'そとたいいく',
+        '外国語': 'がいこくご',
+        '外国語活動': 'がいこくごかつどう',
         '道徳': 'どうとく',
+        '総合': 'そうごう',
+        '特活': 'とっかつ',
         '学活': 'がっかつ',
+        '学級活動': 'がっきゅうかつどう',
         '図工': 'ずこう',
         '図書': 'としょ',
         '書写': 'しょしゃ',
-        '行事': 'ぎょうじ'
+        '行事': 'ぎょうじ',
+        '給食': 'きゅうしょく',
+        '掃除': 'そうじ',
+        '委員会': 'いいんかい'
     };
+
+    /**
+     * いま「ひらがな表記」で出す学年かどうか。
+     * 教科名も表の見出しもこの1か所で判断する。別々に見ていると、
+     * 教科だけひらがなで見出しは漢字、というちぐはぐな表になる。
+     */
+    function schedUsesHiragana_() {
+        try { return STATE.grade === 1; } catch (e) { return false; }
+    }
+    NW.schedUsesHiragana_ = schedUsesHiragana_;
 
     /**
      * 学年が1年の場合、教科名をひらがなに変換します。
@@ -1006,7 +1035,7 @@
      * マップにない教科名はそのまま返します。
      */
     function subjectToHiragana(name) {
-        if (STATE.grade !== 1 || !name) return name;
+        if (!schedUsesHiragana_() || !name) return name;
         // 直接マッチする場合はそのまま返す
         if (SUBJECT_HIRAGANA_MAP[name]) return SUBJECT_HIRAGANA_MAP[name];
         // 分数付き複数教科の解析（例: "国語1/3　音楽2/3"）
@@ -1036,6 +1065,41 @@
         return m + '/' + d;
     }
     NW.schedDateLabel_ = schedDateLabel_;
+
+    // 表の左端の見出し。ひらがな表記の学年ではこちらを使う。
+    // 教科名だけひらがなにして「1校時」「持ち物」が漢字のままだと、
+    // 子どもには読めない行が混ざったままになる。
+    var SCHED_LABEL_HIRAGANA = {
+        '行事': 'ぎょうじ',
+        '中休み': 'なかやすみ',
+        '昼休み': 'ひるやすみ',
+        '放課後': 'ほうかご',
+        '宿題': 'しゅくだい',
+        '持ち物': 'もちもの'
+    };
+
+    /** 表の左端の見出しを、学年に応じた表記で返す */
+    function schedRowLabel_(kanji) {
+        if (!schedUsesHiragana_()) return kanji;
+        return SCHED_LABEL_HIRAGANA[kanji] || kanji;
+    }
+    NW.schedRowLabel_ = schedRowLabel_;
+
+    /**
+     * 校時の見出し。ひらがな表記の学年では「校時」ではなく、
+     * 子どもが使う言い方の「1じかんめ」にする。
+     */
+    function schedPeriodLabel_(n) {
+        return schedUsesHiragana_() ? (n + 'じかんめ') : (n + '校時');
+    }
+    NW.schedPeriodLabel_ = schedPeriodLabel_;
+
+    // 左端の列の幅。ひらがなは字数が増える（「なかやすみ」「1じかんめ」で5字）ので、
+    // 漢字のときの 52px では溢れる。見出しは折り返さない（white-space:nowrap）ため、
+    // 幅が足りないと列からはみ出したまま出る。
+    // セルの左右余白 4px ずつを引いた中身の幅で、いちばん長い見出しが収まること。
+    // tests/newsletter-schedule-block.test.mjs が実ブラウザで測って見張っている。
+    var SCHED_LABEL_COL_W = { kanji: 52, hiragana: 76 };
 
     // 見出し帯の既定色（画面CSSの var(--primary) と同じ）。
     // ここは読み込み時の既定として使うだけなので、宣言がブロック生成より
@@ -1121,7 +1185,11 @@
             return '<span class="nw-sched-date" style="' + dateStyle + '">'
                 + escHtml(schedDateLabel_(day.date)) + '</span>';
         };
-        var html = '<table><thead><tr><th class="nw-sched-label-col" style="' + headStyle + '"></th>';
+        // 幅は inline style で入れる。CSS を連れていけない Classroom 書き出しでも、
+        // ひらがなの見出しが列から溢れないようにするため
+        var labelColW = SCHED_LABEL_COL_W[schedUsesHiragana_() ? 'hiragana' : 'kanji'];
+        var html = '<table><thead><tr><th class="nw-sched-label-col" style="width:' + labelColW + 'px;'
+            + headStyle + '"></th>';
         days.forEach(function (day) {
             // 「日付を上に」を選ぶと日付と曜日が入れ替わる
             var top = opts.dateFirst ? dateHtml(day) : escHtml(day.dayLabel);
@@ -1145,7 +1213,7 @@
 
         // 1行ぶんの小さな行（休み時間・放課後・宿題・持ち物）
         function simpleRow(label, field) {
-            var row = '<tr><td class="nw-sched-label">' + label + '</td>';
+            var row = '<tr><td class="nw-sched-label">' + escHtml(schedRowLabel_(label)) + '</td>';
             days.forEach(function (day, di) {
                 var val = getCellVal(field + '_' + di, day[field] || '');
                 row += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'' + field + '\',' + di + ')">'
@@ -1157,7 +1225,7 @@
         // 校時の行。隠されている校時は出さない
         function periodRow(pp) {
             if (hiddenP.indexOf(pp + 1) >= 0) return '';
-            var row = '<tr><td class="nw-sched-label">' + (pp + 1) + '校時</td>';
+            var row = '<tr><td class="nw-sched-label">' + escHtml(schedPeriodLabel_(pp + 1)) + '</td>';
             days.forEach(function (day, di) {
                 var per = day.periods[pp];
                 var key = 'period_' + pp + '_' + di;
@@ -1169,7 +1237,7 @@
         }
 
         if (opts.showEvent !== false) {
-            html += '<tr><td class="nw-sched-label">行事</td>';
+            html += '<tr><td class="nw-sched-label">' + escHtml(schedRowLabel_('行事')) + '</td>';
             days.forEach(function (day, di) {
                 var val = getCellVal('event_' + di, day.event || '');
                 var ev = val ? '<span class="nw-sched-event">' + escHtml(val) + '</span>' : '';

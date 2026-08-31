@@ -165,3 +165,96 @@ test('選んだ色は紙にも出る（「背景のグラフィック」を切�
   assert.match(nl, /-webkit-print-color-adjust:exact;print-color-adjust:exact;/,
     '見出し帯に print-color-adjust が付いていない');
 });
+
+// ===== ひらがな表記の学年（1年）での見出し =====
+
+const extractObj = (source, name) => {
+  const start = source.indexOf(`var ${name} = {`);
+  assert.notEqual(start, -1, `var ${name} not found`);
+  const end = source.indexOf('\n    };', start);
+  assert.notEqual(end, -1, `var ${name} is unbalanced`);
+  return source.slice(start, end + 7);
+};
+
+const hiraMap = new Function(
+  `${extractObj(nl, 'SCHED_LABEL_HIRAGANA')}\nreturn SCHED_LABEL_HIRAGANA;`)();
+const subjMap = new Function(
+  `${extractObj(nl, 'SUBJECT_HIRAGANA_MAP')}\nreturn SUBJECT_HIRAGANA_MAP;`)();
+const labelColW = new Function(
+  `${/var SCHED_LABEL_COL_W = \{[^}]*\};/.exec(nl)[0]}\nreturn SCHED_LABEL_COL_W;`)();
+
+test('ひらがなにするかの判断は1か所。教科と見出しがちぐはぐにならない', () => {
+  // 教科だけひらがなで「1校時」「持ち物」が漢字のままだと、子どもは読めない行が混ざる
+  assert.match(nl, /function schedUsesHiragana_\(\)/);
+  assert.match(nl, /if \(!schedUsesHiragana_\(\) \|\| !name\) return name;/,
+    '教科名の判断が schedUsesHiragana_ を通っていない');
+  assert.doesNotMatch(nl, /STATE\.grade !== 1/,
+    '学年の判断が2か所に分かれている');
+});
+
+test('表の左端の見出しがひらがなになる', () => {
+  assert.deepEqual(hiraMap, {
+    '行事': 'ぎょうじ',
+    '中休み': 'なかやすみ',
+    '昼休み': 'ひるやすみ',
+    '放課後': 'ほうかご',
+    '宿題': 'しゅくだい',
+    '持ち物': 'もちもの'
+  });
+  // 表に出す見出しはすべて変換を通す
+  for (const m of nl.matchAll(/class="nw-sched-label">' \+ ([^+]+?) \+ '<\/td>/g)) {
+    assert.match(m[1], /schedRowLabel_|schedPeriodLabel_/,
+      `変換を通していない見出しがある: ${m[1]}`);
+  }
+});
+
+test('校時は「1じかんめ」。子どもが使う言い方にそろえる', () => {
+  const f = new Function(
+    `var STATE = {grade: 1};\n${extractFn(nl, 'schedUsesHiragana_')}\n${extractFn(nl, 'schedPeriodLabel_')}\nreturn schedPeriodLabel_;`)();
+  assert.equal(f(1), '1じかんめ');
+  const g = new Function(
+    `var STATE = {grade: 3};\n${extractFn(nl, 'schedUsesHiragana_')}\n${extractFn(nl, 'schedPeriodLabel_')}\nreturn schedPeriodLabel_;`)();
+  assert.equal(g(1), '1校時', '1年以外は今までどおり「校時」');
+});
+
+test('ひらがなの見出しが列からはみ出さない幅を取ってある', () => {
+  // 見出しは折り返さない（.nw-sched-label は white-space:nowrap）。
+  // 幅が足りないと、列をはみ出したまま紙にも出る。
+  const longest = Math.max(
+    ...Object.values(hiraMap).map(v => v.length),
+    ('6じかんめ').length);
+  // 0.72rem = 11.52px。かなはほぼ全角なので 1 文字 ≒ 字送り 1em で見積もる
+  const needed = longest * 11.52 + 8; // + セル左右の padding 4px ずつ
+  assert.ok(labelColW.hiragana >= needed,
+    `ひらがなの見出し列が狭い: ${labelColW.hiragana}px < ${Math.ceil(needed)}px`);
+  assert.equal(labelColW.kanji, 52, '漢字のときの幅は今までどおり');
+});
+
+test('幅は inline style で入る（CSSを連れていけない Classroom 書き出しでも効く）', () => {
+  assert.match(nl, /nw-sched-label-col" style="width:' \+ labelColW \+ 'px;/);
+});
+
+// ===== 教科名の変換もれ =====
+
+test('時数画面の既定教科がすべてひらがなに変換できる', () => {
+  // ここに無い教科は漢字のまま出て、1年生の通信に読めない行が混ざる
+  const hours = read('App_Js_05_Hours.html');
+  const defaults = /var defaultSubjects = \[([^\]]*)\]/.exec(hours);
+  assert.ok(defaults, 'defaultSubjects が見つからない');
+  const names = [...defaults[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+  const missing = names.filter(n => !subjMap[n]);
+  assert.deepEqual(missing, [], `ひらがなの読みが無い教科: ${missing.join('、')}`);
+});
+
+test('集約ルールに出てくる教科名もひらがなにできる（中体育・外体育など）', () => {
+  const webapp = read('07_WebApp.gs');
+  const rules = /const SUBJECT_AGGREGATION_RULES_ = \[([\s\S]*?)\];/.exec(webapp);
+  assert.ok(rules, 'SUBJECT_AGGREGATION_RULES_ が見つからない');
+  const names = [...rules[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+  const missing = [...new Set(names)].filter(n => !subjMap[n]);
+  assert.deepEqual(missing, [], `ひらがなの読みが無い教科: ${missing.join('、')}`);
+  // 体育館（なか）と校庭（そと）の書き分けは潰さない
+  assert.equal(subjMap['中体育'], 'なかたいいく');
+  assert.equal(subjMap['外体育'], 'そとたいいく');
+  assert.notEqual(subjMap['中体育'], subjMap['外体育']);
+});
