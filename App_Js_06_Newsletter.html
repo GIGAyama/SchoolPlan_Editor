@@ -174,13 +174,21 @@
                 block.weekData = data.weekData || null;
                 block.cellOverrides = data.cellOverrides || {};
                 block.options = {
+                    showEvent: true,
                     showRecess: true,
                     showAfterSchool: true,
                     showHomework: true,
                     showItems: true,
                     showSaturday: false,
                     hiddenPeriods: [],
-                    displayMode: 'subject'
+                    displayMode: 'subject',
+                    // 日付の大きさ: s / m / l / xl。既に保存してある通信には無いので、
+                    // 読み込み時はここの既定（m）が入る。
+                    dateSize: 'm',
+                    // 見出しの上段を日付にするか（既定は曜日が上＝これまでどおり）
+                    dateFirst: false,
+                    // 見出し帯の色。文字色は明るさから自動で決める
+                    headerColor: SCHED_HEADER_COLOR_DEFAULT
                 };
                 if (data.options) {
                     for (var k in data.options) block.options[k] = data.options[k];
@@ -1014,6 +1022,69 @@
         return name;
     }
 
+    /**
+     * 週案の日付 "2026/09/14" を、通信の見出し用に "9/14" へ直す。
+     * 月日の頭の 0 を落とすだけ。想定外の形（空・区切りが足りない）は素通しする。
+     */
+    function schedDateLabel_(dateStr) {
+        var raw = String(dateStr == null ? '' : dateStr);
+        var p = raw.split('/');
+        if (p.length < 3) return raw;
+        var m = parseInt(p[1], 10);
+        var d = parseInt(p[2], 10);
+        if (!isFinite(m) || !isFinite(d)) return raw.slice(5);
+        return m + '/' + d;
+    }
+    NW.schedDateLabel_ = schedDateLabel_;
+
+    // 見出し帯の既定色（画面CSSの var(--primary) と同じ）。
+    // ここは読み込み時の既定として使うだけなので、宣言がブロック生成より
+    // 後ろにあっても（同じスクリプトスコープの var なので）先に評価済みになる。
+    var SCHED_HEADER_COLOR_DEFAULT = '#1a73e8';
+
+    /**
+     * 見出し帯の上に載せる文字色を、帯の明るさから決める。
+     * 白と濃い灰のうち、コントラスト比の高いほうを返す（WCAG の相対輝度で計算）。
+     * 先生が選べる色は自由なので、白固定にすると薄い色を選んだ瞬間に読めなくなる。
+     */
+    function schedHeaderTextColor_(hex) {
+        var m = /^#?([0-9a-fA-F]{6})$/.exec(String(hex == null ? '' : hex).trim());
+        if (!m) return '#ffffff';
+        var n = parseInt(m[1], 16);
+        var lin = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(function (v) {
+            var c = v / 255;
+            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        });
+        var L = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+        var vsWhite = 1.05 / (L + 0.05);
+        var vsDark = (L + 0.05) / (0.0115 + 0.05); // #202124 の相対輝度
+        return vsWhite >= vsDark ? '#ffffff' : '#202124';
+    }
+    NW.schedHeaderTextColor_ = schedHeaderTextColor_;
+
+    // 日付の大きさの選択肢。px は span の inline style に入れる。
+    // クラスだけにすると、CSS を連れていけない Classroom 書き出しで効かない。
+    var SCHED_DATE_SIZES = [
+        { key: 's', label: '小', px: 10 },
+        { key: 'm', label: '中', px: 13 },
+        { key: 'l', label: '大', px: 16 },
+        { key: 'xl', label: '特大', px: 20 }
+    ];
+
+    function schedDateStyle_(key) {
+        var hit = null;
+        for (var i = 0; i < SCHED_DATE_SIZES.length; i++) {
+            if (SCHED_DATE_SIZES[i].key === key) { hit = SCHED_DATE_SIZES[i]; break; }
+        }
+        // 知らない値（古い保存データ・手で書き替えたもの）は既定の「中」に落とす
+        if (!hit) {
+            for (var j = 0; j < SCHED_DATE_SIZES.length; j++) {
+                if (SCHED_DATE_SIZES[j].key === 'm') { hit = SCHED_DATE_SIZES[j]; break; }
+            }
+        }
+        return 'font-size:' + hit.px + 'px;' + (hit.px >= 16 ? 'font-weight:600;' : '');
+    }
+
     // ---- Schedule table rendering (transposed: days=columns, periods=rows) ----
     NW.renderScheduleHTML = function (block) {
         var data = block.weekData || NW.scheduleData;
@@ -1039,9 +1110,23 @@
         }
 
         // Header row: blank + day columns
-        var html = '<table><thead><tr><th class="nw-sched-label-col"></th>';
+        // 帯の色は inline style で入れる。CSS を連れていけない Classroom 書き出しでも
+        // 効かせるため。print-color-adjust は、紙で「背景のグラフィック」を切っていても
+        // 帯の色を出すため（色を選べる機能なのに紙で白くなると意味が無い）。
+        var dateStyle = schedDateStyle_(opts.dateSize || 'm');
+        var headBg = opts.headerColor || SCHED_HEADER_COLOR_DEFAULT;
+        var headStyle = 'background:' + headBg + ';color:' + schedHeaderTextColor_(headBg)
+            + ';-webkit-print-color-adjust:exact;print-color-adjust:exact;';
+        var dateHtml = function (day) {
+            return '<span class="nw-sched-date" style="' + dateStyle + '">'
+                + escHtml(schedDateLabel_(day.date)) + '</span>';
+        };
+        var html = '<table><thead><tr><th class="nw-sched-label-col" style="' + headStyle + '"></th>';
         days.forEach(function (day) {
-            html += '<th>' + escHtml(day.dayLabel) + '<br><span class="nw-sched-date">' + escHtml(day.date.slice(5)) + '</span></th>';
+            // 「日付を上に」を選ぶと日付と曜日が入れ替わる
+            var top = opts.dateFirst ? dateHtml(day) : escHtml(day.dayLabel);
+            var bottom = opts.dateFirst ? escHtml(day.dayLabel) : dateHtml(day);
+            html += '<th style="' + headStyle + '">' + top + '<br>' + bottom + '</th>';
         });
         html += '</tr></thead><tbody>';
 
@@ -1051,72 +1136,55 @@
             return overrides.hasOwnProperty(key) ? overrides[key] : original;
         }
 
-        // Event row
-        html += '<tr><td class="nw-sched-label">行事</td>';
-        days.forEach(function (day, di) {
-            var val = getCellVal('event_' + di, day.event || '');
-            var ev = val ? '<span class="nw-sched-event">' + escHtml(val) + '</span>' : '';
-            html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'event\',' + di + ')">' + ev + '</td>';
-        });
-        html += '</tr>';
-
-        // Period rows (1-6), skip hidden
+        // 行の並びは週案の時程どおりにする。
+        // 行事／1／2／中休み／3／4／昼休み／5／6／放課後／宿題／持ち物。
+        // 以前は校時をまとめて出したあとに休み時間を並べていたので、
+        // 中休みと昼休みが表のいちばん下に来てしまい、時程として読めなかった。
+        // 休み時間は「校時が隠れていても本来の位置」に置く（時程は変わらないため）。
         var hiddenP = opts.hiddenPeriods || [];
-        for (var p = 0; p < 6; p++) {
-            if (hiddenP.indexOf(p + 1) >= 0) continue;
-            html += '<tr><td class="nw-sched-label">' + (p + 1) + '校時</td>';
-            (function (pp) {
-                days.forEach(function (day, di) {
-                    var per = day.periods[pp];
-                    var key = 'period_' + pp + '_' + di;
-                    if (overrides.hasOwnProperty(key)) {
-                        html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">' + escHtml(overrides[key]) + '</td>';
-                    } else {
-                        html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">' + cellContent(per) + '</td>';
-                    }
-                });
-            })(p);
-            html += '</tr>';
+
+        // 1行ぶんの小さな行（休み時間・放課後・宿題・持ち物）
+        function simpleRow(label, field) {
+            var row = '<tr><td class="nw-sched-label">' + label + '</td>';
+            days.forEach(function (day, di) {
+                var val = getCellVal(field + '_' + di, day[field] || '');
+                row += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'' + field + '\',' + di + ')">'
+                    + escHtml(val) + '</td>';
+            });
+            return row + '</tr>';
         }
 
-        // Optional rows
-        if (opts.showRecess) {
-            html += '<tr><td class="nw-sched-label">中休み</td>';
+        // 校時の行。隠されている校時は出さない
+        function periodRow(pp) {
+            if (hiddenP.indexOf(pp + 1) >= 0) return '';
+            var row = '<tr><td class="nw-sched-label">' + (pp + 1) + '校時</td>';
             days.forEach(function (day, di) {
-                var val = getCellVal('recess1_' + di, day.recess1 || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'recess1\',' + di + ')">' + escHtml(val) + '</td>';
+                var per = day.periods[pp];
+                var key = 'period_' + pp + '_' + di;
+                var body = overrides.hasOwnProperty(key) ? escHtml(overrides[key]) : cellContent(per);
+                row += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">'
+                    + body + '</td>';
             });
-            html += '</tr><tr><td class="nw-sched-label">昼休み</td>';
+            return row + '</tr>';
+        }
+
+        if (opts.showEvent !== false) {
+            html += '<tr><td class="nw-sched-label">行事</td>';
             days.forEach(function (day, di) {
-                var val = getCellVal('recess2_' + di, day.recess2 || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'recess2\',' + di + ')">' + escHtml(val) + '</td>';
+                var val = getCellVal('event_' + di, day.event || '');
+                var ev = val ? '<span class="nw-sched-event">' + escHtml(val) + '</span>' : '';
+                html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'event\',' + di + ')">' + ev + '</td>';
             });
             html += '</tr>';
         }
-        if (opts.showAfterSchool) {
-            html += '<tr><td class="nw-sched-label">放課後</td>';
-            days.forEach(function (day, di) {
-                var val = getCellVal('afterschool_' + di, day.afterschool || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'afterschool\',' + di + ')">' + escHtml(val) + '</td>';
-            });
-            html += '</tr>';
-        }
-        if (opts.showHomework) {
-            html += '<tr><td class="nw-sched-label">宿題</td>';
-            days.forEach(function (day, di) {
-                var val = getCellVal('homework_' + di, day.homework || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'homework\',' + di + ')">' + escHtml(val) + '</td>';
-            });
-            html += '</tr>';
-        }
-        if (opts.showItems) {
-            html += '<tr><td class="nw-sched-label">持ち物</td>';
-            days.forEach(function (day, di) {
-                var val = getCellVal('items_' + di, day.items || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'items\',' + di + ')">' + escHtml(val) + '</td>';
-            });
-            html += '</tr>';
-        }
+        html += periodRow(0) + periodRow(1);
+        if (opts.showRecess) html += simpleRow('中休み', 'recess1');
+        html += periodRow(2) + periodRow(3);
+        if (opts.showRecess) html += simpleRow('昼休み', 'recess2');
+        html += periodRow(4) + periodRow(5);
+        if (opts.showAfterSchool) html += simpleRow('放課後', 'afterschool');
+        if (opts.showHomework) html += simpleRow('宿題', 'homework');
+        if (opts.showItems) html += simpleRow('持ち物', 'items');
 
         html += '</tbody></table>';
 
@@ -1129,11 +1197,21 @@
             html += '<label><input type="checkbox"' + (checked ? ' checked' : '') + ' onchange="NW.toggleSchedPeriod(\'' + bid + '\',' + pi + ',this.checked)"> ' + pi + '</label>';
         }
         html += '<span style="color:var(--border);">|</span>'
+            + '<label><input type="checkbox"' + (opts.showEvent !== false ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showEvent\',this.checked)"> 行事</label>'
             + '<label><input type="checkbox"' + (opts.showRecess ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showRecess\',this.checked)"> 休み時間</label>'
             + '<label><input type="checkbox"' + (opts.showAfterSchool ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showAfterSchool\',this.checked)"> 放課後</label>'
             + '<label><input type="checkbox"' + (opts.showHomework ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showHomework\',this.checked)"> 宿題</label>'
             + '<label><input type="checkbox"' + (opts.showItems ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showItems\',this.checked)"> 持ち物</label>'
             + '<label><input type="checkbox"' + (opts.showSaturday ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showSaturday\',this.checked)"> 土曜日</label>'
+            + '<span style="color:var(--border);">|</span>'
+            + '<label>日付の大きさ: <select onchange="NW.setSchedDateSize(\'' + bid + '\',this.value)">'
+            + SCHED_DATE_SIZES.map(function (sz) {
+                return '<option value="' + sz.key + '"' + ((opts.dateSize || 'm') === sz.key ? ' selected' : '') + '>' + sz.label + '</option>';
+            }).join('')
+            + '</select></label>'
+            + '<label><input type="checkbox"' + (opts.dateFirst ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'dateFirst\',this.checked)"> 日付を上に</label>'
+            + '<label>見出しの色: <input type="color" class="nw-sched-color" value="' + headBg + '" onchange="NW.setSchedHeaderColor(\'' + bid + '\',this.value)"></label>'
+            + '<button type="button" class="nw-sched-color-reset" onclick="NW.setSchedHeaderColor(\'' + bid + '\',null)">既定の色</button>'
             + '<span style="color:var(--border);">|</span>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subject\')"> 教科のみ</label>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subjectUnit\')"> 教科+単元</label>'
@@ -1245,6 +1323,23 @@
         var block = NW.blocks.find(function (b) { return b.id === id; });
         if (!block) return;
         block.options[key] = val;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    NW.setSchedHeaderColor = function (id, color) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        // null を渡すと既定の青に戻す（色ピッカーからは元の値へ戻しにくいため）
+        block.options.headerColor = color || SCHED_HEADER_COLOR_DEFAULT;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    NW.setSchedDateSize = function (id, size) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        block.options.dateSize = size;
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
         if (el) el.innerHTML = NW.renderScheduleHTML(block);
     };
@@ -2346,7 +2441,7 @@
         + '.nw-schedule-block table{width:100%;border-collapse:collapse;font-size:0.78rem;table-layout:fixed;}'
         + '.nw-schedule-block th{background:#1a73e8;color:#fff;padding:5px 4px;text-align:center;font-weight:600;font-size:0.78rem;vertical-align:middle;}'
         + '.nw-sched-label-col{width:52px;}'
-        + '.nw-sched-date{font-size:0.65rem;font-weight:400;opacity:0.85;}'
+        + '.nw-sched-date{font-size:0.8rem;font-weight:400;}'
         + '.nw-schedule-block td{padding:4px;border:1px solid #dadce0;text-align:center;font-size:0.78rem;vertical-align:top;word-break:break-all;}'
         + '.nw-sched-label{background:#f1f3f4;font-weight:600;font-size:0.72rem;color:#5f6368;text-align:center;white-space:nowrap;}'
         + '.nw-sched-event{color:#d32f2f;font-size:0.7rem;font-weight:600;}'
@@ -2407,9 +2502,17 @@
     NW.printNewsletter = function () {
         if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
         var html = NW.buildPrintHTML();
+        // 画面の外(-10000px)へ飛ばすと、実装によってはスクロールできる範囲がそこまで広がり、
+        // 印刷ダイアログを開いた拍子に画面が飛んで、ダイアログの下でアプリが切れて見える。
+        // 大きさ0・overflow:hidden の入れ物に入れて画面の左上で切り落とす。
+        // iframe の中のレイアウトは外側の切り落としに左右されないので、紙の組み方は変わらない。
+        var host = document.createElement('div');
+        host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;'
+            + 'border:0;pointer-events:none;z-index:-1;';
         var iframe = document.createElement('iframe');
-        iframe.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:210mm;height:297mm;';
-        document.body.appendChild(iframe);
+        iframe.style.cssText = 'display:block;width:210mm;height:297mm;border:0;';
+        host.appendChild(iframe);
+        document.body.appendChild(host);
         var doc = iframe.contentDocument;
         doc.open();
         doc.write(html);
@@ -2417,7 +2520,7 @@
         iframe.onload = function () {
             setTimeout(function () {
                 iframe.contentWindow.print();
-                setTimeout(function () { document.body.removeChild(iframe); }, 1000);
+                setTimeout(function () { if (host.parentNode) host.parentNode.removeChild(host); }, 1000);
             }, 500);
         };
     };
