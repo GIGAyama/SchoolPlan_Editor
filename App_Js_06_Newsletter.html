@@ -184,7 +184,11 @@
                     displayMode: 'subject',
                     // 日付の大きさ: s / m / l / xl。既に保存してある通信には無いので、
                     // 読み込み時はここの既定（m）が入る。
-                    dateSize: 'm'
+                    dateSize: 'm',
+                    // 見出しの上段を日付にするか（既定は曜日が上＝これまでどおり）
+                    dateFirst: false,
+                    // 見出し帯の色。文字色は明るさから自動で決める
+                    headerColor: SCHED_HEADER_COLOR_DEFAULT
                 };
                 if (data.options) {
                     for (var k in data.options) block.options[k] = data.options[k];
@@ -1033,6 +1037,31 @@
     }
     NW.schedDateLabel_ = schedDateLabel_;
 
+    // 見出し帯の既定色（画面CSSの var(--primary) と同じ）。
+    // ここは読み込み時の既定として使うだけなので、宣言がブロック生成より
+    // 後ろにあっても（同じスクリプトスコープの var なので）先に評価済みになる。
+    var SCHED_HEADER_COLOR_DEFAULT = '#1a73e8';
+
+    /**
+     * 見出し帯の上に載せる文字色を、帯の明るさから決める。
+     * 白と濃い灰のうち、コントラスト比の高いほうを返す（WCAG の相対輝度で計算）。
+     * 先生が選べる色は自由なので、白固定にすると薄い色を選んだ瞬間に読めなくなる。
+     */
+    function schedHeaderTextColor_(hex) {
+        var m = /^#?([0-9a-fA-F]{6})$/.exec(String(hex == null ? '' : hex).trim());
+        if (!m) return '#ffffff';
+        var n = parseInt(m[1], 16);
+        var lin = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(function (v) {
+            var c = v / 255;
+            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        });
+        var L = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+        var vsWhite = 1.05 / (L + 0.05);
+        var vsDark = (L + 0.05) / (0.0115 + 0.05); // #202124 の相対輝度
+        return vsWhite >= vsDark ? '#ffffff' : '#202124';
+    }
+    NW.schedHeaderTextColor_ = schedHeaderTextColor_;
+
     // 日付の大きさの選択肢。px は span の inline style に入れる。
     // クラスだけにすると、CSS を連れていけない Classroom 書き出しで効かない。
     var SCHED_DATE_SIZES = [
@@ -1081,11 +1110,23 @@
         }
 
         // Header row: blank + day columns
+        // 帯の色は inline style で入れる。CSS を連れていけない Classroom 書き出しでも
+        // 効かせるため。print-color-adjust は、紙で「背景のグラフィック」を切っていても
+        // 帯の色を出すため（色を選べる機能なのに紙で白くなると意味が無い）。
         var dateStyle = schedDateStyle_(opts.dateSize || 'm');
-        var html = '<table><thead><tr><th class="nw-sched-label-col"></th>';
+        var headBg = opts.headerColor || SCHED_HEADER_COLOR_DEFAULT;
+        var headStyle = 'background:' + headBg + ';color:' + schedHeaderTextColor_(headBg)
+            + ';-webkit-print-color-adjust:exact;print-color-adjust:exact;';
+        var dateHtml = function (day) {
+            return '<span class="nw-sched-date" style="' + dateStyle + '">'
+                + escHtml(schedDateLabel_(day.date)) + '</span>';
+        };
+        var html = '<table><thead><tr><th class="nw-sched-label-col" style="' + headStyle + '"></th>';
         days.forEach(function (day) {
-            html += '<th>' + escHtml(day.dayLabel) + '<br><span class="nw-sched-date" style="' + dateStyle + '">'
-                + escHtml(schedDateLabel_(day.date)) + '</span></th>';
+            // 「日付を上に」を選ぶと日付と曜日が入れ替わる
+            var top = opts.dateFirst ? dateHtml(day) : escHtml(day.dayLabel);
+            var bottom = opts.dateFirst ? escHtml(day.dayLabel) : dateHtml(day);
+            html += '<th style="' + headStyle + '">' + top + '<br>' + bottom + '</th>';
         });
         html += '</tr></thead><tbody>';
 
@@ -1095,7 +1136,38 @@
             return overrides.hasOwnProperty(key) ? overrides[key] : original;
         }
 
-        // Event row（「行事」のチェックを外すと行ごと出さない）
+        // 行の並びは週案の時程どおりにする。
+        // 行事／1／2／中休み／3／4／昼休み／5／6／放課後／宿題／持ち物。
+        // 以前は校時をまとめて出したあとに休み時間を並べていたので、
+        // 中休みと昼休みが表のいちばん下に来てしまい、時程として読めなかった。
+        // 休み時間は「校時が隠れていても本来の位置」に置く（時程は変わらないため）。
+        var hiddenP = opts.hiddenPeriods || [];
+
+        // 1行ぶんの小さな行（休み時間・放課後・宿題・持ち物）
+        function simpleRow(label, field) {
+            var row = '<tr><td class="nw-sched-label">' + label + '</td>';
+            days.forEach(function (day, di) {
+                var val = getCellVal(field + '_' + di, day[field] || '');
+                row += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'' + field + '\',' + di + ')">'
+                    + escHtml(val) + '</td>';
+            });
+            return row + '</tr>';
+        }
+
+        // 校時の行。隠されている校時は出さない
+        function periodRow(pp) {
+            if (hiddenP.indexOf(pp + 1) >= 0) return '';
+            var row = '<tr><td class="nw-sched-label">' + (pp + 1) + '校時</td>';
+            days.forEach(function (day, di) {
+                var per = day.periods[pp];
+                var key = 'period_' + pp + '_' + di;
+                var body = overrides.hasOwnProperty(key) ? escHtml(overrides[key]) : cellContent(per);
+                row += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">'
+                    + body + '</td>';
+            });
+            return row + '</tr>';
+        }
+
         if (opts.showEvent !== false) {
             html += '<tr><td class="nw-sched-label">行事</td>';
             days.forEach(function (day, di) {
@@ -1105,64 +1177,14 @@
             });
             html += '</tr>';
         }
-
-        // Period rows (1-6), skip hidden
-        var hiddenP = opts.hiddenPeriods || [];
-        for (var p = 0; p < 6; p++) {
-            if (hiddenP.indexOf(p + 1) >= 0) continue;
-            html += '<tr><td class="nw-sched-label">' + (p + 1) + '校時</td>';
-            (function (pp) {
-                days.forEach(function (day, di) {
-                    var per = day.periods[pp];
-                    var key = 'period_' + pp + '_' + di;
-                    if (overrides.hasOwnProperty(key)) {
-                        html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">' + escHtml(overrides[key]) + '</td>';
-                    } else {
-                        html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">' + cellContent(per) + '</td>';
-                    }
-                });
-            })(p);
-            html += '</tr>';
-        }
-
-        // Optional rows
-        if (opts.showRecess) {
-            html += '<tr><td class="nw-sched-label">中休み</td>';
-            days.forEach(function (day, di) {
-                var val = getCellVal('recess1_' + di, day.recess1 || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'recess1\',' + di + ')">' + escHtml(val) + '</td>';
-            });
-            html += '</tr><tr><td class="nw-sched-label">昼休み</td>';
-            days.forEach(function (day, di) {
-                var val = getCellVal('recess2_' + di, day.recess2 || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'recess2\',' + di + ')">' + escHtml(val) + '</td>';
-            });
-            html += '</tr>';
-        }
-        if (opts.showAfterSchool) {
-            html += '<tr><td class="nw-sched-label">放課後</td>';
-            days.forEach(function (day, di) {
-                var val = getCellVal('afterschool_' + di, day.afterschool || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'afterschool\',' + di + ')">' + escHtml(val) + '</td>';
-            });
-            html += '</tr>';
-        }
-        if (opts.showHomework) {
-            html += '<tr><td class="nw-sched-label">宿題</td>';
-            days.forEach(function (day, di) {
-                var val = getCellVal('homework_' + di, day.homework || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'homework\',' + di + ')">' + escHtml(val) + '</td>';
-            });
-            html += '</tr>';
-        }
-        if (opts.showItems) {
-            html += '<tr><td class="nw-sched-label">持ち物</td>';
-            days.forEach(function (day, di) {
-                var val = getCellVal('items_' + di, day.items || '');
-                html += '<td class="nw-sched-small nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'items\',' + di + ')">' + escHtml(val) + '</td>';
-            });
-            html += '</tr>';
-        }
+        html += periodRow(0) + periodRow(1);
+        if (opts.showRecess) html += simpleRow('中休み', 'recess1');
+        html += periodRow(2) + periodRow(3);
+        if (opts.showRecess) html += simpleRow('昼休み', 'recess2');
+        html += periodRow(4) + periodRow(5);
+        if (opts.showAfterSchool) html += simpleRow('放課後', 'afterschool');
+        if (opts.showHomework) html += simpleRow('宿題', 'homework');
+        if (opts.showItems) html += simpleRow('持ち物', 'items');
 
         html += '</tbody></table>';
 
@@ -1187,6 +1209,9 @@
                 return '<option value="' + sz.key + '"' + ((opts.dateSize || 'm') === sz.key ? ' selected' : '') + '>' + sz.label + '</option>';
             }).join('')
             + '</select></label>'
+            + '<label><input type="checkbox"' + (opts.dateFirst ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'dateFirst\',this.checked)"> 日付を上に</label>'
+            + '<label>見出しの色: <input type="color" class="nw-sched-color" value="' + headBg + '" onchange="NW.setSchedHeaderColor(\'' + bid + '\',this.value)"></label>'
+            + '<button type="button" class="nw-sched-color-reset" onclick="NW.setSchedHeaderColor(\'' + bid + '\',null)">既定の色</button>'
             + '<span style="color:var(--border);">|</span>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subject\')"> 教科のみ</label>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subjectUnit\')"> 教科+単元</label>'
@@ -1298,6 +1323,15 @@
         var block = NW.blocks.find(function (b) { return b.id === id; });
         if (!block) return;
         block.options[key] = val;
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    NW.setSchedHeaderColor = function (id, color) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        // null を渡すと既定の青に戻す（色ピッカーからは元の値へ戻しにくいため）
+        block.options.headerColor = color || SCHED_HEADER_COLOR_DEFAULT;
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
         if (el) el.innerHTML = NW.renderScheduleHTML(block);
     };

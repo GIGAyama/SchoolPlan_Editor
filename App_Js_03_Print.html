@@ -20,6 +20,26 @@
         var storedFontSize = parseInt(storedOpts.fontSize, 10) || 10;
         var weekendNote = '土曜: ' + (STATE.showSat ? '含める' : '含めない') + ' ／ 日曜: ' + (STATE.showSun ? '含める' : '含めない');
 
+        // 印刷ダイアログはブラウザ自身のもので、アプリからは大きさも位置も動かせない。
+        // Chrome のそれには最低限の高さがあり、画面（＝ウィンドウ）がそれより低いと
+        // 上端が画面の外へはみ出して、見出しやページ数が切れたまま出る。
+        // 直せないので、代わりに「どうすれば収まるか」をここで先に伝える。
+        // 端末の表示サイズを小さくすると、ブラウザのUIごと縮んで収まる。
+        var shortScreenNote = '';
+        try {
+            var availH = (window.screen && window.screen.availHeight) || 0;
+            if (availH > 0 && availH < PRINT_DIALOG_MIN_SCREEN_H) {
+                shortScreenNote = '<div style="margin-top:10px;padding:8px 10px;border-radius:8px;'
+                    + 'background:var(--warning-light);color:var(--text-main);font-size:0.78rem;line-height:1.5;">'
+                    + '<b>このあと出るブラウザの印刷画面が、上で切れて見えることがあります。</b><br>'
+                    + 'この端末の画面の高さ（' + availH + 'px）だと、Chrome の印刷ダイアログが入りきりません。'
+                    + '切れて操作しづらいときは、<b>Ctrl と Shift と −（ハイフン）</b>を同時に押して端末の表示を'
+                    + '1段小さくしてから印刷してください（戻すときは Ctrl と Shift と ＋）。'
+                    + 'アプリ側からダイアログの大きさは変えられないため、この方法だけが有効です。'
+                    + '</div>';
+            }
+        } catch (e) { /* screen を読めない環境では何も出さない */ }
+
         Swal.fire({
             title: '<span class="material-symbols-outlined">print</span> 印刷オプション',
             html: '<div style="text-align:left;font-size:0.85rem;">'
@@ -48,6 +68,7 @@
                 + 'フォントサイズ: <input type="range" id="po_fontSize" min="8" max="14" value="' + storedFontSize + '" style="flex:1;">'
                 + '<span id="po_fontLabel">' + storedFontSize + 'px</span>'
                 + '</label>'
+                + shortScreenNote
                 + '</div>',
             width: 420,
             confirmButtonText: '印刷する',
@@ -95,6 +116,11 @@
             printWeeklyPlanExec(opts);
         });
     }
+
+    // Chrome の印刷ダイアログが収まる画面の高さの目安。実測ではないので厳密な境界ではなく、
+    // 「この辺から下は切れることがある」という案内を出すためのしきい値。
+    // GIGA 端末に多い 768px の Chromebook が案内の対象に入るように取ってある。
+    var PRINT_DIALOG_MIN_SCREEN_H = 800;
 
     // 自動調整時の基準フォントサイズ。実際に紙へ出る大きさは
     // 「基準サイズ × pickFitScale_ が選んだ倍率」で決まるので、ここは固定でよい。

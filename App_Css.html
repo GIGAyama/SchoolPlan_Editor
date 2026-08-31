@@ -1817,6 +1817,35 @@
         cursor: pointer;
     }
 
+    /* 見出し帯の色えらび。色見本そのものが押す場所なので、
+       枠のぶんだけ広く取って指でも当てられるようにしてある */
+    .nw-sched-color {
+        width: 40px;
+        height: 28px;
+        padding: 0 2px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        cursor: pointer;
+    }
+
+    .nw-sched-color-reset {
+        height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-pill);
+        background: var(--surface);
+        color: var(--text-sub);
+        font-family: inherit;
+        font-size: 0.72rem;
+        cursor: pointer;
+    }
+
+    .nw-sched-color-reset:hover {
+        background: var(--hover-soft);
+        color: var(--text-main);
+    }
+
     /* --- Divider block --- */
     .nw-divider-content {
         border: none;

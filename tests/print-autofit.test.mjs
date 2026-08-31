@@ -381,3 +381,18 @@ test('紙ではダークテーマの色を明るい側へ戻す。値はライ�
     }
   }
 });
+
+test('画面が低い端末には、印刷ダイアログが切れることを先に伝える', () => {
+  // 印刷ダイアログはブラウザ自身のもので、アプリからは大きさも位置も動かせない。
+  // Chrome のそれには最低限の高さがあり、画面がそれより低いと上端がはみ出す。
+  // 直せない以上、「どうすれば収まるか」を印刷オプションの中で先に伝えるしかない。
+  assert.match(print, /var PRINT_DIALOG_MIN_SCREEN_H = \d+;/, 'しきい値が無い');
+  assert.match(print, /window\.screen && window\.screen\.availHeight/,
+    '端末の画面の高さを見ていない');
+  assert.match(print, /availH < PRINT_DIALOG_MIN_SCREEN_H/);
+  assert.match(print, /Ctrl と Shift と −/, '収める手順が案内に入っていない');
+  assert.match(print, /\+ shortScreenNote\n/, '案内が印刷オプションに差しこまれていない');
+  // GIGA 端末に多い 768px が案内の対象に入ること
+  const th = Number(/var PRINT_DIALOG_MIN_SCREEN_H = (\d+);/.exec(print)[1]);
+  assert.ok(th > 768, `768px の端末が案内の対象から外れている: ${th}`);
+});

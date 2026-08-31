@@ -107,3 +107,61 @@ test('印刷CSSにも日付のクラスが在る（画面と紙で見え方を�
   assert.match(nl, /\.nw-sched-date\{font-size:/, '印刷CSSに .nw-sched-date が無い');
   assert.match(css, /\.nw-sched-date \{/, '画面CSSに .nw-sched-date が無い');
 });
+
+// ===== 行の並び =====
+
+test('行は週案の時程どおりに並ぶ。休み時間が表の下にまとまらない', () => {
+  // 以前は校時をまとめて出したあとに休み時間を並べていたので、
+  // 中休みと昼休みが表のいちばん下に来て、時程として読めなかった。
+  const order = nl.slice(nl.indexOf('NW.renderScheduleHTML = function'));
+  const seq = [...order.matchAll(/periodRow\((\d)\)|simpleRow\('([^']+)'/g)]
+    .map(m => m[1] !== undefined ? `${Number(m[1]) + 1}校時` : m[2]);
+  assert.deepEqual(seq.slice(0, 9),
+    ['1校時', '2校時', '中休み', '3校時', '4校時', '昼休み', '5校時', '6校時', '放課後'],
+    '時程の並びになっていない');
+});
+
+test('休み時間は校時を隠しても本来の位置に残る（時程そのものは変わらない）', () => {
+  // 校時を隠すのは「その行を通信に出さない」という意味で、時程が動くわけではない
+  assert.match(nl, /function periodRow\(pp\) \{\s*\n\s*if \(hiddenP\.indexOf\(pp \+ 1\) >= 0\) return '';/,
+    '校時の出し分けが periodRow の中に無い');
+  assert.doesNotMatch(nl, /if \(opts\.showRecess\) html \+= simpleRow\('中休み', 'recess1'\) \+ simpleRow\('昼休み'/,
+    '中休みと昼休みが続けて出力されている（校時のあいだに挟まっていない）');
+});
+
+// ===== 曜日と日付の上下 =====
+
+test('日付と曜日の上下を入れ替えられる。既定は曜日が上（今までどおり）', () => {
+  assert.match(nl, /dateFirst: false/, '既定が「曜日が上」になっていない');
+  assert.match(nl, /var top = opts\.dateFirst \? dateHtml\(day\) : escHtml\(day\.dayLabel\);/);
+  assert.match(nl, /var bottom = opts\.dateFirst \? escHtml\(day\.dayLabel\) : dateHtml\(day\);/);
+  assert.ok(nl.includes(String.raw`\'dateFirst\',this.checked)"> 日付を上に`),
+    '入れ替えのチェックボックスが操作パネルに無い');
+});
+
+// ===== 見出しの色 =====
+
+const schedHeaderTextColor_ = new Function(
+  `${extractFn(nl, 'schedHeaderTextColor_')}\nreturn schedHeaderTextColor_;`)();
+
+test('見出しの色は選べる。既定は今までの青のまま', () => {
+  assert.match(nl, /var SCHED_HEADER_COLOR_DEFAULT = '#1a73e8';/);
+  assert.match(nl, /NW\.setSchedHeaderColor = function/, '色を変える口が無い');
+  assert.match(nl, /type="color" class="nw-sched-color"/, '色ピッカーが操作パネルに無い');
+});
+
+test('文字色は帯の明るさから決める。薄い色を選んでも読めなくならない', () => {
+  // 白固定にすると、先生が薄い色を選んだ瞬間に見出しが読めなくなる
+  assert.equal(schedHeaderTextColor_('#1a73e8'), '#ffffff', '既定の青は白文字のまま');
+  assert.equal(schedHeaderTextColor_('#2e7d32'), '#ffffff');
+  assert.equal(schedHeaderTextColor_('#ffe082'), '#202124', '薄い色には濃い文字を載せる');
+  assert.equal(schedHeaderTextColor_('#ffffff'), '#202124');
+  assert.equal(schedHeaderTextColor_('#000000'), '#ffffff');
+  assert.equal(schedHeaderTextColor_('bogus'), '#ffffff', '読めない値でも壊れない');
+});
+
+test('選んだ色は紙にも出る（「背景のグラフィック」を切っていても）', () => {
+  // 色を選べるのに紙で白くなるなら意味が無い
+  assert.match(nl, /-webkit-print-color-adjust:exact;print-color-adjust:exact;/,
+    '見出し帯に print-color-adjust が付いていない');
+});
