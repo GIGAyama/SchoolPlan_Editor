@@ -118,12 +118,68 @@
         welcome.style.display = 'flex';
     }
 
+    // ===== 印刷の題（＝PDFに保存するときのファイル名） =====
+    //
+    // ⚠️ ブラウザがファイル名に使うのは、刷る文書の題ではなく
+    //    **いちばん外側のページ（このシェル）の題**。アプリ本体は iframe の
+    //    中にいて自分では変えられないので、刷るあいだの題を便りで受け取り、
+    //    ここで当てる。これが無いと、どの週を刷っても
+    //    「週案エディタ - School Plan Note.pdf」で保存される。
+    var SHELL_TITLE = document.title;
+    // 戻す便りが届かないまま終わったときに、それでも元へ戻すまでの時間。
+    // ファイル名は印刷プレビューが開いた時点で決まっているので、
+    // ダイアログを開いたまま時間切れになっても、出てくる名前は変わらない。
+    var PRINT_TITLE_RESTORE_MS = 60000;
+    var printTitleTimer = null;
+
+    /**
+     * 「刷るあいだの題」の便りを検算して、当てるべき題を返す純粋関数。
+     *
+     * 便りは誰からでも送れるので、素性と形の両方を見る。
+     *   ・素性: アプリ本体（script.google.com / *.googleusercontent.com）から届いたものだけ
+     *   ・形　: こちらが作る「週案第23週(8月31日-9月6日)」の形に一致するものだけ
+     *
+     * @param {string} origin 便りの送り元（event.origin）
+     * @param {*} data 便りの中身（event.data）
+     * @return {string|null|undefined} 当てる題／元に戻すなら null／受けつけないなら undefined
+     */
+    function readPrintTitleMessage(origin, data) {
+        if (!data || data.type !== 'schoolPlanNote:printTitle') return undefined;
+        var host = '';
+        try { host = new URL(origin).hostname; } catch (e) { return undefined; }
+        var fromApp = host === 'script.google.com' || /\.googleusercontent\.com$/.test(host);
+        if (!fromApp) return undefined;
+        if (data.title === null || data.title === undefined) return null;
+        if (typeof data.title !== 'string') return undefined;
+        // 量指定子に波括弧を使わないのは、この関数を取り出して試験するため
+        if (!/^週案(第\d\d?\d?週)?(\(\d\d?月\d\d?日(-\d\d?月\d\d?日)?\))?$/.test(data.title)) return undefined;
+        return data.title;
+    }
+
+    function applyPrintTitle(title) {
+        if (printTitleTimer) { clearTimeout(printTitleTimer); printTitleTimer = null; }
+        if (title === null) {
+            document.title = SHELL_TITLE;
+            return;
+        }
+        document.title = title;
+        printTitleTimer = setTimeout(function () {
+            printTitleTimer = null;
+            document.title = SHELL_TITLE;
+        }, PRINT_TITLE_RESTORE_MS);
+    }
+
     // App本体（07_WebApp.gs / App.html）から届く ready ハンドシェイクを受信。
     // これが届けば、iframe内にアプリ本体が正しく表示できたと判断できる。
     // 組織アカウント等でGoogleのエラー画面が表示された場合は届かない。
     window.addEventListener('message', function (e) {
         var data = e && e.data;
         if (!data) return;
+        var printTitle = readPrintTitleMessage(e.origin, data);
+        if (printTitle !== undefined) {
+            applyPrintTitle(printTitle);
+            return;
+        }
         if (data.type === 'schoolPlanNote:ready') {
             appReady = true;
             // このブラウザで表示できたことを記録し、次回以降は初回ログイン案内を出さない。

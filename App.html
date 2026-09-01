@@ -32,7 +32,14 @@
                     // サンドボックス内では白画面化する）ではなくシェルへ依頼すべきと判断できる。
                     window.addEventListener('message', function (e) {
                         var d = e && e.data;
-                        if (d && d.type === 'schoolPlanNote:shellAck') { window.__hasPwaShell = true; }
+                        if (d && d.type === 'schoolPlanNote:shellAck') {
+                            window.__hasPwaShell = true;
+                            // 応答の送り元を控えておく。こちらからシェルへ何かを送るとき、
+                            // 宛先 '*'（誰にでも届く）ではなく、この相手を名指しできる。
+                            if (typeof e.origin === 'string' && e.origin.indexOf('https://') === 0) {
+                                window.__shellOrigin = e.origin;
+                            }
+                        }
                     });
                 }
             } catch (e) { }
