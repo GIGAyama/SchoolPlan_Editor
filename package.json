@@ -33,7 +33,7 @@
     "build:app-links": "node tools/build-app-links.mjs"
   },
   "devDependencies": {
-    "@material-symbols/font-400": "^0.45.10",
+    "@material-symbols/font-400": "^0.47.0",
     "bootstrap": "^5.3.8",
     "bootstrap-icons": "^1.11.3",
     "playwright": "^1.62.1",
