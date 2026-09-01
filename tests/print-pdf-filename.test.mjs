@@ -184,6 +184,42 @@ test('別の種類の便りには手を出さない', () => {
   assert.equal(readPrintTitleMessage(APP_ORIGIN, null), undefined);
 });
 
+test('入口ページが当て終わってから印刷を始める', () => {
+  // postMessage はその場では届かない。頼んだ直後に print() を呼ぶと、まだ古い題のまま
+  // ファイル名が決まる（2026-09-01 の実測: パソコンでもスマホでも間に合っていなかった）
+  const exec = print.slice(print.indexOf('function printWeeklyPlanExec('));
+  const swapAt = exec.indexOf('restoreHostTitle = swapHostTitle_(docTitle);');
+  const waitAt = exec.indexOf('whenShellTitleApplied_(SHELL_TITLE_ACK_MS, startPrint);');
+  assert.notEqual(swapAt, -1, '題を差し替えていない');
+  assert.notEqual(waitAt, -1, '入口ページの合図を待っていない');
+  assert.ok(swapAt < waitAt, '合図を待つ前に題を差し替えていない');
+  // print() は待ち終わってから呼ぶ（doPrint の中で直に呼んでいない）
+  const doPrint = exec.slice(exec.indexOf('var doPrint = function'), waitAt);
+  assert.ok(!doPrint.includes('.print();'), '合図を待たずに print() を呼んでいる');
+  assert.match(print, /var startPrint = function \(\) \{[\s\S]*?\.print\(\);/);
+});
+
+test('合図が来なくても、時間切れで必ず印刷は始まる', () => {
+  // 入口ページが古いまま（キャッシュに前の版が残っている）だと合図は来ない。
+  // そこで待ち続けると、印刷そのものが始まらなくなる
+  const wait = extractFn(print, 'whenShellTitleApplied_');
+  assert.ok(wait.includes('setTimeout(finish, timeoutMs);'), '時間切れの逃げ道が無い');
+  assert.ok(wait.includes('window.__shellOrigin'), '入口ページの外かどうかを見ていない');
+  assert.ok(wait.includes("{ done(); return; }"), '入口ページの外なら待たずに進む道が無い');
+  // よそから届いた合図で先へ進まないこと
+  assert.ok(wait.includes('if (e.origin !== origin) return;'), '合図の送り元を見ていない');
+});
+
+test('入口ページは題を当てたあとに合図を返す', () => {
+  const handler = shell.slice(shell.indexOf("addEventListener('message'"));
+  const applyAt = handler.indexOf('applyPrintTitle(printTitle);');
+  const ackAt = handler.indexOf("type: 'schoolPlanNote:printTitleAck'");
+  assert.notEqual(ackAt, -1, '合図を返していない');
+  assert.ok(applyAt < ackAt, '題を当てる前に合図を返している');
+  // 合図の宛先は、頼んできた相手だけを名指しする
+  assert.match(handler, /e\.source\.postMessage\(\{ type: 'schoolPlanNote:printTitleAck' \}, e\.origin\)/);
+});
+
 test('シェルは受け取った題を当て、時間切れで必ず元へ戻す', () => {
   assert.match(shell, /var SHELL_TITLE = document\.title;/);
   assert.match(shell, /document\.title = SHELL_TITLE;/);

@@ -178,6 +178,11 @@
         var printTitle = readPrintTitleMessage(e.origin, data);
         if (printTitle !== undefined) {
             applyPrintTitle(printTitle);
+            // 当て終わったことを知らせる。アプリ側はこの合図を待ってから印刷を始める。
+            // 待たずに始めると、こちらが題を替える前にファイル名が決まってしまう。
+            try {
+                if (e.source) e.source.postMessage({ type: 'schoolPlanNote:printTitleAck' }, e.origin);
+            } catch (e2) { /* 返せなくても題は当たっている */ }
             return;
         }
         if (data.type === 'schoolPlanNote:ready') {

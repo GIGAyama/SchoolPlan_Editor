@@ -151,6 +151,11 @@
     // ダイアログを開いたまま時間切れになっても、出てくる名前は変わらない。
     var HOST_TITLE_RESTORE_MS = 60000;
 
+    // 入口ページが題を当て終わる合図を待つ上限。合図が来ないのは、入口ページが
+    // 古いまま（この直しの前の版がキャッシュに残っている）ときなので、
+    // 待ち続けずに諦めて刷る。人が「印刷」を押してからの間なので、短く取る。
+    var SHELL_TITLE_ACK_MS = 400;
+
     // 測る前に「実際に効かせておく」書体。書体は自己ホスト(App_Fonts.html)なので
     // 外へ取りにはいかないが、使われるまで読み込みは始まらないので名指しで要求する。
     var PRINT_FONT_FAMILY = 'Zen Maru Gothic';
@@ -257,6 +262,38 @@
         try {
             window.top.postMessage({ type: 'schoolPlanNote:printTitle', title: title }, origin);
         } catch (e) { /* 届かない置き方なら諦める */ }
+    }
+
+    /**
+     * 入口ページが題を当て終わるのを待ってから次へ進む。
+     *
+     * ⚠️ postMessage はその場では届かない。頼んだ直後に print() を呼ぶと、
+     * 入口ページがまだ古い題のまま印刷が始まり、ファイル名が変わらないことがある。
+     * フレームごとに処理する場所が分かれているので、間に合うかどうかは端末しだいで、
+     * パソコンでは間に合っていてもスマホでは間に合わない、という出方をする。
+     * ここで合図を待てば、どの端末でも「当ててから刷る」順になる。
+     *
+     * @param {number} timeoutMs 合図が来ないときに諦めるまでの時間
+     * @param {function()} done 待ち終わったら呼ぶ（合図・時間切れのどちらでも一度だけ）
+     */
+    function whenShellTitleApplied_(timeoutMs, done) {
+        var origin = window.__shellOrigin;
+        // 入口ページの外（GAS の URL を直に開いたとき）は、待つ相手がいない
+        if (typeof origin !== 'string' || origin.indexOf('https://') !== 0) { done(); return; }
+        var finished = false;
+        var finish = function () {
+            if (finished) return;
+            finished = true;
+            try { window.removeEventListener('message', onShellAck); } catch (e) { /* 実害は無い */ }
+            done();
+        };
+        var onShellAck = function (e) {
+            if (e.origin !== origin) return;
+            var d = e && e.data;
+            if (d && d.type === 'schoolPlanNote:printTitleAck') finish();
+        };
+        try { window.addEventListener('message', onShellAck); } catch (e) { finish(); return; }
+        setTimeout(finish, timeoutMs);
     }
 
     /**
@@ -1030,6 +1067,10 @@
 
         var printed = false;
         var restoreHostTitle = function () { };
+        var startPrint = function () {
+            printFrame.contentWindow.focus();
+            printFrame.contentWindow.print();
+        };
         var doPrint = function () {
             if (printed) return;
             printed = true;
@@ -1042,8 +1083,9 @@
             // 見るものと、いちばん外側のページの題を見るもの（Chrome はこちら）がある。
             // 外側の題は画面のタブに出ているものなので、刷るあいだだけ差し替えて必ず戻す。
             restoreHostTitle = swapHostTitle_(docTitle);
-            printFrame.contentWindow.focus();
-            printFrame.contentWindow.print();
+            // 入口ページが当て終わってから刷る。ここを待たないと、ファイル名が
+            // 決まるほうが先になり、差し替えが間に合わない端末が出る。
+            whenShellTitleApplied_(SHELL_TITLE_ACK_MS, startPrint);
         };
 
         // 印刷直前にもう一度合わせ直す。フォントが遅れて効いた場合など、測ったあとに
