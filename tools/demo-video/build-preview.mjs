@@ -12,6 +12,7 @@
  *   node tools/demo-video/build-preview.mjs
  *   → dist/demo-preview/index.html
  */
+import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT } from './config.mjs';
@@ -82,7 +83,9 @@ export function buildPreview() {
   return OUT_FILE;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// ⚠️ `file://${process.argv[1]}` を文字列で組み立てて比べないこと。Windows や、空白・日本語を
+//    含むパスでは一致せず、何も走らせないまま exit 0 になる（2026-08-28 / 2026-09-02）。
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const file = buildPreview();
   const size = (fs.statSync(file).size / 1024).toFixed(0);
   console.log(`プレビューを書き出しました: ${path.relative(ROOT, file)} (${size} KB)`);
