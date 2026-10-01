@@ -36,7 +36,7 @@
     "@material-symbols/font-400": "^0.47.0",
     "bootstrap": "^5.3.8",
     "bootstrap-icons": "^1.11.3",
-    "playwright": "^1.62.1",
+    "playwright": "^1.63.0",
     "qrcode-generator": "^2.0.4",
     "sweetalert2": "^11.14.5"
   }
