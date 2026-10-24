@@ -24,6 +24,26 @@
         { label: '手書き風', value: "'Yusei Magic', 'Klee One', 'Hiragino Maru Gothic ProN', cursive" }
     ];
 
+    // 文字の大きさは Google ドキュメントと同じ pt で選ばせる。
+    // 中身はこれまでどおり px で持つ（保存済みの通信・テンプレートが px で入っているため）。
+    // 以前は px の飛び飛びの値（…12, 14, 16…）しか選べず、ドキュメントで
+    // 10pt・10.5pt と詰めていた先生が同じ大きさにできなかった。
+    var NW_PT_SIZES = [6, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 48, 56, 64, 72];
+
+    /** pt → px（1pt = 4/3px）。小数第2位まで持つ */
+    function nwPtToPx_(pt) {
+        var n = parseFloat(pt);
+        if (!isFinite(n) || n <= 0) return 16;
+        return Math.round(n * 4 / 3 * 100) / 100;
+    }
+
+    /** px → pt。0.5pt 刻みに丸める（12px は 9pt、13.33px は 10pt） */
+    function nwPxToPt_(px) {
+        var n = parseFloat(px);
+        if (!isFinite(n) || n <= 0) return 12;
+        return Math.round(n * 0.75 * 2) / 2;
+    }
+
     // WordArt: エフェクト自由組み合わせ式のデフォルト色リスト
     var NW_WA_GRAD_PRESETS = [
         { c1: '#ff0000', c2: '#0000ff', label: '赤→青' },
@@ -188,7 +208,20 @@
                     // 見出しの上段を日付にするか（既定は曜日が上＝これまでどおり）
                     dateFirst: false,
                     // 見出し帯の色。文字色は明るさから自動で決める
-                    headerColor: SCHED_HEADER_COLOR_DEFAULT
+                    headerColor: SCHED_HEADER_COLOR_DEFAULT,
+                    // ここから下は、保存済みの通信には無い。無いとき（undefined）は
+                    // どれも「今までの見え方」になるように決めてある。
+                    // 表の形: 'app'（今まで）/ 'letter'（紙の学級通信の形。schedLetterDefaults_ を見ること）
+                    tableStyle: 'app',
+                    // 朝の行（週案の「朝」の欄）
+                    showMorning: false,
+                    // 祝日・休みの日の列を灰色にして、名前を縦に1字ずつ入れる
+                    closedDays: false,
+                    // 学級通信の形のときの文字の大きさ（pt）と、校時の行の高さ（mm。0 は自動）
+                    sizes: null,
+                    rowHeight: 0,
+                    // 左端の見出しの呼び名（例: 宿題 → 課題）。先生が一度変えたら次の表にも引きつぐ
+                    rowLabels: NW.loadSchedLabels_()
                 };
                 if (data.options) {
                     for (var k in data.options) block.options[k] = data.options[k];
@@ -209,6 +242,31 @@
                     block.colData.push({ content: '', src: '', caption: '' });
                 }
                 block.colRatio = data.colRatio || 'equal';
+                break;
+            case 'masthead':
+                // 通信のいちばん上（題字＋発行日・学校名・担任名）。
+                // 文字は前回の入力を引きつぐ（題字の画像は端末に残さないので引きつがない）
+                var mem = NW.loadMastheadMemory_();
+                block.src = data.src || '';
+                block.logoWidth = data.logoWidth || mem.logoWidth || 66;
+                block.kicker = data.kicker !== undefined ? data.kicker : (mem.kicker || '');
+                block.title = data.title !== undefined ? data.title : (mem.title || '');
+                block.titleSize = data.titleSize || mem.titleSize || nwPtToPx_(28);
+                block.info = data.info !== undefined ? data.info : (mem.info || '');
+                block.infoSize = data.infoSize || mem.infoSize || nwPtToPx_(11);
+                // 発行日は週から決める（対象週の前の金曜日）。先生が書き替えたらその字を使う
+                block.dateAuto = data.dateAuto !== undefined ? data.dateAuto : true;
+                block.dateText = data.dateText || '';
+                block.fontFamily = data.fontFamily || '';
+                break;
+            case 'article':
+                // お知らせの記事 1 本。「１．見出し」（太字・下線）＋本文。番号は並び順で振る
+                block.title = data.title || '';
+                block.content = data.content || '';
+                block.fontSize = data.fontSize || nwPtToPx_(10);
+                block.fontFamily = data.fontFamily || '';
+                block.underline = data.underline !== undefined ? data.underline : true;
+                block.numbered = data.numbered !== undefined ? data.numbered : true;
                 break;
             case 'wordart':
                 block.content = data.content || 'ワードアート';
@@ -236,6 +294,9 @@
                 block.waSpacing = data.waSpacing || 2;
                 break;
         }
+        // 決まった役目を持つブロックの印（いまは「お知らせ」の見出し 'notice-label' だけ）。
+        // AI がまとめて書いた記事を差しこむ位置を探すのに使う
+        if (data.role) block.role = data.role;
         // Block decoration (all block types)
         block.borderColor = data.borderColor || '';
         block.borderRadius = data.borderRadius || 0;
@@ -312,6 +373,23 @@
                     if (block.colData[i]) block.colData[i].content = cell.innerHTML;
                 });
             }
+            if (block.type === 'article') {
+                var at = document.querySelector('[data-block-id="' + block.id + '"] .nw-article-title');
+                if (at) block.title = at.innerHTML;
+                var ab = document.querySelector('[data-block-id="' + block.id + '"] .nw-article-body');
+                if (ab) block.content = ab.innerHTML;
+            }
+            if (block.type === 'masthead') {
+                var mk = document.querySelector('[data-block-id="' + block.id + '"] .nw-masthead-kicker');
+                if (mk) block.kicker = mk.innerHTML;
+                var mn = document.querySelector('[data-block-id="' + block.id + '"] .nw-masthead-name');
+                if (mn) block.title = mn.innerHTML;
+                var ml = document.querySelector('[data-block-id="' + block.id + '"] .nw-masthead-lines');
+                if (ml) block.info = ml.innerHTML;
+                var md = document.querySelector('[data-block-id="' + block.id + '"] .nw-masthead-date');
+                if (md) NW.setMastheadDate_(block, md.textContent, md.getAttribute('data-auto'));
+                if (mk || mn || ml) NW.saveMastheadMemory_(block);
+            }
         });
     };
 
@@ -324,6 +402,9 @@
                 + '<span class="material-symbols-outlined" style="font-size:48px;opacity:0.3;display:block;margin-bottom:12px;">newspaper</span>'
                 + '<p style="margin-bottom:16px;">ブロックを追加して学級通信を作成しましょう</p>'
                 + '<div class="nw-quickstart">'
+                + '<button class="nw-quickstart-btn nw-quickstart-letter" onclick="NW.quickStart(\'letter\')">'
+                + '<span class="material-symbols-outlined">newspaper</span><span>いつもの学級通信</span>'
+                + '<small>題字+週予定の表+お知らせ（A4 1枚）</small></button>'
                 + '<button class="nw-quickstart-btn" onclick="NW.quickStart(\'basic\')">'
                 + '<span class="material-symbols-outlined">article</span><span>基本レイアウト</span>'
                 + '<small>見出し+テキスト+区切り線</small></button>'
@@ -334,8 +415,8 @@
                 + '<span class="material-symbols-outlined">photo_library</span><span>写真レイアウト</span>'
                 + '<small>見出し+段組み+ギャラリー</small></button>'
                 + '<button class="nw-quickstart-btn nw-quickstart-ai" onclick="NW.generateFullNewsletter()">'
-                + '<span class="material-symbols-outlined">auto_awesome</span><span>AIで一括生成</span>'
-                + '<small>AIが通信全体を自動作成</small></button>'
+                + '<span class="material-symbols-outlined">auto_awesome</span><span>AIでお知らせまで</span>'
+                + '<small>いつもの形＋お知らせ記事をAIが下書き</small></button>'
                 + '</div></div>';
             NW.autoSave();
             return;
@@ -369,6 +450,7 @@
 
     NW._showInsertMenu = function (afterId, anchorEl) {
         var items = [
+            { type: 'article', icon: 'article', label: 'お知らせ記事' },
             { type: 'heading', icon: 'title', label: '見出し' },
             { type: 'text', icon: 'notes', label: 'テキスト' },
             { type: 'image', icon: 'image', label: '画像' },
@@ -377,7 +459,8 @@
             { type: 'schedule', icon: 'calendar_month', label: '時間割' },
             { type: 'divider', icon: 'horizontal_rule', label: '区切り線' },
             { type: 'qrcode', icon: 'qr_code_2', label: 'QRコード' },
-            { type: 'wordart', icon: 'title', label: 'ワードアート' }
+            { type: 'wordart', icon: 'title', label: 'ワードアート' },
+            { type: 'masthead', icon: 'newspaper', label: '題字・発行日' }
         ];
         var html = '<div class="nw-insert-menu-grid">';
         items.forEach(function (it) {
@@ -407,6 +490,11 @@
         NW.blocks = [];
         NW.nextId = 1;
         switch (preset) {
+            case 'letter':
+                NW.buildLetterLayout_(NW.scheduleData);
+                // 週案がまだ読めていなければ読みにいく（表と発行日がその週で埋まる）
+                if (!NW.scheduleData) NW.loadScheduleData();
+                break;
             case 'basic':
                 NW.addBlock('heading', null, { content: '学級通信', fontSize: 20, align: 'center' });
                 NW.addBlock('text', null, { content: '', fontSize: 11, align: 'center' });
@@ -443,6 +531,29 @@
     };
 
     /**
+     * 「いつもの学級通信」の形を組む。先生が Google ドキュメントで毎週作ってきた
+     * 通信を読みくらべて、共通していた並びにしてある（A4 1枚に収まる）。
+     *   題字＋発行日・学校名・担任名 → 週予定の表（学級通信の形）→
+     *   表の下の3行（毎日の持ち物・当番。太字 12pt）→ 区切り線 →
+     *   「お知らせ」→「１．見出し」＋本文 を2本（10pt）
+     */
+    NW.buildLetterLayout_ = function (weekData) {
+        var kana = schedUsesHiragana_();
+        NW.addBlock('masthead');
+        NW.addBlock('schedule', null, { weekData: weekData || null, options: schedLetterDefaults_() });
+        NW.addBlock('text', null, {
+            content: kana
+                ? '★タブレット・ドリルは まいにちもってきます。<br>きゅうしょくとうばん：<br>そうじとうばん：'
+                : '★タブレット・ドリルは毎日持ってきます。<br>給食当番：<br>掃除当番：',
+            fontSize: nwPtToPx_(12), bold: true, role: 'week-notes'
+        });
+        NW.addBlock('divider');
+        NW.addBlock('text', null, { content: 'お知らせ', fontSize: nwPtToPx_(10), role: 'notice-label' });
+        NW.addBlock('article');
+        NW.addBlock('article');
+    };
+
+    /**
      * ブロック種別ごとの「書式設定ツールバー」HTML文字列を生成する純粋関数群。
      * いずれも block を読むだけで副作用なし。該当しない場合は空文字を返す。
      * （NW.renderBlock から機械的に抽出。出力は抽出前と完全一致することをNodeで検証済み）
@@ -456,11 +567,7 @@
             fmt += '<option value="' + f.value + '"' + (block.fontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
         });
         fmt += '</select>'
-            + '<select onchange="NW.setFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
-        [9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72].forEach(function (s) {
-            fmt += '<option value="' + s + '"' + (s === block.fontSize ? ' selected' : '') + '>' + s + '</option>';
-        });
-        fmt += '</select>'
+            + NW.buildPtControl_(block.id, 'fontSize', block.fontSize)
             + '<button title="太字" onclick="NW.toggleBold(\'' + block.id + '\')" class="' + (block.bold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
             + '<button title="左揃え" onclick="NW.setAlign(\'' + block.id + '\',\'left\')" class="' + (block.align === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
             + '<button title="中央" onclick="NW.setAlign(\'' + block.id + '\',\'center\')" class="' + (block.align === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
@@ -557,11 +664,7 @@
                 imgFmt += '<option value="' + f.value + '"' + (block.wrapFontFamily === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
             });
             imgFmt += '</select>'
-                + '<select onchange="NW.setWrapFontSize(\'' + block.id + '\',this.value)" title="フォントサイズ">';
-            [9, 10, 11, 12, 14, 16, 18, 20, 24].forEach(function (s) {
-                imgFmt += '<option value="' + s + '"' + (s === (block.wrapFontSize || 12) ? ' selected' : '') + '>' + s + '</option>';
-            });
-            imgFmt += '</select>'
+                + NW.buildPtControl_(block.id, 'wrapFontSize', block.wrapFontSize || 12)
                 + '<button title="太字" onclick="NW.toggleWrapBold(\'' + block.id + '\')" class="' + (block.wrapBold ? 'nw-active' : '') + '" style="font-weight:900">B</button>'
                 + '<button title="左揃え" onclick="NW.setWrapAlign(\'' + block.id + '\',\'left\')" class="' + (block.wrapAlign === 'left' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_left</span></button>'
                 + '<button title="中央" onclick="NW.setWrapAlign(\'' + block.id + '\',\'center\')" class="' + (block.wrapAlign === 'center' ? 'nw-active' : '') + '"><span class="material-symbols-outlined">format_align_center</span></button>'
@@ -581,6 +684,72 @@
             + '</div><div class="nw-act-sep"></div>';
     };
 
+    /**
+     * 文字の大きさを pt で選ぶ部品（－ ／ 一覧 ／ ＋）。
+     * prop はブロックの中で大きさ（px）を持っている欄の名前。
+     */
+    NW.buildPtControl_ = function (id, prop, px, title) {
+        var cur = nwPxToPt_(px);
+        var list = NW_PT_SIZES.indexOf(cur) < 0
+            ? NW_PT_SIZES.concat([cur]).sort(function (a, b) { return a - b; })
+            : NW_PT_SIZES;
+        var call = '\'' + id + '\',\'' + prop + '\'';
+        var html = '<button title="小さく" class="nw-pt-step" onclick="NW.stepSizePt(' + call + ',-1)">－</button>'
+            + '<select onchange="NW.setSizePt(' + call + ',this.value)" title="' + (title || '文字の大きさ（pt）') + '">';
+        list.forEach(function (p) {
+            html += '<option value="' + p + '"' + (p === cur ? ' selected' : '') + '>' + p + 'pt</option>';
+        });
+        return html + '</select>'
+            + '<button title="大きく" class="nw-pt-step" onclick="NW.stepSizePt(' + call + ',1)">＋</button>';
+    };
+
+    /** 書体の一覧（標準＋NW_FONTS）。onchange には選んだ値を受け取る呼び出しを渡す */
+    NW.buildFontSelect_ = function (current, onchangeJs) {
+        var html = '<select onchange="' + onchangeJs + '" title="フォント">'
+            + '<option value=""' + (!current ? ' selected' : '') + '>標準</option>';
+        NW_FONTS.forEach(function (f) {
+            html += '<option value="' + f.value + '"' + (current === f.value ? ' selected' : '') + ' style="font-family:' + f.value + '">' + f.label + '</option>';
+        });
+        return html + '</select>';
+    };
+
+    NW.buildArticleToolbar_ = function (block) {
+        if (block.type !== 'article') return '';
+        var bid = block.id;
+        return '<div class="nw-fmt-toolbar">'
+            + NW.buildFontSelect_(block.fontFamily, 'NW.setBlockProp(\'' + bid + '\',\'fontFamily\',this.value)')
+            + NW.buildPtControl_(bid, 'fontSize', block.fontSize)
+            + '<button title="見出しに下線" onclick="NW.toggleBlockFlag(\'' + bid + '\',\'underline\')" class="' + (block.underline !== false ? 'nw-active' : '') + '"><span style="text-decoration:underline;font-weight:700;">U</span></button>'
+            + '<button title="番号（１．２．）" onclick="NW.toggleBlockFlag(\'' + bid + '\',\'numbered\')" class="' + (block.numbered !== false ? 'nw-active' : '') + '"><span style="font-weight:700;">１．</span></button>'
+            + '<div class="nw-act-sep"></div>'
+            + '<button title="AIでリライト（本文）" onclick="NW.aiRewriteBlock(\'' + bid + '\')" class="nw-ai-btn"><span class="material-symbols-outlined">auto_awesome</span></button>'
+            + '</div><div class="nw-act-sep"></div>';
+    };
+
+    NW.buildMastheadToolbar_ = function (block) {
+        if (block.type !== 'masthead') return '';
+        var bid = block.id;
+        var html = '<div class="nw-fmt-toolbar">'
+            + NW.buildFontSelect_(block.fontFamily, 'NW.setBlockProp(\'' + bid + '\',\'fontFamily\',this.value)')
+            + '<button title="題字の画像を入れる" onclick="NW.uploadImage(\'' + bid + '\')"><span class="material-symbols-outlined">add_photo_alternate</span></button>';
+        if (block.src) {
+            html += '<button title="題字の画像を外す（文字の題字にもどす）" onclick="NW.setBlockProp(\'' + bid + '\',\'src\',\'\')"><span class="material-symbols-outlined">close</span></button>'
+                + '<select onchange="NW.setBlockProp(\'' + bid + '\',\'logoWidth\',parseInt(this.value,10))" title="題字の幅">';
+            [40, 50, 55, 60, 66, 70, 75, 80].forEach(function (w) {
+                html += '<option value="' + w + '"' + (w === (block.logoWidth || 66) ? ' selected' : '') + '>題字 ' + w + '%</option>';
+            });
+            html += '</select>';
+        } else {
+            html += '<span style="font-size:0.72rem;color:var(--text-sub);margin:0 2px;">題字</span>'
+                + NW.buildPtControl_(bid, 'titleSize', block.titleSize, '題字の大きさ（pt）');
+        }
+        html += '<div class="nw-act-sep"></div>'
+            + '<span style="font-size:0.72rem;color:var(--text-sub);margin:0 2px;">右の字</span>'
+            + NW.buildPtControl_(bid, 'infoSize', block.infoSize, '発行日・学校名の大きさ（pt）')
+            + '</div><div class="nw-act-sep"></div>';
+        return html;
+    };
+
     /** ブロック種別に応じた書式ツールバーHTMLをまとめて返す（該当1種のみ非空）。 */
     NW.buildBlockToolbar_ = function (block) {
         return NW.buildTextToolbar_(block)
@@ -588,7 +757,9 @@
             + NW.buildColumnsToolbar_(block)
             + NW.buildGalleryToolbar_(block)
             + NW.buildImageToolbar_(block)
-            + NW.buildQrcodeToolbar_(block);
+            + NW.buildQrcodeToolbar_(block)
+            + NW.buildArticleToolbar_(block)
+            + NW.buildMastheadToolbar_(block);
     };
 
     NW.renderBlock = function (block) {
@@ -954,6 +1125,98 @@
                 (function (bid) { waText.addEventListener('click', function () { NW.editWordArt(bid); }); })(block.id);
                 div.appendChild(waText);
                 break;
+
+            case 'masthead':
+                // 通信のいちばん上。左に題字（画像か文字）、右に発行日・学校名・校長名・担任名。
+                // 下の細い灰色の線まで含めて1つのブロックにしてある
+                div.className = 'nw-masthead';
+                if (block.fontFamily) div.style.fontFamily = block.fontFamily;
+                var mhLeft = document.createElement('div');
+                mhLeft.className = 'nw-masthead-title';
+                mhLeft.style.width = (block.logoWidth || 66) + '%';
+                if (block.src) {
+                    var mhImg = document.createElement('img');
+                    mhImg.src = block.src;
+                    mhImg.alt = '題字';
+                    mhLeft.appendChild(mhImg);
+                } else {
+                    var mhKicker = document.createElement('div');
+                    mhKicker.className = 'nw-masthead-kicker';
+                    mhKicker.contentEditable = 'true';
+                    mhKicker.innerHTML = block.kicker || '';
+                    mhKicker.style.fontSize = Math.round((block.titleSize || 37) * 0.45) + 'px';
+                    mhKicker.setAttribute('data-placeholder', '学年・学級');
+                    mhKicker.addEventListener('blur', function () { block.kicker = mhKicker.innerHTML; NW.saveMastheadMemory_(block); });
+                    var mhName = document.createElement('div');
+                    mhName.className = 'nw-masthead-name';
+                    mhName.contentEditable = 'true';
+                    mhName.innerHTML = block.title || '';
+                    mhName.style.fontSize = (block.titleSize || 37) + 'px';
+                    mhName.setAttribute('data-placeholder', '通信の名前');
+                    mhName.addEventListener('blur', function () { block.title = mhName.innerHTML; NW.saveMastheadMemory_(block); });
+                    mhLeft.appendChild(mhKicker);
+                    mhLeft.appendChild(mhName);
+                }
+                var mhRight = document.createElement('div');
+                mhRight.className = 'nw-masthead-info';
+                mhRight.style.fontSize = (block.infoSize || 14.67) + 'px';
+                var mhDate = document.createElement('div');
+                mhDate.className = 'nw-masthead-date';
+                mhDate.contentEditable = 'true';
+                mhDate.textContent = NW.mastheadDate_(block);
+                // 描いたときの自動の日付を覚えておく。週を切り替えたあと描き直すときに、
+                // 前の週の日付を「先生が書き替えた日付」と取り違えないため
+                if (block.dateAuto !== false) mhDate.setAttribute('data-auto', mhDate.textContent);
+                mhDate.setAttribute('data-placeholder', '発行日');
+                mhDate.addEventListener('blur', function () {
+                    NW.setMastheadDate_(block, mhDate.textContent, mhDate.getAttribute('data-auto'));
+                });
+                var mhLines = document.createElement('div');
+                mhLines.className = 'nw-masthead-lines';
+                mhLines.contentEditable = 'true';
+                mhLines.innerHTML = block.info || '';
+                mhLines.setAttribute('data-placeholder', '学校名・担任名など');
+                mhLines.addEventListener('blur', function () { block.info = mhLines.innerHTML; NW.saveMastheadMemory_(block); });
+                mhRight.appendChild(mhDate);
+                mhRight.appendChild(mhLines);
+                div.appendChild(mhLeft);
+                div.appendChild(mhRight);
+                break;
+
+            case 'article':
+                // お知らせの記事。「１．見出し」（太字・下線）と本文。番号は並び順で振る
+                div.className = 'nw-article';
+                div.style.fontSize = (block.fontSize || 13.33) + 'px';
+                if (block.fontFamily) div.style.fontFamily = block.fontFamily;
+                var arHead = document.createElement('div');
+                arHead.className = 'nw-article-head';
+                if (block.underline !== false) arHead.style.textDecoration = 'underline';
+                if (block.numbered !== false) {
+                    var arNum = document.createElement('span');
+                    arNum.className = 'nw-article-num';
+                    arNum.textContent = NW.articleNumber_(block.id);
+                    arHead.appendChild(arNum);
+                }
+                var arTitle = document.createElement('span');
+                arTitle.className = 'nw-article-title';
+                arTitle.contentEditable = 'true';
+                arTitle.innerHTML = block.title || '';
+                arTitle.setAttribute('data-placeholder', '見出し（例: 木曜日に体操服を持ち帰ります）');
+                arTitle.addEventListener('blur', function () { block.title = arTitle.innerHTML; });
+                var arBody = document.createElement('div');
+                arBody.className = 'nw-article-body';
+                arBody.contentEditable = 'true';
+                arBody.innerHTML = block.content || '';
+                arBody.setAttribute('data-placeholder', '本文');
+                arBody.addEventListener('blur', function () { block.content = arBody.innerHTML; });
+                // 見出しは1行。Enter で本文へ移る
+                arTitle.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') { e.preventDefault(); arBody.focus(); }
+                });
+                arHead.appendChild(arTitle);
+                div.appendChild(arHead);
+                div.appendChild(arBody);
+                break;
         }
         return div;
     };
@@ -1075,6 +1338,7 @@
     // 子どもには読めない行が混ざったままになる。
     var SCHED_LABEL_HIRAGANA = {
         '行事': 'ぎょうじ',
+        '朝': 'あさ',
         '中休み': 'なかやすみ',
         '昼休み': 'ひるやすみ',
         '放課後': 'ほうかご',
@@ -1082,8 +1346,12 @@
         '持ち物': 'もちもの'
     };
 
-    /** 表の左端の見出しを、学年に応じた表記で返す */
-    function schedRowLabel_(kanji) {
+    /**
+     * 表の左端の見出しを、学年に応じた表記で返す。
+     * 先生が名前を決めてあれば（custom。例: 宿題 → かだい）その字をそのまま使う。
+     */
+    function schedRowLabel_(kanji, custom) {
+        if (custom && String(custom).trim()) return String(custom).trim();
         if (!schedUsesHiragana_()) return kanji;
         return SCHED_LABEL_HIRAGANA[kanji] || kanji;
     }
@@ -1092,8 +1360,10 @@
     /**
      * 校時の見出し。ひらがな表記の学年では「校時」ではなく、
      * 子どもが使う言い方の「1じかんめ」にする。
+     * short（学級通信の形）のときは数字だけ。紙の通信は「1」「2」と書いている。
      */
-    function schedPeriodLabel_(n) {
+    function schedPeriodLabel_(n, short) {
+        if (short) return String(n);
         return schedUsesHiragana_() ? (n + 'じかんめ') : (n + '校時');
     }
     NW.schedPeriodLabel_ = schedPeriodLabel_;
@@ -1153,6 +1423,164 @@
         return 'font-size:' + hit.px + 'px;' + (hit.px >= 16 ? 'font-weight:600;' : '');
     }
 
+    // ---- 学級通信の形の表（tableStyle: 'letter'） ----
+    // 先生が Google ドキュメントで作ってきた週予定の表を測った値。
+    //   見出し帯は薄い青灰で1行（「10/19(げつ)」）、罫線は黒の細線、しま模様なし。
+    //   左の見出しは数字だけ（1〜5）、教科 14pt・単元 8pt・宿題と持ち物 7.5pt。
+    //   祝日や休みの日は列ごと灰色にし、名前を1字ずつ縦に入れる。
+    //   空いているところは「−」。
+    var SCHED_LETTER_HEADER_COLOR = '#d0e0e3';
+    var SCHED_CLOSED_BG = '#b7b7b7';
+    var SCHED_LETTER_SIZES = { subject: 14, sub: 8, list: 7.5, label: 14 };
+    var SCHED_EMPTY_MARK = '−';
+
+    /** 学級通信の形に切り替えるときに入れる設定（ほかの設定はそのまま残す） */
+    function schedLetterDefaults_() {
+        return {
+            tableStyle: 'letter',
+            showEvent: false,
+            showRecess: false,
+            showAfterSchool: false,
+            showHomework: true,
+            showItems: true,
+            showMorning: true,
+            closedDays: true,
+            displayMode: 'subjectUnit',
+            dateSize: 'l',
+            headerColor: SCHED_LETTER_HEADER_COLOR,
+            sizes: { subject: SCHED_LETTER_SIZES.subject, sub: SCHED_LETTER_SIZES.sub, list: SCHED_LETTER_SIZES.list, label: SCHED_LETTER_SIZES.label },
+            rowHeight: 16
+        };
+    }
+    NW.schedLetterDefaults_ = schedLetterDefaults_;
+
+    /** 学級通信の形の文字の大きさを px で返す（設定は pt で持っている） */
+    function schedLetterSizesPx_(opts) {
+        var s = (opts && opts.sizes) || {};
+        var out = {};
+        for (var k in SCHED_LETTER_SIZES) {
+            out[k] = nwPtToPx_(s[k] || SCHED_LETTER_SIZES[k]);
+        }
+        return out;
+    }
+
+    // 1年生の見出しの曜日。通信では「10/19(げつ)」のように書く
+    var SCHED_DAY_HIRAGANA = { '月': 'げつ', '火': 'か', '水': 'すい', '木': 'もく', '金': 'きん', '土': 'ど', '日': 'にち' };
+
+    /** 1行の見出し「10/19(げつ)」。ひらがな表記でない学年は「10/19(月)」 */
+    function schedHeadLabel_(day) {
+        var dl = String((day && day.dayLabel) || '');
+        if (schedUsesHiragana_()) dl = SCHED_DAY_HIRAGANA[dl] || dl;
+        return schedDateLabel_(day && day.date) + (dl ? '(' + dl + ')' : '');
+    }
+    NW.schedHeadLabel_ = schedHeadLabel_;
+
+    /** その日に授業や行事が入っているか（土曜を表に入れるかの判断に使う） */
+    function schedDayHasSchool_(day) {
+        if (!day) return false;
+        if (String(day.event || '').trim() || String(day.morning || '').trim()) return true;
+        return (day.periods || []).some(function (p) { return p && String(p.subject || '').trim(); });
+    }
+
+    // 祝日の読み。内閣府の祝日一覧（07_WebApp.gs の fetchAndStoreHolidays）が使う名前。
+    // 振替休日と国民の休日は、一覧では「休日」になっている。
+    var SCHED_HOLIDAY_HIRAGANA = {
+        '元日': 'がんじつ',
+        '成人の日': 'せいじんのひ',
+        '建国記念の日': 'けんこくきねんのひ',
+        '天皇誕生日': 'てんのうたんじょうび',
+        '春分の日': 'しゅんぶんのひ',
+        '昭和の日': 'しょうわのひ',
+        '憲法記念日': 'けんぽうきねんび',
+        'みどりの日': 'みどりのひ',
+        'こどもの日': 'こどものひ',
+        '海の日': 'うみのひ',
+        '山の日': 'やまのひ',
+        '敬老の日': 'けいろうのひ',
+        '秋分の日': 'しゅうぶんのひ',
+        'スポーツの日': 'スポーツのひ',
+        '文化の日': 'ぶんかのひ',
+        '勤労感謝の日': 'きんろうかんしゃのひ',
+        '休日': 'おやすみ'
+    };
+
+    /**
+     * その日を「休みの日」として灰色にするなら、列に入れる名前を返す。休みでなければ空文字。
+     *
+     * 先生が決めた名前（override）があればそれを使う。空文字を決めてあれば休みにしない。
+     * 決めていなければ、祝日の名前、または「授業が1つも無く行事だけ書いてある日」の行事名
+     * （例: 振替休業日・都民の日）を使う。
+     * @param {Object} day 週案の1日
+     * @param {string=} override 先生が決めた名前（未設定は undefined）
+     * @return {string}
+     */
+    function schedClosedLabel_(day, override) {
+        if (override !== undefined && override !== null) return String(override).trim();
+        if (!day) return '';
+        if (String(day.holiday || '').trim()) return String(day.holiday).trim();
+        var hasClass = (day.periods || []).some(function (p) { return p && String(p.subject || '').trim(); });
+        if (!hasClass && !String(day.morning || '').trim() && String(day.event || '').trim()) {
+            return String(day.event).replace(/\s+/g, '').trim();
+        }
+        return '';
+    }
+    NW.schedClosedLabel_ = schedClosedLabel_;
+
+    /** 休みの名前を学年に合わせて書く。先生が書いた名前（auto でない）はそのまま */
+    function schedClosedText_(label, auto) {
+        if (!auto || !schedUsesHiragana_()) return label;
+        return SCHED_HOLIDAY_HIRAGANA[label] || String(label).replace(/の日$/, 'のひ');
+    }
+
+    /**
+     * 休みの名前を、表の行の数に合わせて1字ずつ縦に配る。
+     * 字が少なければ上下のまん中に寄せ、多ければ1行に2字以上を入れる。
+     * @param {string} label
+     * @param {number} rows 表の行の数（見出しの行は除く）
+     * @return {string[]} 行ごとの字（長さは rows）
+     */
+    function schedSpreadChars_(label, rows) {
+        var n = Math.max(0, parseInt(rows, 10) || 0);
+        var out = [];
+        for (var i = 0; i < n; i++) out.push('');
+        var chars = Array.from(String(label == null ? '' : label).replace(/\s+/g, ''));
+        if (!chars.length || !n) return out;
+        if (chars.length <= n) {
+            var start = Math.floor((n - chars.length) / 2);
+            chars.forEach(function (c, j) { out[start + j] = c; });
+        } else {
+            var per = Math.ceil(chars.length / n);
+            for (var r = 0; r < n; r++) out[r] = chars.slice(r * per, (r + 1) * per).join('');
+        }
+        return out;
+    }
+    NW.schedSpreadChars_ = schedSpreadChars_;
+
+    /**
+     * 改行で区切った中身を、1行目は大きく・2行目からは小さく出す。
+     * 朝の行（「学習」の下に「漢字テスト⑥」）や、自由テキストで書き替えた校時に使う。
+     * 大きさは inline style で入れる（Classroom への書き出しは CSS を連れていけない）。
+     */
+    function schedLinesCell_(val, mainPx, subPx) {
+        var lines = String(val == null ? '' : val).split(/\r\n|\r|\n/)
+            .map(function (l) { return l.trim(); })
+            .filter(function (l) { return l; });
+        return lines.map(function (l, i) {
+            var px = i === 0 ? mainPx : subPx;
+            return px ? '<span style="font-size:' + px + 'px;">' + escHtml(l) + '</span>' : escHtml(l);
+        }).join('<br>');
+    }
+    NW.schedLinesCell_ = schedLinesCell_;
+
+    /** 左の見出しの列の幅（学級通信の形）。いちばん長い見出しが1行で収まる幅にする */
+    function schedLetterLabelWidth_(labels, labelPx) {
+        var longest = 1;
+        (labels || []).forEach(function (l) {
+            longest = Math.max(longest, Array.from(String(l || '')).length);
+        });
+        return Math.max(40, Math.ceil(longest * labelPx + 12));
+    }
+
     // ---- Schedule table rendering (transposed: days=columns, periods=rows) ----
     NW.renderScheduleHTML = function (block) {
         var data = block.weekData || NW.scheduleData;
@@ -1161,8 +1589,23 @@
                 + '「予定を読込」をクリックして週案データを読み込んでください</div>';
         }
         var opts = block.options;
-        var days = data.days.slice(0, opts.showSaturday ? 6 : 5);
+        var letter = opts.tableStyle === 'letter';
+        // 学級通信の形では、授業や行事の入っている土曜（運動会など）は自動で列に入れる
+        var showSat = opts.showSaturday || (letter && schedDayHasSchool_(data.days[5]));
+        var days = data.days.slice(0, showSat ? 6 : 5);
         var bid = block.id;
+        var rowLabels = opts.rowLabels || {};
+        var sz = schedLetterSizesPx_(opts);
+        // 学級通信の形のセル。罫線・地の色・中央寄せは inline で入れる
+        // （画面CSSのしま模様と灰色の罫線に勝たせ、Classroom 書き出しでも同じ形にする）
+        var letterTd = 'border:1px solid #000;background:#fff;vertical-align:middle;line-height:1.25;padding:2px 3px;';
+        var rowH = (letter && opts.rowHeight) ? ' style="height:' + opts.rowHeight + 'mm;"' : '';
+
+        var overrides = block.cellOverrides || {};
+        // Helper: get cell content with override support
+        function getCellVal(key, original) {
+            return overrides.hasOwnProperty(key) ? overrides[key] : original;
+        }
 
         // Helper: render cell content based on displayMode
         function cellContent(per) {
@@ -1177,6 +1620,66 @@
             return c;
         }
 
+        // 学級通信の形の校時。教科を大きく、単元（と内容）を小さく下に添える
+        function letterCellContent(per) {
+            if (!per || !per.subject) return '';
+            var c = '<span style="font-size:' + sz.subject + 'px;">' + escHtml(subjectToHiragana(per.subject)) + '</span>';
+            var subs = [];
+            if ((opts.displayMode === 'subjectUnit' || opts.displayMode === 'full') && per.unit) subs.push(per.unit);
+            if (opts.displayMode === 'full' && per.content) subs.push(per.content);
+            subs.forEach(function (s) {
+                c += '<br><span class="nw-sched-sub" style="font-size:' + sz.sub + 'px;color:#202124;">' + escHtml(s) + '</span>';
+            });
+            return c;
+        }
+
+        // 休みの日（列ごと灰色）。名前が空なら休みにしない
+        var closed = days.map(function (day, di) {
+            if (!opts.closedDays) return '';
+            var key = 'closed_' + di;
+            var has = overrides.hasOwnProperty(key);
+            var label = schedClosedLabel_(day, has ? overrides[key] : undefined);
+            return label ? schedClosedText_(label, !has) : '';
+        });
+
+        // 行の並びは週案の時程どおりにする。
+        // 行事／朝／1／2／中休み／3／4／昼休み／5／6／放課後／宿題／持ち物。
+        // 以前は校時をまとめて出したあとに休み時間を並べていたので、
+        // 中休みと昼休みが表のいちばん下に来てしまい、時程として読めなかった。
+        // 休み時間は「校時が隠れていても本来の位置」に置く（時程は変わらないため）。
+        var hiddenP = opts.hiddenPeriods || [];
+
+        // 学級通信の形では、どの日にも授業の無い校時（1年生の6校時など）は出さない。
+        // 週案がまだ空の週は、隠していない校時をそのまま出す（表が消えて見えないように）
+        var periodShown = [0, 1, 2, 3, 4, 5].map(function (pp) {
+            if (hiddenP.indexOf(pp + 1) >= 0) return false;
+            if (!letter) return true;
+            return days.some(function (day, di) {
+                if (closed[di]) return false;
+                var per = (day.periods || [])[pp];
+                return overrides.hasOwnProperty('period_' + pp + '_' + di) || !!(per && per.subject);
+            });
+        });
+        if (letter && !periodShown.some(Boolean)) {
+            periodShown = [0, 1, 2, 3, 4, 5].map(function (pp) { return hiddenP.indexOf(pp + 1) < 0; });
+        }
+
+        // 休みの名前を縦に配るため、先に行の数を数えておく
+        var rowCount = (opts.showEvent !== false ? 1 : 0) + (opts.showMorning ? 1 : 0)
+            + periodShown.filter(Boolean).length
+            + (opts.showRecess ? 2 : 0) + (opts.showAfterSchool ? 1 : 0)
+            + (opts.showHomework ? 1 : 0) + (opts.showItems ? 1 : 0);
+        var spread = closed.map(function (c) { return c ? schedSpreadChars_(c, rowCount) : null; });
+        var rowIdx = 0;
+        var closedPx = letter ? Math.round(sz.subject * 1.4) : 18;
+        function closedTd(di) {
+            return '<td class="nw-sched-closed" onclick="NW.editSchedCell(\'' + bid + '\',\'closed\',' + di + ')"'
+                + ' style="background:' + SCHED_CLOSED_BG + ';color:#202124;text-align:center;vertical-align:middle;'
+                + 'font-size:' + closedPx + 'px;font-weight:600;' + (letter ? 'border:1px solid #000;' : '')
+                + '-webkit-print-color-adjust:exact;print-color-adjust:exact;">'
+                + escHtml((spread[di] && spread[di][rowIdx]) || '') + '</td>';
+        }
+
         // Header row: blank + day columns
         // 帯の色は inline style で入れる。CSS を連れていけない Classroom 書き出しでも
         // 効かせるため。print-color-adjust は、紙で「背景のグラフィック」を切っていても
@@ -1184,7 +1687,8 @@
         var dateStyle = schedDateStyle_(opts.dateSize || 'm');
         var headBg = opts.headerColor || SCHED_HEADER_COLOR_DEFAULT;
         var headStyle = 'background:' + headBg + ';color:' + schedHeaderTextColor_(headBg)
-            + ';-webkit-print-color-adjust:exact;print-color-adjust:exact;';
+            + ';-webkit-print-color-adjust:exact;print-color-adjust:exact;'
+            + (letter ? 'border:1px solid #000;font-weight:400;' : '');
         var dateHtml = function (day) {
             return '<span class="nw-sched-date" style="' + dateStyle + '">'
                 + escHtml(schedDateLabel_(day.date)) + '</span>';
@@ -1192,65 +1696,110 @@
         // 幅は inline style で入れる。CSS を連れていけない Classroom 書き出しでも、
         // ひらがなの見出しが列から溢れないようにするため
         var labelColW = SCHED_LABEL_COL_W[schedUsesHiragana_() ? 'hiragana' : 'kanji'];
-        var html = '<table><thead><tr><th class="nw-sched-label-col" style="width:' + labelColW + 'px;'
+        if (letter) {
+            var shownLabels = ['1'];
+            if (opts.showEvent !== false) shownLabels.push(schedRowLabel_('行事', rowLabels.event));
+            if (opts.showMorning) shownLabels.push(schedRowLabel_('朝', rowLabels.morning));
+            if (opts.showRecess) shownLabels.push(schedRowLabel_('中休み', rowLabels.recess1), schedRowLabel_('昼休み', rowLabels.recess2));
+            if (opts.showAfterSchool) shownLabels.push(schedRowLabel_('放課後', rowLabels.afterschool));
+            if (opts.showHomework) shownLabels.push(schedRowLabel_('宿題', rowLabels.homework));
+            if (opts.showItems) shownLabels.push(schedRowLabel_('持ち物', rowLabels.items));
+            labelColW = schedLetterLabelWidth_(shownLabels, sz.label);
+        }
+        // 学級通信の形は列の幅をそろえる（Googleドキュメントへの書き出しでも同じ幅になるよう inline で）
+        var html = '<table' + (letter ? ' style="width:100%;border-collapse:collapse;table-layout:fixed;"' : '')
+            + '><thead><tr><th class="nw-sched-label-col" style="width:' + labelColW + 'px;'
             + headStyle + '"></th>';
-        days.forEach(function (day) {
+        days.forEach(function (day, di) {
+            // 見出しを押すと、その日を休みにする／やめるを選べる
+            var thAttr = (opts.closedDays ? ' onclick="NW.editSchedCell(\'' + bid + '\',\'closed\',' + di + ')"' : '')
+                + ' style="' + headStyle + (closed[di] ? 'background:' + SCHED_CLOSED_BG + ';color:#202124;' : '') + '"';
+            if (letter) {
+                html += '<th' + thAttr + '><span class="nw-sched-date" style="' + dateStyle + '">'
+                    + escHtml(schedHeadLabel_(day)) + '</span></th>';
+                return;
+            }
             // 「日付を上に」を選ぶと日付と曜日が入れ替わる
             var top = opts.dateFirst ? dateHtml(day) : escHtml(day.dayLabel);
             var bottom = opts.dateFirst ? escHtml(day.dayLabel) : dateHtml(day);
-            html += '<th style="' + headStyle + '">' + top + '<br>' + bottom + '</th>';
+            html += '<th' + thAttr + '>' + top + '<br>' + bottom + '</th>';
         });
         html += '</tr></thead><tbody>';
-
-        var overrides = block.cellOverrides || {};
-        // Helper: get cell content with override support
-        function getCellVal(key, original) {
-            return overrides.hasOwnProperty(key) ? overrides[key] : original;
-        }
-
-        // 行の並びは週案の時程どおりにする。
-        // 行事／1／2／中休み／3／4／昼休み／5／6／放課後／宿題／持ち物。
-        // 以前は校時をまとめて出したあとに休み時間を並べていたので、
-        // 中休みと昼休みが表のいちばん下に来てしまい、時程として読めなかった。
-        // 休み時間は「校時が隠れていても本来の位置」に置く（時程は変わらないため）。
-        var hiddenP = opts.hiddenPeriods || [];
 
         // 1行ぶんの小さな行（休み時間・放課後・宿題・持ち物）
         function simpleRow(label, field) {
             var asList = SCHED_LIST_FIELDS.indexOf(field) >= 0;
-            var row = '<tr><td class="nw-sched-label">' + escHtml(schedRowLabel_(label)) + '</td>';
+            var row = '<tr><td class="nw-sched-label">' + escHtml(schedRowLabel_(label, rowLabels[field])) + '</td>';
             days.forEach(function (day, di) {
+                if (closed[di]) { row += closedTd(di); return; }
                 var val = getCellVal(field + '_' + di, day[field] || '');
+                var click = ' onclick="NW.editSchedCell(\'' + bid + '\',\'' + field + '\',' + di + ')"';
+                if (letter) {
+                    // 紙の通信では、宿題も持ち物も1件1行を中央にそろえて小さく並べる
+                    row += '<td class="nw-sched-small nw-sched-cell" style="' + letterTd + 'font-size:' + sz.list + 'px;"' + click + '>'
+                        + (String(val).trim() ? schedLinesCell_(val) : SCHED_EMPTY_MARK) + '</td>';
+                    return;
+                }
                 row += '<td class="nw-sched-small nw-sched-cell"' + (asList ? ' style="text-align:left;"' : '')
-                    + ' onclick="NW.editSchedCell(\'' + bid + '\',\'' + field + '\',' + di + ')">'
-                    + (asList ? schedListCell_(val) : escHtml(val)) + '</td>';
+                    + click + '>' + (asList ? schedListCell_(val) : escHtml(val)) + '</td>';
             });
+            rowIdx++;
+            return row + '</tr>';
+        }
+
+        // 朝の行。1行目（読書・学習など）を大きく、2行目から（漢字テスト⑥など）を小さく
+        function morningRow() {
+            var row = '<tr' + rowH + '><td class="nw-sched-label">' + escHtml(schedRowLabel_('朝', rowLabels.morning)) + '</td>';
+            days.forEach(function (day, di) {
+                if (closed[di]) { row += closedTd(di); return; }
+                var val = getCellVal('morning_' + di, day.morning || '');
+                var body = String(val).trim()
+                    ? (letter ? schedLinesCell_(val, sz.subject, sz.sub) : schedLinesCell_(val))
+                    : (letter ? SCHED_EMPTY_MARK : '');
+                row += '<td class="nw-sched-cell"' + (letter ? ' style="' + letterTd + '"' : '')
+                    + ' onclick="NW.editSchedCell(\'' + bid + '\',\'morning\',' + di + ')">' + body + '</td>';
+            });
+            rowIdx++;
             return row + '</tr>';
         }
 
         // 校時の行。隠されている校時は出さない
         function periodRow(pp) {
             if (hiddenP.indexOf(pp + 1) >= 0) return '';
-            var row = '<tr><td class="nw-sched-label">' + escHtml(schedPeriodLabel_(pp + 1)) + '</td>';
+            if (!periodShown[pp]) return '';
+            var row = '<tr' + rowH + '><td class="nw-sched-label">' + escHtml(schedPeriodLabel_(pp + 1, letter)) + '</td>';
             days.forEach(function (day, di) {
-                var per = day.periods[pp];
+                if (closed[di]) { row += closedTd(di); return; }
+                var per = (day.periods || [])[pp];
                 var key = 'period_' + pp + '_' + di;
-                var body = overrides.hasOwnProperty(key) ? escHtml(overrides[key]) : cellContent(per);
-                row += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">'
+                var body;
+                if (letter) {
+                    body = overrides.hasOwnProperty(key) ? schedLinesCell_(overrides[key], sz.subject, sz.sub) : letterCellContent(per);
+                    if (!body) body = SCHED_EMPTY_MARK;
+                } else {
+                    body = overrides.hasOwnProperty(key) ? escHtml(overrides[key]) : cellContent(per);
+                }
+                row += '<td class="nw-sched-cell"' + (letter ? ' style="' + letterTd + '"' : '')
+                    + ' onclick="NW.editSchedCell(\'' + bid + '\',\'period\',' + di + ',' + pp + ')">'
                     + body + '</td>';
             });
+            rowIdx++;
             return row + '</tr>';
         }
 
         if (opts.showEvent !== false) {
-            html += '<tr><td class="nw-sched-label">' + escHtml(schedRowLabel_('行事')) + '</td>';
+            html += '<tr><td class="nw-sched-label">' + escHtml(schedRowLabel_('行事', rowLabels.event)) + '</td>';
             days.forEach(function (day, di) {
+                if (closed[di]) { html += closedTd(di); return; }
                 var val = getCellVal('event_' + di, day.event || '');
                 var ev = val ? '<span class="nw-sched-event">' + escHtml(val) + '</span>' : '';
-                html += '<td class="nw-sched-cell" onclick="NW.editSchedCell(\'' + bid + '\',\'event\',' + di + ')">' + ev + '</td>';
+                html += '<td class="nw-sched-cell"' + (letter ? ' style="' + letterTd + '"' : '')
+                    + ' onclick="NW.editSchedCell(\'' + bid + '\',\'event\',' + di + ')">' + ev + '</td>';
             });
             html += '</tr>';
+            rowIdx++;
         }
+        if (opts.showMorning) html += morningRow();
         html += periodRow(0) + periodRow(1);
         if (opts.showRecess) html += simpleRow('中休み', 'recess1');
         html += periodRow(2) + periodRow(3);
@@ -1262,8 +1811,21 @@
 
         html += '</tbody></table>';
 
+        // 左の見出しのセルは、学級通信の形のときだけ白地・黒罫線・大きめの字にする。
+        // 見出しのセルはどれも同じ書き出し（<td class="nw-sched-label">）なので、ここでまとめて足す。
+        if (letter) {
+            html = html.split('<td class="nw-sched-label">').join('<td class="nw-sched-label" style="'
+                + 'background:#fff;color:#202124;font-weight:400;vertical-align:middle;border:1px solid #000;'
+                + 'font-size:' + sz.label + 'px;">');
+        }
+
         // Options panel
         html += '<div class="nw-schedule-options">';
+        html += '<label>表の形: <select onchange="NW.setSchedStyle(\'' + bid + '\',this.value)">'
+            + '<option value="app"' + (letter ? '' : ' selected') + '>アプリの形</option>'
+            + '<option value="letter"' + (letter ? ' selected' : '') + '>学級通信の形（紙）</option>'
+            + '</select></label>'
+            + '<span style="color:var(--border);">|</span>';
         // Period visibility
         html += '<span style="font-size:0.72rem;font-weight:600;color:var(--text-sub);">校時:</span>';
         for (var pi = 1; pi <= 6; pi++) {
@@ -1272,33 +1834,182 @@
         }
         html += '<span style="color:var(--border);">|</span>'
             + '<label><input type="checkbox"' + (opts.showEvent !== false ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showEvent\',this.checked)"> 行事</label>'
+            + '<label><input type="checkbox"' + (opts.showMorning ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showMorning\',this.checked)"> 朝</label>'
             + '<label><input type="checkbox"' + (opts.showRecess ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showRecess\',this.checked)"> 休み時間</label>'
             + '<label><input type="checkbox"' + (opts.showAfterSchool ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showAfterSchool\',this.checked)"> 放課後</label>'
             + '<label><input type="checkbox"' + (opts.showHomework ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showHomework\',this.checked)"> 宿題</label>'
             + '<label><input type="checkbox"' + (opts.showItems ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showItems\',this.checked)"> 持ち物</label>'
             + '<label><input type="checkbox"' + (opts.showSaturday ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'showSaturday\',this.checked)"> 土曜日</label>'
+            + '<label><input type="checkbox"' + (opts.closedDays ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'closedDays\',this.checked)"> 休みの日を灰色に</label>'
+            + '<button type="button" class="nw-sched-color-reset" onclick="NW.editSchedLabels(\'' + bid + '\')">見出しの名前</button>'
             + '<span style="color:var(--border);">|</span>'
             + '<label>日付の大きさ: <select onchange="NW.setSchedDateSize(\'' + bid + '\',this.value)">'
             + SCHED_DATE_SIZES.map(function (sz) {
                 return '<option value="' + sz.key + '"' + ((opts.dateSize || 'm') === sz.key ? ' selected' : '') + '>' + sz.label + '</option>';
             }).join('')
             + '</select></label>'
-            + '<label><input type="checkbox"' + (opts.dateFirst ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'dateFirst\',this.checked)"> 日付を上に</label>'
+            + (letter ? '' : '<label><input type="checkbox"' + (opts.dateFirst ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'dateFirst\',this.checked)"> 日付を上に</label>')
             + '<label>見出しの色: <input type="color" class="nw-sched-color" value="' + headBg + '" onchange="NW.setSchedHeaderColor(\'' + bid + '\',this.value)"></label>'
             + '<button type="button" class="nw-sched-color-reset" onclick="NW.setSchedHeaderColor(\'' + bid + '\',null)">既定の色</button>'
             + '<span style="color:var(--border);">|</span>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subject\')"> 教科のみ</label>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subjectUnit\')"> 教科+単元</label>'
-            + '<label><input type="radio" name="sm_' + bid + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'full\')"> 詳細</label>'
-            + '</div>';
+            + '<label><input type="radio" name="sm_' + bid + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'full\')"> 詳細</label>';
+        if (letter) {
+            // 文字の大きさは pt で選ぶ（Googleドキュメントと同じ単位）
+            var ptChoices = [6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 12, 13, 14, 15, 16, 18, 20];
+            var cur = (opts.sizes || {});
+            html += '<span style="color:var(--border);">|</span>'
+                + '<span style="font-size:0.72rem;font-weight:600;color:var(--text-sub);">文字(pt):</span>';
+            [['subject', '教科'], ['sub', '単元'], ['list', '宿題・持ち物'], ['label', '左の見出し']].forEach(function (kv) {
+                var v = cur[kv[0]] || SCHED_LETTER_SIZES[kv[0]];
+                var list = ptChoices.indexOf(v) < 0 ? ptChoices.concat([v]).sort(function (a, b) { return a - b; }) : ptChoices;
+                html += '<label>' + kv[1] + ' <select onchange="NW.setSchedSize(\'' + bid + '\',\'' + kv[0] + '\',this.value)">'
+                    + list.map(function (p) { return '<option value="' + p + '"' + (p === v ? ' selected' : '') + '>' + p + '</option>'; }).join('')
+                    + '</select></label>';
+            });
+            html += '<label>行の高さ <select onchange="NW.setSchedRowHeight(\'' + bid + '\',this.value)">'
+                + [0, 10, 12, 14, 16, 18, 20].map(function (mm) {
+                    return '<option value="' + mm + '"' + ((opts.rowHeight || 0) === mm ? ' selected' : '') + '>' + (mm ? mm + 'mm' : '自動') + '</option>';
+                }).join('')
+                + '</select></label>';
+        }
+        html += '</div>';
         return html;
     };
 
     // ---- Block property setters ----
+    /** 描き直したあとも、そのブロックを選んだまま（ツールバーを出したまま）にする */
+    NW._rerenderKeep_ = function (id) {
+        NW.render();
+        var el = document.querySelector('[data-block-id="' + id + '"]');
+        if (el) el.classList.add('nw-block-selected');
+    };
+
+    /** ブロックの欄を1つ変えて描き直す（題字の幅・書体など） */
+    NW.setBlockProp = function (id, prop, value) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        NW.pushHistory();
+        NW.saveEditable();
+        block[prop] = value;
+        NW._rerenderKeep_(id);
+    };
+
+    /** 既定が「入」の切り替え（記事の下線・番号）を反転する */
+    NW.toggleBlockFlag = function (id, prop) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        NW.setBlockProp(id, prop, block[prop] === false);
+    };
+
+    /** 文字の大きさを pt で決める。中身は px で持つ */
+    NW.setSizePt = function (id, prop, pt) {
+        NW.setBlockProp(id, prop, nwPtToPx_(pt));
+    };
+
+    /** 文字の大きさを一覧の1つ上（dir=1）／下（dir=-1）へ */
+    NW.stepSizePt = function (id, prop, dir) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        var cur = nwPxToPt_(block[prop]);
+        var next = cur;
+        if (dir > 0) {
+            for (var i = 0; i < NW_PT_SIZES.length; i++) { if (NW_PT_SIZES[i] > cur) { next = NW_PT_SIZES[i]; break; } }
+        } else {
+            for (var j = NW_PT_SIZES.length - 1; j >= 0; j--) { if (NW_PT_SIZES[j] < cur) { next = NW_PT_SIZES[j]; break; } }
+        }
+        if (next !== cur) NW.setSizePt(id, prop, next);
+    };
+
+    /** 数字を全角にする（通信の日付・番号は全角で書いている） */
+    function nwZenkakuDigits_(v) {
+        return String(v).replace(/[0-9]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) + 0xFEE0); });
+    }
+
+    /**
+     * 発行日の既定。対象週の月曜（"YYYY/MM/DD"）の前の金曜日。
+     * 通信は前の週の金曜に出し、翌週の予定を知らせているため。
+     * @return {Date|null}
+     */
+    function nwIssueDate_(mondayStr) {
+        var p = String(mondayStr == null ? '' : mondayStr).split('/');
+        if (p.length < 3) return null;
+        var d = new Date(+p[0], +p[1] - 1, +p[2]);
+        if (isNaN(d.getTime())) return null;
+        d.setDate(d.getDate() - 3);
+        return d;
+    }
+
+    /** 「令和８年１０月１７日」の形（数字は全角）。令和より前の日付は西暦で書く */
+    function nwWarekiDate_(d) {
+        if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+        var y = d.getFullYear();
+        var m = d.getMonth() + 1;
+        var day = d.getDate();
+        if (y < 2019 || (y === 2019 && m < 5)) {
+            return nwZenkakuDigits_(y) + '年' + nwZenkakuDigits_(m) + '月' + nwZenkakuDigits_(day) + '日';
+        }
+        var ry = y - 2018;
+        return '令和' + (ry === 1 ? '元' : nwZenkakuDigits_(ry)) + '年' + nwZenkakuDigits_(m) + '月' + nwZenkakuDigits_(day) + '日';
+    }
+    NW.nwWarekiDate_ = nwWarekiDate_;
+    NW.nwIssueDate_ = nwIssueDate_;
+
+    /** 題字ブロックの発行日。先生が書き替えていなければ週から決める */
+    NW.mastheadDate_ = function (block) {
+        if (block.dateAuto === false && block.dateText) return block.dateText;
+        return nwWarekiDate_(nwIssueDate_(NW.mondayStr || (typeof STATE !== 'undefined' ? STATE.mondayStr : '')));
+    };
+
+    /**
+     * 発行日の欄が書き替えられたら覚える。空にするか自動の日付と同じなら、自動にもどす。
+     * renderedAuto は描いたときの自動の日付。字がそのままなら書き替えていないので何もしない
+     * （週を切り替えると自動の日付が変わるため、今の自動の日付とは比べられない）。
+     */
+    NW.setMastheadDate_ = function (block, text, renderedAuto) {
+        var t = String(text == null ? '' : text).trim();
+        if (renderedAuto && t === renderedAuto) return;
+        var auto = nwWarekiDate_(nwIssueDate_(NW.mondayStr || (typeof STATE !== 'undefined' ? STATE.mondayStr : '')));
+        if (!t || t === auto) { block.dateAuto = true; block.dateText = ''; }
+        else { block.dateAuto = false; block.dateText = t; }
+    };
+
+    /**
+     * 題字ブロックの文字を覚えておく（次の通信を作るときに入れ直さずに済むように）。
+     * 画像は入れない。端末に写真を残さない約束（stripImagesForLocalSave_）と同じ扱い。
+     */
+    NW.saveMastheadMemory_ = function (b) {
+        try {
+            localStorage.setItem('nw_masthead_v1', JSON.stringify({
+                kicker: b.kicker || '', title: b.title || '', info: b.info || '',
+                titleSize: b.titleSize, infoSize: b.infoSize, logoWidth: b.logoWidth
+            }));
+        } catch (e) { }
+    };
+
+    NW.loadMastheadMemory_ = function () {
+        try {
+            var v = JSON.parse(localStorage.getItem('nw_masthead_v1') || '{}');
+            return (v && typeof v === 'object') ? v : {};
+        } catch (e) { return {}; }
+    };
+
+    /** 記事の番号「１．」。番号を付ける記事だけを上から数える */
+    NW.articleNumber_ = function (id) {
+        var n = 0;
+        for (var i = 0; i < NW.blocks.length; i++) {
+            var b = NW.blocks[i];
+            if (b.type === 'article' && b.numbered !== false) n++;
+            if (b.id === id) break;
+        }
+        return nwZenkakuDigits_(n) + '．';
+    };
+
     NW.setFontSize = function (id, size) {
         var block = NW.blocks.find(function (b) { return b.id === id; });
         if (!block) return;
-        block.fontSize = parseInt(size, 10);
+        block.fontSize = parseFloat(size);
         var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
         if (el) el.style.fontSize = block.fontSize + 'px';
     };
@@ -1362,7 +2073,7 @@
     NW.setWrapFontSize = function (id, size) {
         var block = NW.blocks.find(function (b) { return b.id === id; });
         if (!block || block.type !== 'image') return;
-        block.wrapFontSize = parseInt(size, 10);
+        block.wrapFontSize = parseFloat(size);
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-float-text-side');
         if (el) el.style.fontSize = block.wrapFontSize + 'px';
     };
@@ -1440,6 +2151,106 @@
         if (el) el.innerHTML = NW.renderScheduleHTML(block);
     };
 
+    /** 時間割ブロックの表だけを描き直す（ブロックの選択やツールバーはそのまま） */
+    NW.refreshSchedule_ = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
+        if (block && el) el.innerHTML = NW.renderScheduleHTML(block);
+    };
+
+    /**
+     * 表の形を切り替える。学級通信の形にするときは、紙の通信で使っている
+     * 行・大きさ・色をまとめて入れる（校時の出し分けと見出しの名前は残す）。
+     */
+    NW.setSchedStyle = function (id, style) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        NW.pushHistory();
+        if (style === 'letter') {
+            var d = schedLetterDefaults_();
+            for (var k in d) block.options[k] = d[k];
+        } else {
+            block.options.tableStyle = 'app';
+            block.options.dateSize = 'm';
+            block.options.headerColor = SCHED_HEADER_COLOR_DEFAULT;
+        }
+        NW.refreshSchedule_(id);
+    };
+
+    /** 学級通信の形の文字の大きさ（pt）を変える。key は subject / sub / list / label */
+    NW.setSchedSize = function (id, key, pt) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block || !SCHED_LETTER_SIZES.hasOwnProperty(key)) return;
+        var v = parseFloat(pt);
+        if (!isFinite(v) || v <= 0) return;
+        NW.pushHistory();
+        var sizes = {};
+        for (var k in SCHED_LETTER_SIZES) sizes[k] = (block.options.sizes && block.options.sizes[k]) || SCHED_LETTER_SIZES[k];
+        sizes[key] = v;
+        block.options.sizes = sizes;
+        NW.refreshSchedule_(id);
+    };
+
+    /** 校時・朝の行の高さ（mm）。0 は中身に合わせる */
+    NW.setSchedRowHeight = function (id, mm) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        NW.pushHistory();
+        block.options.rowHeight = Math.max(0, parseInt(mm, 10) || 0);
+        NW.refreshSchedule_(id);
+    };
+
+    // 左の見出しの名前を変えられる行。キーは週案のデータの欄の名前
+    var SCHED_RENAMEABLE_ROWS = [
+        ['event', '行事'], ['morning', '朝'], ['recess1', '中休み'], ['recess2', '昼休み'],
+        ['afterschool', '放課後'], ['homework', '宿題'], ['items', '持ち物']
+    ];
+
+    /** 先生が決めた見出しの名前を読む（次に作る表にも引きつぐため） */
+    NW.loadSchedLabels_ = function () {
+        try {
+            var v = JSON.parse(localStorage.getItem('nw_sched_labels_v1') || '{}');
+            return (v && typeof v === 'object') ? v : {};
+        } catch (e) { return {}; }
+    };
+
+    /** 左の見出しの名前を変える（例: 宿題 → かだい）。空にすると既定の名前に戻る */
+    NW.editSchedLabels = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        var cur = block.options.rowLabels || {};
+        var html = '<div style="text-align:left;font-size:0.85rem;">'
+            + '<p style="color:var(--text-sub);margin:0 0 8px;">空のままにすると、ふだんの名前で出ます。ここで決めた名前は次に作る表にも使います。</p>';
+        SCHED_RENAMEABLE_ROWS.forEach(function (kv) {
+            html += '<label style="display:flex;align-items:center;gap:8px;margin:4px 0;">'
+                + '<span style="width:5em;">' + escHtml(kv[1]) + '</span>'
+                + '<input id="swalRowLabel_' + kv[0] + '" class="swal2-input" style="margin:0;flex:1;height:2.4em;" '
+                + 'placeholder="' + escHtml(schedRowLabel_(kv[1])) + '" value="' + escHtml(cur[kv[0]] || '') + '"></label>';
+        });
+        html += '</div>';
+        Swal.fire({
+            title: '見出しの名前',
+            html: html,
+            showCancelButton: true,
+            confirmButtonText: '決める',
+            cancelButtonText: 'キャンセル',
+            preConfirm: function () {
+                var out = {};
+                SCHED_RENAMEABLE_ROWS.forEach(function (kv) {
+                    var v = document.getElementById('swalRowLabel_' + kv[0]).value.trim();
+                    if (v) out[kv[0]] = v;
+                });
+                return out;
+            }
+        }).then(function (result) {
+            if (!result.isConfirmed) return;
+            NW.pushHistory();
+            block.options.rowLabels = result.value;
+            try { localStorage.setItem('nw_sched_labels_v1', JSON.stringify(result.value)); } catch (e) { }
+            NW.refreshSchedule_(id);
+        });
+    };
+
     NW.editSchedCell = function (id, rowType, dayIdx, periodIdx) {
         var block = NW.blocks.find(function (b) { return b.id === id; });
         if (!block) return;
@@ -1448,6 +2259,31 @@
         var day = data.days[dayIdx];
         if (!day) return;
         var overrides = block.cellOverrides || {};
+
+        if (rowType === 'closed') {
+            // 休みの日（列ごと灰色）の名前。空にすると授業のある日として出す
+            var closedKey = 'closed_' + dayIdx;
+            var autoLabel = schedClosedLabel_(day);
+            var curLabel = overrides.hasOwnProperty(closedKey) ? overrides[closedKey] : schedClosedText_(autoLabel, true);
+            Swal.fire({
+                title: schedHeadLabel_(day) + ' を休みの日にする',
+                input: 'text',
+                inputValue: curLabel,
+                inputLabel: '列に縦に入れる名前（例: ふりかえきゅうじつ）。空にすると授業のある日として出します。',
+                showCancelButton: true,
+                showDenyButton: overrides.hasOwnProperty(closedKey),
+                denyButtonText: '週案どおりに戻す',
+                confirmButtonText: '決める',
+                cancelButtonText: 'キャンセル'
+            }).then(function (result) {
+                if (result.isDismissed) return;
+                NW.pushHistory();
+                if (result.isDenied) delete block.cellOverrides[closedKey];
+                else block.cellOverrides[closedKey] = String(result.value || '').trim();
+                NW.refreshSchedule_(id);
+            });
+            return;
+        }
 
         if (rowType === 'period') {
             // Period cell: subject, unit, content fields
@@ -1517,13 +2353,15 @@
             });
         } else {
             // Simple text cell (event, recess1, recess2, afterschool, homework, items)
-            var labels = { event: '行事', recess1: '中休み', recess2: '昼休み', afterschool: '放課後', homework: '宿題', items: '持ち物' };
+            var labels = { event: '行事', morning: '朝', recess1: '中休み', recess2: '昼休み', afterschool: '放課後', homework: '宿題', items: '持ち物' };
             var overKey = rowType + '_' + dayIdx;
             var origVal = day[rowType] || '';
             var curVal = overrides.hasOwnProperty(overKey) ? overrides[overKey] : origVal;
             // 宿題・持ち物は1件1行の箇条書きで出す。1行の <input> で編集させると、
             // 開いた時点で改行が落ちて箇条書きが1行に潰れるので、複数行で編集させる。
             var asList = SCHED_LIST_FIELDS.indexOf(rowType) >= 0;
+            // 朝の欄も「学習」の下に「漢字テスト⑥」と2行で書くので、複数行で編集させる
+            if (rowType === 'morning') asList = true;
             Swal.fire({
                 title: day.dayLabel + ' - ' + (labels[rowType] || rowType),
                 input: asList ? 'textarea' : 'text',
@@ -1558,7 +2396,12 @@
             var reader = new FileReader();
             reader.onload = function (evt) {
                 var block = NW.blocks.find(function (b) { return b.id === blockId; });
-                if (block) { block.src = evt.target.result; NW.render(); }
+                if (block) {
+                    NW.pushHistory();
+                    block.src = evt.target.result;
+                    delete block.srcStripped;
+                    NW.render();
+                }
             };
             reader.readAsDataURL(file);
         };
@@ -2032,6 +2875,9 @@
                 if (b.type === 'gallery') { b.images = []; }
                 if (b.type === 'schedule') { b.weekData = null; }
                 if (b.type === 'qrcode') { b.url = ''; b.label = ''; }
+                // 題字の文字・学校名は毎回同じなので残す。画像は端末に残さない
+                if (b.type === 'masthead') { b.src = ''; b.dateAuto = true; b.dateText = ''; }
+                if (b.type === 'article') { b.title = ''; b.content = ''; }
                 if (b.type === 'columns') {
                     b.colData = b.colData.map(function () { return { content: '', src: '', caption: '' }; });
                 }
@@ -2087,10 +2933,11 @@
             html: '<div style="text-align:left;">'
                 + '<label style="font-size:0.85rem;font-weight:600;">生成したい内容</label>'
                 + '<select id="swalAiType" class="swal2-select" style="width:100%;margin-top:4px;">'
+                + '<option value="article" selected>お知らせ記事（見出し＋本文）</option>'
                 + '<option value="intro">今週のあいさつ・はじめの文</option>'
                 + '<option value="event">行事紹介の文章</option>'
                 + '<option value="study">学習の様子の紹介文</option>'
-                + '<option value="notice">保護者へのお知らせ</option>'
+                + '<option value="notice">保護者へのお知らせ（本文だけ）</option>'
                 + '<option value="closing">結びの文</option>'
                 + '<option value="safety">安全に関するお知らせ</option>'
                 + '<option value="praise">キラキラコーナー（褒め）</option>'
@@ -2110,8 +2957,9 @@
                 + '<option value="medium" selected>標準（3〜5文）</option>'
                 + '<option value="long">長め（5〜8文）</option>'
                 + '</select></div></div>'
-                + '<label style="font-size:0.85rem;font-weight:600;margin-top:10px;display:block;">追加の指示（任意）</label>'
-                + '<textarea id="swalAiExtra" class="swal2-textarea" placeholder="例: 運動会について触れてほしい" style="margin-top:4px;min-height:50px;"></textarea>'
+                + '<label style="font-size:0.85rem;font-weight:600;margin-top:10px;display:block;">何について書くか（任意）</label>'
+                + '<textarea id="swalAiExtra" class="swal2-textarea" placeholder="例: 木曜日に体操服を持ち帰る。土曜の運動会に洗ったものを持たせてほしい" style="margin-top:4px;min-height:50px;"></textarea>'
+                + '<p style="font-size:0.75rem;color:var(--text-sub);margin-top:6px;">書かなければ、週予定の持ち物・行事から話題を選びます。お知らせ記事の長さは、いつもの通信に合わせて決まります。</p>'
                 + '</div>',
             showCancelButton: true,
             confirmButtonText: '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:text-bottom;">auto_awesome</span> 生成',
@@ -2127,71 +2975,121 @@
             }
         }).then(function (result) {
             if (!result.isConfirmed) return;
+            var type = result.value.type;
             showToast('info', 'AIが文章を生成しています...');
             google.script.run
                 .withSuccessHandler(function (res) {
                     if (!res.success) { showToast('error', 'AI生成失敗: ' + res.error); return; }
-                    NW.addBlock('text', null, { content: res.text.replace(/\n/g, '<br>'), fontSize: 12 });
+                    if (type === 'article') {
+                        NW.insertArticles_([{ title: res.title, body: res.text }], false);
+                        showToast('success', 'お知らせ記事を追加しました');
+                        return;
+                    }
+                    NW.addBlock('text', null, { content: escHtml(res.text).replace(/\n/g, '<br>'), fontSize: nwPtToPx_(10) });
                     showToast('success', 'AI文章を追加しました');
                 })
                 .withFailureHandler(_onCommError)
-                .generateNewsletterAI(mondayStr, result.value.type, result.value.extra,
+                .generateNewsletterAI(mondayStr, type, result.value.extra,
                     { tone: result.value.tone, length: result.value.length });
         });
     };
 
-    // ---- AI: 学級通信全体の一括自動生成 ----
+    /**
+     * AI が書いた記事を、通信の「お知らせ」の下へ入れる。
+     * replace のときは、今ある記事（本文の入っていないものも）を取りのぞいてから入れる。
+     * 「お知らせ」の見出しが無ければ、いちばん下に作る。
+     * @param {Array} articles [{ title, body }]
+     * @param {boolean} replace
+     */
+    NW.insertArticles_ = function (articles, replace) {
+        NW.saveEditable();
+        NW.pushHistory();
+        NW._skipHistory = true;
+        if (replace) NW.blocks = NW.blocks.filter(function (b) { return b.type !== 'article'; });
+        var label = NW.blocks.find(function (b) { return b.role === 'notice-label'; });
+        if (!label) {
+            label = NW.addBlock('text', null, { content: 'お知らせ', fontSize: nwPtToPx_(10), role: 'notice-label' });
+        }
+        // 入れる位置: 既にある記事のうち最後のものの下。無ければ「お知らせ」の下
+        var after = label.id;
+        NW.blocks.forEach(function (b) { if (b.type === 'article') after = b.id; });
+        articles.forEach(function (a) {
+            var nb = NW.addBlock('article', after, {
+                title: escHtml(a.title || ''),
+                content: escHtml(a.body || '').replace(/\n/g, '<br>')
+            });
+            after = nb.id;
+        });
+        // お願いを含む記事があれば、見出しを「お知らせとお願い」にする（先生の通信と同じ書き分け）。
+        // 描き直すと画面の字が中身に読み戻されるので、画面の字も同じに書き替えておく
+        var plainLabel = String(label.content || '').replace(/<[^>]*>/g, '').trim();
+        var asks = articles.some(function (a) { return /お願い/.test((a.title || '') + (a.body || '')); });
+        if (plainLabel === 'お知らせ' || plainLabel === 'お知らせとお願い') {
+            label.content = asks ? 'お知らせとお願い' : 'お知らせ';
+            var labelEl = document.querySelector('[data-block-id="' + label.id + '"] [contenteditable]');
+            if (labelEl) labelEl.innerHTML = label.content;
+        }
+        NW._skipHistory = false;
+        NW.render();
+        NW.pushHistory();
+    };
+
+    // ---- AI: お知らせ記事のまとめ生成 ----
     NW.generateFullNewsletter = function () {
         var mondayStr = NW.mondayStr || STATE.mondayStr;
         if (!mondayStr) { showToast('error', '週を選択してください'); return; }
+        var hasArticles = NW.blocks.some(function (b) { return b.type === 'article'; });
         Swal.fire({
-            title: 'AIで学級通信を一括生成',
+            title: 'AIでお知らせをまとめて生成',
             html: '<div style="text-align:left;">'
-                + '<p style="font-size:0.85rem;color:var(--text-sub);margin-bottom:10px;">AIが見出し・あいさつ文・学習紹介・お知らせ・結びを含む学級通信を自動生成します。</p>'
-                + '<label style="font-size:0.85rem;font-weight:600;">文体</label>'
+                + '<p style="font-size:0.85rem;color:var(--text-sub);margin-bottom:10px;">週案の予定（持ち物・行事・単元）から、保護者向けの「お知らせ」記事を書きます。'
+                + (NW.blocks.length === 0 ? '題字と週予定の表も「いつもの学級通信」の形で組みます。' : '題字や表はそのまま残ります。')
+                + (hasArticles ? '<br><strong>いまある記事は置きかわります。</strong>' : '')
+                + '</p>'
+                + '<div style="display:flex;gap:8px;">'
+                + '<div style="flex:1;"><label style="font-size:0.85rem;font-weight:600;">文体</label>'
                 + '<select id="swalFullTone" class="swal2-select" style="width:100%;margin-top:4px;">'
                 + '<option value="warm">温かい</option>'
                 + '<option value="formal">丁寧・フォーマル</option>'
                 + '<option value="casual">カジュアル</option>'
                 + '<option value="energetic">元気・活発</option>'
-                + '</select>'
-                + '<label style="font-size:0.85rem;font-weight:600;margin-top:10px;display:block;">追加の指示（任意）</label>'
-                + '<textarea id="swalFullExtra" class="swal2-textarea" placeholder="例: 遠足のエピソードを入れて" style="margin-top:4px;min-height:50px;"></textarea>'
+                + '</select></div>'
+                + '<div style="flex:1;"><label style="font-size:0.85rem;font-weight:600;">記事の数</label>'
+                + '<select id="swalFullCount" class="swal2-select" style="width:100%;margin-top:4px;">'
+                + '<option value="1">1本</option>'
+                + '<option value="2" selected>2本</option>'
+                + '<option value="3">3本</option>'
+                + '</select></div></div>'
+                + '<label style="font-size:0.85rem;font-weight:600;margin-top:10px;display:block;">書いてほしい話題（任意）</label>'
+                + '<textarea id="swalFullExtra" class="swal2-textarea" placeholder="例: 国語の教科書が下巻になる／運動会のダンス練習をがんばっている" style="margin-top:4px;min-height:50px;"></textarea>'
                 + '</div>',
             showCancelButton: true,
-            confirmButtonText: '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:text-bottom;">auto_awesome</span> 一括生成',
+            confirmButtonText: '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:text-bottom;">auto_awesome</span> 生成',
             cancelButtonText: 'キャンセル',
-            width: 480
+            width: 480,
+            preConfirm: function () {
+                return {
+                    tone: document.getElementById('swalFullTone').value,
+                    count: parseInt(document.getElementById('swalFullCount').value, 10) || 2,
+                    extra: document.getElementById('swalFullExtra').value
+                };
+            }
         }).then(function (result) {
             if (!result.isConfirmed) return;
-            var tone = document.getElementById('swalFullTone').value;
-            var extra = document.getElementById('swalFullExtra').value;
-            showToast('info', 'AIが学級通信全体を生成しています... しばらくお待ちください');
+            showToast('info', 'AIがお知らせを書いています... しばらくお待ちください');
             google.script.run
                 .withSuccessHandler(function (res) {
                     if (!res.success) { showToast('error', 'AI生成失敗: ' + res.error); return; }
-                    // 既存ブロックをクリアして新しいブロックを追加
-                    NW.blocks = [];
-                    NW.nextId = 1;
-                    res.sections.forEach(function (sec) {
-                        if (sec.type === 'heading') {
-                            NW.addBlock('heading', null, { content: sec.text, fontSize: 20, align: 'center' });
-                        } else {
-                            NW.addBlock('text', null, { content: sec.text.replace(/\n/g, '<br>'), fontSize: 12 });
-                        }
-                    });
-                    // 時間割ブロックを自動追加
-                    if (NW.scheduleData) {
-                        NW.addBlock('divider');
-                        NW.addBlock('schedule', null, { weekData: NW.scheduleData });
+                    if (NW.blocks.length === 0) {
+                        NW.buildLetterLayout_(NW.scheduleData);
+                        if (!NW.scheduleData) NW.loadScheduleData();
                     }
-                    NW._history = [];
-                    NW._historyIdx = -1;
-                    NW.pushHistory();
-                    showToast('success', '学級通信を生成しました');
+                    NW.insertArticles_(res.articles || [], true);
+                    showToast('success', 'お知らせを ' + (res.articles || []).length + ' 本書きました。読み直して整えてください');
                 })
                 .withFailureHandler(_onCommError)
-                .generateFullNewsletterAI(mondayStr, extra, { tone: tone });
+                .generateFullNewsletterAI(mondayStr, result.value.extra,
+                    { tone: result.value.tone, count: result.value.count });
         });
     };
 
@@ -2240,7 +3138,9 @@
                     NW.pushHistory();
                     var newContent = res.text.replace(/\n/g, '<br>');
                     // Update DOM element first so NW.saveEditable() inside NW.render() picks up new content
-                    var el = document.querySelector('[data-block-id="' + id + '"] [contenteditable]');
+                    // 記事は見出しと本文の2つが編集欄なので、本文のほうを差し替える
+                    var el = document.querySelector('[data-block-id="' + id + '"] '
+                        + (block.type === 'article' ? '.nw-article-body' : '[contenteditable]'));
                     if (el) el.innerHTML = newContent;
                     block.content = newContent;
                     NW.render();
@@ -2284,7 +3184,8 @@
     NW.stripImagesForLocalSave_ = function (blocks) {
         var copy = JSON.parse(JSON.stringify(blocks || []));
         copy.forEach(function (b) {
-            if (b.src) b.src = '';
+            // 題字の画像は、落としたことを覚えておく（復元したときに入れ直しを促すため）
+            if (b.src) { b.src = ''; if (b.type === 'masthead') b.srcStripped = true; }
             if (b.images) b.images.forEach(function (img) { if (img.src) img.src = ''; });
             if (b.colData) b.colData.forEach(function (col) { if (col.src) col.src = ''; });
         });
@@ -2325,7 +3226,8 @@
                 // 写真はブラウザに残していないので、復元しても空のままになる。
                 // 黙っていると「消えた」と見えるため、入れ直しが要ることを伝える。
                 var needsPhotos = data.blocks.some(function (b) {
-                    return b.type === 'image' || b.type === 'gallery' || b.type === 'columns';
+                    return b.type === 'image' || b.type === 'gallery' || b.type === 'columns'
+                        || (b.type === 'masthead' && b.srcStripped);
                 });
                 if (needsPhotos && typeof showToast === 'function') {
                     showToast('info', '編集中の内容を復元しました。写真は端末に残していないため、入れ直してください。');
@@ -2478,16 +3380,30 @@
                 showToast('success', '週案データを読み込みました');
                 var hasSchedule = NW.blocks.some(function (b) { return b.type === 'schedule'; });
                 if (hasSchedule) {
-                    NW.blocks.forEach(function (b) { if (b.type === 'schedule') b.weekData = data; });
+                    // 週が変わると表の中身も変わるので、その週だけの書き替え（セルの上書き）は捨てる。
+                    // 発行日（自動のもの）は描き直すときに新しい週から決まる
+                    var weekChanged = false;
+                    NW.blocks.forEach(function (b) {
+                        if (b.type !== 'schedule') return;
+                        var sameWeek = b.weekData && b.weekData.days && data.days
+                            && b.weekData.days[0] && data.days[0] && b.weekData.days[0].date === data.days[0].date;
+                        if (!sameWeek) { b.cellOverrides = {}; weekChanged = true; }
+                        b.weekData = data;
+                    });
+                    // 前の週に手で直した発行日は、新しい週には持ちこまない
+                    if (weekChanged) {
+                        NW.blocks.forEach(function (b) {
+                            if (b.type !== 'masthead') return;
+                            b.dateAuto = true;
+                            b.dateText = '';
+                            var dEl = document.querySelector('[data-block-id="' + b.id + '"] .nw-masthead-date');
+                            if (dEl) { dEl.textContent = NW.mastheadDate_(b); dEl.setAttribute('data-auto', dEl.textContent); }
+                        });
+                    }
                     NW.render();
                 } else if (NW.blocks.length === 0) {
-                    // Auto-create default layout
-                    NW.addBlock('heading', null, { content: data.title || '学級通信', fontSize: 20 });
-                    NW.addBlock('text', null, { content: data.date + '〜 の予定', fontSize: 11, align: 'center' });
-                    NW.addBlock('divider');
-                    NW.addBlock('schedule', null, { weekData: data });
-                    NW.addBlock('divider');
-                    NW.addBlock('text', null, { content: '', fontSize: 12 });
+                    // 何も無いところへ読み込んだら「いつもの学級通信」の形で組む
+                    NW.buildLetterLayout_(data);
                 } else {
                     NW.render();
                 }
@@ -2502,8 +3418,12 @@
     NW._PRINT_FONTS = function () {
         return window.getSelfHostedFontCss ? window.getSelfHostedFontCss() : '';
     };
-    NW._PRINT_CSS = '@page{size:A4 portrait;margin:15mm 18mm;}'
-        + 'body{font-family:"Zen Maru Gothic","Hiragino Maru Gothic ProN","Yu Gothic UI","Hiragino Kaku Gothic ProN","Noto Sans JP","Meiryo",system-ui,sans-serif;font-size:12px;color:#202124;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+    // 余白は先生が Google ドキュメントで使っていた通信に合わせてある（上下 12.7mm・左右 16mm）。
+    // 書体は自己ホストの丸ゴシックが先頭。収録していない字（学年配当外の漢字など）は
+    // 端末にある丸ゴシック（iPad のヒラギノ丸ゴ、Office の HG丸ｺﾞｼｯｸM-PRO など）で補い、
+    // 本文の途中で角ゴシックが混ざって見えるのをできるだけ避ける。
+    NW._PRINT_CSS = '@page{size:A4 portrait;margin:12.7mm 16mm;}'
+        + 'body{font-family:"Zen Maru Gothic","Hiragino Maru Gothic ProN","Kosugi Maru","HG丸ｺﾞｼｯｸM-PRO","HGMaruGothicMPRO","Yu Gothic UI","Hiragino Kaku Gothic ProN","Noto Sans JP","Meiryo",system-ui,sans-serif;font-size:12px;color:#202124;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
         // Block container
         + '.nw-block{margin:0;}'
         // Heading / Text
@@ -2552,6 +3472,16 @@
         + '.nw-col-text{line-height:1.6;font-size:0.85rem;}'
         // Image caption
         + '.nw-image-caption{font-size:0.78rem;color:#5f6368;text-align:center;padding:4px 8px;margin-top:4px;}'
+        // 題字（masthead）。下の細い灰色の線まで含む
+        + '.nw-masthead{display:flex;align-items:center;justify-content:space-between;gap:4mm;border-bottom:1.5pt solid #888;padding-bottom:3mm;margin-bottom:2.5mm;}'
+        + '.nw-masthead-title{flex-shrink:0;}.nw-masthead-title img{display:block;width:100%;height:auto;}'
+        + '.nw-masthead-kicker{font-weight:700;line-height:1.3;}.nw-masthead-name{font-weight:900;line-height:1.15;}'
+        + '.nw-masthead-info{flex:1;min-width:0;text-align:right;line-height:1.5;}'
+        // お知らせの記事
+        + '.nw-article{margin:0 0 0.7em;}.nw-article-head{font-weight:700;line-height:1.5;}'
+        + '.nw-article-body{line-height:1.5;}'
+        // 学級通信の形の時間割は、校時の行の高さを紙でも保つ（行の分割で潰れないように）
+        + '.nw-schedule-block tr{break-inside:avoid;page-break-inside:avoid;}'
         // Insert rows hidden
         + '.nw-insert-row{display:none;}';
 
@@ -2717,6 +3647,26 @@
                 case 'divider':
                     body += '<hr style="border:none;border-top:1px solid #dadce0;margin:6px 0;">';
                     break;
+                case 'masthead':
+                    var mhFont = block.fontFamily ? 'font-family:' + block.fontFamily + ';' : '';
+                    var mhLeftHtml = block.src
+                        ? '<img src="' + block.src + '" width="' + Math.round(pageW * (block.logoWidth || 66) / 100) + '">'
+                        : '<p style="margin:0;font-weight:bold;font-size:' + Math.round((block.titleSize || 37) * 0.45) + 'px;">' + (block.kicker || '') + '</p>'
+                        + '<p style="margin:0;font-weight:bold;font-size:' + (block.titleSize || 37) + 'px;">' + (block.title || '') + '</p>';
+                    body += wrapOpen + '<table style="width:100%;border:none;border-collapse:collapse;' + mhFont + '"><tr>'
+                        + '<td style="width:' + (block.logoWidth || 66) + '%;border:none;text-align:left;vertical-align:middle;padding:0;">' + mhLeftHtml + '</td>'
+                        + '<td style="border:none;text-align:right;vertical-align:middle;padding:0;line-height:1.5;font-size:' + (block.infoSize || 14.67) + 'px;">'
+                        + escHtml(NW.mastheadDate_(block)) + '<br>' + (block.info || '') + '</td>'
+                        + '</tr></table>'
+                        + '<hr style="border:none;border-top:2px solid #888888;margin:4px 0 8px;">' + wrapClose;
+                    break;
+                case 'article':
+                    var arFs = 'font-size:' + (block.fontSize || 13.33) + 'px;' + (block.fontFamily ? 'font-family:' + block.fontFamily + ';' : '');
+                    body += wrapOpen + '<p style="' + arFs + 'margin:0;font-weight:bold;line-height:1.5;'
+                        + (block.underline !== false ? 'text-decoration:underline;' : '') + '">'
+                        + (block.numbered !== false ? NW.articleNumber_(block.id) : '') + (block.title || '') + '</p>'
+                        + '<p style="' + arFs + 'margin:0 0 8px;line-height:1.5;">' + (block.content || '&nbsp;') + '</p>' + wrapClose;
+                    break;
                 case 'wordart':
                     // Google DocsはCSSグラデーション非対応 → 太字＋色で代替表現
                     var wc = block.waColor || '#202124';
@@ -2731,7 +3681,8 @@
         });
 
         return '<!DOCTYPE html><html><head><meta charset="utf-8">'
-            + '<style>body{font-family:sans-serif;font-size:12px;color:#202124;margin:8px;padding:0;}'
+            // Googleドキュメントにも同じ丸ゴシックの書体名を渡す（ドキュメント側で選べる書体）
+            + '<style>body{font-family:"Kosugi Maru","Zen Maru Gothic",sans-serif;font-size:12px;color:#202124;margin:8px;padding:0;}'
             + 'p{margin:4px 0;}table{width:100%;border-collapse:collapse;}'
             + 'th{background-color:#1a73e8;color:#ffffff;padding:4px 6px;font-size:11px;text-align:center;}'
             + 'td{padding:3px 5px;border:1px solid #dadce0;text-align:center;font-size:11px;}'

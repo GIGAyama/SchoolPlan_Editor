@@ -363,41 +363,127 @@ function callGeminiAPIText_(prompt) {
 }
 
 /**
+ * 学級通信の「お知らせ」記事の書き方。
+ *
+ * 先生が Google ドキュメントで出してきた通信（A4 1枚。週予定の表の下に
+ * 「お知らせ」が 1〜2 本）を読みくらべて、共通していた型を言葉にしたもの。
+ * 以前の生成は「季節のあいさつ→学習の様子→お知らせ→結び」という読み物の型で、
+ * 実際の通信とは形が違い、毎回ほとんど書き直しになっていた。
+ *
+ * ⚠️ 実例の文をそのまま写していない。児童名・学校名・学級名を
+ *    プロンプトに入れないため（Zero-PII）。
+ */
+const NEWSLETTER_ARTICLE_STYLE_ = [
+  '・読み手は保護者。です・ます調の丁寧語で書く。あいさつ・季節の前置き・結びの言葉は書かない。',
+  '・1本の記事は「見出し」と「本文」でできている。',
+  '・見出しは25字以内で、何の話か一目で分かるようにする。「〜について」「〜のお願い」「〜が始まります」「〜を持ち帰ります」「〜をがんばっています！」のような形で終える。日時が要になる話は「９月３０日（木）１時間目の〜について」のように日時から書きはじめてよい。',
+  '・本文は2〜5文（100〜220字）。(1)何のための学習・行事か → (2)家庭にしてほしいこと（持ち物・大きさ・記名・持たせる日） → (3)お願いの一言、の順に書く。',
+  '・お願いは「〜をお願いします」「〜持たせていただきますようお願いします」「〜していただけると助かります」のように、やわらかく、しかし具体的に書く。',
+  '・日付は「１４日（月）」「９月３０日（木）」の形にする（数字は全角、曜日は（ ）に入れる）。いくつかの持ち物を並べるときは「①手鏡　②コップ」のように丸数字でつなぐ。',
+  '・子どもの名前・個人が分かる話・成績には触れない。予定に書かれていない行事・持ち物・日付を作り出さない。',
+  '・箇条書き・絵文字・【】や★などの飾りは使わない。'
+].join('\n');
+
+const NEWSLETTER_TONE_DESC_ = {
+  warm: '丁寧語のまま、温かみと親しみのある書き方',
+  formal: '丁寧で改まった書き方',
+  casual: '丁寧語のまま、やわらかく気軽に読める書き方',
+  energetic: '丁寧語のまま、明るく前向きな書き方'
+};
+
+// 記事 1 本の形。見出しと本文を分けて受け取り、通信の「１．見出し」＋本文の形に組む
+const NEWSLETTER_ARTICLE_SCHEMA_ = {
+  type: 'OBJECT',
+  properties: {
+    title: { type: 'STRING', description: '記事の見出し（番号は付けない）' },
+    body: { type: 'STRING', description: '記事の本文（です・ます調、2〜5文）' }
+  },
+  required: ['title', 'body']
+};
+
+/**
+ * 週案の 1 週間を、AI に渡す予定の文に直す。
+ * 朝の活動・単元・宿題・持ち物まで入れる。お知らせの話題はたいてい
+ * 「持ち物」「行事」「新しい単元の始まり」から生まれるため。
+ * 日曜は通信に載らないので渡さない。
+ * @param {Object[]} days getNewsletterData().days
+ * @returns {string}
+ */
+function buildNewsletterScheduleContext_(days) {
+  const oneLine = v => String(v == null ? '' : v).replace(/\s*[\r\n]+\s*/g, '、').trim();
+  let text = '\n【この週の予定（週案より）】\n';
+  (days || []).slice(0, 6).forEach(day => {
+    const parts = [];
+    if (day.holiday) parts.push(`祝日:${oneLine(day.holiday)}`);
+    if (day.event) parts.push(`行事:${oneLine(day.event)}`);
+    if (day.morning) parts.push(`朝:${oneLine(day.morning)}`);
+    (day.periods || []).forEach((p, i) => {
+      if (p && p.subject) parts.push(`${i + 1}時間目:${oneLine(p.subject)}${p.unit ? '（' + oneLine(p.unit) + '）' : ''}`);
+    });
+    if (day.homework) parts.push(`宿題:${oneLine(day.homework)}`);
+    if (day.items) parts.push(`持ち物:${oneLine(day.items)}`);
+    text += `${day.dayLabel}(${day.date}): ${parts.join(' ') || '予定なし'}\n`;
+  });
+  return text;
+}
+
+/** 週案を読んで予定の文にする。読めなくても生成そのものは止めない */
+function newsletterScheduleContextFor_(mondayDateStr) {
+  try {
+    const data = getNewsletterData(mondayDateStr);
+    if (data.success && data.days) return buildNewsletterScheduleContext_(data.days);
+  } catch (ignore) { }
+  return '';
+}
+
+/**
+ * AI が返した記事の配列を、通信に載せられる形にそろえる。
+ * 見出しの頭に AI が付けがちな「１．」「1.」「■」は落とす（番号は通信側で振る）。
+ * @param {Array} items [{ title, body }]
+ * @returns {Array} [{ title, body }]（空のものは除く）
+ */
+function normalizeNewsletterArticles_(items) {
+  return (Array.isArray(items) ? items : [])
+    .map(it => ({
+      title: String((it && it.title) || '')
+        .replace(/^\s*(?:[0-9０-９]+\s*[.．、)）]|[■□●○◆◇・★☆]+)\s*/, '')
+        .trim(),
+      body: String((it && it.body) || '').trim()
+    }))
+    .filter(it => it.title || it.body);
+}
+
+/**
  * [Webアプリ API] 学級通信の本文をGemini AIで自動生成する
  * @param {string} mondayDateStr "YYYY/MM/DD" 形式の月曜日
- * @param {string} genType 生成タイプ (intro, event, study, notice, free)
+ * @param {string} genType 生成タイプ (article, intro, event, study, notice, closing, safety, praise, free)
  * @param {string} extraInstructions 追加指示
- * @returns {Object} { success: boolean, text: string }
+ * @param {Object} options { tone, length }
+ * @returns {Object} article のときは { success, title, text }、ほかは { success, text }
  */
 function generateNewsletterAI(mondayDateStr, genType, extraInstructions, options) {
   try {
     options = options || {};
     const tone = options.tone || 'warm';
     const length = options.length || 'medium';
+    const scheduleContext = newsletterScheduleContextFor_(mondayDateStr);
+    const extra = extraInstructions ? '\n【先生からの指示（いちばん優先する）】\n' + extraInstructions : '';
 
-    // 週案データを取得してコンテキストに使う
-    let scheduleContext = '';
-    try {
-      const data = getNewsletterData(mondayDateStr);
-      if (data.success && data.days) {
-        scheduleContext = '\n【今週のスケジュール】\n';
-        data.days.forEach(day => {
-          scheduleContext += `${day.dayLabel}(${day.date}): `;
-          if (day.event) scheduleContext += `行事:${day.event} `;
-          day.periods.forEach((p, i) => {
-            if (p && p.subject) scheduleContext += `${i+1}時間目:${p.subject} `;
-          });
-          scheduleContext += '\n';
-        });
-      }
-    } catch(ignore) {}
+    // お知らせ記事 1 本。見出しと本文を分けて返す
+    if (genType === 'article') {
+      const prompt = `あなたは小学校の担任教員です。保護者向けの学級通信に載せる「お知らせ」の記事を1本書いてください。
+${NEWSLETTER_TONE_DESC_[tone] || NEWSLETTER_TONE_DESC_.warm}で書いてください。
 
-    const toneDesc = {
-      warm: '温かみのある、親しみやすい文体',
-      formal: '丁寧で格式のある文体',
-      casual: 'カジュアルで気軽な口調',
-      energetic: '元気で明るい、活発な文体'
-    };
+【書き方】
+${NEWSLETTER_ARTICLE_STYLE_}
+
+先生の指示があればその話題で書く。無ければ、予定の中から家庭の準備や協力がいちばん要るものを1つ選ぶ。
+${scheduleContext}${extra}`;
+      const articles = normalizeNewsletterArticles_(callGeminiJsonArray_(
+        prompt, NEWSLETTER_ARTICLE_SCHEMA_, '学級通信のお知らせ記事（1本）', 'Gemini Newsletter Article Error', 0.6));
+      if (!articles.length) return { success: false, error: 'AIが記事を生成できませんでした。再度お試しください。' };
+      return { success: true, title: articles[0].title, text: articles[0].body };
+    }
 
     const lengthDesc = {
       short: '2〜3文の簡潔な文章',
@@ -409,20 +495,20 @@ function generateNewsletterAI(mondayDateStr, genType, extraInstructions, options
       intro: '学級通信の冒頭に掲載する「今週のあいさつ文・はじめの文」を書いてください。季節感や子どもたちの成長に触れてください。',
       event: '今週の行事やイベントを紹介する文章を書いてください。保護者が読んで楽しめるよう、子どもたちの様子や準備のことにも触れてください。',
       study: '今週の学習内容や授業の様子を保護者に伝える文章を書いてください。子どもたちが頑張っていることや成長したことを具体的に触れてください。',
-      notice: '保護者へのお知らせ・連絡事項を書いてください。丁寧だが簡潔な表現で、重要な点が伝わるようにしてください。',
+      notice: '保護者へのお知らせ・連絡事項を書いてください。何のためか、家庭で何を準備してほしいか（持ち物・期日）を具体的に、丁寧だが簡潔に書いてください。',
       closing: '学級通信の最後に載せる「結びの文」を書いてください。来週への期待や保護者への感謝を込めてください。',
       safety: '安全に関するお知らせや注意喚起を書いてください。季節に応じた安全指導の内容を含めてください。',
-      praise: '子どもたちの頑張りや良い行動を紹介する「キラキラコーナー」の文章を書いてください。具体的なエピソードを交えて褒めてください。',
+      praise: '子どもたちの頑張りや良い行動を紹介する「キラキラコーナー」の文章を書いてください。具体的な場面を交えて褒めてください。子どもの名前は書かないでください。',
       free: '学級通信に掲載する文章を書いてください。'
     };
 
     const prompt = `あなたは小学校の担任教員です。保護者向けの学級通信の本文を日本語で作成してください。
-文章のみを出力し、タイトルや装飾、箇条書きは不要です。${toneDesc[tone] || toneDesc.warm}で書いてください。
+文章のみを出力し、タイトルや装飾、箇条書きは不要です。${NEWSLETTER_TONE_DESC_[tone] || NEWSLETTER_TONE_DESC_.warm}で書いてください。
 ${lengthDesc[length] || lengthDesc.medium}にしてください。
+予定に書かれていない行事・持ち物・日付を作り出さないでください。子どもの名前は書かないでください。
 
 ${typePrompts[genType] || typePrompts.free}
-${scheduleContext}
-${extraInstructions ? '\n【追加の指示】\n' + extraInstructions : ''}`;
+${scheduleContext}${extra}`;
 
     const text = callGeminiAPIText_(prompt);
     return { success: true, text: text };
@@ -434,75 +520,44 @@ ${extraInstructions ? '\n【追加の指示】\n' + extraInstructions : ''}`;
 }
 
 /**
- * [Webアプリ API] 学級通信全体をAIで一括生成する
+ * [Webアプリ API] 学級通信の「お知らせ」記事をまとめて生成する。
+ *
+ * 以前は「タイトル・あいさつ・学習の様子・お知らせ・結び」を作っていたが、
+ * 先生が実際に出している通信は「週予定の表＋お知らせ 1〜2 本」の形で、
+ * あいさつや結びは書いていない。表は週案から組むので、AI には記事だけを書かせる。
+ *
  * @param {string} mondayDateStr "YYYY/MM/DD" 形式の月曜日
  * @param {string} extraInstructions 追加指示
- * @param {Object} options { tone: string }
- * @returns {Object} { success: boolean, sections: Array }
+ * @param {Object} options { tone: string, count: number(1〜3) }
+ * @returns {Object} { success, articles: [{ title, body }] }
  */
 function generateFullNewsletterAI(mondayDateStr, extraInstructions, options) {
   try {
     options = options || {};
     const tone = options.tone || 'warm';
+    const count = Math.min(3, Math.max(1, parseInt(options.count, 10) || 2));
+    const scheduleContext = newsletterScheduleContextFor_(mondayDateStr);
 
-    let scheduleContext = '';
-    try {
-      const data = getNewsletterData(mondayDateStr);
-      if (data.success && data.days) {
-        scheduleContext = '\n【今週のスケジュール】\n';
-        data.days.forEach(day => {
-          scheduleContext += `${day.dayLabel}(${day.date}): `;
-          if (day.event) scheduleContext += `行事:${day.event} `;
-          day.periods.forEach((p, i) => {
-            if (p && p.subject) scheduleContext += `${i+1}時間目:${p.subject} `;
-          });
-          scheduleContext += '\n';
-        });
-      }
-    } catch(ignore) {}
+    const prompt = `あなたは小学校の担任教員です。保護者向けの学級通信の「お知らせ」欄に載せる記事を${count}本書いてください。
+${NEWSLETTER_TONE_DESC_[tone] || NEWSLETTER_TONE_DESC_.warm}で書いてください。
 
-    const toneDesc = {
-      warm: '温かみのある、親しみやすい文体',
-      formal: '丁寧で格式のある文体',
-      casual: 'カジュアルで気軽な口調',
-      energetic: '元気で明るい、活発な文体'
-    };
+【書き方】
+${NEWSLETTER_ARTICLE_STYLE_}
 
-    const prompt = `あなたは小学校の担任教員です。保護者向けの学級通信に掲載する文章を複数セクションに分けて作成してください。
-${toneDesc[tone] || toneDesc.warm}で書いてください。
+【話題の選び方】
+・予定の中から、家庭の準備や協力が要るもの（持ち物・服装・行事・提出物・新しい単元や教科書の切り替わり）を優先する。
+・その次に、子どもたちががんばっている学習や行事の練習の様子を選ぶ。
+・同じ話題を2本に分けない。家庭にしてほしいことがある記事を先に並べる。
+${scheduleContext}${extraInstructions ? '\n【先生からの指示（いちばん優先する）】\n' + extraInstructions : ''}`;
 
-以下の形式のJSON配列で出力してください。各セクションは type と text を持ちます:
-[
-  { "type": "heading", "text": "学級通信のタイトル（学級通信 〇〇号 など）" },
-  { "type": "intro", "text": "今週のあいさつ文（季節感や子どもたちの様子に触れた2〜3文）" },
-  { "type": "study", "text": "今週の学習の様子（3〜4文）" },
-  { "type": "notice", "text": "保護者へのお知らせ（2〜3文）" },
-  { "type": "closing", "text": "結びの文（1〜2文）" }
-]
+    const articles = normalizeNewsletterArticles_(callGeminiJsonArray_(
+      prompt, NEWSLETTER_ARTICLE_SCHEMA_, `学級通信のお知らせ記事（${count}本）`,
+      'Gemini Newsletter Articles Error', 0.6)).slice(0, count);
 
-行事がある場合は study の前に { "type": "event", "text": "行事紹介文" } を追加してください。
-JSON配列のみを出力し、それ以外は何も出力しないでください。
-${scheduleContext}
-${extraInstructions ? '\n【追加の指示】\n' + extraInstructions : ''}`;
-
-    const text = callGeminiAPIText_(prompt);
-
-    // JSONパース
-    let sections;
-    try {
-      // Markdown コードブロックを除去
-      const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-      sections = JSON.parse(cleaned);
-    } catch (pe) {
-      logError('generateFullNewsletterAI parse', pe);
-      return { success: false, error: 'AI出力のJSON解析に失敗しました。再度お試しください。' };
+    if (articles.length === 0) {
+      return { success: false, error: 'AIが記事を生成できませんでした。再度お試しください。' };
     }
-
-    if (!Array.isArray(sections) || sections.length === 0) {
-      return { success: false, error: 'AIが有効なセクションを生成できませんでした。' };
-    }
-
-    return { success: true, sections: sections };
+    return { success: true, articles: articles };
 
   } catch (e) {
     logError('generateFullNewsletterAI', e);
@@ -526,6 +581,7 @@ function rewriteNewsletterText(originalText, instruction) {
 
     const prompt = `あなたは小学校の担任教員です。以下の学級通信の文章をリライトしてください。
 リライト後の文章のみを出力し、タイトルや装飾は不要です。
+保護者向けの丁寧語（です・ます）のままにし、元の文章に無い日付・持ち物・子どもの名前を足さないでください。
 
 【元の文章】
 ${sanitized}

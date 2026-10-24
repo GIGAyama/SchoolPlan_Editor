@@ -1485,12 +1485,14 @@
         align-items: flex-start;
     }
 
+    /* 余白は印刷（App_Js_06_Newsletter.html の NW._PRINT_CSS の @page）と同じにする。
+       先生が Google ドキュメントで作ってきた通信の余白（上下 12.7mm・左右 16mm）。 */
     .nw-a4-page {
         width: 210mm;
         min-height: 297mm;
         background: white;
         box-shadow: var(--shadow-md);
-        padding: 15mm 18mm;
+        padding: 12.7mm 16mm;
         position: relative;
     }
 
@@ -1844,6 +1846,89 @@
     .nw-sched-color-reset:hover {
         background: var(--hover-soft);
         color: var(--text-main);
+    }
+
+    /* --- 題字（masthead）--- */
+    .nw-masthead {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4mm;
+        border-bottom: 1.5pt solid #888;
+        padding-bottom: 3mm;
+        margin-bottom: 2.5mm;
+        color: #202124;
+    }
+
+    .nw-masthead-title {
+        flex-shrink: 0;
+    }
+
+    .nw-masthead-title img {
+        display: block;
+        width: 100%;
+        height: auto;
+    }
+
+    .nw-masthead-kicker {
+        outline: none;
+        font-weight: 700;
+        line-height: 1.3;
+    }
+
+    .nw-masthead-name {
+        outline: none;
+        font-weight: 900;
+        line-height: 1.15;
+    }
+
+    .nw-masthead-info {
+        flex: 1;
+        min-width: 0;
+        text-align: right;
+        line-height: 1.5;
+    }
+
+    .nw-masthead-date,
+    .nw-masthead-lines {
+        outline: none;
+        min-height: 1.5em;
+    }
+
+    /* --- お知らせの記事（article）--- */
+    .nw-article {
+        margin: 0 0 0.7em;
+        color: #202124;
+    }
+
+    .nw-article-head {
+        font-weight: 700;
+        line-height: 1.5;
+    }
+
+    .nw-article-title,
+    .nw-article-body {
+        outline: none;
+    }
+
+    .nw-article-title:empty {
+        display: inline-block;
+        min-width: 8em;
+    }
+
+    .nw-article-body {
+        line-height: 1.5;
+        min-height: 1.5em;
+    }
+
+    /* 文字の大きさの －／＋ */
+    .nw-fmt-toolbar button.nw-pt-step {
+        font-weight: 700;
+        min-width: 28px;
+    }
+
+    .nw-quickstart-letter {
+        border-color: var(--primary-text);
     }
 
     /* --- Divider block --- */
