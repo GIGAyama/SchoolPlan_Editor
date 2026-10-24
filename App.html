@@ -662,6 +662,12 @@
                 <!-- 左: ブロックパレット -->
                 <div class="nw-block-palette">
                     <div class="nw-palette-label">ブロック追加</div>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('masthead')">
+                        <span class="material-symbols-outlined">newspaper</span> 題字・発行日
+                    </button>
+                    <button class="nw-palette-btn" onclick="NW.addBlock('article')">
+                        <span class="material-symbols-outlined">article</span> お知らせ記事
+                    </button>
                     <button class="nw-palette-btn" onclick="NW.addBlock('heading')">
                         <span class="material-symbols-outlined">title</span> 見出し
                     </button>
@@ -696,7 +702,7 @@
                         <span class="material-symbols-outlined">auto_awesome</span> AI記事生成
                     </button>
                     <button class="nw-palette-btn nw-palette-btn-ai-full" onclick="NW.generateFullNewsletter()">
-                        <span class="material-symbols-outlined">magic_button</span> AI一括生成
+                        <span class="material-symbols-outlined">magic_button</span> AIお知らせ一括
                     </button>
                 </div>
 
