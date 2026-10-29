@@ -1431,7 +1431,14 @@
     //   空いているところは「−」。
     var SCHED_LETTER_HEADER_COLOR = '#d0e0e3';
     var SCHED_CLOSED_BG = '#b7b7b7';
-    var SCHED_LETTER_SIZES = { subject: 14, sub: 8, list: 7.5, label: 14 };
+    // 教科は紙の通信（14pt）より少し大きい 16pt の太字。長い教科名は1行に収まるまで小さくする
+    var SCHED_LETTER_SIZES = { subject: 16, sub: 8, list: 7.5, label: 14 };
+    // 表の幅（px）の見積もり。A4 から左右の余白 16mm を引いた 178mm（約 672px）から、
+    // 編集画面のブロックの左の取っ手ぶん（約 36px）を引いた狭いほうに合わせる。
+    // 画面で1行に収まれば、余白の広い紙でも必ず1行に収まる。
+    var SCHED_LETTER_TABLE_W = 636;
+    // 左の見出しの列は「3字ぶん」の幅。それより長い見出し（もちもの・しゅくだい）は字を小さくして収める
+    var SCHED_LETTER_LABEL_CHARS = 3;
     var SCHED_EMPTY_MARK = '−';
 
     /** 学級通信の形に切り替えるときに入れる設定（ほかの設定はそのまま残す） */
@@ -1449,7 +1456,8 @@
             dateSize: 'l',
             headerColor: SCHED_LETTER_HEADER_COLOR,
             sizes: { subject: SCHED_LETTER_SIZES.subject, sub: SCHED_LETTER_SIZES.sub, list: SCHED_LETTER_SIZES.list, label: SCHED_LETTER_SIZES.label },
-            rowHeight: 16
+            rowHeight: 16,
+            hideHours: true
         };
     }
     NW.schedLetterDefaults_ = schedLetterDefaults_;
@@ -1474,6 +1482,21 @@
         return schedDateLabel_(day && day.date) + (dl ? '(' + dl + ')' : '');
     }
     NW.schedHeadLabel_ = schedHeadLabel_;
+
+    /**
+     * 単元名の後ろについている時数（「くじらぐも 3/8」の「3/8」）を取りのぞく。
+     * 週案の自動入力は「単元名 何時間目/総時数」の形で入れる（04_AutoFill.gs の parseUnitProgress_）。
+     * 手で書いた「3／8時間目」「（３/８）」のような形も落とす。後ろにあるものだけを見るので、
+     * 単元名の途中の数字（「1/2成人式」など）は残る。
+     * @param {string} unit
+     * @return {string}
+     */
+    function schedStripHours_(unit) {
+        return String(unit == null ? '' : unit)
+            .replace(/\s*[（(]?\s*[0-9０-９]+\s*[\/／]\s*[0-9０-９]+\s*(?:時間目|時間)?\s*[)）]?\s*$/, '')
+            .trim();
+    }
+    NW.schedStripHours_ = schedStripHours_;
 
     /** その日に授業や行事が入っているか（土曜を表に入れるかの判断に使う） */
     function schedDayHasSchool_(day) {
@@ -1561,24 +1584,55 @@
      * 朝の行（「学習」の下に「漢字テスト⑥」）や、自由テキストで書き替えた校時に使う。
      * 大きさは inline style で入れる（Classroom への書き出しは CSS を連れていけない）。
      */
-    function schedLinesCell_(val, mainPx, subPx) {
+    function schedLinesCell_(val, mainPx, subPx, fitW, bold) {
         var lines = String(val == null ? '' : val).split(/\r\n|\r|\n/)
             .map(function (l) { return l.trim(); })
             .filter(function (l) { return l; });
         return lines.map(function (l, i) {
             var px = i === 0 ? mainPx : subPx;
-            return px ? '<span style="font-size:' + px + 'px;">' + escHtml(l) + '</span>' : escHtml(l);
+            if (!px) return escHtml(l);
+            // 1行目（教科・朝の活動）は、幅 fitW に1行で収まる大きさにする
+            if (i === 0 && fitW) {
+                return '<span style="font-size:' + schedFitPx_(l, px, fitW, bold) + 'px;white-space:nowrap;'
+                    + (bold ? 'font-weight:700;' : '') + '">' + escHtml(l) + '</span>';
+            }
+            return '<span style="font-size:' + px + 'px;">' + escHtml(l) + '</span>';
         }).join('<br>');
     }
     NW.schedLinesCell_ = schedLinesCell_;
 
-    /** 左の見出しの列の幅（学級通信の形）。いちばん長い見出しが1行で収まる幅にする */
-    function schedLetterLabelWidth_(labels, labelPx) {
-        var longest = 1;
-        (labels || []).forEach(function (l) {
-            longest = Math.max(longest, Array.from(String(l || '')).length);
+    /**
+     * 文字列の幅を em で見積もる。かな・漢字は 1em、英数字と記号（半角）は 0.55em。
+     * 表のセルに1行で収まるかを決めるのに使う（印刷と Classroom 書き出しでも同じ値になるよう、
+     * 端末の書体を測らずに決める）。
+     */
+    function schedTextEm_(text) {
+        var em = 0;
+        Array.from(String(text == null ? '' : text)).forEach(function (c) {
+            em += /[\u0020-\u007e\uff61-\uff9f]/.test(c) ? 0.55 : 1;
         });
-        return Math.max(40, Math.ceil(longest * labelPx + 12));
+        return em;
+    }
+    NW.schedTextEm_ = schedTextEm_;
+
+    /**
+     * 幅 availPx に1行で収まる字の大きさ（px）。収まるなら px のまま。
+     * 太字は字の幅が少し広がるので、そのぶん余らせる。
+     */
+    function schedFitPx_(text, px, availPx, bold) {
+        var em = schedTextEm_(text) * (bold ? 1.06 : 1.02);
+        if (!em || !availPx || em * px <= availPx) return px;
+        return Math.max(6, Math.floor(availPx / em * 100) / 100);
+    }
+    NW.schedFitPx_ = schedFitPx_;
+
+    /**
+     * 左の見出しの列の幅（学級通信の形）。見出しの字で3字ぶん。
+     * 以前は「いちばん長い見出し（しゅくだい）が入る幅」にしていたので列が太り、
+     * 予定の入る列が狭くなっていた。長い見出しは schedFitPx_ で字を小さくして収める。
+     */
+    function schedLetterLabelWidth_(labelPx) {
+        return Math.max(40, Math.ceil(SCHED_LETTER_LABEL_CHARS * labelPx + 10));
     }
 
     // ---- Schedule table rendering (transposed: days=columns, periods=rows) ----
@@ -1607,14 +1661,22 @@
             return overrides.hasOwnProperty(key) ? overrides[key] : original;
         }
 
+        // 単元名の後ろの時数（「くじらぐも 3/8」の 3/8）。週案では進み具合を見るのに要るが、
+        // 子どもに渡す予定表には要らない。学級通信の形では、決めていなければ出さない
+        var hideHours = letter ? opts.hideHours !== false : !!opts.hideHours;
+        function unitText(unit) {
+            return hideHours ? schedStripHours_(unit) : String(unit || '');
+        }
+
         // Helper: render cell content based on displayMode
         function cellContent(per) {
             if (!per || !per.subject) return '';
             var c = escHtml(subjectToHiragana(per.subject));
-            if (opts.displayMode === 'subjectUnit' && per.unit) {
-                c += '<br><span class="nw-sched-sub">' + escHtml(per.unit) + '</span>';
+            var unit = unitText(per.unit);
+            if (opts.displayMode === 'subjectUnit' && unit) {
+                c += '<br><span class="nw-sched-sub">' + escHtml(unit) + '</span>';
             } else if (opts.displayMode === 'full') {
-                if (per.unit) c += '<br><span class="nw-sched-sub">' + escHtml(per.unit) + '</span>';
+                if (unit) c += '<br><span class="nw-sched-sub">' + escHtml(unit) + '</span>';
                 if (per.content) c += '<br><span class="nw-sched-detail">' + escHtml(per.content) + '</span>';
             }
             return c;
@@ -1623,9 +1685,13 @@
         // 学級通信の形の校時。教科を大きく、単元（と内容）を小さく下に添える
         function letterCellContent(per) {
             if (!per || !per.subject) return '';
-            var c = '<span style="font-size:' + sz.subject + 'px;">' + escHtml(subjectToHiragana(per.subject)) + '</span>';
+            var name = subjectToHiragana(per.subject);
+            // 教科名は太字で1行。長い教科名（ずがこうさく・こくご／おんがく など）は字を小さくして収める
+            var c = '<span style="font-size:' + schedFitPx_(name, sz.subject, dayInnerW, true)
+                + 'px;font-weight:700;white-space:nowrap;">' + escHtml(name) + '</span>';
             var subs = [];
-            if ((opts.displayMode === 'subjectUnit' || opts.displayMode === 'full') && per.unit) subs.push(per.unit);
+            var unit = unitText(per.unit);
+            if ((opts.displayMode === 'subjectUnit' || opts.displayMode === 'full') && unit) subs.push(unit);
             if (opts.displayMode === 'full' && per.content) subs.push(per.content);
             subs.forEach(function (s) {
                 c += '<br><span class="nw-sched-sub" style="font-size:' + sz.sub + 'px;color:#202124;">' + escHtml(s) + '</span>';
@@ -1696,15 +1762,14 @@
         // 幅は inline style で入れる。CSS を連れていけない Classroom 書き出しでも、
         // ひらがなの見出しが列から溢れないようにするため
         var labelColW = SCHED_LABEL_COL_W[schedUsesHiragana_() ? 'hiragana' : 'kanji'];
-        if (letter) {
-            var shownLabels = ['1'];
-            if (opts.showEvent !== false) shownLabels.push(schedRowLabel_('行事', rowLabels.event));
-            if (opts.showMorning) shownLabels.push(schedRowLabel_('朝', rowLabels.morning));
-            if (opts.showRecess) shownLabels.push(schedRowLabel_('中休み', rowLabels.recess1), schedRowLabel_('昼休み', rowLabels.recess2));
-            if (opts.showAfterSchool) shownLabels.push(schedRowLabel_('放課後', rowLabels.afterschool));
-            if (opts.showHomework) shownLabels.push(schedRowLabel_('宿題', rowLabels.homework));
-            if (opts.showItems) shownLabels.push(schedRowLabel_('持ち物', rowLabels.items));
-            labelColW = schedLetterLabelWidth_(shownLabels, sz.label);
+        if (letter) labelColW = schedLetterLabelWidth_(sz.label);
+        // 予定の入るセルの、中身に使える幅（左右の padding 3px と罫線ぶんを引く）
+        var dayInnerW = Math.floor((SCHED_LETTER_TABLE_W - labelColW) / days.length) - 8;
+        // 左の見出し。学級通信の形では、列に収まらない長い見出しを小さくする
+        function labelText(text) {
+            if (!letter) return escHtml(text);
+            var fit = schedFitPx_(text, sz.label, labelColW - 8, false);
+            return fit < sz.label ? '<span style="font-size:' + fit + 'px;">' + escHtml(text) + '</span>' : escHtml(text);
         }
         // 学級通信の形は列の幅をそろえる（Googleドキュメントへの書き出しでも同じ幅になるよう inline で）
         var html = '<table' + (letter ? ' style="width:100%;border-collapse:collapse;table-layout:fixed;"' : '')
@@ -1729,7 +1794,7 @@
         // 1行ぶんの小さな行（休み時間・放課後・宿題・持ち物）
         function simpleRow(label, field) {
             var asList = SCHED_LIST_FIELDS.indexOf(field) >= 0;
-            var row = '<tr><td class="nw-sched-label">' + escHtml(schedRowLabel_(label, rowLabels[field])) + '</td>';
+            var row = '<tr><td class="nw-sched-label">' + labelText(schedRowLabel_(label, rowLabels[field])) + '</td>';
             days.forEach(function (day, di) {
                 if (closed[di]) { row += closedTd(di); return; }
                 var val = getCellVal(field + '_' + di, day[field] || '');
@@ -1749,12 +1814,12 @@
 
         // 朝の行。1行目（読書・学習など）を大きく、2行目から（漢字テスト⑥など）を小さく
         function morningRow() {
-            var row = '<tr' + rowH + '><td class="nw-sched-label">' + escHtml(schedRowLabel_('朝', rowLabels.morning)) + '</td>';
+            var row = '<tr' + rowH + '><td class="nw-sched-label">' + labelText(schedRowLabel_('朝', rowLabels.morning)) + '</td>';
             days.forEach(function (day, di) {
                 if (closed[di]) { row += closedTd(di); return; }
                 var val = getCellVal('morning_' + di, day.morning || '');
                 var body = String(val).trim()
-                    ? (letter ? schedLinesCell_(val, sz.subject, sz.sub) : schedLinesCell_(val))
+                    ? (letter ? schedLinesCell_(val, sz.subject, sz.sub, dayInnerW, false) : schedLinesCell_(val))
                     : (letter ? SCHED_EMPTY_MARK : '');
                 row += '<td class="nw-sched-cell"' + (letter ? ' style="' + letterTd + '"' : '')
                     + ' onclick="NW.editSchedCell(\'' + bid + '\',\'morning\',' + di + ')">' + body + '</td>';
@@ -1767,14 +1832,14 @@
         function periodRow(pp) {
             if (hiddenP.indexOf(pp + 1) >= 0) return '';
             if (!periodShown[pp]) return '';
-            var row = '<tr' + rowH + '><td class="nw-sched-label">' + escHtml(schedPeriodLabel_(pp + 1, letter)) + '</td>';
+            var row = '<tr' + rowH + '><td class="nw-sched-label">' + labelText(schedPeriodLabel_(pp + 1, letter)) + '</td>';
             days.forEach(function (day, di) {
                 if (closed[di]) { row += closedTd(di); return; }
                 var per = (day.periods || [])[pp];
                 var key = 'period_' + pp + '_' + di;
                 var body;
                 if (letter) {
-                    body = overrides.hasOwnProperty(key) ? schedLinesCell_(overrides[key], sz.subject, sz.sub) : letterCellContent(per);
+                    body = overrides.hasOwnProperty(key) ? schedLinesCell_(overrides[key], sz.subject, sz.sub, dayInnerW, true) : letterCellContent(per);
                     if (!body) body = SCHED_EMPTY_MARK;
                 } else {
                     body = overrides.hasOwnProperty(key) ? escHtml(overrides[key]) : cellContent(per);
@@ -1788,7 +1853,7 @@
         }
 
         if (opts.showEvent !== false) {
-            html += '<tr><td class="nw-sched-label">' + escHtml(schedRowLabel_('行事', rowLabels.event)) + '</td>';
+            html += '<tr><td class="nw-sched-label">' + labelText(schedRowLabel_('行事', rowLabels.event)) + '</td>';
             days.forEach(function (day, di) {
                 if (closed[di]) { html += closedTd(di); return; }
                 var val = getCellVal('event_' + di, day.event || '');
@@ -1854,7 +1919,9 @@
             + '<span style="color:var(--border);">|</span>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subject\')"> 教科のみ</label>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subjectUnit\')"> 教科+単元</label>'
-            + '<label><input type="radio" name="sm_' + bid + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'full\')"> 詳細</label>';
+            + '<label><input type="radio" name="sm_' + bid + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'full\')"> 詳細</label>'
+            + '<label title="週案の単元についている「3/8」（何時間目か）を、予定表には出さない">'
+            + '<input type="checkbox"' + (hideHours ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'hideHours\',this.checked)"> 時数（3/8）を出さない</label>';
         if (letter) {
             // 文字の大きさは pt で選ぶ（Googleドキュメントと同じ単位）
             var ptChoices = [6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 12, 13, 14, 15, 16, 18, 20];
@@ -3690,36 +3757,232 @@
             + '<body>' + body + '</body></html>';
     };
 
-    // ---- Classroom post (Google Docs互換HTMLで投稿) ----
+    // ---- 刷ったときと同じ見た目の画像・PDF（Classroom 投稿用） ----
+    // Googleドキュメントに変換すると、表の幅や余白がドキュメント側の解釈で崩れる。
+    // そこで、印刷と同じ HTML（NW.buildPrintHTML）をこの端末の中で絵にして、
+    // 画像（PNG）またはその絵を貼った PDF にする。外へは何も取りにいかない（Zero-CDN）。
+    //
+    // 絵にするのは SVG の foreignObject に HTML を入れて canvas に描く方法。
+    // 書体・写真はどれも data: URI で入っているので、canvas が汚れず（tainted にならず）取り出せる。
+
+    // A4 1枚の大きさ（CSS px。96dpi で 210mm × 297mm）と、PDF の大きさ（pt）
+    var NW_A4_PX = { w: 794, h: 1123 };
+    var NW_A4_PT = { w: 595.28, h: 841.89 };
+
+    /** バイト列 → base64（大きな配列でも呼び出しスタックがあふれないよう区切って変換） */
+    function nwBytesToBase64_(bytes) {
+        var bin = '';
+        for (var i = 0; i < bytes.length; i += 0x8000) {
+            bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(bin);
+    }
+
+    /** data URI（base64）→ バイト列 */
+    function nwDataUrlToBytes_(dataUrl) {
+        var bin = atob(String(dataUrl).replace(/^data:[^,]*,/, ''));
+        var out = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
+    }
+
+    /**
+     * JPEG を1ページに1枚ずつ、A4 いっぱいに貼った PDF を組み立てる。
+     * ライブラリを持ちこまずに済むよう、PDF の決まりごと（オブジェクト・xref 表）を直接書く。
+     * @param {Array<{jpeg: Uint8Array, w: number, h: number}>} pages
+     * @return {Uint8Array}
+     */
+    function nwBuildPdf_(pages) {
+        var chunks = [];
+        var offsets = [];
+        var length = 0;
+        function push(part) {
+            var bytes = typeof part === 'string'
+                ? Uint8Array.from(part, function (c) { return c.charCodeAt(0) & 0xff; })
+                : part;
+            chunks.push(bytes);
+            length += bytes.length;
+        }
+        function obj(num, body) {
+            offsets[num] = length;
+            push(num + ' 0 obj\n' + body + '\nendobj\n');
+        }
+        // 番号の割り当て: 1 カタログ / 2 ページ一覧 / ページごとに ページ・画像・描画命令 の3つ
+        var kids = pages.map(function (p, i) { return (3 + i * 3) + ' 0 R'; }).join(' ');
+        push('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n');
+        obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+        obj(2, '<< /Type /Pages /Kids [' + kids + '] /Count ' + pages.length + ' >>');
+        pages.forEach(function (p, i) {
+            var pageNo = 3 + i * 3, imgNo = pageNo + 1, cntNo = pageNo + 2;
+            obj(pageNo, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + NW_A4_PT.w + ' ' + NW_A4_PT.h + ']'
+                + ' /Resources << /XObject << /Im0 ' + imgNo + ' 0 R >> >> /Contents ' + cntNo + ' 0 R >>');
+            offsets[imgNo] = length;
+            push(imgNo + ' 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + p.w + ' /Height ' + p.h
+                + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + p.jpeg.length + ' >>\nstream\n');
+            push(p.jpeg);
+            push('\nendstream\nendobj\n');
+            var draw = 'q ' + NW_A4_PT.w + ' 0 0 ' + NW_A4_PT.h + ' 0 0 cm /Im0 Do Q';
+            obj(cntNo, '<< /Length ' + draw.length + ' >>\nstream\n' + draw + '\nendstream');
+        });
+        var count = 3 + pages.length * 3;
+        var xrefAt = length;
+        var xref = 'xref\n0 ' + count + '\n0000000000 65535 f \n';
+        for (var n = 1; n < count; n++) xref += ('0000000000' + offsets[n]).slice(-10) + ' 00000 n \n';
+        push(xref + 'trailer\n<< /Size ' + count + ' /Root 1 0 R >>\nstartxref\n' + xrefAt + '\n%%EOF\n');
+        var out = new Uint8Array(length);
+        var at = 0;
+        chunks.forEach(function (c) { out.set(c, at); at += c.length; });
+        return out;
+    }
+    NW.nwBuildPdf_ = nwBuildPdf_;
+
+    /**
+     * 学級通信を、刷ったときと同じ見た目の canvas にする。
+     * 高さは中身に合わせ、A4 1枚より短ければ A4 1枚ぶんにする。
+     * @param {number} scale 1 で 96dpi。2 で約 190dpi（文字がにじまない）
+     * @return {Promise<{canvas: HTMLCanvasElement, pages: number}>}
+     */
+    NW.captureNewsletter_ = function (scale) {
+        return new Promise(function (resolve, reject) {
+            var html = NW.buildPrintHTML()
+                // 紙の余白（@page）は絵には効かないので、本文の余白として付け直す
+                .replace('</head>', '<style>html,body{margin:0;background:#fff;}'
+                    + 'body{width:210mm;box-sizing:border-box;padding:12.7mm 16mm;}</style></head>');
+            var host = document.createElement('div');
+            host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;'
+                + 'border:0;pointer-events:none;z-index:-1;';
+            var iframe = document.createElement('iframe');
+            iframe.style.cssText = 'display:block;width:210mm;height:297mm;border:0;';
+            host.appendChild(iframe);
+            document.body.appendChild(host);
+            function cleanup() { if (host.parentNode) host.parentNode.removeChild(host); }
+            var fdoc = iframe.contentDocument;
+            fdoc.open();
+            fdoc.write(html);
+            fdoc.close();
+            var ready = (fdoc.fonts && fdoc.fonts.ready) ? fdoc.fonts.ready : Promise.resolve();
+            ready.then(function () {
+                var contentH = Math.ceil(fdoc.documentElement.scrollHeight);
+                var pages = Math.max(1, Math.ceil((contentH - 2) / NW_A4_PX.h));
+                var w = NW_A4_PX.w, h = pages * NW_A4_PX.h;
+                // HTML を XHTML として書き出し、SVG の foreignObject に入れる
+                var wrap = fdoc.createElement('div');
+                wrap.className = 'nw-cap-root';
+                wrap.setAttribute('style', 'width:' + w + 'px;height:' + h + 'px;box-sizing:border-box;'
+                    + 'padding:12.7mm 16mm;background:#fff;');
+                // 書体・文字の大きさは body に当ててあるが、絵にするのは body ではなくこの div なので、
+                // body に当てている規則をこの div にも当てる
+                fdoc.querySelectorAll('head style').forEach(function (st) {
+                    var copy = fdoc.createElement('style');
+                    copy.textContent = st.textContent.replace(/(^|\})\s*body\{/g, '$1body,.nw-cap-root{');
+                    wrap.appendChild(copy);
+                });
+                Array.prototype.forEach.call(fdoc.body.childNodes, function (n) { wrap.appendChild(n.cloneNode(true)); });
+                var xhtml = new XMLSerializer().serializeToString(wrap);
+                cleanup();
+                var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">'
+                    + '<foreignObject x="0" y="0" width="100%" height="100%">' + xhtml + '</foreignObject></svg>';
+                var img = new Image();
+                img.onload = function () {
+                    // 書体を読みこみ終える前に描くと、別の書体で描かれることがあるので一呼吸おく
+                    setTimeout(function () {
+                        try {
+                            var canvas = document.createElement('canvas');
+                            canvas.width = Math.round(w * scale);
+                            canvas.height = Math.round(h * scale);
+                            var ctx = canvas.getContext('2d');
+                            ctx.fillStyle = '#fff';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            resolve({ canvas: canvas, pages: pages });
+                        } catch (e) { reject(e); }
+                    }, 300);
+                };
+                img.onerror = function () { reject(new Error('学級通信を画像にできませんでした')); };
+                img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+            }).catch(function (e) { cleanup(); reject(e); });
+        });
+    };
+
+    /**
+     * Classroom へ添付するファイルの中身（base64）を作る。
+     * @param {string} format 'pdf' | 'png'
+     * @return {Promise<string>}
+     */
+    NW.buildPostFile_ = function (format) {
+        return NW.captureNewsletter_(2).then(function (shot) {
+            if (format === 'png') return shot.canvas.toDataURL('image/png').replace(/^data:[^,]*,/, '');
+            var pageH = Math.round(NW_A4_PX.h * 2);
+            var pages = [];
+            for (var i = 0; i < shot.pages; i++) {
+                var c = document.createElement('canvas');
+                c.width = shot.canvas.width;
+                c.height = pageH;
+                var ctx = c.getContext('2d');
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, c.width, c.height);
+                ctx.drawImage(shot.canvas, 0, -i * pageH);
+                pages.push({ jpeg: nwDataUrlToBytes_(c.toDataURL('image/jpeg', 0.92)), w: c.width, h: c.height });
+            }
+            return nwBytesToBase64_(nwBuildPdf_(pages));
+        });
+    };
+
+    // ---- Classroom post ----
     NW.postToClassroom = function () {
         if (NW.blocks.length === 0) { showToast('error', 'ブロックがありません'); return; }
+        var last = 'pdf';
+        try { last = localStorage.getItem('nw_post_format') || 'pdf'; } catch (e) { }
+        var opt = function (v, label, note) {
+            return '<label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer;">'
+                + '<input type="radio" name="swalCrFmt" value="' + v + '"' + (last === v ? ' checked' : '') + ' style="margin-top:4px;">'
+                + '<span><strong>' + label + '</strong><br><span style="font-size:0.78rem;color:var(--text-sub);">' + note + '</span></span></label>';
+        };
         Swal.fire({
             title: 'Classroomに投稿',
             html: '<div style="text-align:left;">'
-                + '<p style="font-size:0.85rem;color:var(--text-sub);margin-bottom:8px;">学級通信エディタの現在の内容をGoogleドキュメントに変換してClassroomに投稿します。</p>'
-                + '<label style="font-size:0.85rem;font-weight:600;">付加メッセージ（任意）</label>'
+                + '<label style="font-size:0.85rem;font-weight:600;">添付の形</label>'
+                + opt('pdf', 'PDF（おすすめ）', '印刷したときと同じ見た目。保護者はそのまま印刷できます')
+                + opt('png', '画像（PNG）', '印刷したときと同じ見た目。スマートフォンですぐ開けます')
+                + opt('doc', 'Googleドキュメント', '受け取った側でも直せます。表や余白の形が少し変わります')
+                + '<label style="font-size:0.85rem;font-weight:600;margin-top:10px;display:block;">付加メッセージ（任意）</label>'
                 + '<textarea id="swalCrMsg" class="swal2-textarea" placeholder="Classroomへのメッセージ..." style="margin-top:6px;min-height:80px;"></textarea>'
                 + '</div>',
             showCancelButton: true,
             confirmButtonText: '<span class="material-symbols-outlined" style="font-size:16px;vertical-align:text-bottom;">rocket_launch</span> 投稿',
             cancelButtonText: 'キャンセル',
             preConfirm: function () {
-                return document.getElementById('swalCrMsg').value;
+                var picked = document.querySelector('input[name="swalCrFmt"]:checked');
+                return { message: document.getElementById('swalCrMsg').value, format: picked ? picked.value : 'pdf' };
             }
         }).then(function (result) {
             if (!result.isConfirmed) return;
-            showToast('info', 'Googleドキュメントを作成してClassroomに投稿しています...');
-            var htmlContent = NW.buildClassroomHTML();
-            google.script.run
-                .withSuccessHandler(function (res) {
-                    if (!res) { showToast('error', '投稿失敗: サーバーから応答がありません'); return; }
-                    // 共有できなかった場合は投稿自体は成功しているが、児童が開けない
-                    // おそれがあるので、成功ではなく警告として見せる。
-                    if (res.success) showToast(res.warning ? 'warning' : 'success', res.message);
-                    else showToast('error', '投稿失敗: ' + res.error);
-                })
-                .withFailureHandler(_onCommError)
-                .postNewsletterToClassroomFromWeb(result.value || '学級通信をお届けします。', htmlContent);
+            var format = result.value.format;
+            var message = result.value.message || '学級通信をお届けします。';
+            try { localStorage.setItem('nw_post_format', format); } catch (e) { }
+            function send(content) {
+                google.script.run
+                    .withSuccessHandler(function (res) {
+                        if (!res) { showToast('error', '投稿失敗: サーバーから応答がありません'); return; }
+                        // 共有できなかった場合は投稿自体は成功しているが、児童が開けない
+                        // おそれがあるので、成功ではなく警告として見せる。
+                        if (res.success) showToast(res.warning ? 'warning' : 'success', res.message);
+                        else showToast('error', '投稿失敗: ' + res.error);
+                    })
+                    .withFailureHandler(_onCommError)
+                    .postNewsletterToClassroomFromWeb(message, content, format);
+            }
+            if (format === 'doc') {
+                showToast('info', 'Googleドキュメントを作成してClassroomに投稿しています...');
+                send(NW.buildClassroomHTML());
+                return;
+            }
+            showToast('info', (format === 'pdf' ? 'PDF' : '画像') + 'を作ってClassroomに投稿しています...');
+            NW.saveEditable();
+            NW.buildPostFile_(format).then(send).catch(function (e) {
+                showToast('error', (format === 'pdf' ? 'PDF' : '画像') + 'を作れませんでした。'
+                    + '「Googleドキュメント」で投稿してください。（' + (e && e.message ? e.message : e) + '）');
+            });
         });
     };
 

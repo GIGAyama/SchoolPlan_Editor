@@ -192,7 +192,7 @@ test('学級通信の形の既定は、紙の通信を測った値', () => {
   assert.equal(defaults.closedDays, true, '休みの日を灰色にする');
   assert.equal(defaults.showEvent, false);
   assert.equal(defaults.showRecess, false);
-  assert.deepEqual(defaults.sizes, { subject: 14, sub: 8, list: 7.5, label: 14 });
+  assert.deepEqual(defaults.sizes, { subject: 16, sub: 8, list: 7.5, label: 14 }, '教科は紙の通信より少し大きい 16pt');
   assert.equal(defaults.headerColor, '#d0e0e3');
 });
 
@@ -205,7 +205,7 @@ test('保存済みの通信は今までの見え方のまま（新しい設定�
 
 test('学級通信の形の罫線・地の色・大きさは inline で入る（Classroom 書き出しでも同じ形）', () => {
   assert.match(nl, /var letterTd = 'border:1px solid #000;background:#fff;vertical-align:middle;/);
-  assert.match(nl, /'<span style="font-size:' \+ sz\.subject \+ 'px;">'/);
+  assert.match(nl, /<span class="nw-sched-sub" style="font-size:' \+ sz\.sub \+ 'px;color:#202124;">'/);
   assert.match(nl, /print-color-adjust:exact;">'\s*\n\s*\+ escHtml\(\(spread\[di\]/, '灰色の列が紙で白くなる');
 });
 
@@ -295,4 +295,114 @@ test('まとめ生成は記事だけを返す（題字と表は週案から組�
   assert.match(full, /return \{ success: true, articles: articles \};/);
   assert.match(full, /Math\.min\(3, Math\.max\(1,/, '記事の数は1〜3本');
   assert.doesNotMatch(full, /"type": "closing"/, '結びの文を作る型が残っている');
+});
+
+// ===== 教科名は太字で1行・左の見出しの列は細く =====
+
+const textEm = new Function(`${extractFn(nl, 'schedTextEm_')}\nreturn schedTextEm_;`)();
+const fitPx = new Function(`${extractFn(nl, 'schedTextEm_')}\n${extractFn(nl, 'schedFitPx_')}\nreturn schedFitPx_;`)();
+
+test('字の幅の見積もり：かな・漢字は1字、半角の英数字は0.55字', () => {
+  assert.equal(textEm('こくご'), 3);
+  assert.equal(textEm('図画工作'), 4);
+  assert.ok(Math.abs(textEm('10/19') - 2.75) < 1e-9);
+  assert.equal(textEm(''), 0);
+});
+
+test('教科名が長くても1行に収まる大きさにする。収まるなら小さくしない', () => {
+  assert.equal(fitPx('こくご', 21.33, 110, true), 21.33, '短い教科名はそのまま');
+  const px = fitPx('ずがこうさく', 21.33, 110, true);
+  assert.ok(px < 21.33, '長い教科名が小さくなっていない');
+  assert.ok(textEm('ずがこうさく') * 1.06 * px <= 110, '小さくしても1行に収まらない');
+  assert.ok(fitPx('あ'.repeat(40), 21.33, 110, true) >= 6, '小さくしすぎて読めない');
+});
+
+test('教科名は太字・折り返しなし。幅は予定の列から決める', () => {
+  assert.match(nl, /schedFitPx_\(name, sz\.subject, dayInnerW, true\)/);
+  assert.match(nl, /'px;font-weight:700;white-space:nowrap;">' \+ escHtml\(name\)/);
+  assert.match(nl, /var dayInnerW = Math\.floor\(\(SCHED_LETTER_TABLE_W - labelColW\) \/ days\.length\) - 8;/);
+});
+
+test('左の見出しの列は3字ぶん。長い見出しは字を小さくして収める', () => {
+  const width = new Function(`var SCHED_LETTER_LABEL_CHARS = 3;\n${extractFn(nl, 'schedLetterLabelWidth_')}\nreturn schedLetterLabelWidth_;`)();
+  const w = width(18.67); // 14pt
+  assert.ok(w <= 70, `列が太い: ${w}px`);
+  assert.ok(fitPx('しゅくだい', 18.67, w - 8, false) < 18.67, '「しゅくだい」を小さくしていない');
+  assert.equal(fitPx('あさ', 18.67, w - 8, false), 18.67, '短い見出しはそのまま');
+  // 見出しはどれも labelText を通す
+  for (const m of nl.matchAll(/class="nw-sched-label">' \+ ([^+]+?) \+ '<\/td>/g)) {
+    assert.match(m[1], /^labelText\(/, `大きさをそろえていない見出しがある: ${m[1]}`);
+  }
+});
+
+// ===== Classroom へ PDF・画像で投稿 =====
+
+test('PDF は A4 のページに JPEG を1枚ずつ貼った正しい形', () => {
+  const pt = 'var NW_A4_PT = { w: 595.28, h: 841.89 };';
+  const build = new Function(`${pt}\n${extractFn(nl, 'nwBuildPdf_')}\nreturn nwBuildPdf_;`)();
+  const jpeg = Uint8Array.from([0xff, 0xd8, 0x00, 0x0a, 0xff, 0xd9]);
+  const pdf = build([{ jpeg, w: 10, h: 14 }, { jpeg, w: 10, h: 14 }]);
+  const text = Buffer.from(pdf).toString('latin1');
+  assert.match(text, /^%PDF-1\.4/);
+  assert.match(text, /\/Count 2/);
+  assert.match(text, /\/MediaBox \[0 0 595\.28 841\.89\]/);
+  assert.match(text, /\/Filter \/DCTDecode \/Length 6/);
+  // xref の位置が、それぞれのオブジェクトの書き出し位置と一致する（ずれると開けない PDF になる）
+  const startxref = Number(/startxref\n(\d+)/.exec(text)[1]);
+  assert.equal(text.slice(startxref, startxref + 4), 'xref');
+  const entries = text.slice(startxref).split('\n').slice(3).filter(l => / 00000 n $/.test(l));
+  assert.equal(entries.length, 8, '1 + 1 + 2ページ×3 のオブジェクト');
+  entries.forEach((line, i) => {
+    const at = Number(line.slice(0, 10));
+    assert.equal(text.slice(at, at + String(i + 1).length + 6), `${i + 1} 0 obj`, `${i + 1} 番のオブジェクトの位置がずれている`);
+  });
+  assert.match(text, /%%EOF\n$/);
+});
+
+test('画像にするときも書体は印刷と同じ（body の規則を絵にする div に当てる）', () => {
+  assert.match(nl, /replace\(\/\(\^\|\\\}\)\\s\*body\\\{\/g, '\$1body,\.nw-cap-root\{'\)/);
+  const cap = nl.slice(nl.indexOf('NW.captureNewsletter_ = function'), nl.indexOf('NW.buildPostFile_ = function'));
+  // SVG の名前空間（http://www.w3.org/2000/svg）は URL の形をしているが、取りにいくものではない
+  assert.doesNotMatch(cap.replace(/http:\/\/www\.w3\.org\/2000\/svg/g, ''), /https?:\/\/|fetch\(|XMLHttpRequest/,
+    '絵にするときに外へ取りにいっている');
+});
+
+test('投稿の形は PDF・画像・ドキュメントから選べ、どれも drive.file のまま作る', () => {
+  const gs = read('07_WebApp.gs');
+  const body = gs.slice(gs.indexOf('function postNewsletterToClassroomFromWeb'));
+  const fn = body.slice(0, body.indexOf('\nfunction ', 1));
+  assert.match(gs, /pdf: \{ ext: '\.pdf', mime: 'application\/pdf' \}/);
+  assert.match(gs, /png: \{ ext: '\.png', mime: 'image\/png' \}/);
+  assert.match(fn, /const kind = NEWSLETTER_POST_FORMATS_\[format\] \? format : 'doc';/, '知らない形はドキュメントに落とす');
+  assert.match(fn, /driveCreateFile_\(fileName, Utilities\.newBlob\(bytes, mime, fileName\)\)/);
+  assert.doesNotMatch(fn, /DriveApp\./, 'DriveApp はフル drive スコープが要る');
+  assert.match(nl, /\.postNewsletterToClassroomFromWeb\(message, content, format\);/);
+});
+
+// ===== 単元の時数（3/8）を予定表に出さない =====
+
+const stripHours = new Function(`${extractFn(nl, 'schedStripHours_')}\nreturn schedStripHours_;`)();
+
+test('単元の後ろの時数（何時間目/総時数）を落とす', () => {
+  assert.equal(stripHours('くじらぐも 3/8'), 'くじらぐも', '自動入力の形');
+  assert.equal(stripHours('たしざん 10/12'), 'たしざん');
+  assert.equal(stripHours('かずとかんじ３／５'), 'かずとかんじ', '全角の数字と斜線');
+  assert.equal(stripHours('うみのかくれんぼ 2/6時間目'), 'うみのかくれんぼ');
+  assert.equal(stripHours('きせつとなかよし（1/4）'), 'きせつとなかよし', 'かっこ付き');
+});
+
+test('時数でないものは残す（単元名の途中の数字・時数だけのセル）', () => {
+  assert.equal(stripHours('1/2成人式の準備'), '1/2成人式の準備', '単元名の途中の分数は消さない');
+  assert.equal(stripHours('10よりおおきいかず'), '10よりおおきいかず');
+  assert.equal(stripHours('3/8'), '', '時数しか無ければ空になる（教科名だけが出る）');
+  assert.equal(stripHours(null), '');
+});
+
+test('学級通信の形では時数を出さないのが既定。切り替えは操作パネルから', () => {
+  assert.match(nl, /var hideHours = letter \? opts\.hideHours !== false : !!opts\.hideHours;/,
+    '保存済みの学級通信の形の表でも、決めていなければ時数を出さない／アプリの形は今までどおり出す');
+  assert.match(nl, /hideHours: true\n\s*\};/, '学級通信の形の既定に入っていない');
+  assert.ok(nl.includes(String.raw`\'hideHours\',this.checked)"> 時数（3/8）を出さない</label>`), '切り替えが操作パネルに無い');
+  // 単元を出す2か所（アプリの形・学級通信の形）とも通している
+  assert.equal((nl.match(/var unit = unitText\(per\.unit\);/g) || []).length, 2);
 });

@@ -750,30 +750,50 @@ function getNewsletterData(mondayDateStr) {
   }
 }
 
+// Classroom へ添付できる学級通信の形（postNewsletterToClassroomFromWeb）
+const NEWSLETTER_POST_FORMATS_ = {
+  doc: { ext: '', mime: 'application/vnd.google-apps.document' },
+  pdf: { ext: '.pdf', mime: 'application/pdf' },
+  png: { ext: '.png', mime: 'image/png' }
+};
+
 /**
- * [Webアプリ API] 学級通信HTMLをGoogleドキュメントに変換してClassroomへ投稿します。
- * Drive REST API (v3) を UrlFetchApp 経由で呼び出し、
- * HTMLをGoogleドキュメントに変換してそのまま添付します。
- * (Drive Advanced Serviceは不要)
+ * [Webアプリ API] 学級通信をClassroomへ投稿します。
+ *
+ * 添付の形は3つ。どれも drive.file のまま（アプリが作ったファイルだけを扱う）で作れる。
+ *   'doc' … HTMLをGoogleドキュメントに変換して添付（今まで。受け取った側で直せる）
+ *   'pdf' … 画面で刷ったものと同じ見た目のPDF（端末で作ったものを受け取ってそのまま置く）
+ *   'png' … 同じ見た目の画像
+ * PDF と画像は、Googleドキュメントへの変換で表や余白の形が崩れるのを避けたい先生向け。
  *
  * 添付ファイルはクラスの参加者だけが開けるように共有します（shareFileWithCourse_）。
  * 共有できなかった場合も投稿は行い、warning に注意文を入れて返します。
  * @param {string} customMessage Classroomへの付加メッセージ
- * @param {string} htmlContent 学級通信エディタのHTML文字列
+ * @param {string} content 'doc' のときは学級通信のHTML、'pdf'/'png' のときは中身の base64
+ * @param {string} [format] 'doc'（既定）| 'pdf' | 'png'
  * @returns {Object} { success, message, warning }
  */
-function postNewsletterToClassroomFromWeb(customMessage, htmlContent) {
+function postNewsletterToClassroomFromWeb(customMessage, content, format) {
   try {
+    const kind = NEWSLETTER_POST_FORMATS_[format] ? format : 'doc';
     const courseName = getCourseNameSafe_();
     const formattedDate = Utilities.formatDate(new Date(), 'JST', 'yyyyMMdd_HHmm');
-    const fileName = '学級通信_' + formattedDate;
+    const fileName = '学級通信_' + formattedDate + NEWSLETTER_POST_FORMATS_[kind].ext;
 
     const courseId = getCourseIdByName(courseName);
 
     // drive.file 運用: DriveApp はフル drive スコープを要求するため使わない（17_DriveApi.gs 参照）。
     // parents も指定しない（既定でマイドライブ直下。フォルダ作成はフル drive が必要）。
-    const classroomFile = driveCreateConverted_(
-      fileName, htmlContent, 'text/html', 'application/vnd.google-apps.document');
+    let classroomFile;
+    if (kind === 'doc') {
+      classroomFile = driveCreateConverted_(
+        fileName, content, 'text/html', 'application/vnd.google-apps.document');
+    } else {
+      const mime = NEWSLETTER_POST_FORMATS_[kind].mime;
+      const bytes = Utilities.base64Decode(String(content || '').replace(/^data:[^,]*,/, ''));
+      if (!bytes.length) throw new Error('添付するファイルの中身がありません。');
+      classroomFile = driveCreateFile_(fileName, Utilities.newBlob(bytes, mime, fileName));
+    }
 
     // 学級通信には児童の氏名や写真が入る。以前は「リンクを知っている全員が閲覧可」に
     // していたが、URLが出回れば誰でも開ける状態だった（docs/LEGAL_RISK_AUDIT_JP.md の A-1）。
