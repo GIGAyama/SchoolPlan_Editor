@@ -378,3 +378,31 @@ test('投稿の形は PDF・画像・ドキュメントから選べ、どれも 
   assert.doesNotMatch(fn, /DriveApp\./, 'DriveApp はフル drive スコープが要る');
   assert.match(nl, /\.postNewsletterToClassroomFromWeb\(message, content, format\);/);
 });
+
+// ===== 単元の時数（3/8）を予定表に出さない =====
+
+const stripHours = new Function(`${extractFn(nl, 'schedStripHours_')}\nreturn schedStripHours_;`)();
+
+test('単元の後ろの時数（何時間目/総時数）を落とす', () => {
+  assert.equal(stripHours('くじらぐも 3/8'), 'くじらぐも', '自動入力の形');
+  assert.equal(stripHours('たしざん 10/12'), 'たしざん');
+  assert.equal(stripHours('かずとかんじ３／５'), 'かずとかんじ', '全角の数字と斜線');
+  assert.equal(stripHours('うみのかくれんぼ 2/6時間目'), 'うみのかくれんぼ');
+  assert.equal(stripHours('きせつとなかよし（1/4）'), 'きせつとなかよし', 'かっこ付き');
+});
+
+test('時数でないものは残す（単元名の途中の数字・時数だけのセル）', () => {
+  assert.equal(stripHours('1/2成人式の準備'), '1/2成人式の準備', '単元名の途中の分数は消さない');
+  assert.equal(stripHours('10よりおおきいかず'), '10よりおおきいかず');
+  assert.equal(stripHours('3/8'), '', '時数しか無ければ空になる（教科名だけが出る）');
+  assert.equal(stripHours(null), '');
+});
+
+test('学級通信の形では時数を出さないのが既定。切り替えは操作パネルから', () => {
+  assert.match(nl, /var hideHours = letter \? opts\.hideHours !== false : !!opts\.hideHours;/,
+    '保存済みの学級通信の形の表でも、決めていなければ時数を出さない／アプリの形は今までどおり出す');
+  assert.match(nl, /hideHours: true\n\s*\};/, '学級通信の形の既定に入っていない');
+  assert.ok(nl.includes(String.raw`\'hideHours\',this.checked)"> 時数（3/8）を出さない</label>`), '切り替えが操作パネルに無い');
+  // 単元を出す2か所（アプリの形・学級通信の形）とも通している
+  assert.equal((nl.match(/var unit = unitText\(per\.unit\);/g) || []).length, 2);
+});

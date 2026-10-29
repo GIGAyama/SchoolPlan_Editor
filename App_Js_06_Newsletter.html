@@ -1456,7 +1456,8 @@
             dateSize: 'l',
             headerColor: SCHED_LETTER_HEADER_COLOR,
             sizes: { subject: SCHED_LETTER_SIZES.subject, sub: SCHED_LETTER_SIZES.sub, list: SCHED_LETTER_SIZES.list, label: SCHED_LETTER_SIZES.label },
-            rowHeight: 16
+            rowHeight: 16,
+            hideHours: true
         };
     }
     NW.schedLetterDefaults_ = schedLetterDefaults_;
@@ -1481,6 +1482,21 @@
         return schedDateLabel_(day && day.date) + (dl ? '(' + dl + ')' : '');
     }
     NW.schedHeadLabel_ = schedHeadLabel_;
+
+    /**
+     * 単元名の後ろについている時数（「くじらぐも 3/8」の「3/8」）を取りのぞく。
+     * 週案の自動入力は「単元名 何時間目/総時数」の形で入れる（04_AutoFill.gs の parseUnitProgress_）。
+     * 手で書いた「3／8時間目」「（３/８）」のような形も落とす。後ろにあるものだけを見るので、
+     * 単元名の途中の数字（「1/2成人式」など）は残る。
+     * @param {string} unit
+     * @return {string}
+     */
+    function schedStripHours_(unit) {
+        return String(unit == null ? '' : unit)
+            .replace(/\s*[（(]?\s*[0-9０-９]+\s*[\/／]\s*[0-9０-９]+\s*(?:時間目|時間)?\s*[)）]?\s*$/, '')
+            .trim();
+    }
+    NW.schedStripHours_ = schedStripHours_;
 
     /** その日に授業や行事が入っているか（土曜を表に入れるかの判断に使う） */
     function schedDayHasSchool_(day) {
@@ -1645,14 +1661,22 @@
             return overrides.hasOwnProperty(key) ? overrides[key] : original;
         }
 
+        // 単元名の後ろの時数（「くじらぐも 3/8」の 3/8）。週案では進み具合を見るのに要るが、
+        // 子どもに渡す予定表には要らない。学級通信の形では、決めていなければ出さない
+        var hideHours = letter ? opts.hideHours !== false : !!opts.hideHours;
+        function unitText(unit) {
+            return hideHours ? schedStripHours_(unit) : String(unit || '');
+        }
+
         // Helper: render cell content based on displayMode
         function cellContent(per) {
             if (!per || !per.subject) return '';
             var c = escHtml(subjectToHiragana(per.subject));
-            if (opts.displayMode === 'subjectUnit' && per.unit) {
-                c += '<br><span class="nw-sched-sub">' + escHtml(per.unit) + '</span>';
+            var unit = unitText(per.unit);
+            if (opts.displayMode === 'subjectUnit' && unit) {
+                c += '<br><span class="nw-sched-sub">' + escHtml(unit) + '</span>';
             } else if (opts.displayMode === 'full') {
-                if (per.unit) c += '<br><span class="nw-sched-sub">' + escHtml(per.unit) + '</span>';
+                if (unit) c += '<br><span class="nw-sched-sub">' + escHtml(unit) + '</span>';
                 if (per.content) c += '<br><span class="nw-sched-detail">' + escHtml(per.content) + '</span>';
             }
             return c;
@@ -1666,7 +1690,8 @@
             var c = '<span style="font-size:' + schedFitPx_(name, sz.subject, dayInnerW, true)
                 + 'px;font-weight:700;white-space:nowrap;">' + escHtml(name) + '</span>';
             var subs = [];
-            if ((opts.displayMode === 'subjectUnit' || opts.displayMode === 'full') && per.unit) subs.push(per.unit);
+            var unit = unitText(per.unit);
+            if ((opts.displayMode === 'subjectUnit' || opts.displayMode === 'full') && unit) subs.push(unit);
             if (opts.displayMode === 'full' && per.content) subs.push(per.content);
             subs.forEach(function (s) {
                 c += '<br><span class="nw-sched-sub" style="font-size:' + sz.sub + 'px;color:#202124;">' + escHtml(s) + '</span>';
@@ -1894,7 +1919,9 @@
             + '<span style="color:var(--border);">|</span>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subject"' + (opts.displayMode === 'subject' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subject\')"> 教科のみ</label>'
             + '<label><input type="radio" name="sm_' + bid + '" value="subjectUnit"' + (opts.displayMode === 'subjectUnit' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'subjectUnit\')"> 教科+単元</label>'
-            + '<label><input type="radio" name="sm_' + bid + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'full\')"> 詳細</label>';
+            + '<label><input type="radio" name="sm_' + bid + '" value="full"' + (opts.displayMode === 'full' ? ' checked' : '') + ' onchange="NW.setSchedMode(\'' + bid + '\',\'full\')"> 詳細</label>'
+            + '<label title="週案の単元についている「3/8」（何時間目か）を、予定表には出さない">'
+            + '<input type="checkbox"' + (hideHours ? ' checked' : '') + ' onchange="NW.toggleSchedOpt(\'' + bid + '\',\'hideHours\',this.checked)"> 時数（3/8）を出さない</label>';
         if (letter) {
             // 文字の大きさは pt で選ぶ（Googleドキュメントと同じ単位）
             var ptChoices = [6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 12, 13, 14, 15, 16, 18, 20];
