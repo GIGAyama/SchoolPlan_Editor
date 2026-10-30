@@ -107,6 +107,18 @@
             if (k === 's') { e.preventDefault(); NW.saveToSheet(); return; }
             if (k === 'p') { e.preventDefault(); NW.printNewsletter(); return; }
         });
+        // 学年は起動のあとで遅れて届く（App_Js_14 の p2RunIdle → loadSettingsView）。
+        // 届く前に学級通信を描くと、1年生でも表が漢字のまま描かれ、そのまま印刷・投稿される
+        // （スマートフォンでは通信が遅く、起きやすかった）。まだ届いていなければここでも取りにいき、
+        // 届いたら描き直す（NW.onGradeKnown_）。
+        if (!STATE.gradeKnown) {
+            google.script.run
+                .withSuccessHandler(function (settings) {
+                    if (settings && settings.grade) NW.onGradeKnown_(settings.grade);
+                })
+                .withFailureHandler(function () { /* 予定を読み込むときにもう一度届く */ })
+                .getAppSettings();
+        }
         // Restore from localStorage if available
         if (NW.blocks.length === 0) NW.autoRestore();
         NW.pushHistory(); // initial state
@@ -160,6 +172,22 @@
     };
 
     NW.genId = function () { return 'nwb-' + (NW.nextId++); };
+
+    /**
+     * 学年がサーバーから届いた（または変わった）ときに呼ぶ。
+     * 学年で表記が変わる（1年は教科名・見出しをひらがなにする）ので、
+     * もう描いてある学級通信は描き直す。学年が同じで描き直しが要らないときは何もしない。
+     * @param {string|number} grade
+     */
+    NW.onGradeKnown_ = function (grade) {
+        var g = parseInt(grade, 10);
+        if (!(g >= 1 && g <= 6)) return;
+        STATE.grade = g;
+        STATE.gradeKnown = true;
+        // 描いたときの学年（NW.render が覚える）と違えば描き直す。
+        // 呼び出し側が先に STATE.grade を書き替えていても取りこぼさない
+        if (NW.initialized && NW.blocks.length && NW._gradeAtRender !== g) NW.render();
+    };
 
     // ---- Block CRUD ----
     NW.addBlock = function (type, afterId, data) {
@@ -407,6 +435,7 @@
     // ---- Rendering ----
     NW.render = function () {
         NW.saveEditable();
+        NW._gradeAtRender = Number(STATE.grade);
         var page = document.getElementById('nwEditorPage');
         if (NW.blocks.length === 0) {
             page.innerHTML = '<div class="nw-empty-editor" id="nwEmptyState">'
@@ -1274,7 +1303,7 @@
      * 教科だけひらがなで見出しは漢字、というちぐはぐな表になる。
      */
     function schedUsesHiragana_() {
-        try { return STATE.grade === 1; } catch (e) { return false; }
+        try { return Number(STATE.grade) === 1; } catch (e) { return false; }
     }
     NW.schedUsesHiragana_ = schedUsesHiragana_;
 
@@ -3463,6 +3492,11 @@
         google.script.run
             .withSuccessHandler(function (data) {
                 if (!data.success) { showToast('error', 'データ取得失敗: ' + data.error); return; }
+                // 予定と一緒に届く学年で、表記（1年はひらがな）を決め直す。表を組む前に入れる
+                if (data.grade) {
+                    var gNum = parseInt(data.grade, 10);
+                    if (gNum >= 1 && gNum <= 6) { STATE.grade = gNum; STATE.gradeKnown = true; }
+                }
                 NW.scheduleData = data;
                 showToast('success', '週案データを読み込みました');
                 var hasSchedule = NW.blocks.some(function (b) { return b.type === 'schedule'; });

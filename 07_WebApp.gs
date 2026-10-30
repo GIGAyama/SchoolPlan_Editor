@@ -739,6 +739,9 @@ function getNewsletterData(mondayDateStr) {
 
     return {
       success: true,
+      // 学級通信の表を1年生向けのひらがなにするかは学年で決める。
+      // 起動時の設定の読み込み（getAppSettings）を待たずに、予定と一緒に渡しておく
+      grade: tGetProp_(SCRIPT_PROP_GRADE) || '3',
       title: `今週のがんばり & 来週の予定`,
       date: Utilities.formatDate(monday, 'JST', 'yyyy年M月d日'),
       scheduleSummary: scheduleSummary,

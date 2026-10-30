@@ -471,6 +471,7 @@
         });
         if (!gradeResult.success) { showToast('error', '学年設定の保存に失敗: ' + gradeResult.error); return; }
         STATE.grade = parseInt(wiz.grade, 10) || 3;
+        if (typeof NW !== 'undefined' && NW.onGradeKnown_) NW.onGradeKnown_(wiz.grade);
 
         // 2) システム設定（APIキーはマスクのままなら既存値が保持される）
         var settingsResult = await new Promise(function (resolve) {

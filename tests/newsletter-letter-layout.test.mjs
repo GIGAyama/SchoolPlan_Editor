@@ -457,3 +457,51 @@ test('測るのは印刷と同じ HTML（決め打ちの線を引かない）', 
   assert.match(frame, /padding:12\.7mm 16mm;/, '紙の余白と同じでない');
   assert.match(nl, /NW\.scheduleFitCheck_\(\);\n    \};/, '描き直したあとに測り直していない');
 });
+
+// ===== 学年が遅れて届いても、1年生の表はひらがなになる =====
+
+test('学年が届いたら（変わったら）学級通信を描き直す', () => {
+  // 起動のあと学年は遅れて届く。届く前に描いた表は、1年生でも漢字のまま印刷・投稿されていた
+  // （スマートフォンは通信が遅く、起きやすかった）
+  const fn = nl.slice(nl.indexOf('NW.onGradeKnown_ = function'));
+  const body = fn.slice(0, fn.indexOf('\n    };') + 7);
+  let rendered = 0;
+  const NW = { initialized: true, blocks: [{}], render() { rendered++; NW._gradeAtRender = Number(STATE.grade); } };
+  const STATE = { grade: 3 };
+  const onGrade = new Function('NW', 'STATE', `${body}\nreturn NW.onGradeKnown_;`)(NW, STATE);
+  NW._gradeAtRender = 3;
+  onGrade('1');
+  assert.equal(rendered, 1, '学年が届いても描き直していない');
+  assert.equal(STATE.grade, 1);
+  assert.equal(STATE.gradeKnown, true);
+  onGrade('1');
+  assert.equal(rendered, 1, '学年が同じなのに描き直している');
+  STATE.grade = 2; // 設定画面は先に STATE.grade を書き替えてから知らせる
+  onGrade('2');
+  assert.equal(rendered, 2, '設定画面で学年を変えても描き直していない');
+  onGrade('bogus');
+  assert.equal(STATE.grade, 2, '読めない学年で上書きした');
+});
+
+test('学年を書き替える場所はどれも学級通信へ知らせる', () => {
+  for (const file of ['App_Js_05_Hours.html', 'App_Js_10_Settings.html', 'App_Js_13_SystemTools.html']) {
+    assert.match(read(file), /NW\.onGradeKnown_\(/, `${file}: 学年が変わっても学級通信へ知らせていない`);
+  }
+  assert.match(nl, /NW\._gradeAtRender = Number\(STATE\.grade\);/, '描いたときの学年を覚えていない');
+  assert.match(nl, /if \(!STATE\.gradeKnown\) \{\s*\n\s*google\.script\.run/, '学級通信を開いたときに学年を取りにいっていない');
+});
+
+test('予定と一緒に学年を受け取り、表を組む前に入れる', () => {
+  const gs = read('07_WebApp.gs');
+  const fn = gs.slice(gs.indexOf('function getNewsletterData'), gs.indexOf('function postNewsletterToClassroomFromWeb'));
+  assert.match(fn, /grade: tGetProp_\(SCRIPT_PROP_GRADE\) \|\| '3',/);
+  const load = nl.slice(nl.indexOf('NW.loadScheduleData = function'));
+  assert.ok(load.indexOf('STATE.gradeKnown = true') < load.indexOf('NW.scheduleData = data;'), '表を組んだあとに学年を入れている');
+});
+
+test('学年が文字（"1"）で入っていても1年生として扱う', () => {
+  const f = new Function('STATE', `${extractFn(nl, 'schedUsesHiragana_')}\nreturn schedUsesHiragana_;`);
+  assert.equal(f({ grade: '1' })(), true);
+  assert.equal(f({ grade: 1 })(), true);
+  assert.equal(f({ grade: 3 })(), false);
+});

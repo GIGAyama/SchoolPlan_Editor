@@ -621,6 +621,7 @@
                             .withSuccessHandler(function (r) {
                                 if (r.success) {
                                     STATE.grade = parseInt(newGrade, 10) || 3;
+                                    if (typeof NW !== 'undefined' && NW.onGradeKnown_) NW.onGradeKnown_(newGrade);
                                     showToast('success', r.message);
                                     // 標準時数エディタの内容も再描画する
                                     STATE.stdHoursData = r.data;
