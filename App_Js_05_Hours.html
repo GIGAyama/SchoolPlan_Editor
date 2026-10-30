@@ -291,6 +291,8 @@
                     var el = document.getElementById('settingCourseNameDisp');
                     if (el) el.textContent = settings.courseName || '未設定';
                     STATE.grade = parseInt(settings.grade, 10) || 3;
+                    // 学級通信がもう描かれていたら、学年に合った表記（1年はひらがな）で描き直す
+                    if (typeof NW !== 'undefined' && NW.onGradeKnown_) NW.onGradeKnown_(settings.grade);
                 }
             })
             .withFailureHandler(_onCommError)
