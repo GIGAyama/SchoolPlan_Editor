@@ -645,6 +645,8 @@
                         <span class="material-symbols-outlined fs-6">sync</span> 予定を読込
                     </button>
                     <div class="nw-act-sep-v"></div>
+                    <!-- 印刷したら1枚に収まるか（NW.checkFit_ が印刷と同じ組み方で測る） -->
+                    <button type="button" id="nwFitBadge" class="nw-fit-badge" hidden onclick="NW.showOverflow_()"></button>
                     <button class="btn btn-outline btn-sm" onclick="NW.printNewsletter()">
                         <span class="material-symbols-outlined fs-6">print</span> 印刷
                     </button>

@@ -406,3 +406,54 @@ test('学級通信の形では時数を出さないのが既定。切り替え�
   // 単元を出す2か所（アプリの形・学級通信の形）とも通している
   assert.equal((nl.match(/var unit = unitText\(per\.unit\);/g) || []).length, 2);
 });
+
+// ===== 小さい画面でも紙と同じ見え方・1枚に収まるかの目安 =====
+
+test('狭い画面でもページは 210mm のまま組み、zoom で縮める（幅を 100% にしない）', () => {
+  // 幅を 100% にすると紙より狭い幅で組み直され、紙に合わせた字の大きさが表のマスからはみ出す
+  assert.doesNotMatch(css, /\.nw-a4-page \{\s*width: 100% !important;/, '狭い画面でページの幅を変えている');
+  assert.match(nl, /NW\.fitPage_ = function/);
+  assert.match(nl, /var z = Math\.min\(1, Math\.max\(0\.2, avail \/ NW_A4_PX\.w\)\);/, '広げない（縮めるだけ）');
+  assert.match(nl, /new ResizeObserver\(function \(\) \{ NW\.fitPage_\(\); \}\)/, '画面の幅が変わったら合わせ直す');
+  // 操作の部品は縮めない（指で押せる大きさのまま）
+  assert.match(css, /\.nw-a4-page \.nw-block-actions,\s*\n\s*\.nw-a4-page \.nw-schedule-options \{\s*\n\s*zoom: var\(--nw-unzoom, 1\);/);
+});
+
+test('編集画面のブロックの余白は印刷と同じ。印は組み方に影響しない outline で出す', () => {
+  const block = /\n    \.nw-block \{([\s\S]*?)\n    \}/.exec(css)[1];
+  assert.match(block, /padding: 2px;/, '印刷（padding:2px）と違う余白を取っている');
+  assert.match(block, /border: 0;/);
+  assert.match(nl, /el\.style\.padding = '2px';/, '前提が変わった（印刷の余白）');
+  assert.match(css, /\.nw-block\.nw-block-selected \{\s*\n\s*outline-color:/);
+  const insert = /\n    \.nw-insert-row \{([\s\S]*?)\n    \}/.exec(css)[1];
+  assert.match(insert, /height: 0;/, 'ブロックのあいだの＋が紙に無いすき間を作っている');
+});
+
+test('時間割の設定は選んだときだけ、表の下に重ねて出す（ふだんは紙と同じ高さ）', () => {
+  assert.match(css, /\.nw-block:not\(\.nw-block-selected\) \.nw-schedule-options \{\s*\n\s*display: none;/);
+  assert.match(css, /\.nw-block\.nw-block-selected \.nw-schedule-options \{\s*\n\s*position: absolute;/);
+});
+
+const fitResult = new Function(
+  `var NW_PAGE1_BOTTOM_PX = (297 - 12.7) * 96 / 25.4;\n${extractFn(nl, 'nwFitResult_')}\nreturn nwFitResult_;`)();
+
+test('1枚に収まるかは、印刷と同じ組み方で測ったブロックの下端で決める', () => {
+  const limit = (297 - 12.7) * 96 / 25.4; // 約 1074px
+  assert.deepEqual(fitResult([{ id: 'a', bottom: 300 }, { id: 'b', bottom: limit - 1 }]),
+    { fits: true, overflowMm: 0, firstOverflowId: '', pages: 1 });
+  const over = fitResult([{ id: 'a', bottom: 300 }, { id: 'b', bottom: limit + 200 }, { id: 'c', bottom: limit + 400 }]);
+  assert.equal(over.fits, false);
+  assert.equal(over.firstOverflowId, 'b', '2枚目に入る最初のブロックに印を付ける');
+  assert.equal(over.overflowMm, Math.ceil(400 * 25.4 / 96));
+  assert.equal(over.pages, 2);
+  assert.equal(fitResult([]).fits, true);
+});
+
+test('測るのは印刷と同じ HTML（決め打ちの線を引かない）', () => {
+  const check = nl.slice(nl.indexOf('NW.checkFit_ = function'), nl.indexOf('NW.showOverflow_ = function'));
+  assert.match(check, /NW\.layoutPrintFrame_\(\)/, '印刷と同じ組み方で測っていない');
+  const frame = nl.slice(nl.indexOf('NW.layoutPrintFrame_ = function'), nl.indexOf('var NW_PAGE1_BOTTOM_PX'));
+  assert.match(frame, /NW\.buildPrintHTML\(\)/);
+  assert.match(frame, /padding:12\.7mm 16mm;/, '紙の余白と同じでない');
+  assert.match(nl, /NW\.scheduleFitCheck_\(\);\n    \};/, '描き直したあとに測り直していない');
+});
