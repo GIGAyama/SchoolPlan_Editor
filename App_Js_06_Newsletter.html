@@ -77,13 +77,24 @@
             document.getElementById('nwWeekLabel').textContent = NW.mondayStr + '週';
         }
         // Event delegation: click to select/deselect blocks
-        document.getElementById('nwEditorPage').addEventListener('click', function (e) {
+        // ページの外（灰色のところ）を押しても選ぶのをやめる。設定が閉じて、紙と同じ見え方に戻る
+        var pageEl = document.getElementById('nwEditorPage');
+        pageEl.parentElement.addEventListener('click', function (e) {
             var blockEl = e.target.closest('.nw-block');
             document.querySelectorAll('.nw-block.nw-block-selected').forEach(function (el) {
                 if (el !== blockEl) el.classList.remove('nw-block-selected');
             });
             if (blockEl) blockEl.classList.add('nw-block-selected');
         });
+        // 打っているあいだも、手が止まったら1枚に収まるかを測り直す
+        pageEl.addEventListener('input', function () { NW.scheduleFitCheck_(); });
+        // 画面の幅が変わったら（スマートフォンの縦横・ペインの幅）ページの縮みを合わせ直す
+        if (typeof ResizeObserver === 'function') {
+            new ResizeObserver(function () { NW.fitPage_(); }).observe(pageEl.parentElement);
+        } else {
+            window.addEventListener('resize', NW.fitPage_);
+        }
+        NW.fitPage_();
         // Keyboard shortcuts
         document.addEventListener('keydown', function (e) {
             if (STATE.view !== 'newsletter') return;
@@ -430,6 +441,7 @@
             page.appendChild(NW._createInsertBtn(block.id));
         });
         NW.autoSave();
+        NW.scheduleFitCheck_();
     };
 
     // ---- Insert button between blocks ----
@@ -1434,9 +1446,9 @@
     // 教科は紙の通信（14pt）より少し大きい 16pt の太字。長い教科名は1行に収まるまで小さくする
     var SCHED_LETTER_SIZES = { subject: 16, sub: 8, list: 7.5, label: 14 };
     // 表の幅（px）の見積もり。A4 から左右の余白 16mm を引いた 178mm（約 672px）から、
-    // 編集画面のブロックの左の取っ手ぶん（約 36px）を引いた狭いほうに合わせる。
-    // 画面で1行に収まれば、余白の広い紙でも必ず1行に収まる。
-    var SCHED_LETTER_TABLE_W = 636;
+    // ブロックの余白（左右 2px ずつ。編集画面も印刷も同じ）と少しの余裕を引く。
+    // 編集画面は狭い端末でも 210mm の幅のまま組んで縮めるので、どの端末でも同じ幅になる。
+    var SCHED_LETTER_TABLE_W = 664;
     // 左の見出しの列は「3字ぶん」の幅。それより長い見出し（もちもの・しゅくだい）は字を小さくして収める
     var SCHED_LETTER_LABEL_CHARS = 3;
     var SCHED_EMPTY_MARK = '−';
@@ -2177,6 +2189,7 @@
         block.options[key] = val;
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
         if (el) el.innerHTML = NW.renderScheduleHTML(block);
+        NW.scheduleFitCheck_();
     };
 
     NW.setSchedHeaderColor = function (id, color) {
@@ -2186,6 +2199,7 @@
         block.options.headerColor = color || SCHED_HEADER_COLOR_DEFAULT;
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
         if (el) el.innerHTML = NW.renderScheduleHTML(block);
+        NW.scheduleFitCheck_();
     };
 
     NW.setSchedDateSize = function (id, size) {
@@ -2194,6 +2208,7 @@
         block.options.dateSize = size;
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
         if (el) el.innerHTML = NW.renderScheduleHTML(block);
+        NW.scheduleFitCheck_();
     };
 
     NW.setSchedMode = function (id, mode) {
@@ -2202,6 +2217,7 @@
         block.options.displayMode = mode;
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
         if (el) el.innerHTML = NW.renderScheduleHTML(block);
+        NW.scheduleFitCheck_();
     };
 
     NW.toggleSchedPeriod = function (id, period, show) {
@@ -2216,6 +2232,7 @@
         block.options.hiddenPeriods = hp;
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
         if (el) el.innerHTML = NW.renderScheduleHTML(block);
+        NW.scheduleFitCheck_();
     };
 
     /** 時間割ブロックの表だけを描き直す（ブロックの選択やツールバーはそのまま） */
@@ -2223,6 +2240,7 @@
         var block = NW.blocks.find(function (b) { return b.id === id; });
         var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
         if (block && el) el.innerHTML = NW.renderScheduleHTML(block);
+        NW.scheduleFitCheck_();
     };
 
     /**
@@ -2417,6 +2435,7 @@
                 }
                 var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
                 if (el) el.innerHTML = NW.renderScheduleHTML(block);
+                NW.scheduleFitCheck_();
             });
         } else {
             // Simple text cell (event, recess1, recess2, afterschool, homework, items)
@@ -2448,6 +2467,7 @@
                 }
                 var el = document.querySelector('[data-block-id="' + id + '"] .nw-schedule-block');
                 if (el) el.innerHTML = NW.renderScheduleHTML(block);
+                NW.scheduleFitCheck_();
             });
         }
     };
@@ -3842,26 +3862,128 @@
      * @param {number} scale 1 で 96dpi。2 で約 190dpi（文字がにじまない）
      * @return {Promise<{canvas: HTMLCanvasElement, pages: number}>}
      */
+    /**
+     * 印刷と同じ HTML を、画面に出さない iframe に 210mm の幅で組む。
+     * 1枚に収まるかの判定（NW.checkFit_）と、画像・PDF づくり（NW.captureNewsletter_）で使う。
+     * 紙の余白（@page）は画面の組み方には効かないので、本文の余白として付け直す。
+     * @return {Promise<{fdoc: Document, cleanup: function}>} 書体を読みこみ終えてから返す
+     */
+    NW.layoutPrintFrame_ = function () {
+        var html = NW.buildPrintHTML()
+            .replace('</head>', '<style>html,body{margin:0;background:#fff;}'
+                + 'body{width:210mm;box-sizing:border-box;padding:12.7mm 16mm;}</style></head>');
+        var host = document.createElement('div');
+        host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;'
+            + 'border:0;pointer-events:none;z-index:-1;';
+        var iframe = document.createElement('iframe');
+        iframe.style.cssText = 'display:block;width:210mm;height:297mm;border:0;';
+        host.appendChild(iframe);
+        document.body.appendChild(host);
+        function cleanup() { if (host.parentNode) host.parentNode.removeChild(host); }
+        var fdoc = iframe.contentDocument;
+        fdoc.open();
+        fdoc.write(html);
+        fdoc.close();
+        var ready = (fdoc.fonts && fdoc.fonts.ready) ? fdoc.fonts.ready : Promise.resolve();
+        return ready.then(function () { return { fdoc: fdoc, cleanup: cleanup }; },
+            function (e) { cleanup(); throw e; });
+    };
+
+    // 1枚目の中身が入る高さ（px）。A4 の 297mm から上下の余白 12.7mm を引いた下端まで
+    var NW_PAGE1_BOTTOM_PX = (297 - 12.7) * 96 / 25.4;
+
+    /**
+     * 各ブロックの下端（印刷したときの位置。px）から、1枚に収まるかを決める。
+     * @param {Array<{id: string, bottom: number}>} blocks 上から順
+     * @return {{fits: boolean, overflowMm: number, firstOverflowId: string, pages: number}}
+     */
+    function nwFitResult_(blocks) {
+        var last = 0;
+        var first = '';
+        (blocks || []).forEach(function (b) {
+            last = Math.max(last, b.bottom);
+            if (!first && b.bottom > NW_PAGE1_BOTTOM_PX + 0.5) first = b.id;
+        });
+        var over = Math.max(0, last - NW_PAGE1_BOTTOM_PX);
+        var pageContentPx = (297 - 25.4) * 96 / 25.4;
+        return {
+            fits: !first,
+            overflowMm: Math.ceil(over * 25.4 / 96),
+            firstOverflowId: first,
+            pages: 1 + Math.ceil(over / pageContentPx)
+        };
+    }
+    NW.nwFitResult_ = nwFitResult_;
+
+    /**
+     * 印刷したら1枚に収まるかを、印刷と同じ組み方で測って見出しに出す。
+     * はみ出すときは、2枚目に入るブロックに印を付ける。
+     * 打っているあいだに何度も測らないよう、手が止まってから測る。
+     */
+    NW.scheduleFitCheck_ = function () {
+        clearTimeout(NW._fitTimer);
+        NW._fitTimer = setTimeout(NW.checkFit_, 1200);
+    };
+
+    NW.checkFit_ = function () {
+        var badge = document.getElementById('nwFitBadge');
+        if (!badge) return;
+        if (NW.blocks.length === 0) { badge.hidden = true; return; }
+        if (NW._fitRunning) { NW.scheduleFitCheck_(); return; }
+        NW._fitRunning = true;
+        NW.saveEditable();
+        NW.layoutPrintFrame_().then(function (frame) {
+            var top = frame.fdoc.documentElement.getBoundingClientRect().top;
+            var blocks = [];
+            frame.fdoc.querySelectorAll('.nw-block[data-block-id]').forEach(function (el) {
+                blocks.push({ id: el.getAttribute('data-block-id'), bottom: el.getBoundingClientRect().bottom - top });
+            });
+            frame.cleanup();
+            var r = nwFitResult_(blocks);
+            document.querySelectorAll('.nw-block.nw-block-overflow').forEach(function (el) { el.classList.remove('nw-block-overflow'); });
+            if (r.firstOverflowId) {
+                var el = document.querySelector('#nwEditorPage [data-block-id="' + r.firstOverflowId + '"]');
+                if (el) el.classList.add('nw-block-overflow');
+            }
+            badge.hidden = false;
+            badge.className = 'nw-fit-badge ' + (r.fits ? 'nw-fit-ok' : 'nw-fit-over');
+            badge.textContent = r.fits ? 'A4 1枚に収まっています' : 'A4 1枚から約' + r.overflowMm + 'mm はみ出します（' + r.pages + '枚になります）';
+            badge.title = r.fits ? '印刷したときの組み方で測っています' : '押すと、2枚目に入るところへ移ります';
+            NW._fitFirstOverflowId = r.firstOverflowId;
+        }).catch(function () {
+            badge.hidden = true;
+        }).then(function () { NW._fitRunning = false; });
+    };
+
+    /** 見出しの「はみ出します」を押したら、2枚目に入るブロックを見せる */
+    NW.showOverflow_ = function () {
+        if (!NW._fitFirstOverflowId) return;
+        var el = document.querySelector('#nwEditorPage [data-block-id="' + NW._fitFirstOverflowId + '"]');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+
+    /**
+     * ページ（210mm）を、いまの画面の幅に収まるよう zoom で縮める（広げはしない）。
+     * 中身は紙と同じ幅のまま組まれるので、スマートフォンでも印刷と同じ見え方になる。
+     * 操作の部品（ツールバー・時間割の設定）は --nw-unzoom で元の大きさに戻す（指で押せるように）。
+     */
+    NW.fitPage_ = function () {
+        var page = document.getElementById('nwEditorPage');
+        var scroller = page && page.parentElement;
+        if (!page || !scroller || !scroller.clientWidth) return;
+        var cs = getComputedStyle(scroller);
+        var avail = scroller.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        var z = Math.min(1, Math.max(0.2, avail / NW_A4_PX.w));
+        z = Math.floor(z * 1000) / 1000;
+        page.style.zoom = z < 1 ? String(z) : '';
+        page.style.setProperty('--nw-unzoom', String(z < 1 ? 1 / z : 1));
+    };
+
     NW.captureNewsletter_ = function (scale) {
-        return new Promise(function (resolve, reject) {
-            var html = NW.buildPrintHTML()
-                // 紙の余白（@page）は絵には効かないので、本文の余白として付け直す
-                .replace('</head>', '<style>html,body{margin:0;background:#fff;}'
-                    + 'body{width:210mm;box-sizing:border-box;padding:12.7mm 16mm;}</style></head>');
-            var host = document.createElement('div');
-            host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;'
-                + 'border:0;pointer-events:none;z-index:-1;';
-            var iframe = document.createElement('iframe');
-            iframe.style.cssText = 'display:block;width:210mm;height:297mm;border:0;';
-            host.appendChild(iframe);
-            document.body.appendChild(host);
-            function cleanup() { if (host.parentNode) host.parentNode.removeChild(host); }
-            var fdoc = iframe.contentDocument;
-            fdoc.open();
-            fdoc.write(html);
-            fdoc.close();
-            var ready = (fdoc.fonts && fdoc.fonts.ready) ? fdoc.fonts.ready : Promise.resolve();
-            ready.then(function () {
+        return NW.layoutPrintFrame_().then(function (frame) {
+            return new Promise(function (resolve, reject) {
+                var fdoc = frame.fdoc;
+                var cleanup = frame.cleanup;
                 var contentH = Math.ceil(fdoc.documentElement.scrollHeight);
                 var pages = Math.max(1, Math.ceil((contentH - 2) / NW_A4_PX.h));
                 var w = NW_A4_PX.w, h = pages * NW_A4_PX.h;
@@ -3900,7 +4022,7 @@
                 };
                 img.onerror = function () { reject(new Error('学級通信を画像にできませんでした')); };
                 img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-            }).catch(function (e) { cleanup(); reject(e); });
+            });
         });
     };
 

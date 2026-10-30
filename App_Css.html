@@ -1487,46 +1487,100 @@
 
     /* 余白は印刷（App_Js_06_Newsletter.html の NW._PRINT_CSS の @page）と同じにする。
        先生が Google ドキュメントで作ってきた通信の余白（上下 12.7mm・左右 16mm）。 */
+    /* 紙と同じ 210mm の幅のまま組み、画面が狭いときは NW.fitPage_ が zoom で縮める。
+       以前は狭い画面で幅を 100% にしていたので、紙より狭い幅で組み直され、
+       紙の幅に合わせた字の大きさが表のマスからはみ出していた。 */
     .nw-a4-page {
         width: 210mm;
         min-height: 297mm;
+        flex-shrink: 0;
         background: white;
         box-shadow: var(--shadow-md);
         padding: 12.7mm 16mm;
         position: relative;
     }
 
-    /* --- Block container --- */
+    /* --- Block container ---
+       ブロックの余白と枠は、印刷（NW.buildPrintHTML が padding:2px・枠なしにする）と同じにする。
+       編集画面だけ広い余白や枠を取ると、紙より縦に伸びて、1枚に収まるかが読めなくなる。
+       選んでいる・指しているの印は、組み方に影響しない outline で出す。 */
     .nw-block {
         position: relative;
         margin: 0;
-        padding: 4px 4px 4px 28px;
-        border: 2px solid transparent;
+        padding: 2px;
+        border: 0;
+        outline: 2px solid transparent;
+        outline-offset: 1px;
         border-radius: 4px;
-        transition: border-color 0.15s;
+        transition: outline-color 0.15s;
         min-height: 20px;
     }
 
     .nw-block:hover {
-        border-color: #e8f0fe;
+        outline-color: #c6dafc;
     }
 
     .nw-block[data-deco-border] {
-        border-color: var(--deco-border);
+        border: 2px solid var(--deco-border);
     }
 
     .nw-block.nw-block-selected {
-        border-color: var(--primary-text) !important;
+        outline-color: var(--primary-text) !important;
     }
 
     .nw-block.nw-drag-over {
-        border-top: 3px solid var(--primary);
+        box-shadow: 0 -3px 0 var(--primary);
     }
 
-    /* --- Drag handle --- */
+    /* 印刷で1枚目からはみ出すブロック（NW.checkFit_ が印刷と同じ組み方で測って印を付ける） */
+    .nw-block.nw-block-overflow {
+        outline: 2px dashed var(--danger-text);
+    }
+
+    .nw-block.nw-block-overflow::before {
+        content: 'ここから2枚目';
+        position: absolute;
+        right: 0;
+        top: -1.4em;
+        font-size: 11px;
+        font-weight: 700;
+        color: #fff;
+        background: var(--danger-text);
+        border-radius: 3px;
+        padding: 0 6px;
+        z-index: 4;
+        pointer-events: none;
+    }
+
+    /* 見出しの「A4 1枚に収まっています／はみ出します」 */
+    .nw-fit-badge {
+        min-height: 32px;
+        padding: 4px 10px;
+        border-radius: var(--radius-pill);
+        border: 1px solid transparent;
+        font-family: inherit;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: default;
+        white-space: nowrap;
+    }
+
+    .nw-fit-badge.nw-fit-ok {
+        background: var(--success-light);
+        color: var(--secondary-text);
+    }
+
+    .nw-fit-badge.nw-fit-over {
+        background: var(--danger-light);
+        color: var(--danger-text);
+        border-color: var(--danger-text);
+        cursor: pointer;
+    }
+
+    /* --- Drag handle（ページの左の余白に出す。中身の幅を削らない） --- */
     .nw-block-handle {
         position: absolute;
-        left: 2px;
+        left: -26px;
         top: 50%;
         transform: translateY(-50%);
         cursor: grab;
@@ -1566,6 +1620,37 @@
     .nw-block.nw-block-selected .nw-block-actions {
         opacity: 1;
         pointer-events: auto;
+    }
+
+    /* ページを zoom で縮めても、操作の部品は指で押せる大きさのまま出す（--nw-unzoom = 1 / 縮み） */
+    .nw-a4-page .nw-block-actions,
+    .nw-a4-page .nw-schedule-options {
+        zoom: var(--nw-unzoom, 1);
+    }
+
+    .nw-a4-page .nw-block-actions {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    /* 時間割の設定は、そのブロックを選んだときだけ、表の下に重ねて出す。
+       ふだんは紙と同じ高さのまま見られる（設定が表の下に並んで縦に伸びない） */
+    .nw-block:not(.nw-block-selected) .nw-schedule-options {
+        display: none;
+    }
+
+    .nw-block.nw-block-selected .nw-schedule-options {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 100%;
+        z-index: 9;
+        margin-top: 4px;
+        padding: 8px 10px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        box-shadow: var(--shadow-md);
     }
 
     .nw-block-actions button {
@@ -2304,14 +2389,26 @@
     }
 
     /* --- Insert button between blocks --- */
+    /* ブロックのあいだの＋。高さを取らない（紙に無いすき間を作らない）。
+       指を当てる帯は ::after で上下に広げる */
     .nw-insert-row {
         display: flex;
         align-items: center;
         justify-content: center;
-        height: 12px;
+        height: 0;
         position: relative;
         opacity: 0;
         transition: opacity 0.2s;
+        z-index: 3;
+    }
+
+    .nw-insert-row::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: -6px;
+        height: 12px;
     }
 
     .nw-insert-row:hover {
@@ -2330,7 +2427,8 @@
     }
 
     .nw-insert-btn {
-        position: relative;
+        position: absolute;
+        top: -11px;
         z-index: 2;
         width: 22px;
         height: 22px;
@@ -4275,11 +4373,14 @@
             flex-shrink: 0;
         }
 
-        .nw-a4-page {
-            width: 100% !important;
-            min-width: auto !important;
-            transform: none !important;
-            zoom: 0.7;
+        /* ページの幅は 210mm のまま（縮めるのは NW.fitPage_ の zoom）。ここで幅を変えないこと */
+        .nw-page-scroll {
+            padding: 8px;
+        }
+
+        .nw-palette-btn {
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
         /* タスク */
