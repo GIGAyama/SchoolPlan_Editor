@@ -505,3 +505,53 @@ test('学年が文字（"1"）で入っていても1年生として扱う', () =
   assert.equal(f({ grade: 1 })(), true);
   assert.equal(f({ grade: 3 })(), false);
 });
+
+// ===== 保存・読込・開き直しで中身が消えない =====
+
+test('前の画面の字で、読みこんだ通信の中身を上書きしない', () => {
+  // ブロックの番号は振り直すので、保存した通信を開くと前の画面と同じ番号になる。
+  // 番号だけで画面から読むと、前の画面の字（空の当番の欄など）で上書きしていた
+  const save = nl.slice(nl.indexOf('NW.saveEditable = function'));
+  assert.match(save, /if \(!wrap \|\| wrap\._nwBlock !== block\) return;/, '描いたブロックか確かめずに読んでいる');
+  assert.match(nl, /wrapper\._nwBlock = block;/, 'どのブロックを描いたかを覚えていない');
+});
+
+test('打った字は、手が止まったとき・アプリを離れるときに下書きへ書く', () => {
+  // 以前は描き直したときにしか下書きを書かず、打ってすぐ閉じると消えていた
+  assert.match(nl, /pageEl\.addEventListener\('input', function \(\) \{ NW\.scheduleFitCheck_\(\); NW\.scheduleDraftSave_\(\); \}\);/);
+  assert.match(nl, /pageEl\.addEventListener\('focusout', function \(\) \{ NW\.flushDraft_\(\); \}\);/);
+  assert.match(nl, /if \(document\.visibilityState === 'hidden'\) NW\.flushDraft_\(\);/);
+  assert.match(nl, /window\.addEventListener\('pagehide', function \(\) \{ NW\.flushDraft_\(\); \}\);/);
+  // 下書きに写真を入れない約束はそのまま
+  const draft = nl.slice(nl.indexOf('NW.writeDraft_ = function'), nl.indexOf('NW.scheduleDraftSave_ = function'));
+  assert.match(draft, /NW\.stripImagesForLocalSave_\(NW\.blocks\)/);
+});
+
+test('表の下の持ち物・当番の3行は、次の通信にも引きつぐ（テンプレートでも消さない）', () => {
+  assert.match(nl, /localStorage\.setItem\('nw_week_notes_v1', notes\.content\)/);
+  const layout = nl.slice(nl.indexOf('NW.buildLetterLayout_ = function'));
+  assert.match(layout.slice(0, layout.indexOf('\n    };')), /content: lastNotes \|\| \(kana/);
+  assert.match(nl, /if \(b\.type === 'text' && !b\.role\) b\.content = '';/, 'テンプレート保存で役目のある欄を消している');
+});
+
+test('題字の画像はドライブに置き、題字の無い題字ブロックへ入れ直す', () => {
+  const gs = read('07_WebApp.gs');
+  assert.match(gs, /function saveNewsletterLogo\(dataUrl\)/);
+  assert.match(gs, /function getNewsletterLogo\(\)/);
+  const save = gs.slice(gs.indexOf('function saveNewsletterLogo'), gs.indexOf('function getNewsletterLogo'));
+  assert.match(save, /driveCreateFile_\(/, 'drive.file で作っていない');
+  assert.doesNotMatch(save, /DriveApp\./, 'DriveApp はフル drive スコープが要る');
+  assert.match(save, /\^data:image\\\/\(png\|jpeg\|gif\|webp\);base64,/, '画像でないものを置ける');
+  assert.match(nl, /if \(isLogo\) NW\.storeLogo_\(src\);/, '題字を入れてもドライブに置いていない');
+  assert.match(nl, /if \(NW\.blocks\.length === 0 && NW\.autoRestore\(\)\) NW\.restoreLogo_\(\);/, '開き直したとき題字を入れ直していない');
+  assert.match(nl, /if \(type === 'masthead' && !block\.src\) NW\.restoreLogo_\(\);/, '新しい題字ブロックに題字を入れていない');
+  assert.match(nl, /NW\.storeLogo_\(''\);/, '題字を外してもドライブに残っている');
+  // 端末には残さない約束はそのまま（下書き・テンプレート・覚えておく文字）
+  const mem = nl.slice(nl.indexOf('NW.saveMastheadMemory_ = function'), nl.indexOf('NW.loadMastheadMemory_ = function'));
+  assert.doesNotMatch(mem, /src/);
+});
+
+test('写真は保存に入る大きさまで縮めてから入れる（保存の上限 2MB を超えて失敗しない）', () => {
+  assert.match(nl, /var NW_PHOTO_MAX_W = 1600;/);
+  assert.equal((nl.match(/NW\.shrinkImage_\(evt\.target\.result, /g) || []).length, 3, '画像・ギャラリー・段組みの3か所');
+});

@@ -87,7 +87,13 @@
             if (blockEl) blockEl.classList.add('nw-block-selected');
         });
         // 打っているあいだも、手が止まったら1枚に収まるかを測り直す
-        pageEl.addEventListener('input', function () { NW.scheduleFitCheck_(); });
+        pageEl.addEventListener('input', function () { NW.scheduleFitCheck_(); NW.scheduleDraftSave_(); });
+        pageEl.addEventListener('focusout', function () { NW.flushDraft_(); });
+        // アプリを閉じる・ほかのアプリへ移る直前に書いておく（スマートフォンは前ぶれなく閉じられる）
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'hidden') NW.flushDraft_();
+        });
+        window.addEventListener('pagehide', function () { NW.flushDraft_(); });
         // 画面の幅が変わったら（スマートフォンの縦横・ペインの幅）ページの縮みを合わせ直す
         if (typeof ResizeObserver === 'function') {
             new ResizeObserver(function () { NW.fitPage_(); }).observe(pageEl.parentElement);
@@ -120,7 +126,7 @@
                 .getAppSettings();
         }
         // Restore from localStorage if available
-        if (NW.blocks.length === 0) NW.autoRestore();
+        if (NW.blocks.length === 0 && NW.autoRestore()) NW.restoreLogo_();
         NW.pushHistory(); // initial state
         NW.initialized = true;
     };
@@ -347,6 +353,8 @@
             NW.blocks.push(block);
         }
         NW.render();
+        // 新しい題字ブロックには、いつもの題字の画像（ドライブに置いたもの）を入れる
+        if (type === 'masthead' && !block.src) NW.restoreLogo_();
         return block;
     };
 
@@ -384,6 +392,14 @@
     // ---- Save contenteditable before re-render ----
     NW.saveEditable = function () {
         NW.blocks.forEach(function (block) {
+            // 画面のブロックが、いまのこのブロックを描いたものでなければ読まない。
+            // 保存した通信を開いたとき・テンプレートや「いつもの学級通信」で組み直したとき・
+            // 元に戻したときは、ブロックの中身が入れ替わってから描き直す。ブロックの番号
+            // （nwb-1, nwb-2…）は振り直すので前の画面と同じ番号になり、ここで番号だけを見て
+            // 読むと、前の画面の字（空のテキストなど）で読みこんだ中身を上書きしていた。
+            // 「表の下の給食当番・そうじ当番が消える」「題字の字が前のものに戻る」の原因。
+            var wrap = document.querySelector('#nwEditorPage .nw-block[data-block-id="' + block.id + '"]');
+            if (!wrap || wrap._nwBlock !== block) return;
             if (block.type === 'heading' || block.type === 'text') {
                 var el = document.querySelector('[data-block-id="' + block.id + '"] [contenteditable]');
                 if (el) block.content = el.innerHTML;
@@ -582,10 +598,13 @@
         var kana = schedUsesHiragana_();
         NW.addBlock('masthead');
         NW.addBlock('schedule', null, { weekData: weekData || null, options: schedLetterDefaults_() });
+        var lastNotes = '';
+        try { lastNotes = localStorage.getItem('nw_week_notes_v1') || ''; } catch (e) { }
         NW.addBlock('text', null, {
-            content: kana
+            // 前の通信で書いた3行があればそれを使う（毎週ほとんど同じなので書き直さずに済む）
+            content: lastNotes || (kana
                 ? '★タブレット・ドリルは まいにちもってきます。<br>きゅうしょくとうばん：<br>そうじとうばん：'
-                : '★タブレット・ドリルは毎日持ってきます。<br>給食当番：<br>掃除当番：',
+                : '★タブレット・ドリルは毎日持ってきます。<br>給食当番：<br>掃除当番：'),
             fontSize: nwPtToPx_(12), bold: true, role: 'week-notes'
         });
         NW.addBlock('divider');
@@ -774,7 +793,7 @@
             + NW.buildFontSelect_(block.fontFamily, 'NW.setBlockProp(\'' + bid + '\',\'fontFamily\',this.value)')
             + '<button title="題字の画像を入れる" onclick="NW.uploadImage(\'' + bid + '\')"><span class="material-symbols-outlined">add_photo_alternate</span></button>';
         if (block.src) {
-            html += '<button title="題字の画像を外す（文字の題字にもどす）" onclick="NW.setBlockProp(\'' + bid + '\',\'src\',\'\')"><span class="material-symbols-outlined">close</span></button>'
+            html += '<button title="題字の画像を外す（文字の題字にもどす。次の通信にも出さない）" onclick="NW.removeLogo_(\'' + bid + '\')"><span class="material-symbols-outlined">close</span></button>'
                 + '<select onchange="NW.setBlockProp(\'' + bid + '\',\'logoWidth\',parseInt(this.value,10))" title="題字の幅">';
             [40, 50, 55, 60, 66, 70, 75, 80].forEach(function (w) {
                 html += '<option value="' + w + '"' + (w === (block.logoWidth || 66) ? ' selected' : '') + '>題字 ' + w + '%</option>';
@@ -807,6 +826,8 @@
         var wrapper = document.createElement('div');
         wrapper.className = 'nw-block';
         wrapper.setAttribute('data-block-id', block.id);
+        // どのブロックを描いたかを覚えておく（NW.saveEditable が前の画面の字で上書きしないように）
+        wrapper._nwBlock = block;
         wrapper.setAttribute('draggable', 'true');
 
         // Drag handle
@@ -2004,6 +2025,18 @@
         NW._rerenderKeep_(id);
     };
 
+    /** 題字の画像を外す。ドライブに置いた題字も消すので、次の通信にも出ない */
+    NW.removeLogo_ = function (id) {
+        var block = NW.blocks.find(function (b) { return b.id === id; });
+        if (!block) return;
+        NW.pushHistory();
+        NW.saveEditable();
+        block.src = '';
+        delete block.srcStripped;
+        NW.storeLogo_('');
+        NW._rerenderKeep_(id);
+    };
+
     /** 既定が「入」の切り替え（記事の下線・番号）を反転する */
     NW.toggleBlockFlag = function (id, prop) {
         var block = NW.blocks.find(function (b) { return b.id === id; });
@@ -2501,6 +2534,101 @@
         }
     };
 
+    // ---- 画像の大きさ ----
+    // スマートフォンの写真はそのままだと 1 枚 3〜6MB あり、学級通信の保存
+    // （saveNewsletterData は 2MB まで）に入りきらず、保存が失敗していた。
+    // 紙に刷るのに足りる大きさ（A4 の幅で 200dpi 程度）まで縮めてから入れる。
+    var NW_PHOTO_MAX_W = 1600;
+    var NW_LOGO_MAX_W = 1400;
+
+    /**
+     * 画像を、幅 maxW までに縮める（広げない）。透過のある PNG は PNG のまま、
+     * 写真は JPEG にする。縮めても小さくならなければ元のまま返す。
+     * @return {Promise<string>} data URI
+     */
+    NW.shrinkImage_ = function (dataUrl, maxW) {
+        return new Promise(function (resolve) {
+            var img = new Image();
+            img.onload = function () {
+                try {
+                    var w = img.naturalWidth, h = img.naturalHeight;
+                    if (!w || !h || (w <= maxW && String(dataUrl).length < 700000)) { resolve(dataUrl); return; }
+                    var scale = Math.min(1, maxW / w);
+                    var c = document.createElement('canvas');
+                    c.width = Math.round(w * scale);
+                    c.height = Math.round(h * scale);
+                    var ctx = c.getContext('2d');
+                    var keepPng = /^data:image\/(png|gif|webp)/.test(dataUrl);
+                    if (!keepPng) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
+                    ctx.drawImage(img, 0, 0, c.width, c.height);
+                    var out = keepPng ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.88);
+                    if (keepPng && out.length > 1200000) {
+                        // 透過 PNG でも大きすぎるときは白地の JPEG にする（紙は白いので見た目は変わらない）
+                        var c2 = document.createElement('canvas');
+                        c2.width = c.width; c2.height = c.height;
+                        var ctx2 = c2.getContext('2d');
+                        ctx2.fillStyle = '#fff'; ctx2.fillRect(0, 0, c2.width, c2.height);
+                        ctx2.drawImage(c, 0, 0);
+                        out = c2.toDataURL('image/jpeg', 0.9);
+                    }
+                    resolve(out.length < String(dataUrl).length ? out : dataUrl);
+                } catch (e) { resolve(dataUrl); }
+            };
+            img.onerror = function () { resolve(dataUrl); };
+            img.src = dataUrl;
+        });
+    };
+
+    // ---- 題字の画像をドライブに置く ----
+    // 題字の画像は端末（localStorage）に残さない約束（写真が入ることがあるため）。
+    // そのため、アプリを開き直すたびに題字の画像が消えていた。
+    // 題字は毎週同じなので、先生のドライブ（アプリが作るファイル。drive.file）に置き、
+    // 題字の画像が無い題字ブロックへ入れ直す。スマートフォンとパソコンでも同じものが出る。
+
+    /** 題字の画像をドライブに置く（空文字なら消す） */
+    NW.storeLogo_ = function (src) {
+        NW._logoCache = src || '';
+        google.script.run
+            .withSuccessHandler(function (res) {
+                if (res && !res.success) showToast('warning', '題字の画像を次の通信用に残せませんでした: ' + res.error);
+            })
+            .withFailureHandler(function () { /* この通信には入っている。次に開いたとき入れ直してもらう */ })
+            .saveNewsletterLogo(src || '');
+    };
+
+    /**
+     * 題字の画像が無い題字ブロックへ、ドライブに置いた題字の画像を入れる。
+     * 「題字の画像を外す」を選ぶとドライブの題字も消す（NW.removeLogo_）ので、外したものは戻らない。
+     */
+    NW.restoreLogo_ = function () {
+        var targets = function () {
+            return NW.blocks.filter(function (b) { return b.type === 'masthead' && !b.src; });
+        };
+        if (!targets().length) return;
+        var apply = function (src) {
+            var list = targets();
+            if (!src) {
+                if (list.some(function (b) { return b.srcStripped; })) {
+                    showToast('info', '題字の画像をもう一度入れてください。次からは自動で入ります。');
+                }
+                return;
+            }
+            list.forEach(function (b) { b.src = src; delete b.srcStripped; });
+            NW.render();
+        };
+        if (NW._logoCache !== undefined) { apply(NW._logoCache); return; }
+        if (NW._logoLoading) return;
+        NW._logoLoading = true;
+        google.script.run
+            .withSuccessHandler(function (res) {
+                NW._logoLoading = false;
+                NW._logoCache = (res && res.success && res.dataUrl) || '';
+                apply(NW._logoCache);
+            })
+            .withFailureHandler(function () { NW._logoLoading = false; })
+            .getNewsletterLogo();
+    };
+
     // ---- Image upload (FileReader → base64) ----
     NW.uploadImage = function (blockId) {
         var input = document.createElement('input');
@@ -2511,13 +2639,18 @@
             if (!file) return;
             var reader = new FileReader();
             reader.onload = function (evt) {
-                var block = NW.blocks.find(function (b) { return b.id === blockId; });
-                if (block) {
+                var target = NW.blocks.find(function (b) { return b.id === blockId; });
+                var isLogo = target && target.type === 'masthead';
+                NW.shrinkImage_(evt.target.result, isLogo ? NW_LOGO_MAX_W : NW_PHOTO_MAX_W).then(function (src) {
+                    var block = NW.blocks.find(function (b) { return b.id === blockId; });
+                    if (!block) return;
                     NW.pushHistory();
-                    block.src = evt.target.result;
+                    block.src = src;
                     delete block.srcStripped;
                     NW.render();
-                }
+                    // 題字の画像は毎週同じなので、ドライブに置いて次の通信・ほかの端末でも使う
+                    if (isLogo) NW.storeLogo_(src);
+                });
             };
             reader.readAsDataURL(file);
         };
@@ -2538,9 +2671,11 @@
             files.forEach(function (file) {
                 var reader = new FileReader();
                 reader.onload = function (evt) {
-                    block.images.push({ src: evt.target.result, caption: '' });
-                    loaded++;
-                    if (loaded === files.length) NW.render();
+                    NW.shrinkImage_(evt.target.result, NW_PHOTO_MAX_W).then(function (src) {
+                        block.images.push({ src: src, caption: '' });
+                        loaded++;
+                        if (loaded === files.length) NW.render();
+                    });
                 };
                 reader.readAsDataURL(file);
             });
@@ -2596,11 +2731,13 @@
             if (!file) return;
             var reader = new FileReader();
             reader.onload = function (evt) {
-                var block = NW.blocks.find(function (b) { return b.id === blockId; });
-                if (block && block.colData[colIndex]) {
-                    block.colData[colIndex].src = evt.target.result;
-                    NW.render();
-                }
+                NW.shrinkImage_(evt.target.result, NW_PHOTO_MAX_W).then(function (src) {
+                    var block = NW.blocks.find(function (b) { return b.id === blockId; });
+                    if (block && block.colData[colIndex]) {
+                        block.colData[colIndex].src = src;
+                        NW.render();
+                    }
+                });
             };
             reader.readAsDataURL(file);
         };
@@ -2986,7 +3123,8 @@
             var tplBlocks = JSON.parse(JSON.stringify(NW.blocks));
             tplBlocks.forEach(function (b) {
                 if (b.type === 'heading') b.content = b.content.replace(/<[^>]*>/g, '').trim() ? b.content : '見出し';
-                if (b.type === 'text') b.content = '';
+                // 役目のあるテキスト（表の下の持ち物・当番、「お知らせ」）は毎週同じなので残す
+                if (b.type === 'text' && !b.role) b.content = '';
                 if (b.type === 'image') { b.src = ''; b.wrapText = ''; b.caption = ''; }
                 if (b.type === 'gallery') { b.images = []; }
                 if (b.type === 'schedule') { b.weekData = null; }
@@ -3310,20 +3448,52 @@
 
     NW.autoSave = function () {
         clearTimeout(NW._saveTimer);
-        NW._saveTimer = setTimeout(function () {
+        NW._saveTimer = setTimeout(NW.writeDraft_, 800);
+    };
+
+    /**
+     * 下書きをすぐに書く。打っているあいだ（NW.scheduleDraftSave_）と、
+     * アプリを閉じる・ほかのアプリへ移るとき（visibilitychange / pagehide）に呼ぶ。
+     * 以前は描き直したときにしか書いていなかったので、打ったあとすぐ閉じると
+     * 打った字（給食当番・そうじ当番など）が消えていた。
+     */
+    NW.writeDraft_ = function () {
+        clearTimeout(NW._saveTimer);
+        try {
+            localStorage.setItem('nw_autosave', JSON.stringify({
+                blocks: NW.stripImagesForLocalSave_(NW.blocks),
+                nextId: NW.nextId, mondayStr: NW.mondayStr
+            }));
+        } catch (e) {
             try {
-                localStorage.setItem('nw_autosave', JSON.stringify({
-                    blocks: NW.stripImagesForLocalSave_(NW.blocks),
-                    nextId: NW.nextId, mondayStr: NW.mondayStr
-                }));
-            } catch (e) {
-                try {
-                    // 画像を落としてもなお入らない場合（文章が非常に長いなど）は、
-                    // 古い下書きを残さないよう消す。中途半端な復元より分かりやすい。
-                    localStorage.removeItem('nw_autosave');
-                } catch (ignore) { }
-            }
-        }, 800);
+                // 画像を落としてもなお入らない場合（文章が非常に長いなど）は、
+                // 古い下書きを残さないよう消す。中途半端な復元より分かりやすい。
+                localStorage.removeItem('nw_autosave');
+            } catch (ignore) { }
+        }
+        // 表の下の「毎日の持ち物・給食当番・そうじ当番」は毎週ほとんど同じなので、
+        // 次に「いつもの学級通信」を組むときに入れられるよう覚えておく（児童の名前は入らない欄）
+        var notes = NW.blocks.find(function (b) { return b.role === 'week-notes'; });
+        if (notes && String(notes.content || '').replace(/<[^>]*>/g, '').trim()) {
+            try { localStorage.setItem('nw_week_notes_v1', notes.content); } catch (ignore) { }
+        }
+    };
+
+    /** 打っているあいだは、手が止まったら下書きに書く */
+    NW.scheduleDraftSave_ = function () {
+        clearTimeout(NW._draftTimer);
+        NW._draftTimer = setTimeout(function () {
+            NW.saveEditable();
+            NW.writeDraft_();
+        }, 600);
+    };
+
+    /** いま画面にある字を中身に取りこんで、すぐ下書きに書く */
+    NW.flushDraft_ = function () {
+        if (!NW.initialized) return;
+        clearTimeout(NW._draftTimer);
+        NW.saveEditable();
+        NW.writeDraft_();
     };
 
     NW.autoRestore = function () {
@@ -3341,9 +3511,9 @@
                 NW.render();
                 // 写真はブラウザに残していないので、復元しても空のままになる。
                 // 黙っていると「消えた」と見えるため、入れ直しが要ることを伝える。
+                // 題字の画像はドライブから入れ直す（NW.restoreLogo_）ので、ここでは数えない
                 var needsPhotos = data.blocks.some(function (b) {
-                    return b.type === 'image' || b.type === 'gallery' || b.type === 'columns'
-                        || (b.type === 'masthead' && b.srcStripped);
+                    return b.type === 'image' || b.type === 'gallery' || b.type === 'columns';
                 });
                 if (needsPhotos && typeof showToast === 'function') {
                     showToast('info', '編集中の内容を復元しました。写真は端末に残していないため、入れ直してください。');
@@ -3455,6 +3625,8 @@
         NW._historyIdx = -1;
         NW.render();
         NW.pushHistory();
+        // 題字の画像が入っていない通信（画像を落とした下書きから保存したものなど）には、いつもの題字を入れる
+        NW.restoreLogo_();
         showToast('success', '読み込みました');
     };
 

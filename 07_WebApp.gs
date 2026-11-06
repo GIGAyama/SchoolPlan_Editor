@@ -896,6 +896,60 @@ function saveNewsletterData(title, mondayStr, jsonString) {
   }
 }
 
+// 学級通信の題字の画像を置いたドライブのファイル（ユーザーごと）
+const NW_LOGO_PROP_ = 'nwLogoFileId';
+
+/**
+ * [Web API] 学級通信の題字の画像を、先生のドライブに置きます（次の通信・ほかの端末でも使うため）。
+ *
+ * 題字の画像は端末（localStorage）に残さない約束なので、アプリを開き直すたびに消えていた。
+ * 毎週同じものなので、アプリが作るファイル（drive.file）として1つだけ置き、差し替えたら古いものはごみ箱へ移す。
+ * @param {string} dataUrl 画像の data URI。空文字なら置いた題字を消す
+ * @returns {Object} { success }
+ */
+function saveNewsletterLogo(dataUrl) {
+  try {
+    validateParams_({ dataUrl: dataUrl || '' }, {
+      dataUrl: { type: 'string', maxLength: 3000000 }
+    });
+    if (dataUrl && !/^data:image\/(png|jpeg|gif|webp);base64,/.test(dataUrl)) {
+      throw new Error('題字の画像の形式が読めません。');
+    }
+    const oldId = tGetProp_(NW_LOGO_PROP_);
+    if (dataUrl) {
+      const file = driveCreateFile_('nw_logo_' + new Date().getTime() + '.txt', dataUrl, 'text/plain');
+      tSetProp_(NW_LOGO_PROP_, file.id);
+    } else {
+      tDeleteProp_(NW_LOGO_PROP_);
+    }
+    if (oldId) {
+      // 古い題字は消さずにごみ箱へ（30日のあいだは戻せる）。失敗しても新しい題字は使える
+      try { driveSetTrashed_(oldId, true); } catch (ignore) { }
+    }
+    return { success: true };
+  } catch (e) {
+    logError('saveNewsletterLogo', e);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * [Web API] 置いてある学級通信の題字の画像を返します。無ければ空文字。
+ * @returns {Object} { success, dataUrl }
+ */
+function getNewsletterLogo() {
+  try {
+    const id = tGetProp_(NW_LOGO_PROP_);
+    if (!id) return { success: true, dataUrl: '' };
+    const dataUrl = driveGetBlob_(String(id)).getDataAsString();
+    return { success: true, dataUrl: /^data:image\//.test(dataUrl) ? dataUrl : '' };
+  } catch (e) {
+    // ファイルが消されていた（ごみ箱を空にした等）ときは、題字なしとして扱う
+    logError('getNewsletterLogo', e);
+    return { success: true, dataUrl: '' };
+  }
+}
+
 /**
  * [Web API] 保存済み学級通信の一覧を取得します。
  * シート列構成: A=ID | B=Title | C=Date | D=FileId | E=TargetWeek
