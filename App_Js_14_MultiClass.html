@@ -232,6 +232,8 @@
         weekRequestSeq: 0,
         weekCache: {},
         masterLoading: false,
+        // 単元マスタの取り直しを頼んだ回数。古い応答を見分けるのに使う。
+        masterRequestSeq: 0,
         deferredLoaded: false
     };
 
@@ -470,19 +472,55 @@
         loadMasterData();
     }
 
+    // 単元マスタが届くのを待っている処理（whenMasterDataReady で積む）。
+    var masterDataWaiters_ = [];
+
+    function flushMasterDataWaiters_() {
+        var waiters = masterDataWaiters_;
+        masterDataWaiters_ = [];
+        var ok = !!STATE.masterData;
+        waiters.forEach(function (fn) {
+            try { fn(ok); } catch (e) { if (typeof console !== 'undefined') console.error(e); }
+        });
+    }
+
     function loadMasterData() {
-        if (STATE.masterData || STATE.performance.masterLoading) return;
+        if (STATE.masterData) { flushMasterDataWaiters_(); return; }
+        if (STATE.performance.masterLoading) return;
         STATE.performance.masterLoading = true;
+        var seq = ++STATE.performance.masterRequestSeq;
         google.script.run
             .withSuccessHandler(function (data) {
+                // 取り直しを頼んだあとに届いた古い応答（変更前のマスタ）は捨てる
+                if (seq !== STATE.performance.masterRequestSeq) return;
                 STATE.performance.masterLoading = false;
                 if (data && data.success) STATE.masterData = data;
+                flushMasterDataWaiters_();
             })
             .withFailureHandler(function (e) {
+                if (seq !== STATE.performance.masterRequestSeq) return;
                 STATE.performance.masterLoading = false;
                 _onCommError(e);
+                flushMasterDataWaiters_();
             })
             .getUnitMasterForSuggest();
+    }
+
+    /**
+     * 単元マスタが手元にそろってから onReady(ok) を呼びます。
+     * そろっていればその場で、取り直しの最中なら届いてから、無ければ読みに行ってから呼びます。
+     *
+     * invalidateMasterData() は STATE.masterData を先に空にするため、
+     * 「終了にする」や単元マスタの編集の直後は、届くまでの間マスタが空に見えます。
+     * その間に単元を引くと、マスタはあるのに「見つかりません」になってしまうので、
+     * マスタを引く操作はこれを通して待ちます。
+     *
+     * @param {function(boolean)} onReady 読めたら true、読めなかったら false
+     */
+    function whenMasterDataReady(onReady) {
+        if (STATE.masterData) { onReady(true); return; }
+        masterDataWaiters_.push(onReady);
+        loadMasterData();
     }
 
     /**

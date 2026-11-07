@@ -224,6 +224,13 @@
             return;
         }
 
+        // 単元マスタを取り直している最中（「終了にする」・単元マスタの編集の直後）は、
+        // 届いてから開く。ここで引くとマスタが空に見え、単元があるのに「見つかりません」になる。
+        if (!STATE.masterData) {
+            waitMasterDataThenOpenUnitPicker(dayIdx, pIdx);
+            return;
+        }
+
         // 教科セルは "国語2/3 行事1/3" のように1コマを分け合って書けるので、
         // マスタに載っている側の教科（分数の大きいほうを優先）へ寄せてから引く
         var masterMap = STATE.masterData ? STATE.masterData.masterMap : null;
@@ -244,6 +251,30 @@
                 return;
             }
             showUnitPickerModal(dayIdx, pIdx, subject, sp);
+        });
+    }
+
+    // 単元マスタが届くのを待っている間に開くはずのセル。待つのは1つだけにして、
+    // 待っている間に押し直されたら、最後に押したセルで1回だけ開く。
+    var pendingUnitPicker_ = null;
+
+    /** 単元マスタが届いてから openUnitPicker を開き直す。 */
+    function waitMasterDataThenOpenUnitPicker(dayIdx, pIdx) {
+        var alreadyWaiting = !!pendingUnitPicker_;
+        pendingUnitPicker_ = { dayIdx: dayIdx, pIdx: pIdx };
+        if (alreadyWaiting) return;
+        showToast('info', '単元マスタを読み込んでいます...');
+        whenMasterDataReady(function (ok) {
+            var target = pendingUnitPicker_;
+            pendingUnitPicker_ = null;
+            if (!target) return;
+            if (!ok) {
+                showToast('error', '単元マスタを読み込めませんでした。少し待ってから、もう一度えらんでください。');
+                return;
+            }
+            // 待っている間に編集を終えていたら、もう開かない（セルの入力欄が無い）
+            if (!STATE.editMode) return;
+            openUnitPicker(target.dayIdx, target.pIdx);
         });
     }
 
