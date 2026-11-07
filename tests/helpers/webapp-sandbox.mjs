@@ -76,6 +76,8 @@ export function makeDays(opts = {}) {
  *   options.extraFiles に include ファイル名を足すと、既定の読み込みのあとに続けて読む。
  *   options.gridInputs=true で document.querySelector が同じセレクタに同じ要素を返す
  *   （編集モードのグリッドの入力欄に書き込んだ結果を読み取るために使う）。
+ *   options.serverMethods に google.script.run のメソッド名を足すと、その呼び出しも
+ *   inflight に積む（既定の一覧に無いものは呼ぶと TypeError になる）。
  */
 export function bootClient(options = {}) {
   const clock = makeClock();
@@ -136,7 +138,7 @@ export function bootClient(options = {}) {
           const methods = ['saveWeeklyPlanDataV2', 'saveWeeklyPlanDataProtected',
             'getWeeklyPlanDataV2', 'switchActiveClassFromWeb',
             'createMyDatabase', 'getTenantStatus',
-            'updateTaskStatusFromWebApp'];
+            'updateTaskStatusFromWebApp', ...(options.serverMethods || [])];
           methods.forEach(name => {
             api[name] = (...args) => { inflight.push({ name, args, handlers }); };
           });
