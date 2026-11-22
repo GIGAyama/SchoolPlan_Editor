@@ -6,6 +6,65 @@
 
     // 単元マスタ: 全行データと編集中行は STATE.STATE.umAllRows / STATE.STATE.umEditingRowIndex に集約
 
+    // ===== 行の操作中は、一覧を止める =====
+    //
+    // 一覧の行は「シートの行番号」で指している。行を足す・消すと番号が1つずつずれるが、
+    // 画面の一覧はサーバの応答と読み直しが終わるまで古い番号のままになる。
+    // そのあいだに次の行を押すと、押した行とは別の行が相手になる（実際に、
+    // 3時間目・4時間目と続けて消すと5時間目が消えていた）。
+    // サーバ側でも中身を照らして確かめている（umResolveRow_）が、そもそも
+    // 古い一覧を押せないようにしておく。
+    var umBusy = false;
+
+    /** 行の操作を受けつけているか。処理中なら案内を出して false を返す。 */
+    function umBeginRowOperation() {
+        if (umBusy) {
+            showToast('info', '前の操作を反映しています。少しお待ちください。');
+            return false;
+        }
+        umSetBusy(true);
+        return true;
+    }
+
+    /** 一覧を止める／戻す。止めているあいだはボタンを押せず、読み上げにも「処理中」と伝える。 */
+    function umSetBusy(busy) {
+        umBusy = !!busy;
+        var tbody = document.getElementById('umTableBody');
+        var table = tbody && tbody.closest('table');
+        if (!table) return;
+        table.classList.toggle('um-table-busy', umBusy);
+        if (umBusy) table.setAttribute('aria-busy', 'true');
+        else table.removeAttribute('aria-busy');
+    }
+
+    /** 画面に出ている行の中身を、サーバでの照合用に取り出す。 */
+    function umExpectedOf(row) {
+        if (!row) return null;
+        return { subject: row.subject, unitName: row.unitName, hourNum: row.hourNum, activity: row.activity };
+    }
+
+    /**
+     * 行を足す・消す操作の応答を受けとる。成功なら done を呼ぶ。
+     * 行番号がずれるので、成功でも失敗でも一覧を読み直す（そこで操作の停止も解ける）。
+     * 一覧が古かった（res.stale）ときは、その旨を伝えて押し直してもらう。
+     */
+    function umAfterRowOperation(res, failLabel, done) {
+        if (res && res.success) {
+            if (done) done(res);
+            invalidateMasterData(); // 週案サジェストへ反映
+        } else {
+            showToast(res && res.stale ? 'warning' : 'error',
+                res && res.stale ? res.error : failLabel + ': ' + (res ? res.error : '応答がありません'));
+        }
+        loadUnitMasterData();
+    }
+
+    /** 通信に失敗したとき。サーバで反映されたかどうか分からないので、読み直して確かめる。 */
+    function umOnRowOperationError(e) {
+        _onCommError(e);
+        loadUnitMasterData();
+    }
+
     function loadUnitMasterData() {
         var tbody = document.getElementById('umTableBody');
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:40px;"><div class="spinner-lg"></div><p>単元マスタを読み込み中...</p></td></tr>';
@@ -30,9 +89,11 @@
                 } else {
                     tbody.innerHTML = '<tr><td colspan="6" style="color:var(--danger-text);padding:20px;">読込エラー: ' + escHtml(res.error) + '</td></tr>';
                 }
+                umSetBusy(false);
             })
             .withFailureHandler(function (e) {
                 tbody.innerHTML = '<tr><td colspan="6" style="color:var(--danger-text);padding:20px;">通信エラー: ' + escHtml(e.message) + '</td></tr>';
+                umSetBusy(false);
             })
             .getUnitMasterData();
     }
@@ -133,8 +194,12 @@
 
         if (!data.subject) { showToast('error', '教科名を入力してください'); return; }
 
-        // UIを即座に反映
         var localRow = STATE.umAllRows.find(function (r) { return r.rowIndex === rowIndex; });
+        // 書き換える前の中身。サーバはこれと照らして、行がずれていないかを確かめる
+        var expected = umExpectedOf(localRow);
+        if (!umBeginRowOperation()) return;
+
+        // UIを即座に反映
         if (localRow) {
             localRow.subject = data.subject;
             localRow.unitName = data.unitName;
@@ -147,19 +212,18 @@
 
         google.script.run
             .withSuccessHandler(function (res) {
-                if (res.success) {
+                if (res && res.success && res.rowIndex === rowIndex) {
+                    // 行は動いていない。読み直さずに、そのまま続けられるようにする
                     showToast('success', '保存しました');
                     invalidateMasterData(); // 週案サジェストへ反映
-                } else {
-                    showToast('error', '保存エラー: ' + res.error);
-                    loadUnitMasterData(); // ロールバック
+                    umSetBusy(false);
+                    return;
                 }
+                // 行がずれていた（別の行として保存された）か、保存できなかった。一覧を取り直す
+                umAfterRowOperation(res, '保存エラー', function () { showToast('success', '保存しました'); });
             })
-            .withFailureHandler(function (e) {
-                showToast('error', '通信エラー: ' + e.message);
-                loadUnitMasterData();
-            })
-            .updateUnitMasterRow(rowIndex, data);
+            .withFailureHandler(umOnRowOperationError)
+            .updateUnitMasterRow(rowIndex, data, expected);
     }
 
     // --- 行追加（ヘッダーの「行追加」ボタン） ---
@@ -197,21 +261,16 @@
         });
         if (!result.isConfirmed) return;
 
+        if (!umBeginRowOperation()) return;
         showToast('info', '行を追加中...');
         // 最後の行の後に追加
-        var lastRow = STATE.umAllRows.length > 0 ? STATE.umAllRows[STATE.umAllRows.length - 1].rowIndex : 1;
+        var last = STATE.umAllRows.length > 0 ? STATE.umAllRows[STATE.umAllRows.length - 1] : null;
         google.script.run
             .withSuccessHandler(function (res) {
-                if (res.success) {
-                    showToast('success', '行を追加しました');
-                    loadUnitMasterData();
-                    invalidateMasterData(); // 週案サジェストへ反映
-                } else {
-                    showToast('error', '追加エラー: ' + res.error);
-                }
+                umAfterRowOperation(res, '追加エラー', function () { showToast('success', '行を追加しました'); });
             })
-            .withFailureHandler(_onCommError)
-            .insertUnitMasterRow(lastRow, result.value);
+            .withFailureHandler(umOnRowOperationError)
+            .insertUnitMasterRow(last ? last.rowIndex : 1, result.value, umExpectedOf(last));
     }
 
     // --- 行挿入（特定行の後）---
@@ -226,19 +285,14 @@
             activity: ''
         };
 
+        if (!umBeginRowOperation()) return;
         showToast('info', '行を挿入中...');
         google.script.run
             .withSuccessHandler(function (res) {
-                if (res.success) {
-                    showToast('success', '行を挿入しました');
-                    loadUnitMasterData();
-                    invalidateMasterData(); // 週案サジェストへ反映
-                } else {
-                    showToast('error', '挿入エラー: ' + res.error);
-                }
+                umAfterRowOperation(res, '挿入エラー', function () { showToast('success', '行を挿入しました'); });
             })
-            .withFailureHandler(_onCommError)
-            .insertUnitMasterRow(afterRowIndex, newData);
+            .withFailureHandler(umOnRowOperationError)
+            .insertUnitMasterRow(afterRowIndex, newData, umExpectedOf(srcRow));
     }
 
     // --- 行削除 ---

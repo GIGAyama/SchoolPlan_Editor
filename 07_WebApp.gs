@@ -1035,16 +1035,9 @@ function loadNewsletterData(fileId) {
  * @returns {Object} { success }
  */
 function deleteNewsletterData(rowIndex, fileId) {
-  try {
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
-    if (sheet && rowIndex >= 2) sheet.deleteRow(rowIndex);
-    try { driveSetTrashed_(fileId, true); } catch(ignore) {}
-    return { success: true };
-  } catch (e) {
-    logError('deleteNewsletterData', e);
-    return { success: false, error: e.message };
-  }
+  // 旧クライアント互換の委譲エンドポイント。行とファイルをいきなり消さず、
+  // ごみ箱移動(30日間復元可能)として扱う。行とファイルIDの照合もそちらで行う。
+  return trashNewsletterDataFromWeb(rowIndex, fileId);
 }
 
 // ===================================================
@@ -2068,12 +2061,70 @@ function getUnitMasterData() {
 }
 
 /**
+ * 単元マスタの1行を、照合に使う形にします（教科・単元名・何時間目・学習活動）。
+ * 画面が持っている値とシートの値を、同じ規則で比べるためのもの。
+ * 総時数は入れない（「◯時間で終了」などで、同じ単元の全行がまとめて書き換わるため）。
+ */
+function umRowKey_(subject, unitName, hourNum, activity) {
+  const text = v => (v === null || v === undefined ? '' : String(v)).trim();
+  return [text(subject), text(unitName), text(hourNum), text(activity)].join('\u0001');
+}
+
+/**
+ * 画面が指した行が、いまもその行かを確かめ、実際の行番号を返します。
+ *
+ * 単元タブは行番号で行を指す。ところが行番号は、別の行を足したり消したりした
+ * 瞬間にずれる。実際に、3時間目と4時間目を続けて消すと、確認の画面には
+ * 「4時間目を移動します」と出ているのに、消えるのは5時間目だった
+ * （1件目の削除で1行ずつ繰り上がったあとも、画面は古い番号を送ってくるため）。
+ * 別のタブ・別の端末で編集していたときも同じことが起きる。
+ *
+ * そこで、画面に出ていた中身を一緒に受け取り、その行の中身と照らす。
+ * 合わなければ同じ中身の行を探し、**ちょうど1つ**ならそれを相手にする。
+ * 見つからない・2つ以上あるときは、何も変えずに読み直しを求める。
+ *
+ * @param {Object} sheet 単元マスタのシート
+ * @param {number} rowIndex 画面が持っている行番号（1始まり）
+ * @param {?Object} expected 画面に出ていた中身 { subject, unitName, hourNum, activity }。
+ *   渡されなければ照合しない（更新前の画面が開いたままの先生のため）
+ * @returns {number} 実際の行番号
+ * @throws {Error} 行を1つに決められないとき（error.umStale が true）
+ */
+function umResolveRow_(sheet, rowIndex, expected) {
+  if (!expected || typeof expected !== 'object') return rowIndex;
+  const want = umRowKey_(expected.subject, expected.unitName, expected.hourNum, expected.activity);
+  const keyOf = r => umRowKey_(r[MASTER_COL_SUBJECT - 1], r[MASTER_COL_UNIT_NAME - 1],
+    r[MASTER_COL_HOUR_NUM - 1], r[MASTER_COL_ACTIVITY - 1]);
+
+  const lastRow = sheet.getLastRow();
+  const rows = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 5).getValues() : [];
+  if (rowIndex >= 2 && rowIndex <= lastRow && keyOf(rows[rowIndex - 2]) === want) return rowIndex;
+
+  const hits = [];
+  rows.forEach((r, i) => { if (keyOf(r) === want) hits.push(i + 2); });
+  if (hits.length === 1) return hits[0];
+
+  const error = new Error('単元マスタが、ほかの操作や別の画面で変わっています。一覧を読み直しましたので、もう一度お試しください。');
+  error.umStale = true;
+  throw error;
+}
+
+/** 単元マスタの行操作の失敗を、画面に返す形にします（一覧が古いときは stale を立てる）。 */
+function umFailure_(name, e) {
+  logError(name, e);
+  return e && e.umStale
+    ? { success: false, stale: true, error: e.message }
+    : { success: false, error: e.message };
+}
+
+/**
  * [Webアプリ API] 単元マスタの指定行を更新します
  * @param {number} rowIndex シート上の行番号 (1-based)
  * @param {Object} data {subject, unitName, totalHours, hourNum, activity}
- * @returns {Object} { success: boolean }
+ * @param {Object} [expected] 画面に出ていた（書き換える前の）中身。行がずれていないかの照合に使う
+ * @returns {Object} { success: boolean, rowIndex?: number, stale?: boolean }
  */
-function updateUnitMasterRow(rowIndex, data) {
+function updateUnitMasterRow(rowIndex, data, expected) {
   try {
     validateParams_({ rowIndex }, {
       rowIndex: { type: 'number', required: true, min: 2 }
@@ -2082,19 +2133,21 @@ function updateUnitMasterRow(rowIndex, data) {
     const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!sheet) throw new Error('単元マスタシートが見つかりません');
 
-    sheet.getRange(rowIndex, 1, 1, 5).setValues([[
-      data.subject || '',
-      data.unitName || '',
-      umTotalHoursValue_(data.totalHours),
-      data.hourNum || '',
-      data.activity || ''
-    ]]);
-
-    invalidateUnitProgressCache_();
-    return { success: true };
+    // 照合と書き込みのあいだに、同じ先生の別の操作が割りこまないようにする
+    return p3WithUserLock_(10000, () => {
+      const target = umResolveRow_(sheet, rowIndex, expected);
+      sheet.getRange(target, 1, 1, 5).setValues([[
+        data.subject || '',
+        data.unitName || '',
+        umTotalHoursValue_(data.totalHours),
+        data.hourNum || '',
+        data.activity || ''
+      ]]);
+      invalidateUnitProgressCache_();
+      return { success: true, rowIndex: target };
+    });
   } catch (e) {
-    logError('updateUnitMasterRow', e);
-    return { success: false, error: e.message };
+    return umFailure_('updateUnitMasterRow', e);
   }
 }
 
@@ -2102,52 +2155,44 @@ function updateUnitMasterRow(rowIndex, data) {
  * [Webアプリ API] 単元マスタの指定位置に新しい行を挿入します
  * @param {number} afterRowIndex この行の後に挿入 (1-based)。0の場合はヘッダー直後(2行目)に挿入
  * @param {Object} data {subject, unitName, totalHours, hourNum, activity}
- * @returns {Object} { success: boolean, newRowIndex: number }
+ * @param {Object} [expectedAfter] 画面に出ていた「この行」の中身。行がずれていないかの照合に使う
+ * @returns {Object} { success: boolean, newRowIndex: number, stale?: boolean }
  */
-function insertUnitMasterRow(afterRowIndex, data) {
+function insertUnitMasterRow(afterRowIndex, data, expectedAfter) {
   try {
     const ss = getSs_();
     const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!sheet) throw new Error('単元マスタシートが見つかりません');
 
-    const insertAt = afterRowIndex > 0 ? afterRowIndex + 1 : 2;
-    sheet.insertRowBefore(insertAt);
-    sheet.getRange(insertAt, 1, 1, 5).setValues([[
-      data.subject || '',
-      data.unitName || '',
-      umTotalHoursValue_(data.totalHours),
-      data.hourNum || '',
-      data.activity || ''
-    ]]);
-
-    invalidateUnitProgressCache_();
-    return { success: true, newRowIndex: insertAt };
+    return p3WithUserLock_(10000, () => {
+      const anchor = afterRowIndex >= 2 ? umResolveRow_(sheet, afterRowIndex, expectedAfter) : afterRowIndex;
+      const insertAt = anchor > 0 ? anchor + 1 : 2;
+      sheet.insertRowBefore(insertAt);
+      sheet.getRange(insertAt, 1, 1, 5).setValues([[
+        data.subject || '',
+        data.unitName || '',
+        umTotalHoursValue_(data.totalHours),
+        data.hourNum || '',
+        data.activity || ''
+      ]]);
+      invalidateUnitProgressCache_();
+      return { success: true, newRowIndex: insertAt };
+    });
   } catch (e) {
-    logError('insertUnitMasterRow', e);
-    return { success: false, error: e.message };
+    return umFailure_('insertUnitMasterRow', e);
   }
 }
 
 /**
  * [Webアプリ API] 単元マスタの指定行を削除します
  * @param {number} rowIndex シート上の行番号 (1-based)
+ * @param {Object} [expected] 画面に出ていた中身。行がずれていないかの照合に使う
  * @returns {Object} { success: boolean }
  */
-function deleteUnitMasterRow(rowIndex) {
-  try {
-    validateParams_({ rowIndex }, {
-      rowIndex: { type: 'number', required: true, min: 2 }
-    });
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
-    if (!sheet) throw new Error('単元マスタシートが見つかりません');
-    sheet.deleteRow(rowIndex);
-    invalidateUnitProgressCache_();
-    return { success: true };
-  } catch (e) {
-    logError('deleteUnitMasterRow', e);
-    return { success: false, error: e.message };
-  }
+function deleteUnitMasterRow(rowIndex, expected) {
+  // 旧クライアント互換の委譲エンドポイント。行をいきなり消さず、
+  // ごみ箱移動(30日間復元可能)として扱う（タスク・学級通信と同じ扱い）。
+  return trashUnitMasterRowFromWeb(rowIndex, expected);
 }
 
 /**

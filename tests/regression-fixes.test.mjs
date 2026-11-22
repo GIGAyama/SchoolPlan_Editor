@@ -52,10 +52,19 @@ test('unit master mutations invalidate the week-plan suggestion cache', () => {
   // 変更後は invalidateMasterData で確実に再取得する
   assert.match(multiClass, /function invalidateMasterData/);
   const unitMaster = read('App_Js_12_UnitMaster.html');
-  const calls = unitMaster.match(/invalidateMasterData\(\)/g) || [];
-  assert.ok(calls.length >= 3, `expected invalidateMasterData after each unit-master mutation, got ${calls.length}`);
+  // 行の操作（保存・追加・挿入）の後始末は umAfterRowOperation に集めてあり、
+  // 成功したらそこで invalidateMasterData を呼ぶ。どの操作もそこを通ること。
+  const after = unitMaster.slice(unitMaster.indexOf('function umAfterRowOperation('),
+    unitMaster.indexOf('function umOnRowOperationError('));
+  assert.match(after, /invalidateMasterData\(\)/, 'umAfterRowOperation must invalidate the suggestion cache');
+  for (const name of ['saveUmEdit', 'showAddUnitMasterRow', 'insertUmRowAfter']) {
+    const body = unitMaster.slice(unitMaster.indexOf('function ' + name + '('));
+    assert.match(body.slice(0, body.indexOf('\n    }\n')), /umAfterRowOperation\(/,
+      `expected ${name} to go through umAfterRowOperation`);
+  }
   assert.match(read('App_Js_07_PdfImport.html'), /invalidateMasterData/);
-  assert.match(read('App_Js_15_DataProtection_Overrides.html'), /invalidateMasterData/);
+  // 行の削除（ごみ箱への移動）も同じ後始末を通る
+  assert.match(read('App_Js_15_DataProtection_Overrides.html'), /umAfterRowOperation\(/);
 });
 
 test('V2 bootstrap syncs settings state (grade / tenant info)', () => {
