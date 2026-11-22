@@ -269,7 +269,7 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 │   └── gas-deploy.test.mjs        # 反映の前に控えを取る・URLを変えない・品質ゲートを先に通す
 ├── quality.config.json   # 静的検査の設定（必須ファイル・禁止スコープ・例外リスト）
 ├── package.json          # 品質ゲートとVendor生成用のnpmスクリプト・開発依存
-├── .github/workflows/quality.yml # CI: Node 20 / 22 で npm run check と npm test を実行
+├── .github/workflows/quality.yml # CI: Node 20 / 22 で生成物の検査・npm run check・npm test を実行
 ├── .github/workflows/deploy.yml  # CI: main へのマージでGASへ反映しデプロイを更新（docs/D5）
 ├── docs/                 # GitHub Pages の PWA シェルと設計・運用ドキュメント
 │   ├── index.html / sw.js / offline.html / install-hook.js / manifest.webmanifest / config.js / icons/
@@ -437,8 +437,8 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
     > 以前は `CACHE_NAME` の版を手で上げる決まりだったが、上げるのは人の仕事で、
     > 2026-08-21 に12リポジトリで同時に上げ忘れる事故が起きた。上げ忘れると
     > 古いシェルのキャッシュが掃除されず、直した内容が先生の端末に届かない。
-    > いまは `npm run quality` が `--check` でずれを見るので、刻み忘れたまま
-    > コミットしても CI が捕まえる。
+    > いまは `npm run quality` と、Pull Request の CI（`quality.yml`）の両方が
+    > `--check` でずれを見るので、刻み忘れたままコミットしても CI が捕まえる。
 
 3. 更新は**先生が「最新にする」を押すまで切り替わらない**設計にしてある。
     入力中に画面が入れ替わると、打ちかけの週案が消えるため。
@@ -477,7 +477,7 @@ npm run quality        # 静的検査 + テスト（CI と同じ）
 npm ci          # 依存の取得（CI は --ignore-scripts 付き）
 npm run check   # 静的検査（quality.config.json の設定で実行）
 npm test        # 回帰テスト（node --test / tests/）
-npm run quality # 上の2つをまとめて実行
+npm run quality # 生成物の検査（SW の版・リンクの写し）と、上の2つをまとめて実行
 ```
 
 GASへの反映も `npm` スクリプトにまとめてあります（手順は [D5](docs/D5_AUTO_DEPLOY.md)）。

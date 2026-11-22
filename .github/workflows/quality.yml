@@ -76,6 +76,16 @@ jobs:
           path: test-report.txt
           retention-days: 14
 
+      # 生成物が原本とそろっているか（SW の版・画面下のリンクの写し）。
+      # `npm run quality` の先頭2つと同じもの。ここで見ていなかったころは、
+      # docs/ を直して版を刻み忘れた PR が緑のまま main へ入り、main でしか走らない
+      # deploy.yml で初めて赤くなっていた（シークレット未設定なら、どこでも赤くならない）。
+      # tests/ci-coverage.test.mjs が、`npm run quality` との差を見張っている。
+      - name: Verify generated files are up to date
+        run: |
+          node tools/build-sw.mjs --check
+          node tools/build-app-links.mjs --check
+
       # 検査そのものが壊れていないか（写しを1か所ずつ壊して、落ちることを見る）。
       # 「0件でした」が「守るものが無い」を意味していないことを毎回確かめる。
       - name: Verify the gate itself fails on broken trees
