@@ -7,7 +7,7 @@
  */
 function processNextEventPdf() {
   // レースコンディション対策: スクリプトロックで排他制御
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   if (!lock.tryLock(5000)) {
     logInfo('行事予定PDF処理: 他のプロセスが実行中のためスキップしました。');
     return;
@@ -145,7 +145,7 @@ ${items}
  */
 function createUnitMasterFromPdfs() {
   // レースコンディション対策: スクリプトロックで排他制御
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   if (!lock.tryLock(5000)) {
     logInfo('指導計画PDF処理: 他のプロセスが実行中のためスキップしました。');
     return;
@@ -798,7 +798,7 @@ function dbAppendExtractedEvents_(dbSheet, dbCols, events, today) {
  * @returns {{success: boolean, updated?: number, skippedPast?: number, skippedDuplicate?: number, notInDb?: number, error?: string}}
  */
 function applyExtractedEventsFromWeb(events) {
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   if (!lock.tryLock(15000)) {
     return { success: false, error: '他の処理が実行中です。しばらく待ってから再度お試しください。' };
   }
@@ -947,7 +947,7 @@ ${gradeContext}
  * @returns {{success: boolean, unitCount?: number, rowCount?: number, replacedSubjects?: string[], error?: string}}
  */
 function applyExtractedUnitsFromWeb(units, options) {
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   if (!lock.tryLock(15000)) {
     return { success: false, error: '他の処理が実行中です。しばらく待ってから再度お試しください。' };
   }

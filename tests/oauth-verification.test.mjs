@@ -118,7 +118,9 @@ test('ファイルのコピー漏れを起動時に名指しで知らせる', ()
   // 「ファイルはあるが古い」も捕まえる必要がある。07_WebApp.gs の旧 getSs_() は
   // SpreadsheetApp を呼ぶため、古いまま残ると権限エラーになる。
   assert.ok(named.includes('07_WebApp.gs'));
-  assert.match(check, /getMyTriggersForWebApp/,
+  // 目印は、07_WebApp.gs にいちばん最近足した関数（行のずれを照らす umResolveRow_）。
+  // 古い 07_WebApp.gs のままだと、単元タブの行操作が中身を照らさずに動いてしまう。
+  assert.match(check, /typeof umResolveRow_ !== 'function'\) outdated\.push\('07_WebApp\.gs'\)/,
     '「今の版にしか無い」関数で見ていない（getSs_ の有無では古い版を見逃す）');
   assert.match(check, /古いまま/);
 

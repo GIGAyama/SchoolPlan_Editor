@@ -280,6 +280,105 @@ function getLegacySpreadsheetId_() {
   }
 }
 
+// ============================================================
+// ===== データのロック =====
+// ============================================================
+//
+// 週案の保存や一括転記は「読んでから書く」ので、同じデータへの書き込みを直列に並べる。
+// 以前はどれも LockService.getScriptLock() を使っていた。**ScriptLock は利用者に関係なく
+// スクリプト全体で1本**なので、1つのURLを多数の先生へ配る運用（docs/config.js が共通の
+// /exec を指す形）では、全員の保存が1列に並ぶ。しかも同じロックを、完全バックアップを
+// 伴う全消去・年間一括転記・一括自動入力・PDFの反映が長く握る。誰か1人がそれを実行して
+// いるあいだ、ほかの学校の先生の保存までが10秒待って「他の保存処理が進行中です」で
+// 失敗していた。守りたいのは「同じスプレッドシートへの書き込み」であって、
+// 別の先生の別のスプレッドシートを待たせる理由は無い。
+//
+// そこで、**自分のデータベース（UserProperties で紐付けたもの）を使っている先生は
+// 利用者ごとのロック**を取る。スクリプトプロパティに記録された1冊を全員で使う旧来の形
+// （getLegacySpreadsheetId_）だけは、全員が同じ1冊へ書くので ScriptLock のままにする。
+//
+// 1冊を複数の先生で紐付けて共有している場合、利用者ごとのロックでは互いを待たない。
+// 週案の保存はリビジョンの照合（楽観ロック）が守り、書くのも変わった日の行だけなので、
+// 同じ週の同じ日を数秒以内に2人が保存したときだけ後勝ちになる（docs/DATA_PATH_AUDIT.md）。
+
+/**
+ * ロックを握っている深さ（種類ごと）。
+ *
+ * GAS のロックは、同じ実行が取り直しても何も起きず、releaseLock() は1回で外れる。
+ * 入れ子で取って内側が先に放すと、外側は握っているつもりのまま守られずに走る
+ * （保存の中から復元ポイント作成やマイグレーションが呼ばれる形で実際に入れ子になる）。
+ * 深さを数え、いちばん外側だけが本当に取って・放す。トップレベル変数なので、
+ * 実行が変われば 0 から数え直しになる。
+ */
+let T_LOCK_DEPTH_ = { user: 0, script: 0 };
+
+/**
+ * いまの利用者のデータを直列化するのに使うロックの種類を返します。
+ * @returns {string} 'user'（自分のデータベース）または 'script'（全員で1冊を使う旧来の形）
+ */
+function tDataLockKind_() {
+  const own = getUserSpreadsheetId_();
+  const shared = getLegacySpreadsheetId_(); // 共有デプロイでは常に空（11_Tenant.gs の isSharedDeployment_）
+  // 全員で使う1冊を相手にしているときだけ、全員を並べる。
+  // 自分の紐付けがその1冊を指している場合（持ち主が紐付け直した等）も同じ1冊なので含める。
+  if (shared && (!own || own === shared)) return 'script';
+  return 'user';
+}
+
+/**
+ * 利用者のデータ（スプレッドシート）への書き込みを直列化するロックを返します。
+ * LockService のロックと同じ使い方（waitLock / tryLock / releaseLock）ができ、
+ * 入れ子で取っても外側が先に外れません。
+ * @returns {{waitLock: function(number), tryLock: function(number): boolean,
+ *            releaseLock: function(), hasLock: function(): boolean}}
+ */
+function tDataLock_() {
+  return tReentrantLock_(tDataLockKind_());
+}
+
+/**
+ * 利用者ごとのロックを返します（入れ子で取っても外側が先に外れません）。
+ * データ保全の内部処理（マイグレーション・日次バックアップ）が使います。
+ * @returns {Object} tDataLock_ と同じ形
+ */
+function tUserLock_() {
+  return tReentrantLock_('user');
+}
+
+/**
+ * 入れ子に強いロックを作ります。
+ * @param {string} kind 'user' または 'script'
+ * @returns {Object}
+ */
+function tReentrantLock_(kind) {
+  let held = false; // この取っ手が握っているか（同じ取っ手で2回数えない）
+  const real = function () {
+    return kind === 'user' ? LockService.getUserLock() : LockService.getScriptLock();
+  };
+  return {
+    waitLock: function (timeoutMs) {
+      if (held) return;
+      if (T_LOCK_DEPTH_[kind] === 0) real().waitLock(timeoutMs);
+      T_LOCK_DEPTH_[kind]++;
+      held = true;
+    },
+    tryLock: function (timeoutMs) {
+      if (held) return true;
+      if (T_LOCK_DEPTH_[kind] === 0 && !real().tryLock(timeoutMs)) return false;
+      T_LOCK_DEPTH_[kind]++;
+      held = true;
+      return true;
+    },
+    releaseLock: function () {
+      if (!held) return;
+      held = false;
+      T_LOCK_DEPTH_[kind]--;
+      if (T_LOCK_DEPTH_[kind] === 0) real().releaseLock();
+    },
+    hasLock: function () { return held; }
+  };
+}
+
 /**
  * このユーザーが使用すべきスプレッドシートIDを解決します。
  * 優先順位: ユーザー個別(UserProperties) → 従来のグローバル(ScriptProperties)。
@@ -533,7 +632,9 @@ function initializeNewDatabase_(ss) {
  * @returns {Object} { success, spreadsheetId, spreadsheetName, url, method } / { success:false, error }
  */
 function createMyDatabase(name, options) {
-  const lock = LockService.getUserLock();
+  // 入れ子に強い取っ手で取る。この先で呼ぶ処理（シートの初期化など）が同じ利用者ロックを
+  // 取り直しても、ここで握っているぶんが先に外れない。
+  const lock = tUserLock_();
   try {
     lock.waitLock(10000);
 

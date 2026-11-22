@@ -695,7 +695,10 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, expectedSheetNa
 /**
  * 週案保存の実装本体。
  *
- * ロック順序の規約: ScriptLock(保存・クリア) → UserLock(migration)。逆順で取らないこと。
+ * ロックは tDataLock_()（11_Tenant.gs）で取る。自分のデータベースを使う先生は利用者ごとの
+ * ロック、全員で1冊を使う旧来の形は ScriptLock になる。保存の中から呼ばれる復元ポイント作成や
+ * マイグレーション（p3WithUserLock_）とは深さを共有するので、入れ子になっても先に外れない。
+ * 旧来の形では ScriptLock(保存・クリア) → UserLock(migration) の順で取る。逆順で取らないこと。
  *
  * @param {Object} [options] { protect:false } でスナップショット省略(サーバ内部の復元専用)、
  *   { source } で監査ログの操作元、{ expectedSheetName } で保存先学級の照合。
@@ -710,7 +713,7 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
   const since = (mark) => Date.now() - mark;
 
   const lockAt = Date.now();
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   let locked = false;
   try {
     lock.waitLock(10000);

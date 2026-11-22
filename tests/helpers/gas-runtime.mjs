@@ -68,7 +68,7 @@ export function createWorld(options = {}) {
     // ロックの持ち主。script はスクリプト全体で1本、user は利用者ごとに1本（GAS の仕様どおり）。
     // 値は「持っている実行」の番号。テストから文字列を入れると「ほかの実行が握っている」状態を作れる。
     locks: { script: null, user: new Map() },
-    lockLog: [],               // { exec, email, kind: 'script'|'user', op: 'acquire'|'reenter'|'busy'|'release' }
+    lockLog: [],               // { exec, email, kind: 'script'|'user', op: 'acquire'|'reenter'|'busy'|'release', at }
     execSeq: 0,
     executions: [],            // { fn, email, fetches, ok, error }
     now: null,                 // 固定したいときの「いま」(ms)
@@ -112,7 +112,8 @@ export function createRuntime(world, email) {
   const lockApi = (kind) => () => {
     const holder = () => (kind === 'script' ? world.locks.script : (world.locks.user.get(email) || null));
     const setHolder = (v) => { if (kind === 'script') world.locks.script = v; else if (v === null) world.locks.user.delete(email); else world.locks.user.set(email, v); };
-    const note = (op) => world.lockLog.push({ exec: execId, email, kind, op });
+    // at は「それまでに Google へ何回通信したか」。ロックの外で書いていないかを確かめるのに使う
+    const note = (op) => world.lockLog.push({ exec: execId, email, kind, op, at: world.google.log.length });
     const acquire = () => {
       const h = holder();
       if (h === execId) { note('reenter'); return true; }

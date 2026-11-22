@@ -694,13 +694,13 @@ function checkDeploymentIntegrity_() {
   if (typeof getTaskData !== 'function') outdated.push('02_Database.gs');
   if (typeof getPickerAppId_ !== 'function') outdated.push('03_PdfProcessing.gs');
   if (typeof buildMasterIndex_ !== 'function') outdated.push('04_AutoFill.gs');
-  if (typeof getCourseIdByName !== 'function') outdated.push('05_Classroom.gs');
+  if (typeof recordAutoPostResult_ !== 'function') outdated.push('05_Classroom.gs');
   if (typeof SP_KEY_PICKER_APP_ID === 'undefined') outdated.push('06_Settings.gs');
-  if (typeof getMyTriggersForWebApp !== 'function') outdated.push('07_WebApp.gs');
+  if (typeof umResolveRow_ !== 'function') outdated.push('07_WebApp.gs');
   if (typeof getGeminiApiUrl_ !== 'function') outdated.push('08_Gemini.gs');
   if (typeof saveWeeklySummary !== 'function') outdated.push('09_Reflection.gs');
   if (typeof addClassFromWeb !== 'function') outdated.push('10_MultiClass.gs');
-  if (typeof resolveSpreadsheetId_ !== 'function') outdated.push('11_Tenant.gs');
+  if (typeof tDataLock_ !== 'function') outdated.push('11_Tenant.gs');
   if (typeof P2_WEEK_READ_KEYS_ === 'undefined') outdated.push('12_Performance.gs');
   if (typeof p3MetaGet_ !== 'function') outdated.push('13_DataProtection.gs');
   if (typeof p3GetBackupIndex_ !== 'function') outdated.push('13_DataProtection_Backups.gs');

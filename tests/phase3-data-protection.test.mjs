@@ -40,9 +40,15 @@ test('schema migrations are versioned and forward-only', () => {
 test('the user lock is not acquired twice inside one execution', () => {
   // p3MaybeCreateDailyBackup_ → p3CreateFullBackup_ → p3RunMigrations_ とネストするため、
   // 再入時は取得済みロックを使い回す必要がある。
+  // 入れ子の管理は 11_Tenant.gs の tUserLock_()（tReentrantLock_）に集めてある。
+  // 深さを数え、いちばん外側だけが本当に取って・放す（振る舞いは tests/data-lock.test.mjs）。
   const helper = between(backend, 'function p3WithUserLock_', 'function p3MigrationV1_');
-  assert.match(helper, /p3UserLockDepth_ > 0/);
+  assert.match(helper, /tUserLock_\(\)/);
   assert.match(helper, /tryLock/);
+  assert.doesNotMatch(helper, /LockService\./, 'データ保全の中で LockService を直接呼ばない');
+  const tenant = fs.readFileSync('11_Tenant.gs', 'utf8');
+  const reentrant = between(tenant, 'function tReentrantLock_', 'このユーザーが使用すべきスプレッドシートIDを解決します');
+  assert.match(reentrant, /T_LOCK_DEPTH_\[kind\] === 0/);
   const migrations = between(backend, 'function p3RunMigrations_', 'function ensureDataProtectionReady_');
   assert.match(migrations, /p3WithUserLock_/);
   assert.doesNotMatch(migrations, /LockService\.getUserLock/);
@@ -78,8 +84,11 @@ test('protected and V1 save endpoints delegate to the protected V2 save', () => 
 
 test('protected database clear is serialized with weekly saves', () => {
   const fn = between(backend, 'function clearDatabaseDataProtectedFromWeb', 'function deleteClassProtectedFromWeb');
-  assert.match(fn, /getScriptLock/);
+  // 週案の保存と同じロック（tDataLock_）を取る
+  assert.match(fn, /tDataLock_\(\)/);
   assert.match(fn, /waitLock/);
+  const save = between(fs.readFileSync('12_Performance.gs', 'utf8'), 'function saveWeeklyPlanWeek_', 'function getDbSchemaDiagnosticsFromWeb');
+  assert.match(save, /tDataLock_\(\)/);
 });
 
 test('week snapshots are scoped per class sheet and restores guard the target sheet', () => {
