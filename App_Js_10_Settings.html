@@ -669,6 +669,7 @@
     }
 
     function loadSystemSettings(opts) {
+        initCalendarDefaults();
         if (STATE.isSystemSettingsLoaded) return;
         // 保存直後の再取得では「保存しました」の直後に「読み込み中...」が出て
         // 保存に失敗したように見えるため、silent 指定でトーストを抑止する
@@ -872,6 +873,86 @@
             .getCourseListForDashboard();
     }
 
+    /**
+     * その年度の「4月の最初の月曜日」を YYYY-MM-DD で返します（初期設定ウィザードと同じ決め方）。
+     * @param {number} fiscalYear 年度
+     * @returns {string}
+     */
+    function firstMondayOfApril(fiscalYear) {
+        var d = new Date(fiscalYear, 3, 1);
+        var day = d.getDay();
+        d.setDate(d.getDate() + ((day === 1) ? 0 : ((8 - day) % 7)));
+        return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    }
+
+    /** 年間カレンダーの欄に、開いた日の年度を入れておく（先生が入れた値は書き換えない）。 */
+    function initCalendarDefaults() {
+        var yearEl = document.getElementById('sysCalYear');
+        var startEl = document.getElementById('sysCalStartMonday');
+        if (!yearEl || !startEl || yearEl.value || startEl.value) return;
+        var now = new Date();
+        var fiscalYear = (now.getMonth() + 1 <= 3) ? now.getFullYear() - 1 : now.getFullYear();
+        yearEl.value = fiscalYear;
+        startEl.value = firstMondayOfApril(fiscalYear);
+    }
+
+    /** 対象年度を変えたら、第1週目の月曜日もその年度の4月に合わせる（あとから直せる）。 */
+    function syncCalendarStartToYear() {
+        var year = parseInt(document.getElementById('sysCalYear').value, 10);
+        if (!year || year < 2000 || year > 2100) return;
+        document.getElementById('sysCalStartMonday').value = firstMondayOfApril(year);
+    }
+
+    /**
+     * カレンダーを作り直すと何が起きるかを、確認の画面に出す文にします。
+     *
+     * 入力は日付ごとに引き継ぐので、起点を直しただけなら何も失われない。
+     * 新しい範囲に入らない日（前の年度など）に入力があるときだけ、その件数と範囲を
+     * はっきり出す。以前は「既存の行事や週案データは消えません」とだけ出ていたが、
+     * 実際には入力が行の位置に残ったまま日付だけが入れ替わり、前の年度の授業が
+     * 新しい年度の日付に出ていた。
+     * @param {Object} preview previewAnnualCalendarFromWeb() の戻り値
+     * @returns {string} HTML（サーバから来た文字はエスケープ済み）
+     */
+    function buildCalendarConfirmHtml(preview) {
+        var html = '<div style="text-align:left; font-size:0.9rem; line-height:1.8;">';
+        var many = preview.sheets.length > 1;
+        if (many) {
+            html += '<p style="margin:0 0 6px;">すべての学級のシート（' + preview.sheets.length + '枚）を作り直します。</p>';
+        }
+        html += '<ul style="margin:0 0 10px; padding-left:1.2em;">';
+        preview.sheets.forEach(function (sheet) {
+            html += '<li>' + (many ? '<strong>' + escHtml(sheet.sheetName) + '</strong>： ' : '')
+                + (sheet.currentFrom
+                    ? 'いま ' + escHtml(sheet.currentFrom) + '〜' + escHtml(sheet.currentTo) + ' → '
+                    : '')
+                + '新しく <strong>' + escHtml(sheet.newFrom) + '〜' + escHtml(sheet.newTo) + '</strong></li>';
+        });
+        html += '</ul>';
+
+        if (preview.keptDays > 0) {
+            html += '<p style="margin:0 0 8px;">入力のある <strong>' + preview.keptDays
+                + ' 日ぶん</strong>は、同じ日付のまま引き継ぎます。</p>';
+        }
+        if (preview.droppedDays > 0) {
+            var ranges = preview.sheets.filter(function (sheet) { return sheet.droppedDays > 0; })
+                .map(function (sheet) {
+                    return (many ? escHtml(sheet.sheetName) + ' ' : '') + sheet.droppedDays + ' 日ぶん'
+                        + (sheet.droppedFrom ? '（' + escHtml(sheet.droppedFrom) + '〜' + escHtml(sheet.droppedTo) + '）' : '');
+                }).join('、');
+            html += '<div style="margin:0 0 8px; padding:10px 12px; border:1px solid var(--danger-text);'
+                + ' border-radius:6px; color:var(--danger-text);">'
+                + '入力のある <strong>' + ranges + '</strong> は、新しいカレンダーに日付が無いため、'
+                + '<strong>週案から外れます。</strong></div>'
+                + '<p style="margin:0;">作り直す前に、いまの状態を丸ごと控えます。'
+                + 'この控えは自動では片づけられず、前の年度の記録として、'
+                + '「データ保全・復元」のバックアップ一覧からいつでも開けます。</p>';
+        } else if (preview.hasContent) {
+            html += '<p style="margin:0;">念のため、作り直す前にいまの状態を丸ごと控えます（完全バックアップ）。</p>';
+        }
+        return html + '</div>';
+    }
+
     async function confirmGenerateCalendar() {
         var year = document.getElementById('sysCalYear').value;
         var startMondayStr = document.getElementById('sysCalStartMonday').value;
@@ -881,30 +962,60 @@
             return;
         }
 
+        // まず「何が起きるか」をサーバに確かめる（ここでは何も書かない）
+        showToast('info', 'いまのカレンダーを確かめています...');
+        var preview;
+        try {
+            preview = await _callServerAsync('previewAnnualCalendarFromWeb', startMondayStr, { allClasses: true });
+        } catch (e) {
+            showToast('error', '通信エラー: ' + e.message);
+            return;
+        }
+        if (!preview || !preview.success) {
+            showToast('error', 'エラー: ' + (preview ? preview.error : '応答がありません'));
+            return;
+        }
+
         var swalResult = await Swal.fire({
-            title: 'カレンダー再生成',
-            html: year + '年度のカレンダー（起点: ' + startMondayStr + '）をデータベースに展開します。<br><small>既存の行事や週案データは消えません</small>',
-            icon: 'warning',
+            title: escHtml(String(year)) + '年度のカレンダーを作り直す',
+            html: buildCalendarConfirmHtml(preview),
+            icon: preview.droppedDays > 0 ? 'warning' : 'question',
             showCancelButton: true,
-            confirmButtonText: '再生成する',
+            confirmButtonText: preview.hasContent ? '控えを取って作り直す' : '作り直す',
             cancelButtonText: 'キャンセル',
             confirmButtonColor: '#b45309'
         });
         if (!swalResult.isConfirmed) return;
 
-        showToast('info', 'カレンダー生成中...（数秒〜十数秒かかります）');
-        google.script.run
-            .withSuccessHandler(function (res) {
-                if (res.success) {
-                    showToast('success', res.message);
-                } else {
-                    showToast('error', 'エラー: ' + res.error);
-                }
-            })
-            .withFailureHandler(function (e) {
-                showToast('error', '致命的なエラー: ' + e.message);
-            })
-            .generateAnnualCalendar(year, startMondayStr);
+        Swal.fire({
+            title: 'カレンダーを作り直しています',
+            text: preview.hasContent
+                ? 'いまの状態を控えてから作り直します。1分ほどかかることがあります。このままお待ちください。'
+                : '数秒〜十数秒かかります。',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            showConfirmButton: false,
+            didOpen: function () { Swal.showLoading(); }
+        });
+        var res;
+        try {
+            res = await _callServerAsync('generateAnnualCalendar', year, startMondayStr,
+                { allowDrop: true, allClasses: !!preview.multiClass });
+        } catch (e) {
+            Swal.close();
+            showToast('error', '致命的なエラー: ' + e.message);
+            return;
+        }
+        Swal.close();
+        if (!res || !res.success) {
+            showToast('error', 'エラー: ' + (res ? res.error : '応答がありません'));
+            return;
+        }
+        showToast('success', res.message);
+        // 日付の並びが変わったので、週案・時数などを読み直す
+        if (typeof afterClassContextChanged === 'function') afterClassContextChanged();
+        // 控えを作ったら、データ保全の一覧にも出るようにする
+        if (res.backup && typeof p3LoadProtectionStatus === 'function') p3LoadProtectionStatus(false);
     }
 
     // ===================================================

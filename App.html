@@ -1008,14 +1008,18 @@
                     </div>
                     <div class="integration-body" style="display:flex; flex-direction:column; gap:16px;">
                         <p style="font-size:0.85rem; color:var(--text-sub); margin-bottom:8px;">
-                            新学期のセットアップ時や、スプレッドシートの数式が壊れた場合に使用します。<br>
-                            開始日を指定すると約1年分の「日付」「曜日」「週番号」がデータベースに構築（上書き）されます。既存の入力データ（各校時の内容など）は消えません。
+                            新しい年度を始めるときや、スプレッドシートの日付がくずれたときに使います。<br>
+                            第1週目の月曜日から約1年ぶんの「日付」「曜日」「週番号」を作り直します。<strong>入力した内容は、日付ごとにそのまま引き継ぎます。</strong><br>
+                            新しいカレンダーに入らない日（前の年度など）の入力は週案から外れます。その場合は、押したあとに件数をお見せし、いまの状態を丸ごと控えてから作り直します。
                         </p>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
                             <div>
                                 <label
                                     style="display:block; font-size:0.8rem; color:var(--text-sub); margin-bottom:4px;">対象年度</label>
-                                <input type="number" id="sysCalYear" value="2025"
+                                <!-- 初期値は、開いた日の年度（initCalendarDefaults）。以前は 2025 と書いてあり、
+                                     年度が変わっても古い年のままだった。 -->
+                                <input type="number" id="sysCalYear" min="2000" max="2100"
+                                    onchange="syncCalendarStartToYear()"
                                     style="width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:0.85rem;">
                             </div>
                             <div>
@@ -1028,7 +1032,7 @@
                         <div style="display:flex; justify-content:flex-end; margin-top:8px;">
                             <button class="btn" style="background-color:#b45309; color:white;"
                                 onclick="confirmGenerateCalendar()"><span class="material-symbols-outlined fs-6"
-                                    style="vertical-align:text-bottom;">warning</span> カレンダーを再生成する</button>
+                                    style="vertical-align:text-bottom;">warning</span> カレンダーを作り直す</button>
                         </div>
                     </div>
                 </div>

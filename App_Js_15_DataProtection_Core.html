@@ -175,7 +175,9 @@
             var html = items.length ? items.map(function (item) {
                 return '<div style="padding:9px 0;border-bottom:1px solid var(--border);text-align:left;">'
                     + '<a href="' + escAttr(item.url || '#') + '" target="_blank" rel="noopener noreferrer"><strong>' + escHtml(item.name) + '</strong></a>'
-                    + '<div style="font-size:0.75rem;color:var(--text-sub);">' + escHtml(p3FormatDateTime(item.createdAt)) + ' / ' + escHtml(item.reason || '') + '</div></div>';
+                    + '<div style="font-size:0.75rem;color:var(--text-sub);">' + escHtml(p3FormatDateTime(item.createdAt)) + ' / ' + escHtml(item.reason || '')
+                    // 保管用の控え（年度更新の直前など）は、世代の整理で片づけられないことを示す
+                    + (item.pinned ? ' / <strong>保管（自動では片づけません）</strong>' : '') + '</div></div>';
             }).join('') : '<p>バックアップはまだありません。</p>';
             Swal.fire({ title: '完全バックアップ', html: '<div style="max-height:420px;overflow:auto;">' + html + '</div>', width: 700, confirmButtonText: '閉じる' });
         }).catch(_onCommError);
