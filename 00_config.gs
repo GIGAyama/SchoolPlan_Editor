@@ -123,6 +123,26 @@ function isDbSheetName_(sheetName) {
   return getClassList_().some(c => c.sheetName === sheetName);
 }
 
+/**
+ * そのシートへ書く文字列を、スプレッドシートに解釈させず、打ったとおりに置くか。
+ * 18_SheetsApi.gs のファサードが、書き込みのたびに尋ねます。
+ *
+ * 週案のシート（既定の「データベース」と、登録済みの学級のシート）が該当します。
+ * 行事・朝学習・各校時・宿題・持ち物・振り返りは、どれも先生が打った文字そのもので、
+ * 日付や数として解釈されては困ります。以前は `9:00` が 0.375 に、`10/15` や `4-2` が
+ * 日付のシリアル値に、`+αのプリント` が数式のエラーに変わって保存されていました。
+ * 単元マスタ（総時数・何時間目が数）やタスク（期日が日付）は、これまでどおり解釈させます。
+ * @param {string} sheetName
+ * @returns {boolean}
+ */
+function sheetsIsLiteralInputSheet_(sheetName) {
+  try {
+    return isDbSheetName_(sheetName);
+  } catch (e) {
+    return sheetName === SHEET_NAME_DATABASE;
+  }
+}
+
 // ===== 空き時間（別教員担当）の表現 =====
 // 空き時間の状態は専用の列ではなく、「学習内容」セルの中に区切りマーカーとして
 // 埋め込まれている。マーカーより前が授業内容、後ろがタスク。

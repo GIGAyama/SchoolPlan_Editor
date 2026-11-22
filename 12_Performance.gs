@@ -326,6 +326,24 @@ function p2RereadRows_(sheet, cols, rowState) {
  * 読み込み済みの行状態から週7日分のdayオブジェクトを構築します。
  * getWeeklyPlanDataV2 と保存時のスナップショット用 beforeDays の双方で使用します。
  */
+/**
+ * セルの値を、画面へ返す文字列にします。
+ *
+ * 以前は `String(value || '')` としていたため、数の 0 と真偽値の false が空文字になり、
+ * 画面では空欄に見えていた（シートには値があるのに、次の保存で空欄として上書きされる）。
+ * 週案の欄はいまは打ったとおりの文字で書くが、過去に数や真偽値として入ったセルや、
+ * 先生がスプレッドシートで直接打ったセルは残っているので、落とさずに文字にする。
+ * 真偽値は、スプレッドシートに見えているとおり TRUE / FALSE にする。
+ * @param {*} value
+ * @returns {string}
+ */
+function p2Text_(value) {
+  if (value === null || value === undefined) return '';
+  if (value === true) return 'TRUE';
+  if (value === false) return 'FALSE';
+  return String(value);
+}
+
 function p2BuildWeekDays_(rowState, dbCols, weekDateStrs, holidayMap) {
   const dayLabels = ['月', '火', '水', '木', '金', '土', '日'];
   const holidays = holidayMap || {};
@@ -335,21 +353,21 @@ function p2BuildWeekDays_(rowState, dbCols, weekDateStrs, holidayMap) {
       date: dateStr,
       dayLabel: dayLabels[index],
       holiday: holidays[dateStr] || '',
-      event: String(p2Cell_(row, dbCols, 'EVENT') || ''),
-      preclass: String(p2Cell_(row, dbCols, 'PRECLASS') || ''),
-      morning: String(p2Cell_(row, dbCols, 'MORNING') || ''),
+      event: p2Text_(p2Cell_(row, dbCols, 'EVENT')),
+      preclass: p2Text_(p2Cell_(row, dbCols, 'PRECLASS')),
+      morning: p2Text_(p2Cell_(row, dbCols, 'MORNING')),
       periods: [1, 2, 3, 4, 5, 6].map(n => ({
-        subject: String(p2Cell_(row, dbCols, 'PERIOD' + n) || ''),
-        unit: String(p2Cell_(row, dbCols, 'UNIT' + n) || ''),
-        content: String(p2Cell_(row, dbCols, 'CONTENT' + n) || '')
+        subject: p2Text_(p2Cell_(row, dbCols, 'PERIOD' + n)),
+        unit: p2Text_(p2Cell_(row, dbCols, 'UNIT' + n)),
+        content: p2Text_(p2Cell_(row, dbCols, 'CONTENT' + n))
       })),
-      recess1: String(p2Cell_(row, dbCols, 'RECESS1') || ''),
-      recess2: String(p2Cell_(row, dbCols, 'RECESS2') || ''),
-      afterschool: String(p2Cell_(row, dbCols, 'AFTERSCHOOL') || ''),
-      homework: String(p2Cell_(row, dbCols, 'HOMEWORK') || ''),
-      items: String(p2Cell_(row, dbCols, 'ITEMS') || ''),
-      reflection: String(p2Cell_(row, dbCols, 'REFLECTION') || ''),
-      reflectionStatus: String(p2Cell_(row, dbCols, 'REFLECTION_STATUS') || '').trim(),
+      recess1: p2Text_(p2Cell_(row, dbCols, 'RECESS1')),
+      recess2: p2Text_(p2Cell_(row, dbCols, 'RECESS2')),
+      afterschool: p2Text_(p2Cell_(row, dbCols, 'AFTERSCHOOL')),
+      homework: p2Text_(p2Cell_(row, dbCols, 'HOMEWORK')),
+      items: p2Text_(p2Cell_(row, dbCols, 'ITEMS')),
+      reflection: p2Text_(p2Cell_(row, dbCols, 'REFLECTION')),
+      reflectionStatus: p2Text_(p2Cell_(row, dbCols, 'REFLECTION_STATUS')).trim(),
       found: !!row
     };
   });

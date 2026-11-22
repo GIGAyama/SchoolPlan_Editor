@@ -37,6 +37,17 @@ test('新しい先生がデータベースを作り、今週の週案を読み�
   assert.equal(again.revision, saved.revision, '保存の応答と、読み直したリビジョンがそろう');
 });
 
+test('足場は日本時間で動く（GAS のスクリプトのタイムゾーンと同じ）', () => {
+  // ずれていると、日付の列に端数つきの値（9時間ぶん）が入ったまま通ってしまう。
+  assert.equal(new Date(2026, 0, 1).getTimezoneOffset(), -540,
+    'タイムゾーンを Asia/Tokyo にできていません（TZ=Asia/Tokyo を付けて実行してください）');
+  const world = createWorld({ scriptProps: { sp_sharedDeployment: 'true' } });
+  world.now = Date.parse('2026-11-18T10:30:00+09:00');
+  const teacher = createTeacher(world, TEACHER);
+  const firstDate = teacher.sheet('データベース').grid[1][1];
+  assert.equal(firstDate, Math.round(firstDate), '日付の列に時刻の端数が入っている');
+});
+
 test('末尾が _ の関数は google.script.run から呼べない（本物と同じ）', () => {
   const world = createWorld();
   const res = callFunction(world, TEACHER, 'getSs_');

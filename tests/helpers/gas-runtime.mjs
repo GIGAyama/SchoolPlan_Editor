@@ -12,6 +12,13 @@
 //
 // Google 側の応答は fake-google.mjs が受け持つ。
 
+// GAS のスクリプトは appsscript.json の timeZone（Asia/Tokyo）で動く。`new Date(2026, 3, 6)` は
+// 日本時間の 0 時になり、カレンダーの日付や「今日」の判定はそれを前提に書かれている。
+// CI は UTC で走るので、何もしないと日付が 9 時間ずれたまま（シートには 46111.375 のような
+// 端数つきの日付が入ったまま）「通って」しまう。Date を使う前に、ここで合わせる。
+// node --test はファイルごとに別プロセスで走るので、ほかのテストには影響しない。
+process.env.TZ = 'Asia/Tokyo';
+
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
