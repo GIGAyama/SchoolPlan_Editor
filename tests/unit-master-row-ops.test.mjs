@@ -154,6 +154,17 @@ test('一覧に無い学級通信を消そうとしても、ほかの通信は�
   assert.equal(t.call('getNewsletterSaveList').list.length, 1);
 });
 
+test('同じ先生の別の操作が進行中なら、英語のエラーではなく、待つように伝える', () => {
+  const t = setup();
+  const third = t.list().find(r => r.hourNum === 3);
+  t.world.locks.user.set(TEACHER, 'my-other-tab');
+  const res = t.call('trashUnitMasterRowFromWeb', [third.rowIndex, t.expectedOf(third)]);
+  assert.equal(res.success, false);
+  assert.match(res.error, /少し待ってから/);
+  assert.doesNotMatch(res.error, /Lock timeout/);
+  assert.deepEqual(t.hours(), [1, 2, 3, 4, 5, 6, 7, 8], '行が消えている');
+});
+
 test('ごみ箱を通らない古い削除の入口は、ごみ箱へ移す入口に任せている', () => {
   const t = setup();
   assert.equal(t.call('deleteUnitMasterRow', [4]).success, true);

@@ -2304,9 +2304,13 @@ function umResolveRow_(sheet, rowIndex, expected) {
 /** 単元マスタの行操作の失敗を、画面に返す形にします（一覧が古いときは stale を立てる）。 */
 function umFailure_(name, e) {
   logError(name, e);
-  return e && e.umStale
-    ? { success: false, stale: true, error: e.message }
-    : { success: false, error: e.message };
+  if (e && e.umStale) return { success: false, stale: true, error: e.message };
+  // ロックを取れなかったときの GAS の文は英語（Lock timeout: another process was holding…）。
+  // 先生には何が起きたのか分からないので、言い直す。
+  const message = /lock timeout/i.test(String(e && e.message))
+    ? '前の操作がまだ終わっていません。少し待ってから、もう一度お試しください。'
+    : (e && e.message) || String(e);
+  return { success: false, error: message };
 }
 
 /**
