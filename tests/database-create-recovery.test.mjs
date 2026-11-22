@@ -233,6 +233,10 @@ function loadCreateMyDatabase({ linkedId = '' } = {}) {
     TENANT.match(/function tGetScriptProp_[\s\S]*?\n}/)[0],
     TENANT.match(/function getUserSpreadsheetId_[\s\S]*?\n}/)[0],
     TENANT.match(/function setUserSpreadsheetId_[\s\S]*?\n}/)[0],
+    // ロックは入れ子に強い取っ手（tUserLock_）で取る。実物をそのまま動かす
+    'let T_LOCK_DEPTH_ = { user: 0, script: 0 };',
+    TENANT.match(/function tUserLock_[\s\S]*?\n}/)[0],
+    TENANT.match(/function tReentrantLock_[\s\S]*?\n}/)[0],
     TENANT.match(/function createMyDatabase\(name, options\)[\s\S]*?\n}/)[0]
   ].join('\n');
   const factory = new Function(...names, `${body}\nreturn { createMyDatabase: createMyDatabase, created: ${JSON.stringify([])} };`);

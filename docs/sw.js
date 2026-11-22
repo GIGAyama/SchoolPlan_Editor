@@ -87,6 +87,39 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+/**
+ * いま開こうとしているのが「シェル自身」（入口のページ）かどうか。
+ *
+ * 入口は、このアプリを配っている場所の直下（`/` か `/SchoolPlan_Editor/`）と、
+ * その `index.html` だけ。以前は「`/` で終わる URL はぜんぶ入口」と見ていたため、
+ * `…/manual/` のような存在しない場所を一度開くだけで、その 404 のページが
+ * オフライン用の控え（./index.html）に入っていた。次に圏外で開くと、
+ * 週案の入口ではなく「ページが見つかりません」が出る。
+ * @param {URL} url
+ * @returns {boolean}
+ */
+function isShellNavigation(url) {
+  const root = new URL(self.registration.scope).pathname;
+  return url.pathname === root || url.pathname === root + 'index.html';
+}
+
+/**
+ * 応答を、オフライン用の控えにしてよいか。
+ * うまく返ってきた・自分のオリジンの・転送されていない応答だけを控えにする。
+ * エラーのページや、よそへ転送された先のページを控えにすると、圏外で開いたときに
+ * それが入口として出てしまう。
+ * @param {Response} res
+ * @returns {boolean}
+ */
+function isStorableShell(res) {
+  if (!res || !res.ok || res.redirected) return false;
+  try {
+    return !res.url || new URL(res.url).origin === self.location.origin;
+  } catch (e) {
+    return false;
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
@@ -97,6 +130,7 @@ self.addEventListener('fetch', (event) => {
 
   // ナビゲーションはネットワーク優先、失敗時はキャッシュ済みシェルを返す
   if (event.request.mode === 'navigate') {
+    const shell = isShellNavigation(url);
     event.respondWith(
       fetch(event.request)
         .then((res) => {
@@ -104,11 +138,16 @@ self.addEventListener('fetch', (event) => {
           // 同じオリジンには about.html / privacy-policy.html / terms.html があり、
           // 先生がそれらを一度開くと、オフライン用のシェルがその静的ページに
           // 差し替わる。次に圏外でアプリを開くと、週案ではなく利用規約が出る。
-          // シェル自身（ルート または index.html）のときだけ保存する。
-          const path = url.pathname.replace(/\/$/, '/index.html');
-          if (path.endsWith('/index.html')) {
+          // シェル自身を、うまく取れたときだけ保存する。
+          if (shell && isStorableShell(res)) {
             const copy = res.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy));
+            return res;
+          }
+          // 配信元の不調（5xx）で入口が返らないときは、控えがあればそれを出す。
+          // 圏外のときと同じで、エラーのページより前回の入口のほうが役に立つ。
+          if (shell && res.status >= 500) {
+            return caches.match('./index.html').then((hit) => hit || res);
           }
           return res;
         })

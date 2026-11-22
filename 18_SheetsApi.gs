@@ -30,6 +30,12 @@
  *   `values.get` の返り値の長さで求めます。
  * - **書き込み**: `valueInputOption=USER_ENTERED` を使います。`=` 始まりを数式として
  *   解釈するなど、`SpreadsheetApp.setValues()` と同じ振る舞いになります。
+ *   **ただし週案のシート（データベース・学級のシート）へは `RAW` で書きます。**
+ *   USER_ENTERED は「画面で打ったのと同じ規則」で文字列を解釈し直すため、先生が
+ *   行事の欄に `9:00` とだけ打つと時刻（0.375）に、`10/15` や `4-2` は日付に、
+ *   `50%` は 0.5 に、`+αのプリント` は数式のエラーに変わっていました。週案の欄は
+ *   どれも「打ったとおりに残す文字」なので、解釈させません（`literalInput`）。
+ *   Date は従来どおりシリアル値にして書き、日付の表示形式を当てます。
  *
  * ## 通信量
  *
@@ -1027,7 +1033,7 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
       const result = sheetsFetch_(
         `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/` +
         `${encodeURIComponent(sheetsQuoteTitle_(props.title))}:append` +
-        '?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+        `?valueInputOption=${literalInput() ? 'RAW' : 'USER_ENTERED'}&insertDataOption=INSERT_ROWS`, {
           method: 'post',
           contentType: 'application/json',
           payload: JSON.stringify({ values: payload })
@@ -1262,8 +1268,23 @@ function sheetsMakeSheet_(spreadsheet, state, properties, invalidateMeta) {
     }
   };
 
+  /**
+   * このシートへ書く文字列を、打ったとおりに置くか（`valueInputOption=RAW`）。
+   *
+   * どのシートがそうかは、このファサードではなくアプリ側が決める
+   * （00_config.gs の `sheetsIsLiteralInputSheet_`。週案のシートが該当する）。
+   * 書き込みの経路ごとに指定させると、あとから足した経路で指定を忘れる。
+   * シートの名前で決めておけば、保存・自動入力・一括転記・振り返り・行事の反映の
+   * どこから書いても同じ扱いになる。
+   * @returns {boolean}
+   */
+  function literalInput() {
+    return typeof sheetsIsLiteralInputSheet_ === 'function'
+      && !!sheetsIsLiteralInputSheet_(props.title);
+  }
+
   // getRange から参照するための自己参照。ファサード内でだけ使う。
-  const api = { values: values, valuesCached: valuesCached,
+  const api = { values: values, valuesCached: valuesCached, literalInput: literalInput,
     displayValues: displayValues, dateColumns: dateColumns,
     invalidateDisplay: invalidateDisplay, invalidateValues: invalidateValues,
     invalidateDateColumns: invalidateDateColumns,
@@ -1392,7 +1413,8 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
     },
 
     /**
-     * 値を書き込みます。`SpreadsheetApp` と同じく `=` 始まりは数式になります。
+     * 値を書き込みます。`SpreadsheetApp` と同じく `=` 始まりは数式になります
+     * （週案のシートを除く。そちらは打ったとおりの文字として置きます）。
      * @param {Array[]} values
      */
     setValues: function (values) {
@@ -1414,6 +1436,8 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
      */
     setValuesReadingBack: function (values) {
       const timeZone = api.spreadsheet.getSpreadsheetTimeZone();
+      // 週案のシートへは、打ったとおりに置く（解釈させない）。数式にもならない。
+      const literal = api.literalInput();
       let hasFormula = false;
       // Date を書いた列を覚えておく。書式が日付でない列は、書いたあとに付ける（下記）。
       const dateColumnOffsets = {};
@@ -1425,13 +1449,13 @@ function sheetsMakeRange_(sheet, api, row, column, numRows, numColumns) {
           }
           return sheetsDateToSerial_(v, timeZone);
         }
-        if (typeof v === 'string' && v.charAt(0) === '=') hasFormula = true;
+        if (!literal && typeof v === 'string' && v.charAt(0) === '=') hasFormula = true;
         return v === undefined || v === null ? '' : v;
       }));
 
       const result = sheetsFetch_(
         `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(a1(true))}` +
-        '?valueInputOption=USER_ENTERED&includeValuesInResponse=true' +
+        `?valueInputOption=${literal ? 'RAW' : 'USER_ENTERED'}&includeValuesInResponse=true` +
         '&responseValueRenderOption=UNFORMATTED_VALUE&responseDateTimeRenderOption=SERIAL_NUMBER', {
           method: 'put',
           contentType: 'application/json',

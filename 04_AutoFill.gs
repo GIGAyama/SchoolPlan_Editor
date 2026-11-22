@@ -738,9 +738,9 @@ function callGeminiUnitAllocation_(prompt) {
  * @returns {Object} { success, message, updatedCells, warnings }
  */
 function batchAutoFillFromWeek(baseMondayStr) {
-  // 週案の保存と同じ ScriptLock で直列化する。
+  // 週案の保存と同じロック（tDataLock_）で直列化する。
   // 年間分を読み書きするため、保存と重なると読んだ時点の内容で上書きしてしまう。
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   if (!lock.tryLock(15000)) {
     return { success: false, error: '他の処理が実行中です。しばらく待ってから再度お試しください。' };
   }
@@ -883,7 +883,7 @@ function batchAutoFillFromWeek(baseMondayStr) {
  * @returns {Object} { success, message, shifted, discarded, direction, renumbered }
  */
 function shiftSubjectLessons(subject, startDateStr, endDateStr, direction, count, options) {
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   try {
     options = options || {};
     if (!subject || typeof subject !== 'string' || !subject.trim()) {

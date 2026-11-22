@@ -395,6 +395,12 @@
                     }
                 }
 
+                // Classroom への自動投稿ができなかったときは、ここで知らせる
+                // （自動投稿は先生の見ていないところで走るので、ほかに気づく場所が無い）
+                if (res.autoPost && typeof notifyAutoPostFailure === 'function') {
+                    notifyAutoPostFailure(res.autoPost);
+                }
+
                 if (res.setup && res.setup.success && !res.setup.wizardDone
                     && !(res.setup.hasApiKey && res.setup.hasCalendar)) {
                     setTimeout(function () {

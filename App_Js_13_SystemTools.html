@@ -500,6 +500,10 @@
             });
             if (calResult.success) {
                 calendarMessage = '<br>年間カレンダーを生成しました。';
+            } else if (calResult.needsConfirm) {
+                // 入力済みの週案があり、作り直すと範囲の外になる日がある。ここでは黙って外さない。
+                calendarMessage = '<br>入力済みの週案があるため、年間カレンダーは変えていません。'
+                    + '<br>設定タブの「年間カレンダー生成機能」で、内容を確かめてから作り直せます。';
             } else {
                 calendarMessage = '<br>⚠ 年間カレンダーの生成に失敗しました: ' + escHtml(calResult.error || '')
                     + '<br>設定タブの「年間カレンダー生成機能」から再実行できます。';

@@ -554,4 +554,13 @@
         padding: 2px 8px;
         font-size: 0.72rem;
     }
+
+    /* 単元タブ: 行を足す・消す操作を反映しているあいだは、一覧を押せないようにする。
+       行は行番号で指しているので、古い一覧のまま次を押すと別の行が相手になる
+       （App_Js_12_UnitMaster.html の umSetBusy）。 */
+    .um-table-busy {
+        pointer-events: none;
+        opacity: 0.55;
+        transition: opacity 0.15s ease;
+    }
 </style>

@@ -321,25 +321,17 @@ function p3RecordAudit_(action, entityType, entityId, summary, beforeValue, afte
 }
 
 // LockService のロックは実行単位で保持されるため、同一実行内で二重に waitLock すると
-// 挙動が保証されない。ネストした取得は「外側が既に保持している」とみなして素通しする。
-let p3UserLockDepth_ = 0;
-
-function p3RunHoldingUserLock_(fn) {
-  p3UserLockDepth_++;
-  try {
-    return fn();
-  } finally {
-    p3UserLockDepth_--;
-  }
-}
+// 挙動が保証されない（取り直しは無視され、内側の releaseLock で外側のぶんも外れる）。
+// 入れ子の管理は 11_Tenant.gs の tUserLock_() に集めてある。週案の保存が取る
+// データのロック（tDataLock_）とも深さを共有するので、保存の中からここへ入っても
+// 外側のロックが先に外れない。
 
 /** ユーザー単位のロックを取得して fn を実行する。取得できなければ例外を投げる。 */
 function p3WithUserLock_(timeoutMs, fn) {
-  if (p3UserLockDepth_ > 0) return p3RunHoldingUserLock_(fn);
-  const lock = LockService.getUserLock();
+  const lock = tUserLock_();
   lock.waitLock(timeoutMs);
   try {
-    return p3RunHoldingUserLock_(fn);
+    return fn();
   } finally {
     lock.releaseLock();
   }
@@ -347,11 +339,10 @@ function p3WithUserLock_(timeoutMs, fn) {
 
 /** ロックを取れなければ待たずに busyValue を返す。重複実行を捨ててよい処理に使う。 */
 function p3TryWithUserLock_(timeoutMs, fn, busyValue) {
-  if (p3UserLockDepth_ > 0) return p3RunHoldingUserLock_(fn);
-  const lock = LockService.getUserLock();
+  const lock = tUserLock_();
   if (!lock.tryLock(timeoutMs)) return busyValue;
   try {
-    return p3RunHoldingUserLock_(fn);
+    return fn();
   } finally {
     lock.releaseLock();
   }

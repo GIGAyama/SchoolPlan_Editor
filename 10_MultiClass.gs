@@ -107,7 +107,7 @@ function getMultiClassSettings() {
  * @returns {Object} getMultiClassSettings() と同形式
  */
 function setMultiClassEnabledFromWeb(enabled) {
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   try {
     lock.waitLock(10000);
 
@@ -162,7 +162,7 @@ function setMultiClassEnabledFromWeb(enabled) {
  * @returns {Object} getMultiClassSettings() と同形式
  */
 function addClassFromWeb(name, grade) {
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   try {
     lock.waitLock(10000);
     if (!isMultiClassEnabled_()) throw new Error('複数学級モードが有効になっていません。');
@@ -217,7 +217,7 @@ function addClassFromWeb(name, grade) {
  * @returns {Object} getMultiClassSettings() と同形式
  */
 function deleteClassFromWeb(sheetName) {
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   try {
     lock.waitLock(10000);
     if (!isMultiClassEnabled_()) throw new Error('複数学級モードが有効になっていません。');
@@ -260,7 +260,7 @@ function deleteClassFromWeb(sheetName) {
  * @returns {Object} getMultiClassSettings() と同形式
  */
 function switchActiveClassFromWeb(sheetName) {
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   try {
     lock.waitLock(10000);
     if (!isMultiClassEnabled_()) throw new Error('複数学級モードが有効になっていません。');
@@ -297,7 +297,7 @@ function switchActiveClassFromWeb(sheetName) {
  * @returns {Object} getMultiClassSettings() と同形式
  */
 function renameClassFromWeb(sheetName, newName) {
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   try {
     lock.waitLock(10000);
     if (!isMultiClassEnabled_()) throw new Error('複数学級モードが有効になっていません。');

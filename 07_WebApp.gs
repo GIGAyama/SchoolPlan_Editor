@@ -1035,16 +1035,9 @@ function loadNewsletterData(fileId) {
  * @returns {Object} { success }
  */
 function deleteNewsletterData(rowIndex, fileId) {
-  try {
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
-    if (sheet && rowIndex >= 2) sheet.deleteRow(rowIndex);
-    try { driveSetTrashed_(fileId, true); } catch(ignore) {}
-    return { success: true };
-  } catch (e) {
-    logError('deleteNewsletterData', e);
-    return { success: false, error: e.message };
-  }
+  // 旧クライアント互換の委譲エンドポイント。行とファイルをいきなり消さず、
+  // ごみ箱移動(30日間復元可能)として扱う。行とファイルIDの照合もそちらで行う。
+  return trashNewsletterDataFromWeb(rowIndex, fileId);
 }
 
 // ===================================================
@@ -1601,85 +1594,277 @@ function getHoursSummary(mondayStr) {
 // ===== 年間カレンダー自動生成 API =====
 // ===================================================
 
+// カレンダーは 365 日に少し余裕を持たせて作る
+const CALENDAR_TOTAL_DAYS_ = 370;
+
 /**
- * [Webアプリ API] データベースシートの「日付」「曜日」「第何週/週番号」列を1年間分自動生成します
- * 数式依存を排除するための機能です。
- * @param {string|number} year - 対象年度 (例: 2025)
- * @param {string} startMondayStr - 第1週目の月曜日 (YYYY-MM-DD)
+ * 「第1週目の月曜日」を日付にします。
+ * @param {string} startMondayStr YYYY-MM-DD または YYYY/MM/DD
+ * @returns {Date} その日の 0 時
  */
-function generateAnnualCalendar(year, startMondayStr) {
+function calParseStart_(startMondayStr) {
+  const text = String(startMondayStr || '').trim();
+  if (!/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(text)) {
+    throw new Error('第1週目の月曜日を、日付で指定してください。');
+  }
+  const start = new Date(text.replace(/-/g, '/'));
+  if (isNaN(start.getTime())) throw new Error('第1週目の月曜日を、日付で指定してください。');
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+/**
+ * カレンダーを作り直す対象のシートを返します。
+ * @param {Object} ss スプレッドシート
+ * @param {boolean} allClasses すべての学級のシートを対象にするか（複数学級モードのとき）
+ * @returns {Object[]} シートの配列（重複なし）
+ */
+function calTargetSheets_(ss, allClasses) {
+  const active = getDbSheet_(ss);
+  if (!active) throw new Error('データベースシートが見つかりません');
+  if (!allClasses || !isMultiClassEnabled_()) return [active];
+  const names = [SHEET_NAME_DATABASE].concat(getClassList_().map(c => c.sheetName));
+  const seen = {};
+  const sheets = [];
+  names.forEach(name => {
+    if (!name || seen[name]) return;
+    seen[name] = true;
+    const sheet = ss.getSheetByName(name);
+    if (sheet) sheets.push(sheet);
+  });
+  return sheets.length ? sheets : [active];
+}
+
+/**
+ * 1枚のシートについて、カレンダーを作り直したあとの中身を組み立てます（書きこみません）。
+ *
+ * **入力は、行の位置ではなく日付で引き継ぎます。** 以前は「日付・曜日・週番号」の列だけを
+ * 上から書き直し、ほかの列は行の位置のまま残していた。起点が変わると、入力は同じ行に
+ * 残ったまま日付だけが入れ替わる。前年度の入力を消さずに新年度の起点で作り直すと、
+ * 前年度の授業や宿題がそのまま新年度の日付に出て、新年度の時数にも数えられていた。
+ * 起点を1週間直しただけでも、すべての入力が1週間ずれていた。
+ *
+ * ここでは、新しいカレンダーの各日について、同じ日付を持つ行の中身を移します。
+ * 新しい範囲に入らない日の入力は移せないので、件数と範囲を数えて返します
+ * （書く側は、控えを取り、先生に確かめてから進みます）。
+ *
+ * @param {Object} dbSheet 対象のシート
+ * @param {Date} start 第1週目の月曜日
+ * @returns {{sheetName: string, lastCol: number, existingRows: number, newData: Array[],
+ *            summary: Object}}
+ */
+function calPlanSheet_(dbSheet, start) {
+  const cols = scanDbHeaderForSheet_(dbSheet);
+  if (!cols.DATE || !cols.DAY_OF_WEEK || !cols.WEEK_NUM) {
+    throw new Error(`シート「${dbSheet.getName()}」に必要な列（日付、曜日、週番号）が見つかりません`);
+  }
+  const lastRow = dbSheet.getLastRow();
+  const lastCol = dbSheet.getLastColumn();
+  const existing = lastRow >= 2
+    ? dbSheet.getRange(2, 1, lastRow - 1, lastCol).getValues({ dateColumns: [cols.DATE] })
+    : [];
+
+  const calendarColumns = [cols.DATE, cols.DAY_OF_WEEK, cols.WEEK_NUM];
+  const hasContent = row => row.some((value, index) =>
+    calendarColumns.indexOf(index + 1) < 0
+    && value !== '' && value !== null && value !== undefined && String(value).trim() !== '');
+
+  // いまの行を日付で引けるようにする
+  const byDate = new Map();
+  const leftovers = [];   // 日付を持たない・日付が重なっている行のうち、入力のあるもの
+  let currentFrom = '';
+  let currentTo = '';
+  existing.forEach(row => {
+    const date = row[cols.DATE - 1];
+    if (!(date instanceof Date) || isNaN(date.getTime())) {
+      if (hasContent(row)) leftovers.push('');
+      return;
+    }
+    const key = formatDate(date);
+    if (!currentFrom || key < currentFrom) currentFrom = key;
+    if (!currentTo || key > currentTo) currentTo = key;
+    const held = byDate.get(key);
+    if (!held) { byDate.set(key, row); return; }
+    // 同じ日付の行が2つある。入力のあるほうを残し、両方にあれば先のほうを残す
+    if (!hasContent(held)) byDate.set(key, row);
+    else if (hasContent(row)) leftovers.push(key);
+  });
+
+  const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
+  const newData = [];
+  const used = {};
+  let keptDays = 0;
+  let weekNum = 1;
+  let newFrom = '';
+  let newTo = '';
+  const cursor = new Date(start.getTime());
+  for (let i = 0; i < CALENDAR_TOTAL_DAYS_; i++) {
+    const day = new Date(cursor.getTime());
+    if (i > 0 && day.getDay() === 1) weekNum++;
+    const key = formatDate(day);
+    if (i === 0) newFrom = key;
+    newTo = key;
+
+    const source = byDate.get(key);
+    const row = source ? source.slice() : new Array(lastCol).fill('');
+    while (row.length < lastCol) row.push('');
+    if (source) {
+      used[key] = true;
+      if (hasContent(source)) keptDays++;
+    }
+    row[cols.DATE - 1] = day;
+    row[cols.DAY_OF_WEEK - 1] = DAY_LABELS[day.getDay()];
+    row[cols.WEEK_NUM - 1] = weekNum;
+    newData.push(row);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  // 以前の行が 370 行より多ければ、残りは空にする（中身は上で日付ごとに移してある）
+  for (let i = newData.length; i < existing.length; i++) newData.push(new Array(lastCol).fill(''));
+
+  // 新しい範囲に入らなかった入力
+  const dropped = leftovers.filter(Boolean);
+  byDate.forEach((row, key) => { if (!used[key] && hasContent(row)) dropped.push(key); });
+  dropped.sort();
+  const undatedRows = leftovers.length - leftovers.filter(Boolean).length;
+
+  return {
+    sheetName: dbSheet.getName(),
+    lastCol: lastCol,
+    existingRows: existing.length,
+    newData: newData,
+    summary: {
+      sheetName: dbSheet.getName(),
+      currentFrom: currentFrom,
+      currentTo: currentTo,
+      newFrom: newFrom,
+      newTo: newTo,
+      keptDays: keptDays,
+      droppedDays: dropped.length + undatedRows,
+      droppedFrom: dropped.length ? dropped[0] : '',
+      droppedTo: dropped.length ? dropped[dropped.length - 1] : '',
+      undatedRows: undatedRows,
+      hasContent: keptDays > 0 || dropped.length > 0 || undatedRows > 0
+    }
+  };
+}
+
+/** 複数のシートぶんの見込みを、画面に返す形にまとめます。 */
+function calSummarize_(plans) {
+  const sheets = plans.map(plan => plan.summary);
+  return {
+    sheets: sheets,
+    droppedDays: sheets.reduce((sum, sheet) => sum + sheet.droppedDays, 0),
+    keptDays: sheets.reduce((sum, sheet) => sum + sheet.keptDays, 0),
+    hasContent: sheets.some(sheet => sheet.hasContent)
+  };
+}
+
+/**
+ * [Webアプリ API] カレンダーを作り直すと何が起きるかを、書きこまずに返します。
+ * 画面はこれを先生に見せてから generateAnnualCalendar を呼びます。
+ * @param {string} startMondayStr 第1週目の月曜日 (YYYY-MM-DD)
+ * @param {Object} [options] { allClasses: boolean }
+ * @returns {Object} { success, sheets: [{sheetName, currentFrom, currentTo, newFrom, newTo,
+ *   keptDays, droppedDays, droppedFrom, droppedTo}], keptDays, droppedDays, hasContent, multiClass }
+ */
+function previewAnnualCalendarFromWeb(startMondayStr, options) {
   try {
+    const start = calParseStart_(startMondayStr);
     const ss = getSs_();
-    const dbSheet = getDbSheet_(ss);
-    if (!dbSheet) throw new Error('データベースシートが見つかりません');
+    const plans = calTargetSheets_(ss, !!(options && options.allClasses))
+      .map(sheet => calPlanSheet_(sheet, start));
+    return Object.assign({ success: true, multiClass: isMultiClassEnabled_() }, calSummarize_(plans));
+  } catch (e) {
+    logError('previewAnnualCalendarFromWeb', e);
+    return { success: false, error: e.message };
+  }
+}
 
-    const dbCols = getDbColumns();
-    if (!dbCols.DATE || !dbCols.DAY_OF_WEEK || !dbCols.WEEK_NUM) {
-      throw new Error('データベースシートに必要な列（日付、曜日、週番号）が見つかりません');
+/**
+ * [Webアプリ API] データベースシートの「日付」「曜日」「第何週/週番号」列を1年間分作り直します。
+ *
+ * 入力は日付ごとに引き継ぎます（calPlanSheet_）。新しい範囲に入らない日に入力があるときは、
+ * options.allowDrop が無ければ何も書かずに needsConfirm を返します。年度更新のように
+ * 前年度の入力がすべて範囲の外になる場合に、黙って消さないためです。
+ * 入力のあるシートを書き直す前には、必ず完全バックアップを作ります。
+ *
+ * @param {string|number} year - 対象年度 (例: 2025)。知らせの文に使うだけで、範囲は起点で決まる
+ * @param {string} startMondayStr - 第1週目の月曜日 (YYYY-MM-DD)
+ * @param {Object} [options] { allowDrop: boolean, allClasses: boolean }
+ * @returns {Object} { success, message, backup?, sheets, keptDays, droppedDays } /
+ *   { success: false, needsConfirm: true, error, sheets, droppedDays }
+ */
+function generateAnnualCalendar(year, startMondayStr, options) {
+  // 週案の保存・一括転記と同じロックで並べる。作り直しはシート全体を書き直すので、
+  // 途中に保存が入ると、その保存が古い内容で上書きされる。
+  const lock = tDataLock_();
+  try {
+    lock.waitLock(30000);
+  } catch (lockErr) {
+    return { success: false, error: '他の保存処理が進行中です。少し待ってから再度お試しください。' };
+  }
+  try {
+    const start = calParseStart_(startMondayStr);
+    const ss = getSs_();
+    const sheets = calTargetSheets_(ss, !!(options && options.allClasses));
+    const plans = sheets.map(sheet => calPlanSheet_(sheet, start));
+    const summary = calSummarize_(plans);
+
+    if (summary.droppedDays > 0 && !(options && options.allowDrop)) {
+      return Object.assign({
+        success: false,
+        needsConfirm: true,
+        error: `入力のある ${summary.droppedDays} 日ぶんが、新しいカレンダーの範囲に入りません。`
+          + '内容を確かめてから作り直してください（画面を読みこみ直すと、確認の画面が出ます）。'
+      }, summary);
     }
 
-    // 1行目はヘッダーなので2行目から開始
-    const startRow = 2;
-    // シートの現在の最終行。カレンダー生成によってこれより伸びる可能性がある
-    const lastRow = Math.max(dbSheet.getLastRow(), startRow);
-    const lastCol = dbSheet.getLastColumn();
-
-    // 既存データを全取得してマージベースを作成する
-    const existingData = dbSheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
-    
-    // 生成の起点日
-    let currentDate = new Date(startMondayStr.replace(/-/g, '/'));
-    currentDate.setHours(0, 0, 0, 0);
-
-    const DAY_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
-    
-    // 365日分（余裕を持って370日分）を生成
-    const totalDays = 370;
-    
-    // 更新用の配列（行数は既存データ or 370日の多い方に合わせる）
-    const mergeRowCount = Math.max(existingData.length, totalDays);
-    const newData = [];
-
-    let currentWeekNum = 1;
-
-    for (let i = 0; i < mergeRowCount; i++) {
-      // 既存の行データをベースにする（なければ空配列を作成して幅を合わせる）
-      let row = existingData[i] ? [...existingData[i]] : new Array(lastCol).fill('');
-      
-      if (i < totalDays) {
-        // カレンダー生成対象の行
-        const d = new Date(currentDate);
-        
-        // 週番号の計算 (月曜日ごとにカウントアップ)
-        if (i > 0 && d.getDay() === 1) {
-          currentWeekNum++;
-        }
-
-        row[dbCols.DATE - 1] = d; // 日付オブジェクトをそのままセット
-        row[dbCols.DAY_OF_WEEK - 1] = DAY_LABELS[d.getDay()]; // 曜日
-        row[dbCols.WEEK_NUM - 1] = currentWeekNum; // 第何週
-
-        // 次の日へ
-        currentDate.setDate(currentDate.getDate() + 1);
-      } else {
-        // 370日以降かつ既存行がある場合、カレンダー列はクリアする（あるいは既存を維持する）
-        // 古い年度の余分な日付が残らないよう、カレンダー系はクリア
-        row[dbCols.DATE - 1] = '';
-        row[dbCols.DAY_OF_WEEK - 1] = '';
-        row[dbCols.WEEK_NUM - 1] = '';
-      }
-      newData.push(row);
+    // 入力のあるシートを書き直すので、直前の状態を丸ごと控える。
+    // 控えを作れなかったら進まない（例外になり、下の catch が何も書かずに返す）。
+    let backup = null;
+    if (summary.hasContent) {
+      ensureDataProtectionReady_();
+      // 範囲の外になる入力がある（＝前の年度の記録がここにしか残らない）ときは、
+      // 世代の整理で片づけられない「保管用の控え」にする。
+      backup = p3CreateFullBackup_(summary.droppedDays > 0
+        ? 'カレンダーの作り直しの直前（前の年度の記録）'
+        : 'カレンダーの作り直しの直前', { pinned: summary.droppedDays > 0 });
     }
 
-    // まとめて一括書き込み
-    dbSheet.getRange(startRow, 1, newData.length, lastCol).setValues(newData);
-    // 日付の並びが変わったので、覚えている「日付→行番号」を捨てる
-    p2ForgetCalendar_(dbSheet);
+    plans.forEach((plan, index) => {
+      const sheet = sheets[index];
+      sheet.getRange(2, 1, plan.newData.length, plan.lastCol).setValues(plan.newData);
+      // 日付の並びが変わったので、覚えている「日付→行番号」を捨てる
+      p2ForgetCalendar_(sheet);
+    });
+    // 範囲の外になった入力は単元の進み具合にも数えられていたので、取り直させる
+    invalidateUnitProgressCache_();
 
-    return { success: true, message: `${year}年度のカレンダー（${totalDays}日分）を生成しました。` };
+    if (summary.hasContent) {
+      p3RecordAudit_(
+        'CALENDAR_REGENERATE', 'database', plans.map(plan => plan.sheetName).join(' / '),
+        'カレンダーを作り直し',
+        { ranges: summary.sheets.map(sheet => `${sheet.sheetName}: ${sheet.currentFrom}〜${sheet.currentTo}`).join(' / ') },
+        {
+          ranges: summary.sheets.map(sheet => `${sheet.sheetName}: ${sheet.newFrom}〜${sheet.newTo}`).join(' / '),
+          keptDays: summary.keptDays, droppedDays: summary.droppedDays, backupId: backup ? backup.id : ''
+        },
+        'calendar_' + Utilities.getUuid()
+      );
+    }
+
+    let message = `${year}年度のカレンダー（${CALENDAR_TOTAL_DAYS_}日分）を生成しました。`;
+    if (summary.keptDays > 0) message += `入力のある ${summary.keptDays} 日ぶんは、同じ日付に引き継ぎました。`;
+    if (summary.droppedDays > 0) {
+      message += `新しい範囲に入らない ${summary.droppedDays} 日ぶんの入力は週案から外しました。`
+        + '直前の状態は「保管用の控え」に残っています（自動では片づけられません）。';
+    }
+    return Object.assign({ success: true, message: message, backup: backup }, summary);
   } catch (e) {
     logError('generateAnnualCalendar', e);
     return { success: false, error: e.message };
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -2068,12 +2253,74 @@ function getUnitMasterData() {
 }
 
 /**
+ * 単元マスタの1行を、照合に使う形にします（教科・単元名・何時間目・学習活動）。
+ * 画面が持っている値とシートの値を、同じ規則で比べるためのもの。
+ * 総時数は入れない（「◯時間で終了」などで、同じ単元の全行がまとめて書き換わるため）。
+ */
+function umRowKey_(subject, unitName, hourNum, activity) {
+  const text = v => (v === null || v === undefined ? '' : String(v)).trim();
+  return [text(subject), text(unitName), text(hourNum), text(activity)].join('\u0001');
+}
+
+/**
+ * 画面が指した行が、いまもその行かを確かめ、実際の行番号を返します。
+ *
+ * 単元タブは行番号で行を指す。ところが行番号は、別の行を足したり消したりした
+ * 瞬間にずれる。実際に、3時間目と4時間目を続けて消すと、確認の画面には
+ * 「4時間目を移動します」と出ているのに、消えるのは5時間目だった
+ * （1件目の削除で1行ずつ繰り上がったあとも、画面は古い番号を送ってくるため）。
+ * 別のタブ・別の端末で編集していたときも同じことが起きる。
+ *
+ * そこで、画面に出ていた中身を一緒に受け取り、その行の中身と照らす。
+ * 合わなければ同じ中身の行を探し、**ちょうど1つ**ならそれを相手にする。
+ * 見つからない・2つ以上あるときは、何も変えずに読み直しを求める。
+ *
+ * @param {Object} sheet 単元マスタのシート
+ * @param {number} rowIndex 画面が持っている行番号（1始まり）
+ * @param {?Object} expected 画面に出ていた中身 { subject, unitName, hourNum, activity }。
+ *   渡されなければ照合しない（更新前の画面が開いたままの先生のため）
+ * @returns {number} 実際の行番号
+ * @throws {Error} 行を1つに決められないとき（error.umStale が true）
+ */
+function umResolveRow_(sheet, rowIndex, expected) {
+  if (!expected || typeof expected !== 'object') return rowIndex;
+  const want = umRowKey_(expected.subject, expected.unitName, expected.hourNum, expected.activity);
+  const keyOf = r => umRowKey_(r[MASTER_COL_SUBJECT - 1], r[MASTER_COL_UNIT_NAME - 1],
+    r[MASTER_COL_HOUR_NUM - 1], r[MASTER_COL_ACTIVITY - 1]);
+
+  const lastRow = sheet.getLastRow();
+  const rows = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 5).getValues() : [];
+  if (rowIndex >= 2 && rowIndex <= lastRow && keyOf(rows[rowIndex - 2]) === want) return rowIndex;
+
+  const hits = [];
+  rows.forEach((r, i) => { if (keyOf(r) === want) hits.push(i + 2); });
+  if (hits.length === 1) return hits[0];
+
+  const error = new Error('単元マスタが、ほかの操作や別の画面で変わっています。一覧を読み直しましたので、もう一度お試しください。');
+  error.umStale = true;
+  throw error;
+}
+
+/** 単元マスタの行操作の失敗を、画面に返す形にします（一覧が古いときは stale を立てる）。 */
+function umFailure_(name, e) {
+  logError(name, e);
+  if (e && e.umStale) return { success: false, stale: true, error: e.message };
+  // ロックを取れなかったときの GAS の文は英語（Lock timeout: another process was holding…）。
+  // 先生には何が起きたのか分からないので、言い直す。
+  const message = /lock timeout/i.test(String(e && e.message))
+    ? '前の操作がまだ終わっていません。少し待ってから、もう一度お試しください。'
+    : (e && e.message) || String(e);
+  return { success: false, error: message };
+}
+
+/**
  * [Webアプリ API] 単元マスタの指定行を更新します
  * @param {number} rowIndex シート上の行番号 (1-based)
  * @param {Object} data {subject, unitName, totalHours, hourNum, activity}
- * @returns {Object} { success: boolean }
+ * @param {Object} [expected] 画面に出ていた（書き換える前の）中身。行がずれていないかの照合に使う
+ * @returns {Object} { success: boolean, rowIndex?: number, stale?: boolean }
  */
-function updateUnitMasterRow(rowIndex, data) {
+function updateUnitMasterRow(rowIndex, data, expected) {
   try {
     validateParams_({ rowIndex }, {
       rowIndex: { type: 'number', required: true, min: 2 }
@@ -2082,19 +2329,21 @@ function updateUnitMasterRow(rowIndex, data) {
     const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!sheet) throw new Error('単元マスタシートが見つかりません');
 
-    sheet.getRange(rowIndex, 1, 1, 5).setValues([[
-      data.subject || '',
-      data.unitName || '',
-      umTotalHoursValue_(data.totalHours),
-      data.hourNum || '',
-      data.activity || ''
-    ]]);
-
-    invalidateUnitProgressCache_();
-    return { success: true };
+    // 照合と書き込みのあいだに、同じ先生の別の操作が割りこまないようにする
+    return p3WithUserLock_(10000, () => {
+      const target = umResolveRow_(sheet, rowIndex, expected);
+      sheet.getRange(target, 1, 1, 5).setValues([[
+        data.subject || '',
+        data.unitName || '',
+        umTotalHoursValue_(data.totalHours),
+        data.hourNum || '',
+        data.activity || ''
+      ]]);
+      invalidateUnitProgressCache_();
+      return { success: true, rowIndex: target };
+    });
   } catch (e) {
-    logError('updateUnitMasterRow', e);
-    return { success: false, error: e.message };
+    return umFailure_('updateUnitMasterRow', e);
   }
 }
 
@@ -2102,52 +2351,44 @@ function updateUnitMasterRow(rowIndex, data) {
  * [Webアプリ API] 単元マスタの指定位置に新しい行を挿入します
  * @param {number} afterRowIndex この行の後に挿入 (1-based)。0の場合はヘッダー直後(2行目)に挿入
  * @param {Object} data {subject, unitName, totalHours, hourNum, activity}
- * @returns {Object} { success: boolean, newRowIndex: number }
+ * @param {Object} [expectedAfter] 画面に出ていた「この行」の中身。行がずれていないかの照合に使う
+ * @returns {Object} { success: boolean, newRowIndex: number, stale?: boolean }
  */
-function insertUnitMasterRow(afterRowIndex, data) {
+function insertUnitMasterRow(afterRowIndex, data, expectedAfter) {
   try {
     const ss = getSs_();
     const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
     if (!sheet) throw new Error('単元マスタシートが見つかりません');
 
-    const insertAt = afterRowIndex > 0 ? afterRowIndex + 1 : 2;
-    sheet.insertRowBefore(insertAt);
-    sheet.getRange(insertAt, 1, 1, 5).setValues([[
-      data.subject || '',
-      data.unitName || '',
-      umTotalHoursValue_(data.totalHours),
-      data.hourNum || '',
-      data.activity || ''
-    ]]);
-
-    invalidateUnitProgressCache_();
-    return { success: true, newRowIndex: insertAt };
+    return p3WithUserLock_(10000, () => {
+      const anchor = afterRowIndex >= 2 ? umResolveRow_(sheet, afterRowIndex, expectedAfter) : afterRowIndex;
+      const insertAt = anchor > 0 ? anchor + 1 : 2;
+      sheet.insertRowBefore(insertAt);
+      sheet.getRange(insertAt, 1, 1, 5).setValues([[
+        data.subject || '',
+        data.unitName || '',
+        umTotalHoursValue_(data.totalHours),
+        data.hourNum || '',
+        data.activity || ''
+      ]]);
+      invalidateUnitProgressCache_();
+      return { success: true, newRowIndex: insertAt };
+    });
   } catch (e) {
-    logError('insertUnitMasterRow', e);
-    return { success: false, error: e.message };
+    return umFailure_('insertUnitMasterRow', e);
   }
 }
 
 /**
  * [Webアプリ API] 単元マスタの指定行を削除します
  * @param {number} rowIndex シート上の行番号 (1-based)
+ * @param {Object} [expected] 画面に出ていた中身。行がずれていないかの照合に使う
  * @returns {Object} { success: boolean }
  */
-function deleteUnitMasterRow(rowIndex) {
-  try {
-    validateParams_({ rowIndex }, {
-      rowIndex: { type: 'number', required: true, min: 2 }
-    });
-    const ss = getSs_();
-    const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
-    if (!sheet) throw new Error('単元マスタシートが見つかりません');
-    sheet.deleteRow(rowIndex);
-    invalidateUnitProgressCache_();
-    return { success: true };
-  } catch (e) {
-    logError('deleteUnitMasterRow', e);
-    return { success: false, error: e.message };
-  }
+function deleteUnitMasterRow(rowIndex, expected) {
+  // 旧クライアント互換の委譲エンドポイント。行をいきなり消さず、
+  // ごみ箱移動(30日間復元可能)として扱う（タスク・学級通信と同じ扱い）。
+  return trashUnitMasterRowFromWeb(rowIndex, expected);
 }
 
 /**

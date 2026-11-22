@@ -130,6 +130,9 @@ function loadBackend(sheetRows, options = {}) {
     LockService: {
       getScriptLock: () => ({ waitLock: () => {}, tryLock: () => true, releaseLock: () => {} })
     },
+    // 書き込みを直列化するロック（11_Tenant.gs）。この足場は 11_Tenant.gs を読みこまないので、
+    // 取っ手だけ渡す。どのロックを取るかは tests/data-lock.test.mjs が確かめている。
+    tDataLock_: () => ({ waitLock: () => {}, tryLock: () => true, releaseLock: () => {}, hasLock: () => true }),
     // 「日付→行番号」を覚える経路を実際に通すため、動くキャッシュを渡す
     CacheService: (() => {
       const store = {};

@@ -17,12 +17,21 @@ function p3SanitizeFileName_(name) {
   return String(name || '週案エディタ').replace(/[\\/:*?"<>|]/g, '_').substring(0, 100);
 }
 
-function p3CreateFullBackup_(reason) {
+/**
+ * スプレッドシート全体の控え（完全バックアップ）を作ります。
+ * @param {string} reason 何のための控えか（一覧と監査ログに出る）
+ * @param {Object} [options] { pinned: boolean } pinned を付けた控えは、世代の整理で
+ *   片づけません。年度更新のように「この控えにしか前の年度の記録が残らない」ときに使います。
+ *   ふつうの控えは新しいものから4つまでなので、毎日アプリを開くと数日で入れ替わります。
+ * @returns {Object} 控えの情報 { id, name, url, createdAt, reason, pinned? }
+ */
+function p3CreateFullBackup_(reason, options) {
   const source = getSs_();
   p3RunMigrations_(source);
   const now = new Date();
   const stamp = Utilities.formatDate(now, 'JST', 'yyyyMMdd_HHmmss');
-  const backupName = p3SanitizeFileName_(source.getName()) + '_バックアップ_' + stamp;
+  const pinned = !!(options && options.pinned);
+  const backupName = p3SanitizeFileName_(source.getName()) + (pinned ? '_保管用の控え_' : '_バックアップ_') + stamp;
   const backup = sheetsCreate_(backupName);
   const defaultSheet = backup.getSheets()[0];
   // コピー元に「シート1 / Sheet1」があっても名前衝突しないよう、一時シートを先に退避名へ変更する。
@@ -43,6 +52,7 @@ function p3CreateFullBackup_(reason) {
     createdAt: now.toISOString(),
     reason: String(reason || 'manual').substring(0, 200)
   };
+  if (pinned) item.pinned = true;
   const list = p3GetBackupIndex_(source);
   list.unshift(item);
   p3SetBackupIndex_(source, list);
@@ -70,9 +80,13 @@ function p3CleanupBackups_(ss) {
 
   const keep = [];
   const remove = [];
-  list.forEach((item, index) => {
+  let counted = 0;
+  list.forEach(item => {
+    // 保管用の控え（年度更新の直前など）は、日数でも世代数でも片づけない。
+    // ここにしか前の年度の記録が残っていないことがある。世代数にも数えない。
+    if (item.pinned) { keep.push(item); return; }
     const created = new Date(item.createdAt).getTime();
-    if (index < P3_BACKUP_MAX_COUNT_ && created >= threshold) keep.push(item);
+    if (counted < P3_BACKUP_MAX_COUNT_ && created >= threshold) { keep.push(item); counted++; }
     else remove.push(item);
   });
 

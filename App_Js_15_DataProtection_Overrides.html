@@ -125,15 +125,15 @@
             var msg = targetRow ? (targetRow.subject + ' / ' + targetRow.unitName + ' (' + targetRow.hourNum + '時間目)') : '行 ' + rowIndex;
             var result = await Swal.fire({ title: '行をごみ箱へ移動', text: '「' + msg + '」を移動します。30日以内は復元できます。', icon: 'warning', showCancelButton: true, confirmButtonText: 'ごみ箱へ移動', cancelButtonText: 'キャンセル', confirmButtonColor: '#ea4335' });
             if (!result.isConfirmed) return;
+            // 前の行の削除がまだ反映されていないあいだは受けつけない。行番号は1行消すたびに
+            // ずれるので、古い一覧のまま次を消すと、確認に出した行とは別の行が消える。
+            if (!umBeginRowOperation()) return;
             showToast('info', 'ごみ箱へ移動中...');
             google.script.run.withSuccessHandler(function (res) {
-                if (res.success) {
-                    showToast('success', res.message);
-                    loadUnitMasterData();
-                    if (typeof invalidateMasterData === 'function') invalidateMasterData(); // 週案サジェストへ反映
-                }
-                else showToast('error', '削除エラー: ' + res.error);
-            }).withFailureHandler(_onCommError).trashUnitMasterRowFromWeb(rowIndex);
+                umAfterRowOperation(res, '削除エラー', function () { showToast('success', res.message); });
+            }).withFailureHandler(umOnRowOperationError)
+                // 画面に出ていた中身も送る。サーバはその行の中身と照らしてから消す
+                .trashUnitMasterRowFromWeb(rowIndex, umExpectedOf(targetRow));
         };
 
         if (window.NW) {

@@ -326,6 +326,24 @@ function p2RereadRows_(sheet, cols, rowState) {
  * 読み込み済みの行状態から週7日分のdayオブジェクトを構築します。
  * getWeeklyPlanDataV2 と保存時のスナップショット用 beforeDays の双方で使用します。
  */
+/**
+ * セルの値を、画面へ返す文字列にします。
+ *
+ * 以前は `String(value || '')` としていたため、数の 0 と真偽値の false が空文字になり、
+ * 画面では空欄に見えていた（シートには値があるのに、次の保存で空欄として上書きされる）。
+ * 週案の欄はいまは打ったとおりの文字で書くが、過去に数や真偽値として入ったセルや、
+ * 先生がスプレッドシートで直接打ったセルは残っているので、落とさずに文字にする。
+ * 真偽値は、スプレッドシートに見えているとおり TRUE / FALSE にする。
+ * @param {*} value
+ * @returns {string}
+ */
+function p2Text_(value) {
+  if (value === null || value === undefined) return '';
+  if (value === true) return 'TRUE';
+  if (value === false) return 'FALSE';
+  return String(value);
+}
+
 function p2BuildWeekDays_(rowState, dbCols, weekDateStrs, holidayMap) {
   const dayLabels = ['月', '火', '水', '木', '金', '土', '日'];
   const holidays = holidayMap || {};
@@ -335,21 +353,21 @@ function p2BuildWeekDays_(rowState, dbCols, weekDateStrs, holidayMap) {
       date: dateStr,
       dayLabel: dayLabels[index],
       holiday: holidays[dateStr] || '',
-      event: String(p2Cell_(row, dbCols, 'EVENT') || ''),
-      preclass: String(p2Cell_(row, dbCols, 'PRECLASS') || ''),
-      morning: String(p2Cell_(row, dbCols, 'MORNING') || ''),
+      event: p2Text_(p2Cell_(row, dbCols, 'EVENT')),
+      preclass: p2Text_(p2Cell_(row, dbCols, 'PRECLASS')),
+      morning: p2Text_(p2Cell_(row, dbCols, 'MORNING')),
       periods: [1, 2, 3, 4, 5, 6].map(n => ({
-        subject: String(p2Cell_(row, dbCols, 'PERIOD' + n) || ''),
-        unit: String(p2Cell_(row, dbCols, 'UNIT' + n) || ''),
-        content: String(p2Cell_(row, dbCols, 'CONTENT' + n) || '')
+        subject: p2Text_(p2Cell_(row, dbCols, 'PERIOD' + n)),
+        unit: p2Text_(p2Cell_(row, dbCols, 'UNIT' + n)),
+        content: p2Text_(p2Cell_(row, dbCols, 'CONTENT' + n))
       })),
-      recess1: String(p2Cell_(row, dbCols, 'RECESS1') || ''),
-      recess2: String(p2Cell_(row, dbCols, 'RECESS2') || ''),
-      afterschool: String(p2Cell_(row, dbCols, 'AFTERSCHOOL') || ''),
-      homework: String(p2Cell_(row, dbCols, 'HOMEWORK') || ''),
-      items: String(p2Cell_(row, dbCols, 'ITEMS') || ''),
-      reflection: String(p2Cell_(row, dbCols, 'REFLECTION') || ''),
-      reflectionStatus: String(p2Cell_(row, dbCols, 'REFLECTION_STATUS') || '').trim(),
+      recess1: p2Text_(p2Cell_(row, dbCols, 'RECESS1')),
+      recess2: p2Text_(p2Cell_(row, dbCols, 'RECESS2')),
+      afterschool: p2Text_(p2Cell_(row, dbCols, 'AFTERSCHOOL')),
+      homework: p2Text_(p2Cell_(row, dbCols, 'HOMEWORK')),
+      items: p2Text_(p2Cell_(row, dbCols, 'ITEMS')),
+      reflection: p2Text_(p2Cell_(row, dbCols, 'REFLECTION')),
+      reflectionStatus: p2Text_(p2Cell_(row, dbCols, 'REFLECTION_STATUS')).trim(),
       found: !!row
     };
   });
@@ -535,6 +553,8 @@ function getDeferredBootstrapV2() {
     tasks: safeCall('tasks', () => getTasksFromWebApp()),
     reflection: safeCall('reflection', () => getTodayReflectionStatus()),
     setup: safeCall('setup', () => getSetupStatus()),
+    // Classroom への自動投稿ができなかったときの知らせ（プロパティを読むだけ）
+    autoPost: safeCall('autoPost', () => getAutoPostStatus_()),
     elapsedMs: Date.now() - startedAt
   };
 }
@@ -693,7 +713,10 @@ function saveWeeklyPlanDataV2(mondayDateStr, days, baseRevision, expectedSheetNa
 /**
  * 週案保存の実装本体。
  *
- * ロック順序の規約: ScriptLock(保存・クリア) → UserLock(migration)。逆順で取らないこと。
+ * ロックは tDataLock_()（11_Tenant.gs）で取る。自分のデータベースを使う先生は利用者ごとの
+ * ロック、全員で1冊を使う旧来の形は ScriptLock になる。保存の中から呼ばれる復元ポイント作成や
+ * マイグレーション（p3WithUserLock_）とは深さを共有するので、入れ子になっても先に外れない。
+ * 旧来の形では ScriptLock(保存・クリア) → UserLock(migration) の順で取る。逆順で取らないこと。
  *
  * @param {Object} [options] { protect:false } でスナップショット省略(サーバ内部の復元専用)、
  *   { source } で監査ログの操作元、{ expectedSheetName } で保存先学級の照合。
@@ -708,7 +731,7 @@ function saveWeeklyPlanWeek_(mondayDateStr, days, baseRevision, options) {
   const since = (mark) => Date.now() - mark;
 
   const lockAt = Date.now();
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   let locked = false;
   try {
     lock.waitLock(10000);

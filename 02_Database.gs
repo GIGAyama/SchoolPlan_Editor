@@ -99,7 +99,7 @@ function dbApplyTimetableEntries_(sheet, cols, entries) {
 
 /**
  * 指定週の月～金に固定時間割をデータベースに転記します（上書き）。
- * 週案の保存と同じ ScriptLock で直列化する（転記中の保存が消えるのを防ぐ）。
+ * 週案の保存と同じロック（tDataLock_）で直列化する（転記中の保存が消えるのを防ぐ）。
  */
 function transferWeeklyTimetable(targetDate) {
   const ss = getSs_();
@@ -109,7 +109,7 @@ function transferWeeklyTimetable(targetDate) {
   const dbCols = getDbColumns();
   const firstDayOfWeek = getMondayOfWeek(targetDate);
 
-  const lock = LockService.getScriptLock();
+  const lock = tDataLock_();
   let locked = false;
   try {
     lock.waitLock(10000);
@@ -209,8 +209,8 @@ function processBulkTransferWithExclusion(dates) {
       return `一括転記の対象となる日がありませんでした (${skippedDayCount}日分スキップ)`;
     }
 
-    // 週案の保存と同じ ScriptLock で直列化する（転記中の保存が消えるのを防ぐ）
-    const lock = LockService.getScriptLock();
+    // 週案の保存と同じロック（tDataLock_）で直列化する（転記中の保存が消えるのを防ぐ）
+    const lock = tDataLock_();
     let locked = false;
     try {
       lock.waitLock(30000);

@@ -107,56 +107,99 @@ function trashTaskFromWebApp(taskId) {
   }
 }
 
-function trashUnitMasterRowFromWeb(rowIndex) {
+/**
+ * [Webアプリ API] 単元マスタの1行をごみ箱へ移します。
+ * @param {number} rowIndex 画面が持っている行番号（1始まり）
+ * @param {Object} [expected] 画面に出ていた中身 { subject, unitName, hourNum, activity }。
+ *   行番号は別の行を消した瞬間にずれるので、中身で照らして相手の行を確かめる（umResolveRow_）
+ * @returns {Object} { success, trashId, message, stale? }
+ */
+function trashUnitMasterRowFromWeb(rowIndex, expected) {
   try {
     ensureDataProtectionReady_();
     const index = parseInt(rowIndex, 10);
     if (!Number.isFinite(index) || index < 2) throw new Error('行番号が不正です。');
     const ss = getSs_();
     const sheet = ss.getSheetByName(SHEET_NAME_UNIT_MASTER);
-    if (!sheet || index > sheet.getLastRow()) throw new Error('対象行が見つかりません。');
-    const row = sheet.getRange(index, 1, 1, 5).getValues()[0];
-    const payload = {
-      originalRow: index,
-      values: row,
-      subject: row[0] || '',
-      unitName: row[1] || '',
-      hourNum: row[3] || ''
-    };
-    const label = [payload.subject, payload.unitName, payload.hourNum ? payload.hourNum + '時間目' : '']
-      .filter(Boolean).join(' / ');
-    const trashId = p3AppendTrash_('unitMaster', String(index), label, payload);
-    sheet.deleteRow(index);
-    p3RecordAudit_('TRASH', 'unitMaster', String(index), '単元マスタ行をごみ箱へ移動', payload, { trashId }, trashId);
-    invalidateUnitProgressCache_();
-    return { success: true, trashId, message: '単元マスタ行をごみ箱へ移動しました。' };
+    if (!sheet) throw new Error('対象行が見つかりません。');
+
+    // 「中身を読む → ごみ箱へ控える → 行を消す」を、同じ先生のほかの操作と重ねない。
+    // 重なると、控えた中身と実際に消えた行が食い違い、ごみ箱から戻せない行ができる。
+    return p3WithUserLock_(10000, () => {
+      const target = umResolveRow_(sheet, index, expected);
+      if (target > sheet.getLastRow()) throw new Error('対象行が見つかりません。');
+      const row = sheet.getRange(target, 1, 1, 5).getValues()[0];
+      const payload = {
+        originalRow: target,
+        values: row,
+        subject: row[0] || '',
+        unitName: row[1] || '',
+        hourNum: row[3] || ''
+      };
+      const label = [payload.subject, payload.unitName, payload.hourNum ? payload.hourNum + '時間目' : '']
+        .filter(Boolean).join(' / ');
+      const trashId = p3AppendTrash_('unitMaster', String(target), label, payload);
+      sheet.deleteRow(target);
+      p3RecordAudit_('TRASH', 'unitMaster', String(target), '単元マスタ行をごみ箱へ移動', payload, { trashId }, trashId);
+      invalidateUnitProgressCache_();
+      return { success: true, trashId, message: '単元マスタ行をごみ箱へ移動しました。' };
+    });
   } catch (e) {
-    logError('trashUnitMasterRowFromWeb', e);
-    return { success: false, error: e.message };
+    return umFailure_('trashUnitMasterRowFromWeb', e);
   }
 }
 
+/**
+ * [Webアプリ API] 保存済みの学級通信をごみ箱へ移します。
+ * @param {number} rowIndex 一覧が持っている行番号（1始まり）
+ * @param {string} fileId 通信の本体（ドライブのファイル）のID
+ * @returns {Object} { success, trashId, message, stale? }
+ */
 function trashNewsletterDataFromWeb(rowIndex, fileId) {
   try {
     ensureDataProtectionReady_();
     const ss = getSs_();
     const sheet = ss.getSheetByName(SHEET_NAME_NEWSLETTER_DATA);
-    const index = parseInt(rowIndex, 10);
-    if (!sheet || !Number.isFinite(index) || index < 2 || index > sheet.getLastRow()) {
+    let index = parseInt(rowIndex, 10);
+    if (!sheet || !Number.isFinite(index) || index < 2) {
       throw new Error('保存済み学級通信が見つかりません。');
     }
-    const width = Math.max(4, Math.min(5, sheet.getLastColumn()));
-    const values = sheet.getRange(index, 1, 1, width).getValues()[0];
-    const payload = { originalRow: index, width, values, fileId: String(fileId || '') };
-    const label = String(values[1] || values[0] || '学級通信');
-    const trashId = p3AppendTrash_('newsletter', String(fileId || index), label, payload);
-    sheet.deleteRow(index);
-    try { if (fileId) driveSetTrashed_(String(fileId), true); } catch (e) {}
-    p3RecordAudit_('TRASH', 'newsletter', String(fileId || index), '学級通信をごみ箱へ移動', payload, { trashId }, trashId);
-    return { success: true, trashId, message: '学級通信をごみ箱へ移動しました。' };
+
+    return p3WithUserLock_(10000, () => {
+      const lastRow = sheet.getLastRow();
+      const width = Math.max(4, Math.min(5, sheet.getLastColumn()));
+      const wanted = String(fileId || '');
+      // 一覧の行番号は、別の通信を消すとずれる。行のファイルIDと照らし、
+      // 違っていたら同じファイルIDの行を探す。行だけ消えてファイルは別、という
+      // 食い違い（一覧からは消えたのに別の通信が開けなくなる）を起こさない。
+      if (wanted) {
+        const ids = lastRow >= 2
+          ? sheet.getRange(2, 4, lastRow - 1, 1).getDisplayValues().map(r => String(r[0]))
+          : [];
+        if (ids[index - 2] !== wanted) {
+          const found = ids.indexOf(wanted);
+          if (found < 0) {
+            const stale = new Error('保存済みの学級通信の一覧が変わっています。一覧を開き直してから、もう一度お試しください。');
+            stale.umStale = true;
+            throw stale;
+          }
+          index = found + 2;
+        }
+      } else if (index > lastRow) {
+        throw new Error('保存済み学級通信が見つかりません。');
+      }
+
+      const values = sheet.getRange(index, 1, 1, width).getValues()[0];
+      const payload = { originalRow: index, width, values, fileId: wanted };
+      const label = String(values[1] || values[0] || '学級通信');
+      const trashId = p3AppendTrash_('newsletter', String(fileId || index), label, payload);
+      sheet.deleteRow(index);
+      try { if (fileId) driveSetTrashed_(String(fileId), true); } catch (e) {}
+      p3RecordAudit_('TRASH', 'newsletter', String(fileId || index), '学級通信をごみ箱へ移動', payload, { trashId }, trashId);
+      return { success: true, trashId, message: '学級通信をごみ箱へ移動しました。' };
+    });
   } catch (e) {
-    logError('trashNewsletterDataFromWeb', e);
-    return { success: false, error: e.message };
+    return umFailure_('trashNewsletterDataFromWeb', e);
   }
 }
 
