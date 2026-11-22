@@ -63,6 +63,7 @@ export class FakeGoogle {
     this.permissions = [];
     this.geminiCalls = [];
     this.geminiResponder = null;     // (model, body) => string | null
+    this.geminiModels = null;        // (apiKey) => モデル一覧。キーごとに違う一覧を返したいとき
     this.failNext = null;            // (url) => {code, body} | null
   }
 
@@ -473,14 +474,16 @@ export class FakeGoogle {
   geminiApi(u, method, opt) {
     const key = (opt.headers && (opt.headers['x-goog-api-key'] || opt.headers['X-Goog-Api-Key'])) || new URL(u).searchParams.get('key');
     if (u.includes('/models?')) {
+      this.geminiCalls.push({ kind: 'models', key: key || '' });
       if (!key) return { code: 403, body: { error: { message: 'API key missing' } } };
+      if (this.geminiModels) return { code: 200, body: { models: this.geminiModels(key) } };
       return { code: 200, body: { models: [
         { name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', supportedGenerationMethods: ['generateContent'] },
         { name: 'models/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', supportedGenerationMethods: ['generateContent'] }] } };
     }
     const model = (/models\/([^:]+):generateContent/.exec(u) || [])[1];
     const body = opt.payload ? JSON.parse(opt.payload) : {};
-    this.geminiCalls.push({ model, keyInUrl: /[?&]key=/.test(u), body });
+    this.geminiCalls.push({ kind: 'generate', model, key: key || '', keyInUrl: /[?&]key=/.test(u), body });
     if (!key) return { code: 400, body: { error: { message: 'API key not valid. Please pass a valid API key.' } } };
     const text = this.geminiResponder ? this.geminiResponder(model, body) : null;
     if (text === null || text === undefined) return { code: 503, body: { error: { message: 'fake-google: no canned Gemini response' } } };

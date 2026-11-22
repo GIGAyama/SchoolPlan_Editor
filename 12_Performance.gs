@@ -535,6 +535,8 @@ function getDeferredBootstrapV2() {
     tasks: safeCall('tasks', () => getTasksFromWebApp()),
     reflection: safeCall('reflection', () => getTodayReflectionStatus()),
     setup: safeCall('setup', () => getSetupStatus()),
+    // Classroom への自動投稿ができなかったときの知らせ（プロパティを読むだけ）
+    autoPost: safeCall('autoPost', () => getAutoPostStatus_()),
     elapsedMs: Date.now() - startedAt
   };
 }

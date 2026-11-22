@@ -595,6 +595,79 @@
         delete select.dataset.pendingValue;
     }
 
+    /**
+     * 自動投稿の日時を「11/17(火) 16:00」の形にします。
+     * @param {string} iso サーバが覚えていた ISO 形式の日時
+     * @returns {string} 読めなければ空文字
+     */
+    function formatAutoPostTime(iso) {
+        var d = new Date(iso);
+        if (!iso || isNaN(d.getTime())) return '';
+        var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+        return (d.getMonth() + 1) + '/' + d.getDate() + '(' + '日月火水木金土'.charAt(d.getDay()) + ') '
+            + d.getHours() + ':' + pad(d.getMinutes());
+    }
+
+    /**
+     * Classroom への自動投稿が前回どうなったかを、設定タブに出します。
+     *
+     * 自動投稿は時間主導トリガーで走るため、できなかったことが先生の画面に出ない。
+     * 以前は「ログ」シートに1行残るだけで、保護者に予定が届いていないことに
+     * 気づく手立てが無かった。サーバの文はそのまま来るので、HTML として解釈させない。
+     * @param {{lastRun: ?Object, failure: ?Object}} autoPost getAppSettings().autoPost
+     */
+    function renderAutoPostStatus(autoPost) {
+        var box = document.getElementById('sysAutoPostStatus');
+        if (!box) return;
+        var failure = autoPost && autoPost.failure;
+        var lastRun = autoPost && autoPost.lastRun;
+        box.textContent = '';
+        if (!failure && !lastRun) { box.hidden = true; return; }
+        box.hidden = false;
+
+        var line = document.createElement('div');
+        if (failure) {
+            line.style.color = 'var(--danger-text)';
+            line.textContent = formatAutoPostTime(failure.at) + ' の自動投稿はできませんでした。'
+                + (failure.message ? '（' + failure.message + '）' : '');
+        } else {
+            line.style.color = 'var(--text-sub)';
+            line.textContent = '前回の自動投稿: ' + formatAutoPostTime(lastRun.at) + '　' + (lastRun.message || '');
+        }
+        box.appendChild(line);
+
+        if (failure && !failure.acknowledged) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-outline btn-sm';
+            btn.style.marginTop = '4px';
+            btn.textContent = '確認しました';
+            btn.addEventListener('click', function () {
+                btn.disabled = true;
+                google.script.run
+                    .withSuccessHandler(function () {
+                        failure.acknowledged = true;
+                        renderAutoPostStatus(autoPost);
+                    })
+                    .withFailureHandler(function (e) { btn.disabled = false; _onCommError(e); })
+                    .acknowledgeAutoPostFailureFromWeb();
+            });
+            box.appendChild(btn);
+        }
+    }
+
+    /**
+     * アプリを開いたときに、自動投稿ができなかったことを知らせます。
+     * 先生が「確認しました」を押すか、次に投稿できるまで、開くたびに出します。
+     * @param {{lastRun: ?Object, failure: ?Object}} autoPost getDeferredBootstrapV2().autoPost
+     */
+    function notifyAutoPostFailure(autoPost) {
+        var failure = autoPost && autoPost.failure;
+        if (!failure || failure.acknowledged) return;
+        showToast('warning', 'Classroom への自動投稿ができませんでした（' + formatAutoPostTime(failure.at)
+            + '）。くわしくは「設定」タブで確かめられます。');
+    }
+
     function loadSystemSettings(opts) {
         if (STATE.isSystemSettingsLoaded) return;
         // 保存直後の再取得では「保存しました」の直後に「読み込み中...」が出て
@@ -604,6 +677,7 @@
             .withSuccessHandler(function (res) {
                 document.getElementById('sysCourseName').value = res.courseName || '';
                 document.getElementById('sysPostHour').value = res.postHour || '';
+                renderAutoPostStatus(res.autoPost);
                 // Geminiモデル名を保留値として保存し、モデル一覧取得後に反映する
                 var modelSelect = document.getElementById('sysGeminiModelName');
                 modelSelect.dataset.pendingValue = res.geminiModelName || 'gemini-2.5-flash';

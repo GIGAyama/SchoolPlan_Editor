@@ -44,7 +44,9 @@ function getAppSettings() {
         : '',
       geminiModelName  : getVal(SP_KEY_GEMINI_MODEL_NAME) || 'gemini-2.5-flash',
       grade            : getVal(SCRIPT_PROP_GRADE) || '3',
-      moduleEnabled    : tGetProp_('moduleEnabled') === 'true'
+      moduleEnabled    : tGetProp_('moduleEnabled') === 'true',
+      // 自動投稿が前回どうなったか（設定タブに出す。プロパティを読むだけで通信は増えない）
+      autoPost         : getAutoPostStatus_()
     };
   } catch(e) {
     logError('getAppSettings', e);
@@ -96,6 +98,7 @@ function saveAppSettings(settings) {
     } else if (settings.postHour === '') {
       // 時刻を空にして保存した場合は自動投稿を停止する（従来は古いトリガーが残り続けていた）
       deleteTriggers_('postScheduleToClassroom');
+      clearAutoPostFailure_();
       logInfo('自動投稿時刻が未設定のため、自動投稿トリガーを解除しました');
     }
 
@@ -172,6 +175,9 @@ function getGeminiModelNameSafe_() {
   return getSetting(SP_KEY_GEMINI_MODEL_NAME) || 'gemini-2.5-flash';
 }
 
+/** モデル一覧のキャッシュの鍵（利用者ごとのキャッシュに入れる） */
+const GEMINI_MODEL_LIST_CACHE_KEY_ = 'geminiModelList';
+
 /**
  * [Web API] Gemini APIから利用可能なモデル一覧を取得します。
  * generateContent をサポートするモデルのみ返します。
@@ -184,11 +190,15 @@ function getAvailableGeminiModels() {
       return { success: false, models: [], error: 'Gemini APIキーが設定されていません。' };
     }
 
-    // パフォーマンス: モデル一覧を1時間キャッシュ
-    const cache = CacheService.getScriptCache();
-    const cachedModels = cache.get('geminiModelList');
+    // パフォーマンス: モデル一覧を1時間キャッシュ。
+    // 一覧は API キーごとに違いうるので、**利用者ごとのキャッシュ**に入れる。
+    // スクリプト全体のキャッシュに入れていたころは、ほかの先生のキーで取った一覧が
+    // 返り、自分のキーでは問い合わせていなかった（キーが誤っていても一覧が出た）。
+    const cachedModels = tCacheGet_(GEMINI_MODEL_LIST_CACHE_KEY_);
     if (cachedModels) {
-      return { success: true, models: JSON.parse(cachedModels) };
+      try {
+        return { success: true, models: JSON.parse(cachedModels) };
+      } catch (ignore) { /* 壊れていたら取り直す */ }
     }
 
     const allModels = [];
@@ -222,7 +232,7 @@ function getAvailableGeminiModels() {
       }));
 
     // 1時間キャッシュ（CacheServiceの最大6時間だが、1時間で十分）
-    cache.put('geminiModelList', JSON.stringify(filtered), 3600);
+    tCachePut_(GEMINI_MODEL_LIST_CACHE_KEY_, JSON.stringify(filtered), 3600);
     return { success: true, models: filtered };
   } catch (e) {
     logError('getAvailableGeminiModels', e);

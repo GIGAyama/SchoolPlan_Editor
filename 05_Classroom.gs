@@ -8,10 +8,102 @@
  * （例：金曜日に翌週月曜日の予定を投稿）。
  */
 function postScheduleToClassroom() {
+  // 時間主導トリガーから呼ばれる。ここで起きたことは先生の画面に出ないので、
+  // 結果を覚えておき、次にアプリを開いたときに知らせる（recordAutoPostResult_）。
+  // 以前は失敗しても「ログ」シートに1行残るだけで、保護者に予定が届いていない
+  // ことに先生が気づく手立てが無かった。
   try {
-    postScheduleToClassroom_core_();
+    const result = postScheduleToClassroom_core_();
+    recordAutoPostResult_(true, result);
   } catch (error) {
     logError("postScheduleToClassroom", error);
+    recordAutoPostResult_(false, {
+      posted: false,
+      message: describeAuthError_(error, 'Google Classroom 連携')
+    });
+  }
+}
+
+// 自動投稿の結果（利用者ごと）。{ lastRun, failure } を JSON で持つ。
+const SP_KEY_AUTO_POST_STATUS = 'sp_autoPostStatus';
+// プロパティは1件 9KB までなので、長いエラー文は切る
+const AUTO_POST_MESSAGE_MAX_ = 400;
+
+/**
+ * 自動投稿の結果を読みます。
+ * @returns {{lastRun: ?Object, failure: ?Object}} どちらも { at, ok, posted, message }。
+ *   failure は「できなかった」ことの知らせで、次に投稿できるか、先生が確認するまで残る
+ */
+function getAutoPostStatus_() {
+  let status = {};
+  try {
+    status = JSON.parse(tGetProp_(SP_KEY_AUTO_POST_STATUS) || '{}') || {};
+  } catch (e) {
+    status = {};
+  }
+  return {
+    lastRun: (status.lastRun && typeof status.lastRun === 'object') ? status.lastRun : null,
+    failure: (status.failure && typeof status.failure === 'object') ? status.failure : null
+  };
+}
+
+/**
+ * 自動投稿の結果を覚えます。
+ *
+ * 「できなかった」は、次に投稿できるまで消さない。金曜に失敗し、土曜・日曜の
+ * 「登校日ではないので見送り」で上書きされると、月曜に開いた先生には何も伝わらない。
+ * @param {boolean} ok 例外なく終わったか
+ * @param {{posted: boolean, message: string}} result
+ */
+function recordAutoPostResult_(ok, result) {
+  try {
+    const status = getAutoPostStatus_();
+    const entry = {
+      at: new Date().toISOString(),
+      ok: !!ok,
+      posted: !!(result && result.posted),
+      message: String((result && result.message) || '').substring(0, AUTO_POST_MESSAGE_MAX_)
+    };
+    status.lastRun = entry;
+    if (!ok) {
+      status.failure = Object.assign({ acknowledged: false }, entry);
+    } else if (entry.posted) {
+      status.failure = null;
+    }
+    tSetProp_(SP_KEY_AUTO_POST_STATUS, JSON.stringify(status));
+  } catch (e) {
+    logError('recordAutoPostResult_', e);
+  }
+}
+
+/** 「できなかった」の知らせを消します（自動投稿をやめたときなど）。 */
+function clearAutoPostFailure_() {
+  try {
+    const status = getAutoPostStatus_();
+    if (!status.failure) return;
+    status.failure = null;
+    tSetProp_(SP_KEY_AUTO_POST_STATUS, JSON.stringify(status));
+  } catch (e) {
+    logError('clearAutoPostFailure_', e);
+  }
+}
+
+/**
+ * [Webアプリ API] 自動投稿ができなかった知らせを「確認した」にします。
+ * 確認したあとは、アプリを開いたときの知らせを出しません（設定タブには残ります）。
+ * @returns {{success: boolean}}
+ */
+function acknowledgeAutoPostFailureFromWeb() {
+  try {
+    const status = getAutoPostStatus_();
+    if (status.failure && !status.failure.acknowledged) {
+      status.failure.acknowledged = true;
+      tSetProp_(SP_KEY_AUTO_POST_STATUS, JSON.stringify(status));
+    }
+    return { success: true };
+  } catch (e) {
+    logError('acknowledgeAutoPostFailureFromWeb', e);
+    return { success: false, error: e.message };
   }
 }
 
@@ -341,27 +433,38 @@ function buildLessonContext_(rowData, dbCols) {
 
 /**
  * 指定されたクラス名から、Google ClassroomのコースIDを探し出します。
+ *
+ * **結果はキャッシュしません。** 以前はスクリプト全体のキャッシュ（ScriptCache）に
+ * 「クラス名」だけを鍵にして6時間入れていた。1つのURLを多数の先生へ配る運用では
+ * このキャッシュを全員が共有するため、別の学校の先生が同じ名前（「4年2組」など）の
+ * クラスを持っていると、その先生には**他人のクラスのID**が返り、投稿が
+ * 「権限がありません」で失敗していた（毎日の自動投稿は黙って失敗する）。
+ * 投稿は1日に数回しか無く、一覧の取得は1往復で済むので、覚えておく利点のほうが小さい。
+ *
+ * 同じ名前の有効なクラスが複数あるとき（前年度のクラスをアーカイブしていない等）は、
+ * いちばん新しく作られたものを使います。
+ * @param {string} courseName クラス名
+ * @returns {string} コースID
  */
 function getCourseIdByName(courseName) {
   try {
-    const cache = CacheService.getScriptCache();
-    const cacheKey = `courseId_${courseName}`;
-    const cachedId = cache.get(cacheKey);
-    if (cachedId) return cachedId;
-
+    const matches = [];
     let pageToken = null;
     do {
       const response = Classroom.Courses.list({ pageSize: 100, courseStates: ['ACTIVE'], pageToken: pageToken });
-      if (response.courses) {
-        const course = response.courses.find(c => c.name === courseName);
-        if (course) {
-          cache.put(cacheKey, course.id, 21600); // 6時間キャッシュ
-          return course.id;
-        }
-      }
+      (response.courses || []).forEach(c => { if (c.name === courseName) matches.push(c); });
       pageToken = response.nextPageToken;
     } while (pageToken);
-    throw new Error(`クラス「${courseName}」が見つかりません`);
+
+    if (matches.length === 0) throw new Error(`クラス「${courseName}」が見つかりません`);
+    // 一覧は新しい順に返るが、それを当てにせず作成日時で選ぶ（同じなら先に出たほう）
+    const course = matches.reduce((best, c) =>
+      (String(c.creationTime || '') > String(best.creationTime || '') ? c : best));
+    if (matches.length > 1) {
+      logInfo(`クラス「${courseName}」が${matches.length}つあります。いちばん新しく作られたものへ投稿します。`
+        + '前年度のクラスが残っている場合は、Classroom でアーカイブしてください。');
+    }
+    return course.id;
   } catch (e) {
     logError("getCourseIdByName", e);
     throw e;
